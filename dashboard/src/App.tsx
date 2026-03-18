@@ -52,7 +52,7 @@ import "./lib/authInterceptor";
 
 export default function App() {
   // Device state context
-  const { fetchDeviceState } = useDeviceState();
+  const { fetchDeviceState, getPendingConfig } = useDeviceState();
   
   // Auth context
   const { user, isAuthenticated, isLoading: isAuthLoading, logout } = useAuth();
@@ -190,6 +190,15 @@ export default function App() {
     // Don't fallback to devices[0] - allow undefined when no device is selected
     return devices.find((d) => d.id === selectedDeviceId);
   }, [devices, selectedDeviceId]);
+
+  const isRemoteAccessEnabledForSelectedDevice = useMemo(() => {
+    if (!selectedDevice?.deviceUuid) {
+      return true;
+    }
+
+    const pendingConfig = getPendingConfig(selectedDevice.deviceUuid);
+    return pendingConfig?.features?.enableDeviceRemoteAccess !== false;
+  }, [getPendingConfig, selectedDevice?.deviceUuid]);
 
   // URL routing integration (no UI changes, just URL sync)
   const { currentPath, navigateToAgent, navigateToGlobal, navigateToFleet } = useRouting();
@@ -395,13 +404,45 @@ export default function App() {
   }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId, selectedFleetId]);
 
   const handleAgentViewChange = useCallback((view: View) => {
+    if (view === 'remote-access' && !isRemoteAccessEnabledForSelectedDevice) {
+      toast.warning('Remote access is disabled for this agent.');
+      return;
+    }
+
     if (selectedDevice?.deviceUuid) {
       const fleetUuid = selectedDevice.fleet_uuid
         ? selectedDevice.fleet_uuid
         : undefined;
       navigateToAgent(selectedDevice.deviceUuid, fleetUuid, view);
     }
-  }, [navigateToAgent, selectedDevice]);
+  }, [isRemoteAccessEnabledForSelectedDevice, navigateToAgent, selectedDevice]);
+
+  useEffect(() => {
+    if (!selectedDevice?.deviceUuid) {
+      return;
+    }
+
+    if (currentView !== 'remote-access') {
+      return;
+    }
+
+    if (isRemoteAccessEnabledForSelectedDevice) {
+      return;
+    }
+
+    const fleetUuid = selectedDevice.fleet_uuid
+      ? selectedDevice.fleet_uuid
+      : undefined;
+
+    toast.warning('Remote access is disabled for this agent. Redirecting to System view.');
+    navigateToAgent(selectedDevice.deviceUuid, fleetUuid, 'metrics');
+  }, [
+    currentView,
+    isRemoteAccessEnabledForSelectedDevice,
+    navigateToAgent,
+    selectedDevice?.deviceUuid,
+    selectedDevice?.fleet_uuid,
+  ]);
 
   const formatViewLabel = useCallback((view: string) => {
     // Special mappings for views with different display names
@@ -1456,15 +1497,17 @@ export default function App() {
                       <FileText className="w-4 h-4 mr-2" />
                       Logs
                     </Button>
-                    <Button
-                      variant={currentView === 'remote-access' ? 'default' : 'ghost'}
-                      size="sm"
-                      onClick={() => handleAgentViewChange('remote-access')}
-                      className="text-sm"
-                    >
-                      <Terminal className="w-4 h-4 mr-2" />
-                      Remote Access
-                    </Button>
+                    {isRemoteAccessEnabledForSelectedDevice && (
+                      <Button
+                        variant={currentView === 'remote-access' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => handleAgentViewChange('remote-access')}
+                        className="text-sm"
+                      >
+                        <Terminal className="w-4 h-4 mr-2" />
+                        Remote Access
+                      </Button>
+                    )}
                     <Button
                       variant={currentView === 'settings' ? 'default' : 'ghost'}
                       size="sm"
@@ -1620,15 +1663,17 @@ export default function App() {
               <FileText className="w-4 h-4 mr-2" />
               Logs
             </Button>
-            <Button
-              variant={currentView === 'remote-access' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => handleAgentViewChange('remote-access')}
-              className="text-sm"
-            >
-              <Terminal className="w-4 h-4 mr-2" />
-              Remote Access
-            </Button>
+            {isRemoteAccessEnabledForSelectedDevice && (
+              <Button
+                variant={currentView === 'remote-access' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => handleAgentViewChange('remote-access')}
+                className="text-sm"
+              >
+                <Terminal className="w-4 h-4 mr-2" />
+                Remote Access
+              </Button>
+            )}
             <Button
               variant={currentView === 'settings' ? 'default' : 'ghost'}
               size="sm"
@@ -1809,7 +1854,7 @@ export default function App() {
           {currentView === 'logs' && selectedDevice && (
             <LogsPage deviceUuid={selectedDevice.deviceUuid} />
           )}
-          {currentView === 'remote-access' && selectedDevice && (
+          {currentView === 'remote-access' && selectedDevice && isRemoteAccessEnabledForSelectedDevice && (
             <RemoteAccessPage deviceUuid={selectedDevice.deviceUuid} />
           )}
           {currentView === 'settings' && selectedDevice && (

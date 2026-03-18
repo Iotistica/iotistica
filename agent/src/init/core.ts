@@ -38,6 +38,78 @@ export function setupConfigEventListeners(ctx: AgentInitContext): void {
 				ctx.anomalyService = undefined;
 			}
 		}
+
+		if (change.old.enableDeviceSensorPublish !== change.new.enableDeviceSensorPublish) {
+			if (!change.new.enableDeviceSensorPublish) {
+				logger?.infoSync('Stopping Device Publish Feature (dynamically disabled)', {
+					component: LogComponents.agent
+				});
+
+				try {
+					const sensorPublish = ctx.featureInitializer?.getFeatures()?.sensorPublish;
+					if (sensorPublish) {
+						await sensorPublish.stop();
+						ctx.featureInitializer!.getFeatures().sensorPublish = undefined;
+					}
+				} catch (error) {
+					logger?.errorSync(
+						'Failed to stop Device Publish Feature while disabling',
+						error instanceof Error ? error : new Error(String(error)),
+						{ component: LogComponents.agent }
+					);
+				}
+			} else {
+				logger?.infoSync('Starting Device Publish Feature (dynamically enabled)', {
+					component: LogComponents.agent
+				});
+
+				try {
+					await ctx.featureInitializer?.initDevicePublish();
+				} catch (error) {
+					logger?.errorSync(
+						'Failed to start Device Publish Feature while enabling',
+						error instanceof Error ? error : new Error(String(error)),
+						{ component: LogComponents.agent }
+					);
+				}
+			}
+		}
+
+		if (change.old.enableDeviceRemoteAccess !== change.new.enableDeviceRemoteAccess) {
+			if (!change.new.enableDeviceRemoteAccess) {
+				logger?.infoSync('Stopping Shell Handler (dynamically disabled)', {
+					component: LogComponents.agent
+				});
+
+				try {
+					const shellHandler = ctx.featureInitializer?.getFeatures()?.shellHandler;
+					if (shellHandler) {
+						await shellHandler.cleanup();
+						ctx.featureInitializer!.getFeatures().shellHandler = undefined;
+					}
+				} catch (error) {
+					logger?.errorSync(
+						'Failed to stop Shell Handler while disabling',
+						error instanceof Error ? error : new Error(String(error)),
+						{ component: LogComponents.agent }
+					);
+				}
+			} else {
+				logger?.infoSync('Starting Shell Handler (dynamically enabled)', {
+					component: LogComponents.agent
+				});
+
+				try {
+					await ctx.featureInitializer?.initShellHandler();
+				} catch (error) {
+					logger?.errorSync(
+						'Failed to start Shell Handler while enabling',
+						error instanceof Error ? error : new Error(String(error)),
+						{ component: LogComponents.agent }
+					);
+				}
+			}
+		}
 	});
 
 	ctx.stateReconciler?.on('anomaly-config-changed', (change: { old: any; new: any }) => {

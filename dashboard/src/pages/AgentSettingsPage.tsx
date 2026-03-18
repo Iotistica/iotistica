@@ -502,8 +502,8 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
               onToggle={() => updateSetting('features.enableDeviceRemoteAccess', !(settings.features?.enableDeviceRemoteAccess || false))}
             />
             <FeatureToggle
-              label="Metrics Publishing"
-              description="Automatically publish device data to MQTT broker"
+              label="Device publish"
+              description="Automatically publish device metrics to cloud. Device configuration is required."
               enabled={settings.features?.enableDeviceSensorPublish || false}
               onToggle={() => updateSetting('features.enableDeviceSensorPublish', !(settings.features?.enableDeviceSensorPublish || false))}
             />

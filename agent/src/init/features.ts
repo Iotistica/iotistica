@@ -115,6 +115,26 @@ export class FeatureInitializer {
     return this.features;
   }
 
+  private isDevicePublishEnabled(): boolean {
+    const dynamicFeatures = this.context.stateReconciler?.getConfigManager?.().getFeatures?.();
+    if (dynamicFeatures && typeof dynamicFeatures.enableDeviceSensorPublish === 'boolean') {
+      return dynamicFeatures.enableDeviceSensorPublish;
+    }
+
+    return this.context.configFeatures?.enableDeviceSensorPublish
+      ?? this.context.configFeatures?.enableSensorPublish
+      ?? false;
+  }
+
+  private isDeviceRemoteAccessEnabled(): boolean {
+    const dynamicFeatures = this.context.stateReconciler?.getConfigManager?.().getFeatures?.();
+    if (dynamicFeatures && typeof dynamicFeatures.enableDeviceRemoteAccess === 'boolean') {
+      return dynamicFeatures.enableDeviceRemoteAccess;
+    }
+
+    return this.context.configFeatures?.enableDeviceRemoteAccess ?? true;
+  }
+
   /**
    * Set CloudSync reference for updating endpoints after auto-reload
    * Called from agent.ts after CloudSync creation
@@ -186,6 +206,27 @@ export class FeatureInitializer {
    */
   async initDevicePublish(): Promise<void> {
     const { logger, deviceInfo, anomalyService } = this.context;
+
+    const devicePublishEnabled = this.isDevicePublishEnabled();
+    if (!devicePublishEnabled) {
+      if (this.features.sensorPublish) {
+        try {
+          await this.features.sensorPublish.stop();
+        } catch (error) {
+          logger.warnSync('Failed to stop Device Publish while disabled by feature toggle', {
+            component: LogComponents.agent,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+
+      this.features.sensorPublish = undefined;
+      logger.infoSync('Device Publish Feature skipped by feature toggle', {
+        component: LogComponents.agent,
+        enableDeviceSensorPublish: devicePublishEnabled,
+      });
+      return;
+    }
 
 
     try {
@@ -652,8 +693,29 @@ export class FeatureInitializer {
     }
   }
 
-  private async initShellHandler(): Promise<void> {
+  async initShellHandler(): Promise<void> {
     const { logger, deviceInfo, mqttManager } = this.context;
+
+    const deviceRemoteAccessEnabled = this.isDeviceRemoteAccessEnabled();
+    if (!deviceRemoteAccessEnabled) {
+      if (this.features.shellHandler) {
+        try {
+          await this.features.shellHandler.cleanup();
+        } catch (error) {
+          logger.warnSync('Failed to stop Shell Handler while disabled by feature toggle', {
+            component: LogComponents.agent,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+
+      this.features.shellHandler = undefined;
+      logger.infoSync('Shell handler skipped by feature toggle', {
+        component: LogComponents.agent,
+        enableDeviceRemoteAccess: deviceRemoteAccessEnabled,
+      });
+      return;
+    }
 
     try {
       const { ShellHandler } = await import('../shell/shell-handler.js');
