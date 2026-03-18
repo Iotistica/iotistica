@@ -44,6 +44,7 @@ import { toast } from 'sonner';
 
 interface AnomalyMetric {
   name: string;
+  deviceName?: string;  // Optional: scopes this config to a specific device (matches "deviceName_name" in publish manager)
   enabled: boolean;
   methods: string[];
   threshold: number;
@@ -78,11 +79,6 @@ interface MetricDevice {
   last_seen: string;
 }
 
-interface EndpointRef {
-  uuid?: string;
-  name?: string;
-}
-
 function sanitizeExpectedRange(range?: [number, number]): [number, number] | undefined {
   if (!Array.isArray(range) || range.length !== 2) return undefined;
   const [min, max] = range;
@@ -97,75 +93,6 @@ function isMetricDeviceForAgent(device: MetricDevice, agentUuid: string): boolea
   if (device.agent_uuid && device.agent_uuid === agentUuid) return true;
   if (Array.isArray(device.agent_uuids) && device.agent_uuids.includes(agentUuid)) return true;
   return false;
-}
-
-function toQualifiedMetricName(endpointUuid: string, metricName: string): string {
-  const trimmedMetric = (metricName || '').trim();
-  if (!trimmedMetric) return trimmedMetric;
-
-  // Keep already-qualified names untouched.
-  if (trimmedMetric.startsWith(`${endpointUuid}_`)) {
-    return trimmedMetric;
-  }
-
-  return `${endpointUuid}_${trimmedMetric}`;
-}
-
-function normalizeMetricNameForSave(
-  metricName: string,
-  agentUuid: string,
-  metricDevices: MetricDevice[],
-  endpoints: EndpointRef[],
-  preferredEndpointName?: string
-): string {
-  const trimmedMetric = (metricName || '').trim();
-  if (!trimmedMetric) return trimmedMetric;
-
-  const endpointUuidByName = new Map<string, string>();
-  for (const endpoint of endpoints) {
-    if (!endpoint?.name || !endpoint?.uuid) continue;
-    if (!endpointUuidByName.has(endpoint.name)) {
-      endpointUuidByName.set(endpoint.name, endpoint.uuid);
-    }
-  }
-
-  const knownEndpointUuids = Array.from(endpointUuidByName.values());
-
-  // Already fully-qualified as endpointUuid_metric.
-  if (knownEndpointUuids.some(endpointUuid => trimmedMetric.startsWith(`${endpointUuid}_`))) {
-    return trimmedMetric;
-  }
-
-  const scopedDevices = metricDevices.filter(d => isMetricDeviceForAgent(d, agentUuid));
-  const candidateDevices = scopedDevices.filter(d =>
-    Array.isArray(d.available_metrics) && d.available_metrics.includes(trimmedMetric)
-  );
-
-  if (candidateDevices.length === 0) {
-    // System metric or unknown metric - keep unchanged.
-    return trimmedMetric;
-  }
-
-  if (preferredEndpointName) {
-    const preferred = candidateDevices.find(d => d.device_name === preferredEndpointName);
-    const preferredEndpointUuid = preferred ? endpointUuidByName.get(preferred.device_name) : undefined;
-    if (preferredEndpointUuid) {
-      return toQualifiedMetricName(preferredEndpointUuid, trimmedMetric);
-    }
-  }
-
-  const candidateEndpointUuids = candidateDevices
-    .map(device => endpointUuidByName.get(device.device_name))
-    .filter((value): value is string => !!value);
-
-  const uniqueEndpointUuids = Array.from(new Set(candidateEndpointUuids));
-
-  if (uniqueEndpointUuids.length === 1) {
-    return toQualifiedMetricName(uniqueEndpointUuids[0], trimmedMetric);
-  }
-
-  // Ambiguous metric across endpoints; keep unchanged so user can disambiguate explicitly.
-  return trimmedMetric;
 }
 
 const DETECTION_METHOD_OPTIONS = [
@@ -205,6 +132,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
   } = useForm<AnomalyMetric>({
     defaultValues: {
       name: '',
+      deviceName: undefined,
       enabled: true,
       methods: [],
       threshold: 3.0,
@@ -227,10 +155,11 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
     }
   }, [selectedDeviceUuid, open]);
 
-  // Load available devices/metrics for the Add Metric dialog
+  // Load available devices/metrics for the Add/Edit Metric dialog
   useEffect(() => {
     if (open && isFormDialogOpen) {
-      fetchMetricDevices();
+      // When editing, preserve the device selection restored in handleEdit
+      fetchMetricDevices(editingIndex !== null);
     }
   }, [open, isFormDialogOpen]);
 
@@ -265,7 +194,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
     }
   };
 
-  const fetchMetricDevices = async () => {
+  const fetchMetricDevices = async (preserveDeviceSelection = false) => {
     setMetricDevicesLoading(true);
     try {
       const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
@@ -276,11 +205,14 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
       const fetchedDevices = data.devices || [];
       setMetricDevices(fetchedDevices);
 
-      const scopedDevices = fetchedDevices.filter((d: MetricDevice) =>
-        isMetricDeviceForAgent(d, selectedDeviceUuid)
-      );
-      const defaultDevice = scopedDevices[0] || fetchedDevices[0];
-      setSelectedMetricDevice(defaultDevice?.device_name || '');
+      // Only auto-select a default device when adding (not editing) to avoid overwriting the restored selection
+      if (!preserveDeviceSelection) {
+        const scopedDevices = fetchedDevices.filter((d: MetricDevice) =>
+          isMetricDeviceForAgent(d, selectedDeviceUuid)
+        );
+        const defaultDevice = scopedDevices[0] || fetchedDevices[0];
+        setSelectedMetricDevice(defaultDevice?.device_name || '');
+      }
     } catch (err: any) {
       console.error('Failed to fetch metric devices:', err);
     } finally {
@@ -295,10 +227,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
       await fetchDeviceState(deviceUuid);
 
       const pendingConfig = getPendingConfig(deviceUuid);
-      const configuredMetrics =
-        pendingConfig?.anomalyDetection?.metrics ||
-        pendingConfig?.anomalyDetection?.systemMetrics ||
-        [];
+      const configuredMetrics = pendingConfig?.anomalyDetection?.metrics ?? [];
 
       setMetrics(configuredMetrics);
       setError(null);
@@ -313,6 +242,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
   const handleAdd = () => {
     reset({
       name: '',
+      deviceName: undefined,
       enabled: true,
       methods: [],
       threshold: 3.0,
@@ -331,6 +261,13 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
       ...metric,
       expectedRange: metric.expectedRange ? metric.expectedRange : undefined,
     });
+    // Restore device selection from saved deviceName (new format) or from legacy prefixed name
+    if (metric.deviceName) {
+      setSelectedMetricDevice(metric.deviceName);
+    } else {
+      // Legacy: try to match from endpoint uuids embedded in the name
+      setSelectedMetricDevice('');
+    }
     setEditingIndex(index);
     setIsFormDialogOpen(true);
   };
@@ -358,6 +295,12 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
       return;
     }
 
+    // Always derive deviceName from the current device selection so system metrics
+    // (protocol === 'system') never get a deviceName, regardless of form state.
+    const selectedDeviceInfo = metricDevices.find(d => d.device_name === selectedMetricDevice);
+    const isSystemSelection = !selectedMetricDevice || selectedDeviceInfo?.protocol === 'system';
+    data.deviceName = isSystemSelection ? undefined : (selectedMetricDevice || undefined);
+
     let updated: AnomalyMetric[];
     if (editingIndex !== null) {
       // Edit existing
@@ -379,22 +322,33 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
 
     setLoading(true);
     try {
-      const pendingConfig = getPendingConfig(selectedDeviceUuid);
-      const endpoints: EndpointRef[] = Array.isArray(pendingConfig?.endpoints)
-        ? pendingConfig.endpoints
-        : [];
+      const normalizedMetrics = updatedMetrics.map(metric => {
+        const metricName = (metric.name || '').trim();
 
-      const normalizedMetrics = updatedMetrics.map(metric => ({
-        ...metric,
-        name: normalizeMetricNameForSave(
-          metric.name,
-          selectedDeviceUuid,
-          metricDevices,
-          endpoints,
-          selectedMetricDevice || undefined
-        ),
-        expectedRange: sanitizeExpectedRange(metric.expectedRange),
-      }));
+        // Sanitize deviceName: clear it if the device is a 'system' protocol device in the
+        // catalog. This self-heals any existing entries that were incorrectly saved with a
+        // deviceName on system metrics (cpu_usage, memory_percent, cpu_temp, etc.).
+        let deviceName = metric.deviceName;
+        if (deviceName) {
+          const deviceInfo = metricDevices.find(d => d.device_name === deviceName);
+          if (deviceInfo?.protocol === 'system') {
+            deviceName = undefined;
+          }
+        }
+
+        // Build with explicit field ordering: name → deviceName → rest
+        const normalized: AnomalyMetric = {
+          name: metricName,
+          ...(deviceName ? { deviceName } : {}),
+          enabled: metric.enabled,
+          methods: metric.methods,
+          threshold: metric.threshold,
+          windowSize: metric.windowSize,
+        };
+        const cleanRange = sanitizeExpectedRange(metric.expectedRange);
+        if (cleanRange) normalized.expectedRange = cleanRange;
+        return normalized;
+      });
 
       // Update pending config locally (does not save to database)
       updatePendingConfig(
@@ -416,13 +370,15 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
   };
 
   const selectedDevice = devices.find(d => d.uuid === selectedDeviceUuid);
-  const pendingConfig = selectedDeviceUuid ? getPendingConfig(selectedDeviceUuid) : undefined;
-  const endpoints: EndpointRef[] = Array.isArray(pendingConfig?.endpoints) ? pendingConfig.endpoints : [];
-  const endpointUuids = endpoints
-    .map(endpoint => endpoint?.uuid)
-    .filter((value): value is string => typeof value === 'string' && value.length > 0);
-  const configuredMetricNames = new Set(metrics.map(m => m.name));
-  const unusedMetrics = availableMetrics.filter(m => !configuredMetricNames.has(m));
+  // Build a set of configured metric keys for duplicate detection.
+  // Key format: "deviceName|name" for device-scoped metrics, or just "name" for system metrics.
+  const configuredMetricKeys = new Set(
+    metrics.map(m => m.deviceName ? `${m.deviceName}|${m.name}` : m.name)
+  );
+  const unusedMetrics = availableMetrics.filter(m => {
+    const key = selectedMetricDevice ? `${selectedMetricDevice}|${m}` : m;
+    return !configuredMetricKeys.has(key) && !configuredMetricKeys.has(m);
+  });
   const metricDeviceOptions = metricDevices.filter(d =>
     isMetricDeviceForAgent(d, selectedDeviceUuid)
   );
@@ -449,17 +405,12 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
     return `${isValidMin ? min : '-'} - ${isValidMax ? max : '-'}`;
   };
 
-  const formatMetricNameForGrid = (metricName: string) => {
-    if (!metricName) return metricName;
-
-    for (const endpointUuid of endpointUuids) {
-      const prefix = `${endpointUuid}_`;
-      if (metricName.startsWith(prefix) && metricName.length > prefix.length) {
-        return metricName.slice(prefix.length);
-      }
+  const formatMetricNameForGrid = (metric: AnomalyMetric) => {
+    const name = metric.name || '';
+    if (metric.deviceName) {
+      return `${metric.deviceName} / ${name}`;
     }
-
-    return metricName;
+    return name;
   };
 
   return (
@@ -534,7 +485,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
                 <Table className="w-full">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="pl-8">Name</TableHead>
+                      <TableHead className="pl-8">Metric</TableHead>
                       <TableHead className="px-4">Method</TableHead>
                       <TableHead className="px-4">Threshold</TableHead>
                       <TableHead className="px-4">Window</TableHead>
@@ -546,7 +497,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
                   <TableBody>
                     {metrics.map((metric, index) => (
                       <TableRow key={index}>
-                        <TableCell className="font-medium pl-8" title={metric.name}>{formatMetricNameForGrid(metric.name)}</TableCell>
+                        <TableCell className="font-medium pl-8" title={metric.deviceName ? `${metric.deviceName}_${metric.name}` : metric.name}>{formatMetricNameForGrid(metric)}</TableCell>
                         <TableCell className="px-4">
                           <Badge variant="secondary" className="text-xs whitespace-nowrap">
                             {formatMethod(metric.methods[0])}

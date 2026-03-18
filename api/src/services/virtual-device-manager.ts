@@ -2,7 +2,7 @@
  * Virtual Device Manager Service
  * 
  * Manages virtual device sidecars (protocol simulators) that run alongside agents.
- * Virtual devices are stored in device_sensors table and deployed as sidecar containers.
+ * Virtual devices are stored in endpoints table and deployed as sidecar containers.
  * 
  * Key Features:
  * - Profile-based configuration (defines data points exposed by simulator)
@@ -103,7 +103,7 @@ export class VirtualDeviceManager {
    * 3. Fetch profile data points
    * 4. Auto-assign port based on existing virtual devices
    * 5. Build container config and connection object
-   * 6. Insert into device_sensors table via standard addEndpoint flow
+   * 6. Insert into endpoints table via standard addEndpoint flow
    * 7. If parent is K8s virtual agent, update ResourceQuota and patch Deployment
    */
   async createVirtualDevice(config: VirtualDeviceConfig): Promise<VirtualDevice> {
@@ -319,12 +319,12 @@ export class VirtualDeviceManager {
     // 8. Query database to get complete record with all fields
     // This ensures we return the same structure as regular devices
     const dbResult = await query(
-      `SELECT uuid, device_uuid, name, protocol, enabled, poll_interval,
+      `SELECT uuid, agent_uuid AS device_uuid, name, protocol, enabled, poll_interval,
               connection, data_points, metadata, created_at, updated_at,
               created_by, updated_by, deployment_status, config_version,
               synced_to_config
-       FROM device_sensors
-       WHERE device_uuid = $1 AND uuid = $2`,
+       FROM endpoints
+       WHERE agent_uuid = $1 AND uuid = $2`,
       [config.deviceUuid, result.sensor.uuid]
     );
 
@@ -391,9 +391,9 @@ export class VirtualDeviceManager {
    */
   async getVirtualDevices(deviceUuid: string): Promise<VirtualDevice[]> {
     const result = await query(
-      `SELECT uuid, device_uuid, name, protocol, connection, data_points, metadata
-       FROM device_sensors
-       WHERE device_uuid = $1 
+      `SELECT uuid, agent_uuid AS device_uuid, name, protocol, connection, data_points, metadata
+       FROM endpoints
+       WHERE agent_uuid = $1 
        AND metadata->>'sidecar' = 'true'
        ORDER BY created_at ASC`,
       [deviceUuid]
@@ -536,7 +536,7 @@ export class VirtualDeviceManager {
   }
 
   /**
-   * Patch K8s Deployment to sync sidecar containers with device_sensors table
+   * Patch K8s Deployment to sync sidecar containers with endpoints table
    * 
    * This reads all virtual devices for the agent and rebuilds the sidecar container list.
    */

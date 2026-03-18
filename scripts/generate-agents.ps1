@@ -79,9 +79,9 @@ param(
     [string]$SimulateMemoryLeak = "false",
     [string]$AnomalyDetectionEnabled = "true",
     [string]$FirewallEnabled = "false",
-    [string]$UseMsgpackPoc = "true",
+    [string]$UseMsgpackPoc = "false",
     [string]$UseKeyCompactionPoc = "false",
-    [string]$UseDeflateCompression = "true",
+    [string]$UseDeflateCompression = "false",
     [string]$EnableHeapProfiling = "true",
     
     # Protocol Adapter Configuration

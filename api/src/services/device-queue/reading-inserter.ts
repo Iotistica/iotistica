@@ -29,7 +29,7 @@ export class ReadingInserter {
   }
 
   /**
-   * Stamp last_telemetry_at on device_sensors rows using the endpoint_uuid from extra.
+   * Stamp last_telemetry_at on endpoints rows using the endpoint_uuid from extra.
    * Decouples "data is flowing" from MQTT heartbeat / connectivity events.
    */
   private async updateLastTelemetryAt(readings: ReadingInsert[], ingestedAt: Date): Promise<void> {
@@ -43,7 +43,7 @@ export class ReadingInserter {
 
     const placeholders = endpointUuids.map((_, i) => `$${i + 2}::uuid`).join(', ');
     await query(
-      `UPDATE device_sensors SET last_telemetry_at = $1::timestamptz WHERE uuid IN (${placeholders})`,
+      `UPDATE endpoints SET last_telemetry_at = $1::timestamptz WHERE uuid IN (${placeholders})`,
       [ingestedAt.toISOString(), ...endpointUuids],
     );
   }

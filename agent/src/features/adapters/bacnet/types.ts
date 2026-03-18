@@ -48,6 +48,8 @@ export type BACnetObject = z.infer<typeof BACnetObjectSchema>;
  */
 export const BACnetDeviceSchema = z.object({
   name: z.string().min(1),
+  /** Optional human-readable label. When set, takes priority over the protocol-discovered objectName. */
+  displayName: z.string().optional(),
   ipAddress: z.string().ip(),
   port: z.number().min(1).max(65535).optional().default(47808),
   deviceInstance: z.number().min(0).max(4194303),

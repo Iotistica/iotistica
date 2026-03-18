@@ -21,6 +21,7 @@ export interface SensorDataPoint {
   deviceName: string;
   deviceId?: string;
   device_uuid?: string;
+  endpoint_uuid?: string;  // UUID from the endpoints table (target state)
   metric: string;  // Generic field name (Modbus register, OPC UA node, SNMP OID)
   value: number | boolean | string | null;  // null when quality is BAD
   unit: string;
@@ -29,7 +30,8 @@ export interface SensorDataPoint {
   qualityCode?: string;  // Error code when quality is BAD (e.g., 'ETIMEDOUT', 'DEVICE_OFFLINE')
   protocol?: string;  // Protocol context for enum namespacing (modbus, snmp, opcua, mqtt, bacnet)
   nodeType?: 'metric' | 'metadata';  // Node classification (OPC UA only)
-  anomaly_score?: number;  // Edge AI anomaly score (0.0 = normal, 1.0 = max anomaly)
+  resolvedDisplayName?: string;  // Human-readable name resolved from the protocol server (e.g. OPC-UA DisplayName, SNMP sysName, BACnet objectName, or metadata.displayName config override). Used by SensorsFeature as the base of the final unique display name instead of the raw config name.
+  anomaly_score?: number;  // anomaly score (0.0 = normal, 1.0 = max anomaly)
   anomaly_threshold?: number;  // Confidence threshold used for alerting (e.g., 0.7)
   baseline_samples?: number;  // Number of samples in baseline buffer
   detection_methods?: string[];  // Detection methods used (e.g., ["zscore", "mad"])

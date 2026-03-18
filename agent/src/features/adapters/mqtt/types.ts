@@ -23,6 +23,8 @@ export interface MqttMetricConfig {
 
 export interface MqttDevice {
   name: string;
+  /** Optional human-readable label. When set, overrides the raw config name in payloads. */
+  displayName?: string;
   enabled: boolean;
   topic: string;  // MQTT topic to subscribe to
   qos?: 0 | 1 | 2;

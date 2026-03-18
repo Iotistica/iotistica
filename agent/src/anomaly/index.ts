@@ -758,11 +758,28 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Get metric configuration by name
-	 * Returns undefined if metric not found in config.metrics
+	 * Get metric configuration by name.
+	 *
+	 * Matching priority:
+	 *  1. Exact match on `m.name` (handles system metrics like "cpu_usage" and
+	 *     legacy pre-qualified names like "endpointUuid_level").
+	 *  2. Device-scoped match: a config entry with both `name` and `deviceName` set
+	 *     matches an incoming metric whose name is `"${deviceName}_${name}"`.
+	 *     e.g., { name: "level", deviceName: "Zone A-abc12345" } matches "Zone A-abc12345_level".
 	 */
 	private getMetricConfig(metricName: string): MetricConfig | undefined {
-		return this.config.metrics.find(m => m.name === metricName);
+		// Exact match (system metrics, pre-qualified legacy names)
+		const exact = this.config.metrics.find(m => m.name === metricName);
+		if (exact) return exact;
+
+		// Device-scoped match
+		for (const m of this.config.metrics) {
+			if (m.deviceName && `${m.deviceName}_${m.name}` === metricName) {
+				return m;
+			}
+		}
+
+		return undefined;
 	}
 	
 	/**
@@ -805,6 +822,17 @@ export class AnomalyDetectionService {
 		return effectiveConfig;
 	}
 	
+	/** Returns true when at least one metric is enabled for anomaly detection. */
+	hasConfiguredMetrics(): boolean {
+		return this.enabled && this.config.metrics.some(m => m.enabled);
+	}
+
+	/** Returns true when the given canonical metric key is configured and enabled. */
+	isMetricConfigured(metricName: string): boolean {
+		const cfg = this.getMetricConfig(metricName);
+		return !!(cfg && cfg.enabled);
+	}
+
 	/**
 	 * Get all unique detection methods across metrics
 	 */

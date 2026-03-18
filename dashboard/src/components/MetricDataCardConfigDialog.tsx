@@ -48,6 +48,7 @@ interface MetricSourceRef {
   deviceUuid: string;
   endpointUuid: string;
   agentName?: string;
+  endpointName?: string;
 }
 
 interface EndpointDevice {
@@ -148,7 +149,7 @@ export function MetricDataCardConfigDialog({
       if (device) {
         setAvailableMetrics(device.available_metrics);
         const sourceRefs = Array.isArray(device.source_refs) ? device.source_refs : [];
-        if (sourceRefs.length === 1) {
+        if (sourceRefs.length >= 1) {
           setSelectedSourceKey(getSourceKey(sourceRefs[0]));
           return;
         }
@@ -180,8 +181,8 @@ export function MetricDataCardConfigDialog({
   const selectedDeviceSources = Array.isArray(selectedDeviceData?.source_refs)
     ? selectedDeviceData.source_refs.filter(sourceRef => sourceRef.deviceUuid && sourceRef.endpointUuid)
     : [];
-  const selectedSourceRef = selectedDeviceSources.find(sourceRef => getSourceKey(sourceRef) === selectedSourceKey);
-  const requiresExactSourceSelection = selectedDeviceSources.length > 1;
+  const selectedSourceRef = selectedDeviceSources.find(sourceRef => getSourceKey(sourceRef) === selectedSourceKey)
+    ?? selectedDeviceSources[0];
   const canSave = Boolean(
     selectedDevice &&
     selectedMetric &&
@@ -253,6 +254,7 @@ export function MetricDataCardConfigDialog({
     const config: MetricDataCardConfig = {
       widgetId: initialConfig?.widgetId || `metric-${Date.now()}`,
       agentName: selectedSourceRef.agentName,
+      endpointName: selectedSourceRef.endpointName,
       deviceUuid: selectedSourceRef.deviceUuid,
       endpointUuid: selectedSourceRef.endpointUuid,
       deviceName: selectedDevice,
@@ -387,44 +389,6 @@ export function MetricDataCardConfigDialog({
                 )}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="metric-source">Exact Source</Label>
-            {selectedDeviceSources.length === 0 ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                No exact source mapping is available for this device yet.
-              </div>
-            ) : selectedDeviceSources.length === 1 && selectedSourceRef ? (
-              <div className="rounded-md border px-3 py-2 text-sm">
-                <div className="font-medium">{selectedSourceRef.agentName || 'Source agent'}</div>
-                <div className="text-muted-foreground">
-                  Device UUID: {selectedSourceRef.deviceUuid}
-                </div>
-              </div>
-            ) : (
-              <Select value={selectedSourceKey} onValueChange={setSelectedSourceKey}>
-                <SelectTrigger id="metric-source">
-                  <SelectValue placeholder="Select exact source" />
-                </SelectTrigger>
-                <SelectContent>
-                  {selectedDeviceSources.map((sourceRef) => {
-                    const deviceInfo = registeredDevices.get(sourceRef.deviceUuid);
-                    const isOnline = Boolean(deviceInfo?.isOnline);
-                    return (
-                      <SelectItem key={getSourceKey(sourceRef)} value={getSourceKey(sourceRef)}>
-                        {sourceRef.agentName || sourceRef.deviceUuid} {isOnline ? '• online' : '• offline'}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
-            )}
-            {requiresExactSourceSelection && !selectedSourceRef && (
-              <p className="text-xs text-muted-foreground">
-                Select the exact source so the widget can store stable UUIDs.
-              </p>
-            )}
           </div>
 
           <div className="grid gap-2">

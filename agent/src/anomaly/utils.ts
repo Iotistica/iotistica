@@ -19,16 +19,10 @@ export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfi
 	
 	const rawConfig = targetStateConfig.anomalyDetection;
 
-	const configuredMetrics: MetricConfig[] = Array.isArray(rawConfig.metrics)
+	const metrics: MetricConfig[] = Array.isArray(rawConfig.metrics)
 		? rawConfig.metrics
 		: [];
-	const legacySystemMetrics: MetricConfig[] = Array.isArray(rawConfig.systemMetrics)
-		? rawConfig.systemMetrics
-		: [];
-	const unifiedMetrics: MetricConfig[] = configuredMetrics.length > 0
-		? configuredMetrics
-		: legacySystemMetrics;
-	
+
 	const config: AnomalyConfig = {
 		enabled: rawConfig.enabled !== undefined ? rawConfig.enabled : true,
 		defaults: rawConfig.defaults || {
@@ -37,9 +31,8 @@ export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfi
 			windowSize: 120,
 			minSamples: 5
 		},
-		systemMetrics: legacySystemMetrics,
 		sensitivity: rawConfig.sensitivity || 5,
-		metrics: unifiedMetrics,
+		metrics,
 		alerts: {
 			// Defaults first, then override with any provided values
 			mqtt: true,

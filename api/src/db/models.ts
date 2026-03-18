@@ -479,7 +479,7 @@ export class DeviceTargetStateModel {
   /**
    * Deploy target state to device
    * This increments version so device will pick up changes
-   * Also syncs config.endpoints to device_sensors table
+   * Also syncs config.endpoints to endpoints table
    */
   static async deploy(
     deviceUuid: string,
@@ -507,7 +507,7 @@ export class DeviceTargetStateModel {
     if (deployedState.config && deployedState.config.endpoints) {
       const syncService = new DeviceSensorSyncService();
       const existingSensors = await query(
-        'SELECT uuid, name FROM device_sensors WHERE device_uuid = $1',
+        'SELECT uuid, name FROM endpoints WHERE agent_uuid = $1',
         [deviceUuid]
       );
       const existingUuids = new Set(existingSensors.rows.map((row: any) => row.uuid).filter(Boolean));

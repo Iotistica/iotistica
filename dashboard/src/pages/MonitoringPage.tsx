@@ -74,8 +74,9 @@ interface Stats {
   byStatus: { open: number; active: number; resolved: number };
   bySeverity: { info: number; warning: number; critical: number };
   affectedDevices: number;
+  affectedEndpoints: number;
   topMetrics: { metric: string; count: number }[];
-  topDevices: { deviceName: string; count: number }[];
+  topDevices: { deviceName: string; deviceUuid: string | null; count: number }[];
 }
 
 interface IncidentDetails extends Incident {

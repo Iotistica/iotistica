@@ -153,7 +153,7 @@ router.get('/fleets/:id', jwtAuth, async (req, res) => {
         d.uuid, d.device_name, d.device_type, d.is_online,
         d.cpu_usage, d.memory_usage, d.memory_total,
         d.deployment_status, d.k8s_pod_name,
-        (SELECT COUNT(*) FROM device_sensors ds WHERE ds.device_uuid = d.uuid) as endpoint_count
+        (SELECT COUNT(*) FROM endpoints ds WHERE ds.agent_uuid = d.uuid) as endpoint_count
       FROM devices d
       WHERE d.fleet_uuid = $1
       ORDER BY d.device_name`,

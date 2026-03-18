@@ -1,0 +1,157 @@
+import { EventEmitter } from 'events';
+import type { DeviceConfig, Logger } from './types.js';
+
+/**
+ * Owns the raw socket read buffer (frame reassembly) and the parsed message
+ * batch.  Emits:
+ *   'flush'         — batch should be published immediately
+ *   'message-added' — one parsed message was accepted into the batch
+ */
+export class MessageBatcher extends EventEmitter {
+  // Raw socket buffer — accumulates partial frames until a delimiter is seen
+  private readBuffer: Buffer = Buffer.alloc(0);
+
+  // Parsed-object batch
+  private _messages: any[] = [];
+  private _totalBytes = 0;
+  private _firstMessageTime = Date.now();
+  private _totalReceived = 0;  // lifetime counter (never reset)
+
+  private readonly delimiterRegex: RegExp;
+
+  constructor(
+    private readonly config: DeviceConfig,
+    private readonly maxMessages: number,
+    private readonly maxBytes: number,
+    private readonly logger?: Logger,
+  ) {
+    super();
+    try {
+      this.delimiterRegex = new RegExp(config.eomDelimiter, 'g');
+    } catch {
+      throw new Error(`Invalid eom_delimiter regex: ${config.eomDelimiter}`);
+    }
+  }
+
+  // --- public accessors -------------------------------------------------------
+
+  get messages(): any[] { return this._messages; }
+  get totalBytes(): number { return this._totalBytes; }
+  get firstMessageTime(): number { return this._firstMessageTime; }
+  get messageCount(): number { return this._messages.length; }
+  get totalReceived(): number { return this._totalReceived; }
+
+  // --- data ingestion ---------------------------------------------------------
+
+  /** Called by EndpointConnection whenever data arrives on the socket. */
+  appendData(data: Buffer): void {
+    const deviceName = this.config.name || 'unknown';
+
+    if (this.readBuffer.length + data.length > this.config.bufferCapacity) {
+      this.logger?.error(
+        `Buffer capacity exceeded for '${deviceName}' ` +
+        `(current: ${this.readBuffer.length}, incoming: ${data.length}, max: ${this.config.bufferCapacity}). ` +
+        `Discarding buffer — check delimiter or message size.`,
+      );
+      this.readBuffer = data;
+      this.parseFrames();
+      if (this.readBuffer.length > this.config.bufferCapacity) {
+        this.logger?.error(`Single chunk exceeds capacity (${data.length}), discarding`);
+        this.readBuffer = Buffer.alloc(0);
+      }
+      return;
+    }
+
+    if (this.readBuffer.length === 0) {
+      this.readBuffer = data;
+    } else {
+      const merged = Buffer.allocUnsafe(this.readBuffer.length + data.length);
+      this.readBuffer.copy(merged, 0);
+      data.copy(merged, this.readBuffer.length);
+      this.readBuffer = merged;
+    }
+
+    this.parseFrames();
+  }
+
+  // --- batch management -------------------------------------------------------
+
+  reset(): void {
+    this._messages.length = 0;
+    this._totalBytes = 0;
+    this._firstMessageTime = Date.now();
+    this.readBuffer = Buffer.alloc(0);
+  }
+
+  // --- internals --------------------------------------------------------------
+
+  private parseFrames(): void {
+    const str = this.readBuffer.toString('utf8');
+    const parts = str.split(this.delimiterRegex);
+    if (parts.length === 0) return;
+
+    const tail = parts[parts.length - 1];
+    if (Buffer.byteLength(tail, 'utf8') > this.config.bufferCapacity) {
+      this.logger?.error(
+        `Incomplete frame exceeds capacity for '${this.config.name || 'unknown'}'. Discarding.`,
+      );
+      this.readBuffer = Buffer.alloc(0);
+    } else {
+      this.readBuffer = Buffer.from(tail, 'utf8');
+    }
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (parts[i].length > 0) this.addMessage(parts[i]);
+    }
+  }
+
+  private addMessage(raw: string): void {
+    const deviceName = this.config.name || 'unknown';
+    const byteLen = Buffer.byteLength(raw, 'utf8');
+
+    if (byteLen > this.config.bufferCapacity) {
+      this.logger?.error(`Message size exceeds capacity for '${deviceName}', discarding`);
+      return;
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      this.logger?.warn(
+        `JSON parse failed for '${deviceName}': ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
+
+    if (this._messages.length === 0) this._firstMessageTime = Date.now();
+    this._messages.push(parsed);
+    this._totalBytes += byteLen;
+    this._totalReceived++;
+    this.emit('message-added');
+
+    // Safety: force flush if batch grows past hard limits
+    if (this._messages.length >= this.maxMessages || this._totalBytes >= this.maxBytes) {
+      this.logger?.warn(
+        `Batch safety limit reached for '${deviceName}' ` +
+        `(${this._messages.length} msgs / ${(this._totalBytes / (1024 * 1024)).toFixed(1)} MB). Force flushing.`,
+      );
+      this.emit('flush');
+      return;
+    }
+
+    const bufferSize = this.config.bufferSize ?? 0;
+    const bufferTimeMs = this.config.bufferTimeMs ?? 0;
+
+    // No buffering configured → publish immediately
+    if (bufferSize <= 0 && bufferTimeMs <= 0) {
+      this.emit('flush');
+      return;
+    }
+
+    // Size-based flush (timer-based flush is driven by the manager's interval)
+    if (bufferSize > 0 && this._messages.length >= bufferSize) {
+      this.emit('flush');
+    }
+  }
+}

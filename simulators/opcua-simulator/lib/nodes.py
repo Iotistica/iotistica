@@ -2,6 +2,7 @@
 OPC UA node creation and management
 """
 import logging
+import uuid as uuid_module
 from typing import Dict, List
 from asyncua import Server, ua
 from .types import Device
@@ -9,6 +10,9 @@ from .models import get_model
 from .profiles import DeviceProfile
 
 logger = logging.getLogger(__name__)
+
+# Fixed namespace for deterministic per-device UUID generation (uuid5)
+_DEVICE_UUID_NAMESPACE = uuid_module.UUID('b5a7b3c9-d1e2-4f3a-8960-c0d1e2f34567')
 
 
 class NodeManager:
@@ -144,7 +148,7 @@ class NodeManager:
                 current_folder = zone_folder
                 folder_path.append(zone_name)
             
-            # Get device config for this group (may override model defaults)
+            # Get device config for this group
             device_config = device_group.get('config', {})
             
             # Get model instance to extract default min/max
@@ -154,47 +158,81 @@ class NodeManager:
             min_value = device_config.get('min_value', getattr(model, 'min_value', None))
             max_value = device_config.get('max_value', getattr(model, 'max_value', None))
             
-            # Create device nodes in the deepest folder
+            # Create device nodes — each device is an object folder with DeviceUUID + value child
             for i in range(count):
                 node_name = f"{prefix}{i+1}"
-                # Create string-based NodeID: ns=2;s=Production/Device1
-                # This format is required for agent validation
+                # NodeID for the device object: ns=2;s=Temperature/Device1
                 node_id_string = f"{folder_path[-1]}/{node_name}"
-                node_id = ua.NodeId(node_id_string, 2)
+                device_obj_id = ua.NodeId(node_id_string, 2)
                 
-                # Check if node already exists (handles Flask debug mode reloads)
+                # Create (or reuse) the device object folder
                 try:
-                    node = self.server.get_node(node_id)
-                    # Node exists, verify it's accessible
-                    await node.read_browse_name()
-                    logger.debug(f"Node {node_id_string} already exists, skipping creation")
+                    device_obj = self.server.get_node(device_obj_id)
+                    await device_obj.read_browse_name()
+                    logger.debug(f"Device object {node_id_string} already exists, skipping creation")
                 except Exception:
-                    # Node doesn't exist, create it
-                    node = await current_folder.add_variable(node_id, node_name, 0.0)
-                    await node.set_writable()
+                    device_obj = await current_folder.add_folder(device_obj_id, node_name)
                 
-                # Set Description attribute with unit information (if available)
+                # Set custom DisplayName on device folder if specified in the profile.
+                # The agent reads this attribute from the parent folder to build per-sensor
+                # display names (device_name field in readings).
+                custom_display_name = device_group.get('displayName')
+                if custom_display_name:
+                    try:
+                        await device_obj.write_attribute(
+                            ua.AttributeIds.DisplayName,
+                            ua.DataValue(ua.LocalizedText(custom_display_name))
+                        )
+                    except Exception as e:
+                        logger.debug(f"Could not set DisplayName for {node_name}: {e}")
+                
+                # Generate a stable per-device UUID from profile name + full path + device name
+                unique_key = f"{profile.name}/{'/'.join(folder_path)}/{node_name}"
+                device_uuid = str(uuid_module.uuid5(_DEVICE_UUID_NAMESPACE, unique_key))
+                
+                # DeviceUUID variable inside the device folder
+                uuid_var_id = ua.NodeId(f"{node_id_string}/DeviceUUID", 2)
+                try:
+                    uuid_var = self.server.get_node(uuid_var_id)
+                    await uuid_var.read_browse_name()
+                    logger.debug(f"DeviceUUID node for {node_id_string} already exists")
+                except Exception:
+                    await device_obj.add_variable(uuid_var_id, "DeviceUUID", device_uuid)
+                    logger.debug(f"Created DeviceUUID for {node_id_string}: {device_uuid}")
+                
+                # Value variable inside the device folder, named after the sensor type
+                value_var_id = ua.NodeId(f"{node_id_string}/{model_type}", 2)
+                try:
+                    value_var = self.server.get_node(value_var_id)
+                    await value_var.read_browse_name()
+                    logger.debug(f"Value node for {node_id_string} already exists, skipping creation")
+                except Exception:
+                    value_var = await device_obj.add_variable(value_var_id, model_type, 0.0)
+                    await value_var.set_writable()
+                
+                # Set Description on the value variable
                 try:
                     if unit:
                         description = f"{device_group.get('description', model_type.replace('_', ' ').title())} in {unit}"
                     else:
                         description = device_group.get('description', model_type.replace('_', ' ').title())
-                    await node.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.LocalizedText(description)))
+                    await value_var.write_attribute(ua.AttributeIds.Description, ua.DataValue(ua.LocalizedText(description)))
                 except Exception as e:
                     logger.debug(f"Could not set description for {node_name}: {e}")
                 
-                # Create structured device object
+                # Device struct points at the value variable; ValueUpdater writes to device.node
                 device = Device(
-                    node=node,
+                    node=value_var,
                     device_type=model_type,
                     model_type=model_type,
                     index=i,
                     name=node_name,
-                    folder='/'.join(folder_path),  # Full path
+                    folder='/'.join(folder_path),
                     unit=unit,
                     min_value=min_value,
                     max_value=max_value,
-                    config=device_config
+                    config=device_config,
+                    uuid=device_uuid
                 )
                 
                 self.devices.append(device)

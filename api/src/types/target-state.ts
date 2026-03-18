@@ -17,11 +17,16 @@ export interface AnomalyAlerts {
 
 export interface AnomalyMetric {
   name: string;
+  deviceName?: string;             // Optional: scope this config to a specific device.
+                                   // When set, matches incoming metric "deviceName_name".
   enabled: boolean;
   methods: string[];
   threshold: number;
   windowSize: number;
   expectedRange?: [number, number];
+  minConfidence?: number;          // Minimum confidence to alert (0–1, default 0.7)
+  cooldownMs?: number;             // Min time between duplicate alerts for this metric
+  seasonality?: 'none' | 'day-night' | 'hourly' | 'weekly';
 }
 
 export interface AnomalyStorage {
@@ -52,7 +57,7 @@ export interface AnomalyDetectionConfig {
 
 /**
  * Per-Data-Point Anomaly Detection Configuration
- * Stored in device_sensors.data_points JSONB field
+ * Stored in endpoints.data_points JSONB field
  * Used by API to build AnomalyMetric[] array in target state
  */
 export interface AnomalyDetectionDataPointConfig {
@@ -198,7 +203,7 @@ export interface ModbusDataPoint {
 
 /**
  * OPC-UA Data Point Configuration
- * Stored in device_sensors.data_points JSONB field
+ * Stored in endpoints.data_points JSONB field
  */
 export interface OPCUADataPoint {
   name: string;

@@ -6,7 +6,7 @@
  * sidecar containers alongside agents, accessed via localhost.
  * 
  * Architecture:
- * - Database: device_sensors table stores full config + deployment metadata
+ * Database: endpoints table stores full config + deployment metadata
  * - Target State: agent receives only connection settings (no K8s metadata)
  * - Deployment: K8s sidecar containers or Docker Compose services
  */

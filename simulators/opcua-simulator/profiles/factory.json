@@ -6,7 +6,7 @@
       "folder": "Temperature",
       "prefix": "Device",
       "model": "temperature",
-      "count": 5,
+      "count": 1,
       "unit": "°C",
       "config": {
         "active_state": "normal",
@@ -42,7 +42,7 @@
       "folder": "Pressure",
       "prefix": "Device",
       "model": "pressure",
-      "count": 5,
+      "count": 1,
       "unit": "mbar",
       "config": {
         "active_state": "normal",
@@ -78,7 +78,7 @@
       "folder": "Flow",
       "prefix": "Device",
       "model": "flow",
-      "count": 5,
+      "count": 1,
       "unit": "L/min",
       "config": {
         "active_state": "normal",
@@ -114,7 +114,7 @@
       "folder": "Level",
       "prefix": "Tank",
       "model": "level",
-      "count": 3,
+      "count": 1,
       "unit": "mm",
       "config": {
         "active_state": "normal",
@@ -150,7 +150,7 @@
       "folder": "Vibration",
       "prefix": "Motor",
       "model": "vibration",
-      "count": 4,
+      "count": 1,
       "unit": "mm/s",
       "config": {
         "active_state": "normal",
@@ -189,7 +189,7 @@
       "folder": "Power",
       "prefix": "Line",
       "model": "power",
-      "count": 3,
+      "count": 1,
       "unit": "W",
       "config": {
         "active_state": "normal",

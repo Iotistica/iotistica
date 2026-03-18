@@ -27,6 +27,10 @@ export class BACnetAdapter extends EventEmitter {
   private deviceMetrics: Map<string, DeviceMetrics> = new Map();
   private running = false;
   private pollLoopRunning = false;
+
+  // Human-readable names resolved from BACnet Device objectName at init time.
+  // Priority: device.displayName (config override) > BACnet objectName property > (unset)
+  private resolvedDeviceNames: Map<string, string> = new Map();
   
   // Performance tracking
   private pollHistory: Map<string, boolean[]> = new Map();
@@ -219,6 +223,18 @@ export class BACnetAdapter extends EventEmitter {
       await client.connect();
       this.clients.set(deviceConfig.name, client);
 
+      // Resolve human-readable display name.
+      // Priority: device.displayName (config) > BACnet objectName property > (unset)
+      if (deviceConfig.displayName && deviceConfig.displayName.trim()) {
+        this.resolvedDeviceNames.set(deviceConfig.name, deviceConfig.displayName.trim());
+      } else {
+        const objectName = await client.readDeviceName();
+        if (objectName) {
+          this.resolvedDeviceNames.set(deviceConfig.name, objectName);
+          this.logger.debug(`Resolved BACnet objectName for ${deviceConfig.name}: "${objectName}"`);
+        }
+      }
+
       this.updateDeviceStatus(deviceConfig.name, {
         connected: true,
         lastError: null,
@@ -322,6 +338,7 @@ export class BACnetAdapter extends EventEmitter {
       let updatedCount = 0;
 
       const lastValuesMap = this.lastValues.get(deviceName) || new Map();
+      const resolvedDisplayName = this.resolvedDeviceNames.get(deviceName);
 
       for (const object of enabledObjects) {
         const result = results.get(object.name);
@@ -344,6 +361,7 @@ export class BACnetAdapter extends EventEmitter {
           quality: result.quality,
           qualityCode: result.error,
           protocol: 'bacnet',
+          ...(resolvedDisplayName && { resolvedDisplayName }),
         });
       }
 

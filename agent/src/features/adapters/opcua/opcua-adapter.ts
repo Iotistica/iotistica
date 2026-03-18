@@ -107,6 +107,16 @@ interface OPCUASession {
  */
 export class OPCUAAdapter extends BaseProtocolAdapter {
   private sessions: Map<string, OPCUASession> = new Map();
+
+  // Human-readable names resolved from the OPC-UA server at connect time.
+  // Populated from: metadata.displayName (config override) > server DisplayName attribute > unset
+  private resolvedDeviceNames: Map<string, string> = new Map();
+
+  // Per-node display names read from the OPC-UA server's parent folder nodes.
+  // Keyed by value-variable nodeId. Populated when the server advertises a DisplayName
+  // on the parent device folder (e.g. simulator profile "displayName" field).
+  // Takes precedence over resolvedDeviceNames when present.
+  private resolvedNodeDisplayNames: Map<string, string> = new Map();
   
   // Concurrency control: OPC-UA sessions do NOT support concurrent requests
   // Concurrent reads will cause BadSessionIdInvalid, BadSecureChannelClosed, or corrupted data
@@ -144,6 +154,17 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     }
 
     return nodeId.replace(/\s+/g, '_');
+  }
+
+  /**
+   * Derives the parent folder node ID from a string-addressed value variable.
+   * e.g. "ns=2;s=Temperature/Device1/temperature" → "ns=2;s=Temperature/Device1"
+   * Returns null for flat or non-string node IDs that have no resolvable parent.
+   */
+  private deriveParentNodeId(nodeId: string): string | null {
+    const match = nodeId.match(/^(ns=\d+;s=)(.+)\/[^/]+$/);
+    if (!match) return null;
+    return `${match[1]}${match[2]}`;
   }
 
   private buildStableNodeDeviceId(device: OPCUADeviceConfig, dataPoint: OPCUADataPoint): string {
@@ -553,6 +574,10 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
               ...(qualityCode && { qualityCode }),  // Only include if quality != GOOD
               protocol: 'opcua',  // For enum namespacing
               nodeType: 'metric', // Always 'metric' at this point (metadata filtered)
+              ...(dp.device_uuid && { device_uuid: dp.device_uuid }),
+              ...((this.resolvedNodeDisplayNames.has(dp.nodeId) || this.resolvedDeviceNames.has(deviceName)) && {
+                resolvedDisplayName: this.resolvedNodeDisplayNames.get(dp.nodeId) ?? this.resolvedDeviceNames.get(deviceName),
+              }),
             };
 
             // Emit immediately (real-time streaming)
@@ -1042,6 +1067,15 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         currentRetryDelay: this.MIN_RETRY_DELAY,
         consecutiveFailures: 0
       };
+
+      // Resolve human-readable display name for this device.
+      // Only set when explicitly configured via metadata.displayName — do NOT read ns=0;i=2253
+      // (the OPC-UA Server root object) because its DisplayName is always "Server" per the spec
+      // and is unrelated to any sensor or device being polled.
+      const configDisplayName = device.metadata?.displayName as string | undefined;
+      if (configDisplayName && configDisplayName.trim()) {
+        this.resolvedDeviceNames.set(device.name, configDisplayName.trim());
+      }
       
       // Store session for reconnection access
       this.sessions.set(device.name, sessionWrapper);
@@ -1118,6 +1152,42 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
       // Read metadata nodes once on connect (separate from time-series)
       await this.readMetadata(session, device.dataPoints, device.name);
+
+      // Read per-node DisplayNames from parent device folder nodes.
+      // Allows OPC-UA servers (e.g. simulator profiles with a "displayName" field) to
+      // advertise human-readable names per sensor group. These override the raw endpoint
+      // name when building the device_name in readings. Batched in a single read call.
+      if (validDataPoints.length > 0) {
+        const nodeToParent = new Map<string, string>();
+        for (const dp of validDataPoints) {
+          const parentId = this.deriveParentNodeId(dp.nodeId);
+          if (parentId) nodeToParent.set(dp.nodeId, parentId);
+        }
+        if (nodeToParent.size > 0) {
+          const uniqueParents = [...new Set(nodeToParent.values())];
+          const parentToChildren = new Map<string, string[]>();
+          for (const [nodeId, parentId] of nodeToParent) {
+            if (!parentToChildren.has(parentId)) parentToChildren.set(parentId, []);
+            parentToChildren.get(parentId)!.push(nodeId);
+          }
+          try {
+            const readResults = await session.read(
+              uniqueParents.map(parentId => ({ nodeId: parentId, attributeId: AttributeIds.DisplayName }))
+            );
+            readResults.forEach((result, i) => {
+              const text = result?.value?.value?.text;
+              if (text && typeof text === 'string' && text.trim()) {
+                for (const nodeId of parentToChildren.get(uniqueParents[i]) ?? []) {
+                  this.resolvedNodeDisplayNames.set(nodeId, text.trim());
+                }
+                this.logger.debug(`Resolved per-node DisplayName for ${uniqueParents[i]}: "${text.trim()}"`);
+              }
+            });
+          } catch {
+            // Non-fatal: per-node names unavailable, falls back to endpoint name or device.name
+          }
+        }
+      }
 
       // Create subscription if enabled (real-time streaming)
       if (device.connection.useSubscription && validDataPoints.length > 0) {
@@ -1403,6 +1473,14 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       this.logger.error(`Error disconnecting device ${deviceName}: ${error}`);
     } finally {
       this.sessions.delete(deviceName);
+      this.resolvedDeviceNames.delete(deviceName);
+      // Clean up per-node display names for this device's data points
+      const deviceConfig = this.devices.get(deviceName) as OPCUADeviceConfig | undefined;
+      if (deviceConfig) {
+        for (const dp of deviceConfig.dataPoints) {
+          this.resolvedNodeDisplayNames.delete(dp.nodeId);
+        }
+      }
     }
   }
 
@@ -1498,6 +1576,10 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
           quality,
           qualityCode,
           nodeType: 'metric',
+          ...(dp.device_uuid && { device_uuid: dp.device_uuid }),
+          ...((this.resolvedNodeDisplayNames.has(dp.nodeId) || this.resolvedDeviceNames.has(deviceName)) && {
+            resolvedDisplayName: this.resolvedNodeDisplayNames.get(dp.nodeId) ?? this.resolvedDeviceNames.get(deviceName),
+          }),
         });
         continue;
       }
@@ -1524,6 +1606,10 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         unit: dp.unit || '',
         quality: 'GOOD' as const,
         nodeType: 'metric',
+        ...(dp.device_uuid && { device_uuid: dp.device_uuid }),
+        ...((this.resolvedNodeDisplayNames.has(dp.nodeId) || this.resolvedDeviceNames.has(deviceName)) && {
+          resolvedDisplayName: this.resolvedNodeDisplayNames.get(dp.nodeId) ?? this.resolvedDeviceNames.get(deviceName),
+        }),
       });
 
       goodValueCount++;

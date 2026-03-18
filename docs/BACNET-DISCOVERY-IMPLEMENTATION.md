@@ -115,7 +115,7 @@ await discovery.runDiscovery({
   protocols: ['bacnet']
 });
 
-// Results saved automatically to device_sensors table
+// Results saved automatically to endpoints table
 ```
 
 ## Testing with Simulator
@@ -136,7 +136,7 @@ curl -X POST http://localhost:48484/api/v2/discovery/run \
 ✅ Follows BaseDiscoveryPlugin pattern
 ✅ Two-phase discovery (fast scan + optional validation)
 ✅ Cryptographic fingerprinting for device identity
-✅ Saves directly to SQLite device_sensors table
+✅ Saves directly to SQLite endpoints table
 ✅ Emits 'discovery-complete' and 'endpoint-enabled' events
 ✅ Rate limiting and concurrency control
 ✅ Comprehensive logging with LogComponents

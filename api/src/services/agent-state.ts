@@ -153,7 +153,7 @@ export async function processAgentStateReport(
       logger.debug(`No endpoints_health in state report for agent ${uuid.substring(0, 8)}`);
     }
 
-    // 🔄 RECONCILIATION: Sync agent's current state to device_sensors table
+    // RECONCILIATION: Sync agent's current state to endpoints table
     // Only reconcile if config.endpoints is present in the report
     // This runs AFTER health update to preserve health_* columns
     if (deviceState.config?.endpoints) {

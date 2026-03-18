@@ -117,6 +117,9 @@ export const OPCUADataPointSchema = z.object({
   
   /** Offset (optional) */
   offset: z.number().optional(),
+
+  /** Device group UUID — shared by all nodes in the same profile group */
+  device_uuid: z.string().optional(),
 });
 export type OPCUADataPoint = z.infer<typeof OPCUADataPointSchema>;
 
@@ -142,6 +145,9 @@ export const OPCUAMetadataSchema = z.object({
   
   /** Custom tags for grouping/filtering */
   tags: z.array(z.string()).optional(),
+
+  /** Optional human-readable label. When set, overrides the OPC-UA server DisplayName as the display name in payloads. */
+  displayName: z.string().optional(),
 });
 export type OPCUAMetadata = z.infer<typeof OPCUAMetadataSchema>;
 

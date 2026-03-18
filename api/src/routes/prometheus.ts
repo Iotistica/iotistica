@@ -48,18 +48,18 @@ router.get('/metrics', async (req, res) => {
     // Uses pre-aggregated hourly buckets with last_value (only ~7K rows, no need for time filter)
     const readingsResult = await query(`
       WITH latest_hourly AS (
-        SELECT DISTINCT ON (device_uuid, device_name, metric_name)
-          device_uuid,
+        SELECT DISTINCT ON (agent_uuid, device_name, metric_name)
+          agent_uuid,
           device_name,
           metric_name,
           protocol,
           last_value,
           EXTRACT(EPOCH FROM last_time) as timestamp_unix
         FROM readings_hourly
-        ORDER BY device_uuid, device_name, metric_name, bucket DESC
+        ORDER BY agent_uuid, device_name, metric_name, bucket DESC
       )
       SELECT 
-        r.device_uuid,
+        r.agent_uuid,
         r.device_name,
         r.metric_name,
         r.protocol,
@@ -71,7 +71,7 @@ router.get('/metrics', async (req, res) => {
           ELSE 0
         END as device_online
       FROM latest_hourly r
-      LEFT JOIN devices d ON d.uuid = r.device_uuid
+      LEFT JOIN devices d ON d.uuid = r.agent_uuid
       LIMIT 10000
     `);
 
@@ -88,7 +88,7 @@ router.get('/metrics', async (req, res) => {
     // Generate metrics for each reading
     for (const reading of readings) {
       const {
-        device_uuid,
+        agent_uuid,
         device_name,
         metric_name,
         protocol,
@@ -104,7 +104,7 @@ router.get('/metrics', async (req, res) => {
       }
 
       // Sanitize labels (Prometheus requires lowercase, no special chars except _)
-      const sanitizedDeviceUuid = device_uuid.replace(/-/g, '_');
+      const sanitizedDeviceUuid = agent_uuid.replace(/-/g, '_');
       const sanitizedDeviceName = (device_name || 'unknown').replace(/[^a-zA-Z0-9_]/g, '_');
       const sanitizedMetricName = metric_name.replace(/[^a-zA-Z0-9_]/g, '_');
       const sanitizedProtocol = protocol.replace(/[^a-zA-Z0-9_]/g, '_');
@@ -121,8 +121,8 @@ router.get('/metrics', async (req, res) => {
       );
 
       // Track device status
-      if (!devicesStatus.has(device_uuid)) {
-        devicesStatus.set(device_uuid, {
+      if (!devicesStatus.has(agent_uuid)) {
+        devicesStatus.set(agent_uuid, {
           name: sanitizedDeviceName,
           online: device_online
         });

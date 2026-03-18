@@ -10,7 +10,7 @@ import logger from '../utils/logger';
 
 export interface Reading {
   time: Date;
-  device_uuid: string;
+  agent_uuid: string;
   metric_name: string;
   value: number | null;
   quality: string;
@@ -20,7 +20,7 @@ export interface Reading {
 }
 
 export interface ReadingInsert {
-  device_uuid: string;  // AGENT/infrastructure UUID
+  agent_uuid: string;  // AGENT/infrastructure UUID
   metric_name: string;
   value: number | null;
   quality?: string;
@@ -43,7 +43,7 @@ export interface ReadingExtra {
 }
 
 export interface TimeSeriesQuery {
-  device_uuid?: string;      // Agent UUID (infrastructure entity)
+  agent_uuid?: string;        // Agent UUID (infrastructure entity)
   endpoint_uuid?: string;    // Endpoint UUID (connection point)
   asset_uuid?: string;       // Asset UUID (business entity, stored in extra.device_uuid)
   metric_name?: string;
@@ -86,7 +86,7 @@ export class ReadingsService {
    */
   async insert(reading: ReadingInsert): Promise<void> {
     const {
-      device_uuid,
+      agent_uuid,
       metric_name,
       value,
       quality = 'good',
@@ -97,10 +97,10 @@ export class ReadingsService {
     } = reading;
 
     await query(
-      `INSERT INTO readings (time, device_uuid, metric_name, value, quality, unit, protocol, extra)
+      `INSERT INTO readings (time, agent_uuid, metric_name, value, quality, unit, protocol, extra)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (device_uuid, metric_name, time) DO NOTHING`,
-      [time, device_uuid, metric_name, value, quality, unit, protocol, JSON.stringify(extra)]
+       ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING`,
+      [time, agent_uuid, metric_name, value, quality, unit, protocol, JSON.stringify(extra)]
     );
   }
 
@@ -120,7 +120,7 @@ export class ReadingsService {
 
       batch.forEach((reading) => {
         const {
-          device_uuid,
+          agent_uuid,
           metric_name,
           value,
           quality = 'good',
@@ -140,7 +140,7 @@ export class ReadingsService {
 
         values.push(
           time,
-          device_uuid,
+          agent_uuid,
           metric_name,
           value,
           quality,
@@ -155,9 +155,9 @@ export class ReadingsService {
       });
 
       const result = await query(
-        `INSERT INTO readings (time, device_uuid, metric_name, value, quality, unit, protocol, extra, anomaly_score, anomaly_threshold, baseline_samples, detection_methods)
+        `INSERT INTO readings (time, agent_uuid, metric_name, value, quality, unit, protocol, extra, anomaly_score, anomaly_threshold, baseline_samples, detection_methods)
          VALUES ${placeholders.join(', ')}
-         ON CONFLICT (device_uuid, metric_name, time) DO NOTHING`,
+         ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING`,
         values
       );
 
@@ -179,11 +179,11 @@ export class ReadingsService {
   /**
    * Get latest value for each metric (device)
    */
-  async getLatest(device_uuid: string, metric_names?: string[]): Promise<Reading[]> {
+  async getLatest(agent_uuid: string, metric_names?: string[]): Promise<Reading[]> {
     let sql = `
       SELECT DISTINCT ON (metric_name)
         time,
-        device_uuid,
+        agent_uuid,
         metric_name,
         value,
         quality,
@@ -191,9 +191,9 @@ export class ReadingsService {
         protocol,
         extra
       FROM readings
-      WHERE device_uuid = $1
+      WHERE agent_uuid = $1
     `;
-    const params: any[] = [device_uuid];
+    const params: any[] = [agent_uuid];
 
     if (metric_names && metric_names.length > 0) {
       sql += ` AND metric_name = ANY($2)`;
@@ -211,7 +211,7 @@ export class ReadingsService {
    */
   async getTimeSeries(queryParams: TimeSeriesQuery): Promise<Reading[]> {
     const {
-      device_uuid,
+      agent_uuid,
       metric_name,
       protocol,
       start_time,
@@ -223,9 +223,9 @@ export class ReadingsService {
     const params: any[] = [];
     let paramIndex = 1;
 
-    if (device_uuid) {
-      sql += ` AND device_uuid = $${paramIndex++}`;
-      params.push(device_uuid);
+    if (agent_uuid) {
+      sql += ` AND agent_uuid = $${paramIndex++}`;
+      params.push(agent_uuid);
     }
 
     if (metric_name) {
@@ -259,7 +259,7 @@ export class ReadingsService {
    * Get hourly aggregates (uses continuous aggregate - fast!)
    */
   async getHourlyAggregates(
-    device_uuid: string,
+    agent_uuid: string,
     metric_name: string,
     start_time: Date,
     end_time: Date
@@ -276,12 +276,12 @@ export class ReadingsService {
         last_value,
         first_value
        FROM readings_hourly
-       WHERE device_uuid = $1
+       WHERE agent_uuid = $1
          AND metric_name = $2
          AND bucket >= $3
          AND bucket <= $4
        ORDER BY bucket DESC`,
-      [device_uuid, metric_name, start_time, end_time]
+      [agent_uuid, metric_name, start_time, end_time]
     );
 
     return result.rows;
@@ -291,7 +291,7 @@ export class ReadingsService {
    * Get daily aggregates (uses continuous aggregate - fast!)
    */
   async getDailyAggregates(
-    device_uuid: string,
+    agent_uuid: string,
     metric_name: string,
     start_time: Date,
     end_time: Date
@@ -305,12 +305,12 @@ export class ReadingsService {
         stddev_value,
         sample_count
        FROM readings_daily
-       WHERE device_uuid = $1
+       WHERE agent_uuid = $1
          AND metric_name = $2
          AND bucket >= $3
          AND bucket <= $4
        ORDER BY bucket DESC`,
-      [device_uuid, metric_name, start_time, end_time]
+      [agent_uuid, metric_name, start_time, end_time]
     );
 
     return result.rows;
@@ -319,7 +319,7 @@ export class ReadingsService {
   /**
    * Get metrics summary for a device
    */
-  async getMetricsSummary(device_uuid: string): Promise<any[]> {
+  async getMetricsSummary(agent_uuid: string): Promise<any[]> {
     const result = await query(
       `SELECT
         metric_name,
@@ -329,10 +329,10 @@ export class ReadingsService {
         MAX(time) as last_reading_time,
         MIN(time) as first_reading_time
        FROM readings
-       WHERE device_uuid = $1
+       WHERE agent_uuid = $1
        GROUP BY metric_name, protocol, unit
        ORDER BY last_reading_time DESC`,
-      [device_uuid]
+      [agent_uuid]
     );
 
     return result.rows;
@@ -341,10 +341,10 @@ export class ReadingsService {
   /**
    * Delete readings for a device (respects retention policy)
    */
-  async deleteByDevice(device_uuid: string): Promise<number> {
+  async deleteByDevice(agent_uuid: string): Promise<number> {
     const result = await query(
-      'DELETE FROM readings WHERE device_uuid = $1',
-      [device_uuid]
+      'DELETE FROM readings WHERE agent_uuid = $1',
+      [agent_uuid]
     );
 
     return result.rowCount || 0;
@@ -353,10 +353,10 @@ export class ReadingsService {
   /**
    * Delete specific metric readings
    */
-  async deleteMetric(device_uuid: string, metric_name: string): Promise<number> {
+  async deleteMetric(agent_uuid: string, metric_name: string): Promise<number> {
     const result = await query(
-      'DELETE FROM readings WHERE device_uuid = $1 AND metric_name = $2',
-      [device_uuid, metric_name]
+      'DELETE FROM readings WHERE agent_uuid = $1 AND metric_name = $2',
+      [agent_uuid, metric_name]
     );
 
     return result.rowCount || 0;
@@ -364,17 +364,17 @@ export class ReadingsService {
 
   /**
    * Get device anomaly summary (last 24 hours)
-   * @param device_uuid - Edge gateway UUID (optional if deviceName provided)
+   * @param agent_uuid - Edge gateway UUID (optional if deviceName provided)
    * @param deviceName - Monitored device name (e.g., 'COMAP-Main-Controller')
    */
-  async getDeviceAnomalySummary(device_uuid?: string, deviceName?: string): Promise<any[]> {
+  async getDeviceAnomalySummary(agent_uuid?: string, deviceName?: string): Promise<any[]> {
     let sql = 'SELECT * FROM device_anomaly_summary WHERE 1=1';
     const params: any[] = [];
     let paramIndex = 1;
 
-    if (device_uuid) {
-      sql += ` AND device_uuid = $${paramIndex++}`;
-      params.push(device_uuid);
+    if (agent_uuid) {
+      sql += ` AND agent_uuid = $${paramIndex++}`;
+      params.push(agent_uuid);
     }
 
     if (deviceName) {
@@ -388,11 +388,11 @@ export class ReadingsService {
 
   /**
    * Get hourly anomaly aggregates
-   * @param device_uuid - Edge gateway UUID (optional if deviceName provided)
+   * @param agent_uuid - Edge gateway UUID (optional if deviceName provided)
    * @param deviceName - Monitored device name (e.g., 'COMAP-Main-Controller')
    */
   async getHourlyAnomalyScores(
-    device_uuid?: string,
+    agent_uuid?: string,
     deviceName?: string,
     metric_name?: string,
     start_time?: Date,
@@ -402,30 +402,30 @@ export class ReadingsService {
     let sql = `
       SELECT
         bucket,
-        device_uuid,
-        device_name,
-        metric_name,
-        protocol,
-        avg_anomaly_score,
-        min_anomaly_score,
-        max_anomaly_score,
-        stddev_anomaly_score,
-        scored_count,
-        high_anomaly_count,
-        high_anomaly_percent,
-        last_anomaly_score,
-        last_scored_time,
-        avg_threshold,
-        avg_baseline_samples
+agent_uuid,
+      device_name,
+      metric_name,
+      protocol,
+      avg_anomaly_score,
+      min_anomaly_score,
+      max_anomaly_score,
+      stddev_anomaly_score,
+      scored_count,
+      high_anomaly_count,
+      high_anomaly_percent,
+      last_anomaly_score,
+      last_scored_time,
+      avg_threshold,
+      avg_baseline_samples
       FROM anomaly_scores_hourly
       WHERE 1=1
     `;
     const params: any[] = [];
     let paramIndex = 1;
 
-    if (device_uuid) {
-      sql += ` AND device_uuid = $${paramIndex++}`;
-      params.push(device_uuid);
+    if (agent_uuid) {
+      sql += ` AND agent_uuid = $${paramIndex++}`;
+      params.push(agent_uuid);
     }
 
     if (deviceName) {
@@ -457,11 +457,11 @@ export class ReadingsService {
 
   /**
    * Get daily anomaly aggregates
-   * @param device_uuid - Edge gateway UUID (optional if deviceName provided)
+   * @param agent_uuid - Edge gateway UUID (optional if deviceName provided)
    * @param deviceName - Monitored device name (e.g., 'COMAP-Main-Controller')
    */
   async getDailyAnomalyScores(
-    device_uuid?: string,
+    agent_uuid?: string,
     deviceName?: string,
     metric_name?: string,
     start_time?: Date,
@@ -471,32 +471,32 @@ export class ReadingsService {
     let sql = `
       SELECT
         bucket,
-        device_uuid,
-        device_name,
-        metric_name,
-        protocol,
-        avg_anomaly_score,
-        min_anomaly_score,
-        max_anomaly_score,
-        stddev_anomaly_score,
-        scored_count,
-        critical_count,
-        high_count,
-        medium_count,
-        low_count,
-        critical_percent,
-        high_plus_percent,
-        avg_threshold,
-        avg_baseline_samples
+agent_uuid,
+      device_name,
+      metric_name,
+      protocol,
+      avg_anomaly_score,
+      min_anomaly_score,
+      max_anomaly_score,
+      stddev_anomaly_score,
+      scored_count,
+      critical_count,
+      high_count,
+      medium_count,
+      low_count,
+      critical_percent,
+      high_plus_percent,
+      avg_threshold,
+      avg_baseline_samples
       FROM anomaly_scores_daily
       WHERE 1=1
     `;
     const params: any[] = [];
     let paramIndex = 1;
 
-    if (device_uuid) {
-      sql += ` AND device_uuid = $${paramIndex++}`;
-      params.push(device_uuid);
+    if (agent_uuid) {
+      sql += ` AND agent_uuid = $${paramIndex++}`;
+      params.push(agent_uuid);
     }
 
     if (deviceName) {
@@ -528,11 +528,11 @@ export class ReadingsService {
 
   /**
    * Get metrics with highest anomaly scores (per device)
-   * @param device_uuid - Edge gateway UUID (optional if deviceName provided)
+   * @param agent_uuid - Edge gateway UUID (optional if deviceName provided)
    * @param deviceName - Monitored device name (e.g., 'COMAP-Main-Controller')
    */
   async getTopAnomalousMetrics(
-    device_uuid?: string,
+    agent_uuid?: string,
     deviceName?: string,
     hours: number = 24,
     limit: number = 10
@@ -554,9 +554,9 @@ export class ReadingsService {
     const params: any[] = [hours];
     let paramIndex = 2;
 
-    if (device_uuid) {
-      sql += ` AND device_uuid = $${paramIndex++}`;
-      params.push(device_uuid);
+    if (agent_uuid) {
+      sql += ` AND agent_uuid = $${paramIndex++}`;
+      params.push(agent_uuid);
     }
 
     if (deviceName) {

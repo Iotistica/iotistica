@@ -9,7 +9,7 @@ The sensor status badge system provides clear, real-time visibility into the sta
 ### 1. State Fields
 
 #### `enabled` (Boolean - Desired State)
-- **Location**: `device_sensors.enabled` column
+- **Location**: `endpoints.enabled` column
 - **Updated**: Immediately when user toggles the switch
 - **Meaning**: What the user **wants** - the target configuration
 - **Examples**:
@@ -17,7 +17,7 @@ The sensor status badge system provides clear, real-time visibility into the sta
   - `enabled: false` → User wants sensor stopped
 
 #### `health_connected` (Boolean - Actual State) ✅ **SOURCE OF TRUTH**
-- **Location**: `device_sensors.health_connected` column
+- **Location**: `endpoints.health_connected` column
 - **Updated**: By agent when reporting runtime state
 - **Meaning**: What's **actually running** on the device right now
 - **Examples**:
@@ -26,7 +26,7 @@ The sensor status badge system provides clear, real-time visibility into the sta
   - `health_connected: null` → No health data yet (new sensor)
 
 #### `deployment_status` (String - Sync State)
-- **Location**: `device_sensors.deployment_status` column
+- **Location**: `endpoints.deployment_status` column
 - **Updated**: During deployment/sync operations
 - **Meaning**: Status of syncing desired state to actual state
 - **Values**:
@@ -178,7 +178,7 @@ User clicks "Save Draft":
   Badge: "Draft (Saved)" (gray)
 
 User clicks "Sync":
-  (Copied to device_sensors table)
+  (Copied to endpoints table)
   enabled: true
   health_connected: null             ← No health data yet
   deployment_status: pending
@@ -304,7 +304,7 @@ const getStatusBadge = (sensor: Sensor) => {
 ## Database Schema
 
 ```sql
-CREATE TABLE device_sensors (
+CREATE TABLE endpoints (
   -- Identity
   id SERIAL PRIMARY KEY,
   uuid UUID UNIQUE,
@@ -370,7 +370,7 @@ await cloudSync.reportState({
 
 await updateEndpointHealth(deviceUuid, endpointsHealth);
 
-// Updates device_sensors table:
+// Updates endpoints table:
 // - health_status = status
 // - health_connected = connected
 // - health_last_poll = lastPoll
@@ -430,7 +430,7 @@ const isOutOfSync = existing && existing.health_connected !== null &&
 **Debug**:
 ```sql
 SELECT name, enabled, health_connected, deployment_status, deployment_error
-FROM device_sensors 
+FROM endpoints 
 WHERE device_uuid = '<uuid>';
 ```
 
@@ -448,4 +448,4 @@ WHERE device_uuid = '<uuid>';
 **Related Files**:
 - `api/src/services/device-endpoints.ts` - Sync logic and out-of-sync detection
 - `dashboard/src/pages/SensorsPage.tsx` - Badge rendering logic
-- `api/database/migrations/125_add_endpoint_health_to_device_sensors.sql` - Health columns
+- `api/database/migrations/125_add_endpoint_health_to_endpoints.sql` - Health columns

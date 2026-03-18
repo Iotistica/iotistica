@@ -74,6 +74,45 @@ export class BACnetClient {
   }
 
   /**
+   * Read the BACnet Device object's objectName property (BACnet property 77).
+   * Returns the device's self-reported name, or null if unavailable.
+   * Device object type is 8; instance is the device's deviceInstance number.
+   */
+  async readDeviceName(): Promise<string | null> {
+    if (!this.connected || !this.config.deviceInstance) {
+      return null;
+    }
+
+    const DEVICE_OBJECT_TYPE = 8;  // BACnet Device object type
+    const PROP_OBJECT_NAME = 77;   // BACnet objectName property
+
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(null), this.config.connectionTimeoutMs);
+
+      try {
+        this.client.readProperty(
+          this.config.ipAddress,
+          { type: DEVICE_OBJECT_TYPE, instance: this.config.deviceInstance },
+          PROP_OBJECT_NAME,
+          (err: Error | null, value: any) => {
+            clearTimeout(timeout);
+            if (err) {
+              resolve(null);
+              return;
+            }
+            // bacstack returns objectName as a CharacterString in values[0].value[0].value
+            const name = value?.values?.[0]?.value?.[0]?.value;
+            resolve(typeof name === 'string' && name.trim() ? name.trim() : null);
+          }
+        );
+      } catch {
+        clearTimeout(timeout);
+        resolve(null);
+      }
+    });
+  }
+
+  /**
    * Read a single object's present value
    */
   async readObject(object: BACnetObject): Promise<{ value: any; quality: 'GOOD' | 'BAD'; error?: string }> {

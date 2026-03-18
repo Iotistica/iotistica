@@ -2,8 +2,8 @@ import { BaseFeature } from '../index.js';
 import { AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
 import {
-  SensorPublishConfig,
-  SensorConfig
+  DevicePublishConfig,
+  DeviceConfig
 } from './types.js';
 import { PublishManager } from './manager.js';
 
@@ -22,7 +22,7 @@ export class SensorPublishFeature extends BaseFeature {
   private readonly useDeflatePoc: boolean;
 
   constructor(
-    config: SensorPublishConfig & { enabled: boolean },
+    config: DevicePublishConfig & { enabled: boolean },
     agentLogger: AgentLogger,
     deviceUuid: string,
     dictionaryManager?: any, // Optional dictionary manager
@@ -56,7 +56,7 @@ export class SensorPublishFeature extends BaseFeature {
    * Validate configuration - override from BaseFeature
    */
   protected validateConfig(): void {
-    const sensorConfig = this.config as SensorPublishConfig;
+    const sensorConfig = this.config as DevicePublishConfig;
     
     if (!sensorConfig.endpoints || !Array.isArray(sensorConfig.endpoints)) {
       throw new Error('Sensor Publish configuration must include endpoints array');
@@ -68,7 +68,7 @@ export class SensorPublishFeature extends BaseFeature {
     }
 
     // Validate each sensor configuration
-    sensorConfig.endpoints.forEach((config: SensorConfig) => {
+    sensorConfig.endpoints.forEach((config: DeviceConfig) => {
       this.validateSensorConfig(config);
     });
 
@@ -79,7 +79,7 @@ export class SensorPublishFeature extends BaseFeature {
    * Initialize - called by BaseFeature.start() before onStart()
    */
   protected async onInitialize(): Promise<void> {
-    const sensorConfig = this.config as SensorPublishConfig;
+    const sensorConfig = this.config as DevicePublishConfig;
     
     if (sensorConfig.endpoints.length === 0) {
       this.logger.warn('No sensors configured');
@@ -97,7 +97,7 @@ export class SensorPublishFeature extends BaseFeature {
       throw new Error('MQTT connection required for Sensor Publish feature');
     }
 
-    const sensorConfig = this.config as SensorPublishConfig;
+    const sensorConfig = this.config as DevicePublishConfig;
     
     if (sensorConfig.endpoints.length === 0) {
       return;
@@ -247,8 +247,8 @@ export class SensorPublishFeature extends BaseFeature {
    * Get sensor by name
    */
   public getSensor(name: string): PublishManager | undefined {
-    const sensorConfig = this.config as SensorPublishConfig;
-    const index = sensorConfig.endpoints.findIndex((s: SensorConfig) => s.name === name);
+    const sensorConfig = this.config as DevicePublishConfig;
+    const index = sensorConfig.endpoints.findIndex((s: DeviceConfig) => s.name === name);
     return index >= 0 ? this.sensors[index] : undefined;
   }
 
@@ -256,8 +256,8 @@ export class SensorPublishFeature extends BaseFeature {
    * Get all sensors with their configuration
    */
   public getSensors(): Array<{ name: string; enabled: boolean; addr: string; publishInterval: number }> {
-    const sensorConfig = this.config as SensorPublishConfig;
-    return sensorConfig.endpoints.map((config: SensorConfig, index: number) => {
+    const sensorConfig = this.config as DevicePublishConfig;
+    return sensorConfig.endpoints.map((config: DeviceConfig, index: number) => {
       return {
         name: config.name || `sensor-${index + 1}`,
         enabled: config.enabled !== false,
@@ -271,8 +271,8 @@ export class SensorPublishFeature extends BaseFeature {
    * Enable a sensor by name
    */
   public async enableSensor(sensorName: string): Promise<void> {
-    const publishConfig = this.config as SensorPublishConfig;
-    const index = publishConfig.endpoints.findIndex((s: SensorConfig) => s.name === sensorName);
+    const publishConfig = this.config as DevicePublishConfig;
+    const index = publishConfig.endpoints.findIndex((s: DeviceConfig) => s.name === sensorName);
     if (index < 0) {
       throw new Error(`Sensor not found: ${sensorName}`);
     }
@@ -296,8 +296,8 @@ export class SensorPublishFeature extends BaseFeature {
    * Disable a sensor by name
    */
   public async disableSensor(sensorName: string): Promise<void> {
-    const publishConfig = this.config as SensorPublishConfig;
-    const index = publishConfig.endpoints.findIndex((s: SensorConfig) => s.name === sensorName);
+    const publishConfig = this.config as DevicePublishConfig;
+    const index = publishConfig.endpoints.findIndex((s: DeviceConfig) => s.name === sensorName);
     if (index < 0) {
       throw new Error(`Sensor not found: ${sensorName}`);
     }
@@ -321,8 +321,8 @@ export class SensorPublishFeature extends BaseFeature {
    * Update publish interval for a sensor
    */
   public async updateInterval(sensorName: string, intervalMs: number): Promise<void> {
-    const publishConfig = this.config as SensorPublishConfig;
-    const index = publishConfig.endpoints.findIndex((s: SensorConfig) => s.name === sensorName);
+    const publishConfig = this.config as DevicePublishConfig;
+    const index = publishConfig.endpoints.findIndex((s: DeviceConfig) => s.name === sensorName);
     if (index < 0) {
       throw new Error(`Sensor not found: ${sensorName}`);
     }
@@ -357,7 +357,7 @@ export class SensorPublishFeature extends BaseFeature {
   /**
    * Validate individual sensor configuration
    */
-  protected validateSensorConfig(config: SensorConfig): void {
+  protected validateSensorConfig(config: DeviceConfig): void {
     // Check required fields
     if (!config.addr) {
       throw new Error(`Sensor '${config.name}': 'addr' is required`);

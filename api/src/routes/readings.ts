@@ -19,27 +19,27 @@ const limitSchema = z.number().int().min(1).max(10000).default(1000);
 
 /**
  * Get latest readings for a device
- * GET /api/readings/:device_uuid/latest
- * 
+ * GET /api/readings/:agent_uuid/latest
+ *
  * Query params:
  * - metrics: Comma-separated list of metric names (optional)
  */
-router.get('/:device_uuid/latest', jwtAuth, async (req, res) => {
+router.get('/:agent_uuid/latest', jwtAuth, async (req, res) => {
   try {
-    const { device_uuid } = req.params;
+    const { agent_uuid } = req.params;
     const { metrics } = req.query;
     const requestId = (req as any).id || 'unknown';
     const userId = (req as any).user?.id;
 
-    // Validate device_uuid
-    const validatedUuid = uuidSchema.parse(device_uuid);
+    // Validate agent_uuid
+    const validatedUuid = uuidSchema.parse(agent_uuid);
 
     const metric_names = metrics ? (metrics as string).split(',').map(m => m.trim()) : undefined;
 
     const readings = await readingsService.getLatest(validatedUuid, metric_names);
 
     res.json({
-      device_uuid: validatedUuid,
+      agent_uuid: validatedUuid,
       count: readings.length,
       readings
     });
@@ -47,7 +47,7 @@ router.get('/:device_uuid/latest', jwtAuth, async (req, res) => {
     const requestId = (req as any).id || 'unknown';
     if (error instanceof z.ZodError) {
       logger.warn('Invalid request parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid device UUID format', requestId });
+      return res.status(400).json({ error: 'Invalid agent UUID format', requestId });
     }
     logger.error('Error getting latest readings', { requestId, userId: (req as any).user?.id, error: error.message });
     res.status(500).json({ error: 'Internal server error', requestId });
@@ -56,8 +56,8 @@ router.get('/:device_uuid/latest', jwtAuth, async (req, res) => {
 
 /**
  * Get time-series data
- * GET /api/readings/:device_uuid/timeseries
- * 
+ * GET /api/readings/:agent_uuid/timeseries
+ *
  * Query params:
  * - metric: Metric name (optional)
  * - protocol: Protocol filter (optional)
@@ -65,14 +65,14 @@ router.get('/:device_uuid/latest', jwtAuth, async (req, res) => {
  * - end: ISO 8601 end time (optional)
  * - limit: Max results (default: 1000)
  */
-router.get('/:device_uuid/timeseries', jwtAuth, async (req, res) => {
+router.get('/:agent_uuid/timeseries', jwtAuth, async (req, res) => {
   try {
-    const { device_uuid } = req.params;
+    const { agent_uuid } = req.params;
     const { metric, protocol, start, end, limit } = req.query;
     const requestId = (req as any).id || 'unknown';
 
-    // Validate device_uuid
-    const validatedUuid = uuidSchema.parse(device_uuid);
+    // Validate agent_uuid
+    const validatedUuid = uuidSchema.parse(agent_uuid);
 
     // Validate metric if provided
     if (metric) {
@@ -98,7 +98,7 @@ router.get('/:device_uuid/timeseries', jwtAuth, async (req, res) => {
     }
 
     const readings = await readingsService.getTimeSeries({
-      device_uuid: validatedUuid,
+      agent_uuid: validatedUuid,
       metric_name: metric as string,
       protocol: protocol as string,
       start_time: startTime,
@@ -107,7 +107,7 @@ router.get('/:device_uuid/timeseries', jwtAuth, async (req, res) => {
     });
 
     res.json({
-      device_uuid: validatedUuid,
+      agent_uuid: validatedUuid,
       count: readings.length,
       readings
     });
@@ -124,15 +124,15 @@ router.get('/:device_uuid/timeseries', jwtAuth, async (req, res) => {
 
 /**
  * Get hourly aggregates (fast - uses continuous aggregate)
- * GET /api/readings/:device_uuid/:metric/hourly
- * 
+ * GET /api/readings/:agent_uuid/:metric/hourly
+ *
  * Query params:
  * - start: ISO 8601 start time (required)
  * - end: ISO 8601 end time (required)
  */
-router.get('/:device_uuid/:metric/hourly', jwtAuth, async (req, res) => {
+router.get('/:agent_uuid/:metric/hourly', jwtAuth, async (req, res) => {
   try {
-    const { device_uuid, metric } = req.params;
+    const { agent_uuid, metric } = req.params;
     const { start, end } = req.query;
     const requestId = (req as any).id || 'unknown';
 
@@ -141,7 +141,7 @@ router.get('/:device_uuid/:metric/hourly', jwtAuth, async (req, res) => {
     }
 
     // Validate inputs
-    const validatedUuid = uuidSchema.parse(device_uuid);
+    const validatedUuid = uuidSchema.parse(agent_uuid);
     const validatedMetric = metricNameSchema.parse(metric);
 
     // Validate dates
@@ -159,7 +159,7 @@ router.get('/:device_uuid/:metric/hourly', jwtAuth, async (req, res) => {
     );
 
     res.json({
-      device_uuid: validatedUuid,
+      agent_uuid: validatedUuid,
       metric_name: validatedMetric,
       interval: 'hourly',
       count: aggregates.length,
@@ -178,15 +178,15 @@ router.get('/:device_uuid/:metric/hourly', jwtAuth, async (req, res) => {
 
 /**
  * Get daily aggregates (fast - uses continuous aggregate)
- * GET /api/readings/:device_uuid/:metric/daily
- * 
+ * GET /api/readings/:agent_uuid/:metric/daily
+ *
  * Query params:
  * - start: ISO 8601 start time (required)
  * - end: ISO 8601 end time (required)
  */
-router.get('/:device_uuid/:metric/daily', jwtAuth, async (req, res) => {
+router.get('/:agent_uuid/:metric/daily', jwtAuth, async (req, res) => {
   try {
-    const { device_uuid, metric } = req.params;
+    const { agent_uuid, metric } = req.params;
     const { start, end } = req.query;
     const requestId = (req as any).id || 'unknown';
 
@@ -195,7 +195,7 @@ router.get('/:device_uuid/:metric/daily', jwtAuth, async (req, res) => {
     }
 
     // Validate inputs
-    const validatedUuid = uuidSchema.parse(device_uuid);
+    const validatedUuid = uuidSchema.parse(agent_uuid);
     const validatedMetric = metricNameSchema.parse(metric);
 
     // Validate dates
@@ -213,7 +213,7 @@ router.get('/:device_uuid/:metric/daily', jwtAuth, async (req, res) => {
     );
 
     res.json({
-      device_uuid: validatedUuid,
+      agent_uuid: validatedUuid,
       metric_name: validatedMetric,
       interval: 'daily',
       count: aggregates.length,
@@ -232,20 +232,20 @@ router.get('/:device_uuid/:metric/daily', jwtAuth, async (req, res) => {
 
 /**
  * Get metrics summary
- * GET /api/readings/:device_uuid/summary
+ * GET /api/readings/:agent_uuid/summary
  */
-router.get('/:device_uuid/summary', jwtAuth, async (req, res) => {
+router.get('/:agent_uuid/summary', jwtAuth, async (req, res) => {
   try {
-    const { device_uuid } = req.params;
+    const { agent_uuid } = req.params;
     const requestId = (req as any).id || 'unknown';
 
-    // Validate device_uuid
-    const validatedUuid = uuidSchema.parse(device_uuid);
+    // Validate agent_uuid
+    const validatedUuid = uuidSchema.parse(agent_uuid);
 
     const summary = await readingsService.getMetricsSummary(validatedUuid);
 
     res.json({
-      device_uuid: validatedUuid,
+      agent_uuid: validatedUuid,
       total_metrics: summary.length,
       metrics: summary
     });
@@ -253,7 +253,7 @@ router.get('/:device_uuid/summary', jwtAuth, async (req, res) => {
     const requestId = (req as any).id || 'unknown';
     if (error instanceof z.ZodError) {
       logger.warn('Invalid request parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid device UUID format', requestId });
+      return res.status(400).json({ error: 'Invalid agent UUID format', requestId });
     }
     logger.error('Error getting metrics summary', { requestId, userId: (req as any).user?.id, error: error.message });
     res.status(500).json({ error: 'Internal server error', requestId });
@@ -266,7 +266,7 @@ router.get('/:device_uuid/summary', jwtAuth, async (req, res) => {
  * 
  * Body:
  * {
- *   "device_uuid": "...",
+ *   "agent_uuid": "...",
  *   "metric_name": "temperature",
  *   "value": 23.5,
  *   "unit": "°C",
@@ -282,15 +282,15 @@ router.post('/', jwtAuth, async (req, res) => {
     const userId = (req as any).user?.id;
 
     // Validate required fields
-    if (!reading.device_uuid || !reading.metric_name || !reading.protocol) {
+    if (!reading.agent_uuid || !reading.metric_name || !reading.protocol) {
       return res.status(400).json({
-        error: 'device_uuid, metric_name, and protocol are required',
+        error: 'agent_uuid, metric_name, and protocol are required',
         requestId
       });
     }
 
     // Validate inputs
-    const validatedUuid = uuidSchema.parse(reading.device_uuid);
+    const validatedUuid = uuidSchema.parse(reading.agent_uuid);
     const validatedMetric = metricNameSchema.parse(reading.metric_name);
     const validatedProtocol = z.string().min(1).max(50).parse(reading.protocol);
     const validatedValue = z.number().parse(reading.value);
@@ -301,7 +301,7 @@ router.post('/', jwtAuth, async (req, res) => {
     }
 
     const sanitizedReading = {
-      device_uuid: validatedUuid,
+      agent_uuid: validatedUuid,
       metric_name: validatedMetric,
       value: validatedValue,
       unit: reading.unit ? z.string().max(20).parse(reading.unit) : undefined,

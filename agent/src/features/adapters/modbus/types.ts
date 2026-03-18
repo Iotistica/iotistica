@@ -128,6 +128,8 @@ export type ModbusConnectionConfig = z.infer<typeof ModbusConnectionSchema>;
  */
 export const ModbusDeviceSchema = z.object({
   name: z.string().min(1),
+  /** Optional human-readable label that overrides the raw config name in payloads. */
+  displayName: z.string().optional(),
   slaveId: z.number().min(1).max(247),
   connection: ModbusConnectionSchema,
   registers: z.array(ModbusRegisterSchema).min(1),

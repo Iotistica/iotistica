@@ -82,7 +82,7 @@ router.get('/timeseries', async (req, res) => {
 
     if (devices) {
       const deviceList = (devices as string).split(',');
-      conditions.push(`device_uuid = ANY($${params.length + 1})`);
+      conditions.push(`agent_uuid = ANY($${params.length + 1})`);
       params.push(deviceList);
     }
 
@@ -108,17 +108,19 @@ router.get('/timeseries', async (req, res) => {
 
     // Query continuous aggregate
     const result = await query(`
-      SELECT 
+      SELECT
         bucket,
-        device_uuid,
+        agent_uuid,
         device_name,
+        device_uuid,
+        endpoint_uuid,
         metric_name,
         protocol,
         ${aggColumn} as value,
         sample_count
       FROM readings_hourly
       ${whereClause}
-      ORDER BY bucket ASC, device_uuid, device_name, metric_name
+      ORDER BY bucket ASC, agent_uuid, device_name, metric_name
     `, params);
 
     res.json({
@@ -149,7 +151,7 @@ router.get('/current', async (req, res) => {
 
     if (devices) {
       const deviceList = (devices as string).split(',');
-      conditions.push(`r.device_uuid = ANY($${params.length + 1})`);
+      conditions.push(`r.agent_uuid = ANY($${params.length + 1})`);
       params.push(deviceList);
     }
 
@@ -163,31 +165,35 @@ router.get('/current', async (req, res) => {
 
     const result = await query(`
       WITH latest AS (
-        SELECT DISTINCT ON (device_uuid, device_name, metric_name)
-          device_uuid,
+        SELECT DISTINCT ON (agent_uuid, device_name, metric_name)
+          agent_uuid,
           device_name,
+          device_uuid,
+          endpoint_uuid,
           metric_name,
           protocol,
           last_value as value,
           last_time as timestamp,
           bucket
         FROM readings_hourly
-        ORDER BY device_uuid, device_name, metric_name, bucket DESC
+        ORDER BY agent_uuid, device_name, metric_name, bucket DESC
       )
-      SELECT 
-        r.device_uuid,
+      SELECT
+        r.agent_uuid,
         r.device_name,
+        r.device_uuid,
+        r.endpoint_uuid,
         r.metric_name,
         r.protocol,
         r.value,
         r.timestamp,
-        CASE 
+        CASE
           WHEN d.last_connectivity_event > NOW() - INTERVAL '5 minutes' THEN 'online'
           WHEN d.last_connectivity_event > NOW() - INTERVAL '1 hour' THEN 'degraded'
           ELSE 'offline'
         END as device_status
       FROM latest r
-      LEFT JOIN devices d ON d.uuid = r.device_uuid
+      LEFT JOIN devices d ON d.uuid = r.agent_uuid
       ${whereClause}
       ORDER BY r.device_name, r.metric_name
     `, params);
@@ -223,7 +229,7 @@ router.get('/statistics', async (req, res) => {
 
     const result = await query(`
       SELECT 
-        COUNT(DISTINCT device_uuid) as total_devices,
+        COUNT(DISTINCT agent_uuid) as total_devices,
         COUNT(DISTINCT metric_name) as total_metrics,
         COUNT(*) as total_readings,
         MIN(bucket) as earliest_reading,
@@ -272,7 +278,7 @@ router.get('/metadata', async (req, res) => {
         END as status,
         COUNT(DISTINCT r.metric_name) as metric_count
       FROM devices d
-      LEFT JOIN readings_hourly r ON r.device_uuid = d.uuid
+      LEFT JOIN readings_hourly r ON r.agent_uuid = d.uuid
       GROUP BY d.uuid, d.device_name, d.last_connectivity_event
       ORDER BY d.device_name
     `);
@@ -295,7 +301,7 @@ router.get('/metadata', async (req, res) => {
 
     // Get all protocols
     const protocolsResult = await query(`
-      SELECT DISTINCT protocol, COUNT(DISTINCT device_uuid) as device_count
+      SELECT DISTINCT protocol, COUNT(DISTINCT agent_uuid) as device_count
       FROM readings_hourly
       WHERE bucket >= NOW() - INTERVAL '24 hours'
       GROUP BY protocol

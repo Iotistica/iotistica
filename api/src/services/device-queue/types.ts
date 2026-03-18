@@ -8,6 +8,7 @@ export interface SensorDataEntry {
 
 export interface DeviceIdentity {
   endpointUuid?: string;
+  deviceUuid?: string;
   deviceName?: string;
 }
 

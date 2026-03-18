@@ -151,7 +151,9 @@ export interface AnomalyAlert {
  * Metric-specific configuration
  */
 export interface MetricConfig {
-	name: string;                    // Metric name (e.g., 'temperature')
+	name: string;                    // Metric name field (e.g., 'level', 'temperature')
+	deviceName?: string;             // Optional: scope this config to a specific device (e.g., 'Zone A-uuid123')
+	                                 // When set, matches incoming metric "deviceName_name" (e.g., 'Zone A-uuid123_level')
 	enabled: boolean;
 	methods: DetectionMethod[];      // Which detection methods to use
 	threshold: number;               // Threshold for detection (σ or MAD multiplier)
@@ -207,13 +209,10 @@ export interface AnomalyDefaults {
 
 /**
  * Anomaly detection configuration
- * Primary schema: defaults + metrics (single list).
- * Legacy compatibility: systemMetrics may still be present in older target states.
  */
 export interface AnomalyConfig {
 	enabled?: boolean;               // Global anomaly detection toggle (default: true)
-	defaults?: AnomalyDefaults;      // Shared default settings (NEW)
-	systemMetrics?: MetricConfig[];  // Legacy key (deprecated, use metrics)
+	defaults?: AnomalyDefaults;      // Shared default settings
 	sensitivity: number;             // 1-10 (higher = more sensitive)
 	metrics: MetricConfig[];         // Unified metric list for anomaly processing
 	alerts: {

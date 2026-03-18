@@ -64,7 +64,7 @@ The protocol simulators (`iotistic-modbus-sim`, `iotistic-opcua-sim`, `iotistic-
 
 **Two databases work together:**
 
-1. **Cloud API Database (PostgreSQL)** - `device_sensors` table
+1. **Cloud API Database (PostgreSQL)** - `endpoints` table
    - Stores sensor configurations from Dashboard
    - Used for querying, filtering, historical tracking
    - Synced to target state config
@@ -77,7 +77,7 @@ The protocol simulators (`iotistic-modbus-sim`, `iotistic-opcua-sim`, `iotistic-
 ### Configuration Flow
 
 ```
-Dashboard → API (PostgreSQL) → device_sensors table
+Dashboard → API (PostgreSQL) → endpoints table
                                       ↓
                               device_target_state.config.protocolAdapterDevices
                                       ↓
@@ -99,9 +99,9 @@ Dashboard → API (PostgreSQL) → device_sensors table
 
 ### Database Schemas
 
-**Cloud API (PostgreSQL) - `device_sensors` table:**
+**Cloud API (PostgreSQL) - `endpoints` table:**
 ```sql
-CREATE TABLE device_sensors (
+CREATE TABLE endpoints (
     id SERIAL PRIMARY KEY,
     device_uuid UUID NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -154,7 +154,7 @@ The system uses **two databases** that sync via the target state config:
 
 ### Flow Overview
 
-1. **Dashboard adds sensor** → Inserts into API's `device_sensors` table (PostgreSQL)
+1. **Dashboard adds sensor** → Inserts into API's `endpoints` table (PostgreSQL)
 2. **API syncs table → config** → Updates `device_target_state.config.protocolAdapterDevices`
 3. **Agent polls target state** → Gets updated config from API
 4. **Agent syncs config → local DB** → Updates SQLite `sensors` table
@@ -217,7 +217,7 @@ curl -X POST http://localhost:4002/api/v1/devices/{device-uuid}/protocol-devices
 ```
 
 **What happens:**
-1. Record inserted into API's `device_sensors` table (PostgreSQL)
+1. Record inserted into API's `endpoints` table (PostgreSQL)
 2. Config synced to `device_target_state.config.protocolAdapterDevices`
 3. `deployment_status` set to `"pending"`
 
@@ -301,8 +301,8 @@ await cloudSync.reportState({
 
 **API updates deployment_status:**
 ```sql
--- Cloud API updates device_sensors table
-UPDATE device_sensors 
+-- Cloud API updates endpoints table
+UPDATE endpoints 
 SET deployment_status = 'deployed',
     last_deployed_at = NOW()
 WHERE name = 'modbus-sim-temperature';
@@ -324,7 +324,7 @@ Modbus Adapter → /tmp/sensors/modbus.sock → Sensor-Publish → MQTT (sensor/
 
 **Database Record**:
 ```sql
-INSERT INTO device_sensors (device_uuid, name, protocol, connection, data_points)
+INSERT INTO endpoints (device_uuid, name, protocol, connection, data_points)
 VALUES (
   '12345678-1234-1234-1234-123456789012',
   'modbus-sim-temperature',
@@ -365,7 +365,7 @@ VALUES (
 ### Example 2: CAN Bus Simulator
 
 ```sql
-INSERT INTO device_sensors (device_uuid, name, protocol, connection, data_points)
+INSERT INTO endpoints (device_uuid, name, protocol, connection, data_points)
 VALUES (
   '12345678-1234-1234-1234-123456789012',
   'can-sim-vehicle',
@@ -381,7 +381,7 @@ VALUES (
 ### Example 3: OPC-UA Simulator
 
 ```sql
-INSERT INTO device_sensors (device_uuid, name, protocol, connection, data_points)
+INSERT INTO endpoints (device_uuid, name, protocol, connection, data_points)
 VALUES (
   '12345678-1234-1234-1234-123456789012',
   'opcua-sim-factory',
@@ -463,7 +463,7 @@ async reportDeviceStatus(): Promise<void> {
     }))
   };
   
-  // CloudSync sends this to API, which updates device_sensors.deployment_status
+  // CloudSync sends this to API, which updates endpoints.deployment_status
   this.cloudSync.reportProtocolAdapterStatus(status);
 }
 ```
@@ -706,7 +706,7 @@ curl -X POST http://localhost:4002/api/v1/devices/${DEVICE_UUID}/protocol-device
 
 ```sql
 SELECT name, protocol, enabled, deployment_status, connection, data_points 
-FROM device_sensors 
+FROM endpoints 
 WHERE device_uuid = '12345678-1234-1234-1234-123456789012';
 ```
 
@@ -809,7 +809,7 @@ docker exec iotistic-agent cat /tmp/sensors/modbus.sock
 
 **Dual-Database Architecture:**
 
-1. ✅ **Cloud (PostgreSQL)**: `device_sensors` table - Dashboard management, querying, history
+1. ✅ **Cloud (PostgreSQL)**: `endpoints` table - Dashboard management, querying, history
 2. ✅ **Agent (SQLite)**: `sensors` table - Local cache, offline capability, fast reads
 3. ✅ **Modbus**: Adapter reads local SQLite, connects to `modbus-simulator:502`
 4. ⚠️ **CAN Bus**: Implement adapter to read local SQLite, connect to `canbus-simulator:11898`
@@ -817,7 +817,7 @@ docker exec iotistic-agent cat /tmp/sensors/modbus.sock
 
 **Data Flow:**
 ```
-Dashboard → Cloud PostgreSQL (device_sensors)
+Dashboard → Cloud PostgreSQL (endpoints)
                     ↓
             Target state config
                     ↓

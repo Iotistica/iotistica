@@ -37,6 +37,7 @@ class DataPointPublisher:
         self.min_value = datapoint.get("min")
         self.max_value = datapoint.get("max")
         self.period_s = float(datapoint.get("period_s", 30.0))
+        self.device_uuid = datapoint.get("device_uuid", "")
 
         if not self.name or not self.topic:
             raise ValueError("Each MQTT datapoint requires name and topic")
@@ -59,12 +60,15 @@ class DataPointPublisher:
         return round(value, 4)
 
     def build_payload(self, value):
-        return {
+        payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "name": self.name,
             "value": value,
             "unit": self.unit,
         }
+        if self.device_uuid:
+            payload["device_uuid"] = self.device_uuid
+        return payload
 
 
 class MqttSimulator:
@@ -165,6 +169,10 @@ class MqttSimulator:
             "deviceId": self.device_id,
             "device_id": self.device_id,
         }
+
+        device_uuid = next((p.device_uuid for p in publishers if p.device_uuid), None)
+        if device_uuid:
+            payload["device_uuid"] = device_uuid
 
         for pub in publishers:
             payload[pub.name] = pub.next_value(now)

@@ -29,6 +29,10 @@ export class ModbusAdapter extends EventEmitter {
   private deviceMetrics: Map<string, DeviceMetrics> = new Map(); // Time-series metrics
   private running = false;
   private pollLoopRunning = false;
+
+  // Human-readable display names from device config (Modbus has no server-side name discovery).
+  // Populated from device.displayName if set; otherwise the entry is absent (fall back to device.name).
+  private resolvedDeviceNames: Map<string, string> = new Map();
   
   // Backpressure tracking
   private pollsSkippedBackpressure = 0;
@@ -291,6 +295,11 @@ export class ModbusAdapter extends EventEmitter {
       // Connect to device
       await client.connect();
 
+      // Store config displayName if provided (Modbus has no server-side name discovery)
+      if (deviceConfig.displayName && deviceConfig.displayName.trim()) {
+        this.resolvedDeviceNames.set(deviceConfig.name, deviceConfig.displayName.trim());
+      }
+
       // Update device status
       const status = this.deviceStatuses.get(deviceConfig.name)!;
       status.connected = true;
@@ -468,6 +477,11 @@ export class ModbusAdapter extends EventEmitter {
         this.logger.error(`[RECOVERY] No client found for ${deviceConfig.name}`);
         return;
       }
+
+      // Helper: attach resolvedDisplayName to data points (no-op if no override configured)
+      const resolvedDisplayName = this.resolvedDeviceNames.get(deviceConfig.name);
+      const enrich = (pts: SensorDataPoint[]): SensorDataPoint[] =>
+        resolvedDisplayName ? pts.map(p => ({ ...p, resolvedDisplayName })) : pts;
       
       const isConnected = client.isConnected();
       this.logger.debug(
@@ -482,7 +496,7 @@ export class ModbusAdapter extends EventEmitter {
         
         // CRITICAL: Call readAllRegisters even when disconnected
         // This triggers tryEnsureConnected() which schedules reconnection
-        const dataPoints = await client.readAllRegisters();
+        const dataPoints = enrich(await client.readAllRegisters());
         
         if (dataPoints.length > 0) {
           this.emit('data', dataPoints);
@@ -492,7 +506,7 @@ export class ModbusAdapter extends EventEmitter {
         this.logger.debug(
           `[RECOVERY] Device ${deviceConfig.name} connected, calling readAllRegisters()`
         );
-        const dataPoints = await client.readAllRegisters();
+        const dataPoints = enrich(await client.readAllRegisters());
         const responseTime = Date.now() - startTime;
 
         this.logger.debug(
@@ -547,6 +561,7 @@ export class ModbusAdapter extends EventEmitter {
       
       // Send BAD quality data points with error code
       const timestamp = new Date().toISOString();
+      const resolvedDisplayName = this.resolvedDeviceNames.get(deviceConfig.name);
       const badDataPoints = deviceConfig.registers.map(register => ({
         deviceName: deviceConfig.name,
         metric: register.name,
@@ -554,7 +569,8 @@ export class ModbusAdapter extends EventEmitter {
         unit: register.unit || '',
         timestamp: timestamp,
         quality: 'BAD' as const,
-        qualityCode: qualityCode
+        qualityCode: qualityCode,
+        ...(resolvedDisplayName && { resolvedDisplayName }),
       }));
       
       if (badDataPoints.length > 0) {

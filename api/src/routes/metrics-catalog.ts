@@ -46,23 +46,23 @@ router.get('/devices', jwtAuth, async (req, res) => {
     const validatedAgentUuid = uuidSchema.parse(agentUuid);
     
     // Group by device_name to get unique devices across all agents while preserving
-    // exact source references for widget configs that need stable IDs.
+    // exact source references (asset_uuid, endpoint_uuid) for widget configs that need stable IDs.
     let sql = `
       WITH unnested AS (
-        SELECT 
+        SELECT
           ed.device_name,
           ed.protocol,
           ed.last_seen,
           ed.agent_uuid,
           ed.agent_name,
           ed.overall_quality_percentage,
-          ds.uuid::text AS endpoint_uuid,
+          ed.device_uuid,
+          ed.endpoint_uuid,
+          ep.name AS endpoint_name,
           unnest(ed.available_metrics) as metric_name
         FROM endpoint_devices ed
-        LEFT JOIN device_sensors ds
-          ON ds.device_uuid = ed.agent_uuid
-         AND ds.name = ed.device_name
-         AND ds.deployment_status != 'deleted'
+        LEFT JOIN endpoints ep ON ep.uuid::text = ed.endpoint_uuid
+          AND ep.agent_uuid = ed.agent_uuid
         WHERE 1=1
     `;
     
@@ -83,7 +83,7 @@ router.get('/devices', jwtAuth, async (req, res) => {
     
     sql += `
       )
-      SELECT 
+      SELECT
         device_name,
         protocol,
         MAX(last_seen) as last_seen,
@@ -95,10 +95,12 @@ router.get('/devices', jwtAuth, async (req, res) => {
         array_agg(DISTINCT agent_name ORDER BY agent_name) as agent_names,
         COALESCE(
           jsonb_agg(DISTINCT jsonb_build_object(
-            'deviceUuid', agent_uuid::text,
+            'deviceUuid', device_uuid,
             'endpointUuid', endpoint_uuid,
-            'agentName', agent_name
-          )) FILTER (WHERE agent_uuid IS NOT NULL AND endpoint_uuid IS NOT NULL),
+            'agentUuid', agent_uuid::text,
+            'agentName', agent_name,
+            'endpointName', endpoint_name
+          )) FILTER (WHERE agent_uuid IS NOT NULL),
           '[]'::jsonb
         ) as source_refs
       FROM unnested
@@ -147,10 +149,12 @@ router.get('/catalog', jwtAuth, async (req, res) => {
     const validatedMetricName = metricName ? metricNameSchema.parse(metricName) : undefined;
     
     let sql = `
-      SELECT 
+      SELECT
         agent_uuid,
         agent_name,
         device_name,
+        device_uuid,
+        endpoint_uuid,
         protocol,
         metric_name,
         unit,
@@ -247,6 +251,8 @@ router.get('/latest', jwtAuth, async (req, res) => {
         unit,
         protocol,
         ingested_at,
+        device_uuid,
+        endpoint_uuid,
         anomaly_score,
         anomaly_threshold,
         agent_name,
@@ -378,14 +384,23 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
     }
     
     // Build query for selected view - SAFE: intervalMinutes is number, not interpolated into SQL
+    // All views now use agent_uuid for the gateway UUID (migration 013)
+    const agentUuidCol = 'agent_uuid';
+    // readings_hourly and readings_daily do not have quality_ratio
+    const qualityCol = (viewName === 'readings_hourly' || viewName === 'readings_daily')
+      ? 'NULL::float as quality_ratio'
+      : 'quality_ratio';
+
     let sql = `
-      SELECT 
+      SELECT
         bucket as time,
+        device_uuid,
+        endpoint_uuid,
         avg_value,
         min_value,
         max_value,
         sample_count,
-        quality_ratio
+        ${qualityCol}
       FROM ${viewName}
       WHERE device_name = $1
         AND metric_name = $2
@@ -402,7 +417,7 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
     
     if (validatedAgentUuid) {
       params.push(validatedAgentUuid);
-      sql += ` AND agent_uuid = $${++paramIndex}`;
+      sql += ` AND ${agentUuidCol} = $${++paramIndex}`;
     }
     
     sql += ` ORDER BY bucket ASC`;

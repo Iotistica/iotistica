@@ -113,9 +113,9 @@ CREATE TABLE target_state (
 );
 ```
 
-**`device_sensors`** - Sensor configurations:
+**`endpoints`** - Sensor configurations:
 ```sql
-CREATE TABLE device_sensors (
+CREATE TABLE endpoints (
   id INTEGER PRIMARY KEY,
   configId TEXT NOT NULL UNIQUE,     -- Cloud-assigned config ID
   name TEXT NOT NULL,
@@ -132,13 +132,13 @@ CREATE TABLE device_sensors (
 ```sql
 CREATE TABLE endpoint_outputs (
   id INTEGER PRIMARY KEY,
-  sensorId INTEGER NOT NULL,          -- FK to device_sensors
+  sensorId INTEGER NOT NULL,          -- FK to endpoints
   name TEXT NOT NULL,
   dataType TEXT NOT NULL,             -- 'temperature', 'humidity', etc.
   unit TEXT,
   topic TEXT NOT NULL,                -- MQTT topic
   config TEXT,                        -- JSON: output-specific config
-  FOREIGN KEY (sensorId) REFERENCES device_sensors(id) ON DELETE CASCADE
+  FOREIGN KEY (sensorId) REFERENCES endpoints(id) ON DELETE CASCADE
 );
 ```
 
@@ -689,7 +689,7 @@ docker exec -it agent-1 sqlite3 /app/data/device.sqlite
 SELECT * FROM device;                  -- Device info
 SELECT * FROM target_state;            -- Current target state
 SELECT * FROM anomaly_detections ORDER BY timestamp DESC LIMIT 10;
-SELECT * FROM device_sensors;          -- Sensor configs
+SELECT * FROM endpoints;          -- Sensor configs
 ```
 
 **Programmatic Access**:

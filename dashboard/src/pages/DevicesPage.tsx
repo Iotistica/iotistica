@@ -72,7 +72,7 @@ interface Sensor {
   lastDeployedAt?: string | null;
   deploymentError?: string | null;
   deploymentAttempts?: number;
-  // Health metrics from device_sensors table
+  // Health metrics from endpoints table
   health?: {
     status: string;
     connected: boolean;

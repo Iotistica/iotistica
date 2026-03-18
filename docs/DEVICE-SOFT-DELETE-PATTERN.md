@@ -74,7 +74,7 @@ async deleteEndpoint(deviceUuid, sensorIdentifier, userId) {
 ```typescript
 async hardDeleteEndpoint(deviceUuid, sensorIdentifier, userId) {
   // 1. Remove from target state config.endpoints
-  // 2. Delete from device_sensors table
+  // 2. Delete from endpoints table
   // 3. Increment version
   // 4. Publish 'device_sensor.deleted' event
 }
@@ -90,7 +90,7 @@ async syncCurrentStateToTable(deviceUuid, currentState) {
   
   // 2. CRITICAL: Check for pending_deletion devices
   const pendingDeletion = await query(
-    `SELECT uuid, name FROM device_sensors 
+    `SELECT uuid, name FROM endpoints 
      WHERE device_uuid = $1 AND deployment_status = 'pending_deletion'`
   );
   
@@ -122,7 +122,7 @@ type DeploymentStatus =
 ### Key Fields
 
 ```sql
-CREATE TABLE device_sensors (
+CREATE TABLE endpoints (
   id SERIAL PRIMARY KEY,
   device_uuid UUID NOT NULL,
   uuid UUID NOT NULL,

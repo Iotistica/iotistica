@@ -73,18 +73,33 @@ export class SensorsFeature extends BaseFeature {
     }
 
     return dataPoints.map((point) => {
-      if (point.device_uuid) {
-        return point;
-      }
-
       const endpointUuid = endpointUuidByName.get(point.deviceName);
       if (!endpointUuid) {
         return point;
       }
 
+      // Each endpoint in the endpoints table is itself a device with a UUID.
+      // Honour any asset-level device_uuid supplied by the source (e.g. a fleet
+      // simulator that assigns its own UUIDs), otherwise the endpoint UUID is the
+      // device identity for protocol adapters (OPC UA, Modbus, SNMP, MQTT).
+      const device_uuid = point.device_uuid || endpointUuid;
+
+      // Build a unique device display name: "{displayBase}-{first8ofDeviceUuid}"
+      // - displayBase: protocol-discovered name (OPC-UA DisplayName, SNMP sysName, BACnet
+      //   objectName) or config displayName override; falls back to the raw endpoint config name
+      // - uuid suffix: first 8 hex chars of device_uuid make it globally unique across agents
+      //   e.g. "opcua-4" (raw) → "Siemens S7-1500-eaaeff83" (discovered) or "opcua-4-eaaeff83"
+      const displayBase = point.resolvedDisplayName || point.deviceName;
+      const uuidSuffix = device_uuid.replace(/-/g, '').slice(0, 8);
+      const deviceName = uuidSuffix.length === 8
+        ? `${displayBase}-${uuidSuffix}`
+        : displayBase;
+
       return {
         ...point,
-        device_uuid: endpointUuid,
+        deviceName,
+        endpoint_uuid: endpointUuid,
+        device_uuid,
       };
     });
   }

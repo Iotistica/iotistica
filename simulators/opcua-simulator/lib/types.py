@@ -30,6 +30,7 @@ class Device:
     min_value: Optional[float] = None  # Minimum value constraint
     max_value: Optional[float] = None  # Maximum value constraint
     config: dict = None              # Device-specific config from profile JSON
+    uuid: str = ""                   # Per-device UUID (deterministic, generated at startup via uuid5)
     model: Any = None                # Cached model instance (set by ValueUpdater)
     
     @property

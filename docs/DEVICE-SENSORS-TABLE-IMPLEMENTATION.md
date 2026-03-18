@@ -5,7 +5,7 @@
 
 ## Overview
 
-Implemented a relational database table `device_sensors` to store sensor configurations alongside the existing config-based approach in `device_target_state.config.protocolAdapterDevices`.
+Implemented a relational database table `endpoints` to store sensor configurations alongside the existing config-based approach in `device_target_state.config.protocolAdapterDevices`.
 
 ### Why This Approach?
 
@@ -32,7 +32,7 @@ Save Draft → API
         ↓
     [DATABASE DUAL WRITE]
         ├─→ device_target_state.config.protocolAdapterDevices (Agent pulls this)
-        └─→ device_sensors table (API queries this)
+        └─→ endpoints table (API queries this)
         ↓
 Sync → Agent pulls config
         ↓
@@ -43,10 +43,10 @@ Agent reports health → protocol_adapter_health_history (separate)
 
 ## Database Schema
 
-### Table: `device_sensors`
+### Table: `endpoints`
 
 ```sql
-CREATE TABLE device_sensors (
+CREATE TABLE endpoints (
     id SERIAL PRIMARY KEY,
     device_uuid UUID NOT NULL REFERENCES devices(uuid) ON DELETE CASCADE,
     
@@ -76,17 +76,17 @@ CREATE TABLE device_sensors (
 ```
 
 **Indexes**:
-- `idx_device_sensors_device_uuid` - Query by device
-- `idx_device_sensors_protocol` - Filter by protocol type
-- `idx_device_sensors_enabled` - Filter active sensors
-- `idx_device_sensors_device_protocol` - Composite query
-- `idx_device_sensors_sync` - Track sync status
+- `idx_endpoints_device_uuid` - Query by device
+- `idx_endpoints_protocol` - Filter by protocol type
+- `idx_endpoints_enabled` - Filter active sensors
+- `idx_endpoints_device_protocol` - Composite query
+- `idx_endpoints_sync` - Track sync status
 
 ## Implementation Files
 
 ### 1. Migration
-**File**: `api/database/migrations/039_create_device_sensors_table.sql`
-- Creates `device_sensors` table
+**File**: `api/database/migrations/039_create_endpoints_table.sql`
+- Creates `endpoints` table
 - Adds indexes
 - Grants permissions
 - Sets up timestamp trigger
@@ -145,8 +145,8 @@ updatePendingConfig(deviceUuid, 'protocolAdapterDevices', [
 await deviceSensorSync.addSensor(uuid, sensorConfig, userId);
 
 // 3. Sync service performs dual-write:
-//    a) INSERT into device_sensors table
-const sensorId = await query('INSERT INTO device_sensors ...');
+//    a) INSERT into endpoints table
+const sensorId = await query('INSERT INTO endpoints ...');
 
 //    b) Sync table → config (updates target_state)
 const syncResult = await syncTableToConfig(deviceUuid, userId);
@@ -211,7 +211,7 @@ const sensors = await deviceSensorSync.getSensors(uuid);
 
 ```bash
 cd api
-psql -U postgres -d iotistic -f database/migrations/039_create_device_sensors_table.sql
+psql -U postgres -d iotistic -f database/migrations/039_create_endpoints_table.sql
 ```
 
 ### Test Add Sensor
@@ -250,7 +250,7 @@ curl http://localhost:4002/api/v1/devices/{uuid}/protocol-devices
 
 ```sql
 -- Check table
-SELECT * FROM device_sensors WHERE device_uuid = '{uuid}';
+SELECT * FROM endpoints WHERE device_uuid = '{uuid}';
 
 -- Check config
 SELECT config->'protocolAdapterDevices' 
@@ -270,7 +270,7 @@ WHERE device_uuid = '{uuid}';
 
 ## Future Enhancements
 
-1. **Audit Trail**: `device_sensors_history` table for change tracking
+1. **Audit Trail**: `endpoints_history` table for change tracking
 2. **Validation**: Database constraints for connection/register schemas
 3. **Auto-Sync**: Webhook on Save Draft to trigger syncConfigToTable
 4. **Bulk Operations**: Import/export sensors via SQL
@@ -298,7 +298,7 @@ WHERE device_uuid = '{uuid}';
 
 ## Notes
 
-- **Table name**: `device_sensors` (not `protocol_adapter_devices` - obsolete term)
+- **Table name**: `endpoints` (not `protocol_adapter_devices` - obsolete term)
 - **Service name**: `DeviceSensorSyncService` (renamed from protocol-device-sync)
 - **API endpoints**: Keep existing `/protocol-devices` for backward compatibility
 - **Config field**: Still uses `protocolAdapterDevices` for agent compatibility

@@ -26,7 +26,7 @@ await discoveryService.runDiscovery({ trigger: 'manual', validate: true });
 const modbusDevices = await modbusPlugin.discover(options);
 const opcuaDevices = await opcuaPlugin.discover(options);
 
-// Devices saved to SQLite device_sensors table
+// Devices saved to SQLite endpoints table
 await DeviceEndpointModel.create({
   name: 'modbus-sim-2_slave_1',
   protocol: 'modbus',
@@ -38,7 +38,7 @@ await DeviceEndpointModel.create({
 });
 ```
 
-**Database**: Agent's local SQLite `device_sensors` table
+**Database**: Agent's local SQLite `endpoints` table
 
 ---
 
@@ -55,7 +55,7 @@ await DeviceEndpointModel.create({
 // Agent sends current state report
 await cloudSync.reportCurrentState();
 
-// Report includes endpoints from device_sensors table
+// Report includes endpoints from endpoints table
 const currentState = {
   apps: { ... },
   config: {
@@ -89,10 +89,10 @@ if (deviceState.config?.endpoints) {
 **What It Does**:
 - Takes agent's reported endpoints
 - Converts agent format → API format
-- **Syncs to cloud PostgreSQL `device_sensors` table**
+- **Syncs to cloud PostgreSQL `endpoints` table**
 - Marks as `deployment_status='deployed'` (reconciled)
 
-**Database**: Cloud PostgreSQL `device_sensors` table (replica of agent's state)
+**Database**: Cloud PostgreSQL `endpoints` table (replica of agent's state)
 
 ---
 
@@ -110,7 +110,7 @@ if (deviceState.config?.endpoints) {
 const response = await fetch(`/api/devices/${deviceUuid}/sensors`);
 const sensors = await response.json();
 
-// API reads from device_sensors table
+// API reads from endpoints table
 const endpoints = await deviceSensorSync.getEndpoints(deviceUuid);
 
 // IMPORTANT: enabled field comes from target state, NOT table!
@@ -215,12 +215,12 @@ const handleToggleSensorEnabled = async (sensor: Sensor, currentEnabled: boolean
 }
 
 // IMPORTANT: No connection, dataPoints, or metadata in endpoints!
-// Those are in device_sensors table
+// Those are in endpoints table
 ```
 
 **Complete Example with Merge**:
 
-**What's in device_sensors table** (discovered data):
+**What's in endpoints table** (discovered data):
 ```json
 {
   "uuid": "550e8400-e29b-41d4-a716-446655440001",
@@ -339,7 +339,7 @@ const result = await query(
   [deviceUuid]
 );
 
-// Sync config.endpoints → device_sensors table
+// Sync config.endpoints → endpoints table
 await deviceSensorSync.syncConfigToTable(
   deviceUuid,
   deployedState.config.endpoints,
@@ -350,7 +350,7 @@ await deviceSensorSync.syncConfigToTable(
 
 **Database**: 
 - Increments `device_target_state.version` (agent polls this)
-- Updates `device_sensors.deployment_status='pending'` for changed endpoints
+- Updates `endpoints.deployment_status='pending'` for changed endpoints
 
 ---
 
@@ -430,7 +430,7 @@ this.targetConfig = config;
 await this.reconcile();
 
 // CRITICAL: Merge discovery data + config overrides
-const currentEndpoints = await DeviceEndpointModel.getAll(); // From device_sensors table
+const currentEndpoints = await DeviceEndpointModel.getAll(); // From endpoints table
 
 for (const endpoint of currentEndpoints) {
   // Find override in target state
@@ -450,7 +450,7 @@ for (const endpoint of currentEndpoints) {
 }
 ```
 
-**Database**: Updates agent's SQLite `device_sensors` table with **ONLY override fields**
+**Database**: Updates agent's SQLite `endpoints` table with **ONLY override fields**
 
 **Key Point**: Discovery data (connection, dataPoints) remains intact! Only user configuration is updated.
 
@@ -474,7 +474,7 @@ for (const endpoint of currentEndpoints) {
 
 **Flow**:
 ```typescript
-// Adapter reloads devices from device_sensors table
+// Adapter reloads devices from endpoints table
 const endpoints = await DeviceEndpointModel.getAll();
 
 // Filter by protocol and enabled=true
@@ -498,7 +498,7 @@ for (const device of enabledModbusDevices) {
 
 **CRITICAL PRINCIPLE**: Target state endpoints should **ONLY** contain configuration overrides, NOT discovery data!
 
-- ✅ **device_sensors table** = Source of truth for discovered device details (connection, data points, metadata)
+- ✅ **endpoints table** = Source of truth for discovered device details (connection, data points, metadata)
 - ✅ **config.endpoints** = Configuration overrides only (enabled, pollInterval, custom settings)
 - ❌ **Don't duplicate** full endpoint definitions in target state
 
@@ -515,12 +515,12 @@ interface TargetState {
     // ENDPOINTS CONFIGURATION (overrides only!)
     // Only include fields that USER configured (not discovered)
     endpoints?: Array<{
-      uuid: string;          // UUID - references device_sensors table entry
+      uuid: string;          // UUID - references endpoints table entry
       enabled?: boolean;     // User override: enable/disable device
       pollInterval?: number; // User override: custom poll interval
       alias?: string;        // User override: friendly name (overrides discovered name)
       tags?: string[];       // User override: custom tags/categories
-      // NO name, connection, dataPoints, metadata! Those live in device_sensors table
+      // NO name, connection, dataPoints, metadata! Those live in endpoints table
     }>;
     
     // PROTOCOL DISCOVERY SECTION (scanning config)
@@ -558,7 +558,7 @@ interface TargetState {
 }
 
 // Agent Reconciliation Pattern (CORRECT)
-// 1. Read full endpoint from device_sensors table (discovery data)
+// 1. Read full endpoint from endpoints table (discovery data)
 // 2. Apply overrides from config.endpoints (user configuration)
 // 3. Result = merged endpoint configuration
 const endpoint = {
@@ -577,7 +577,7 @@ const endpoint = {
 
 **✅ Correct Pattern** (endpoints as overrides):
 - Target state only contains **user decisions** (enabled/disabled)
-- Discovery data stays in `device_sensors` table
+- Discovery data stays in `endpoints` table
 - Small payload size (just UUIDs + overrides)
 - Clear separation: discovery vs. configuration
 ```
@@ -586,10 +586,10 @@ const endpoint = {
 
 ## Database Schema
 
-### Cloud PostgreSQL: `device_sensors` Table
+### Cloud PostgreSQL: `endpoints` Table
 
 ```sql
-CREATE TABLE device_sensors (
+CREATE TABLE endpoints (
   id SERIAL PRIMARY KEY,
   uuid UUID UNIQUE,              -- Stable identifier (survives renames)
   name VARCHAR(255) NOT NULL,    -- Discovered name (e.g., "modbus-sim-2_slave_1")
@@ -621,9 +621,9 @@ CREATE TABLE device_sensors (
 
 **Problem**: Target state config vs database table - which is source of truth?
 
-**Solution**: **device_sensors table** is the source of truth, **config.endpoints** is overrides only!
+**Solution**: **endpoints table** is the source of truth, **config.endpoints** is overrides only!
 
-- **Database Table** (`device_sensors`): Source of truth for **discovered data** (connection, dataPoints, metadata)
+- **Database Table** (`endpoints`): Source of truth for **discovered data** (connection, dataPoints, metadata)
 - **Target State Config** (`config.endpoints`): Source of truth for **user configuration** (enabled, pollInterval, alias)
 
 **WRONG** (Current Implementation?):
@@ -654,7 +654,7 @@ config.endpoints = [
   }
 ];
 
-// Agent merges: device_sensors (discovery) + config.endpoints (overrides)
+// Agent merges: endpoints (discovery) + config.endpoints (overrides)
 const finalConfig = {
   ...deviceSensorsRow,  // Discovery data (name, connection, dataPoints, metadata)
   ...configOverride     // User configuration (enabled, pollInterval, alias)
@@ -663,7 +663,7 @@ const finalConfig = {
 // Example result:
 {
   uuid: "abc-123",
-  name: "modbus-sim-2_slave_1",  // From discovery (device_sensors)
+  name: "modbus-sim-2_slave_1",  // From discovery (endpoints)
   alias: "My Custom Name",        // From user config (config.endpoints)
   protocol: "modbus",             // From discovery
   connection: { host: "10.0.0.60", port: 503, slaveId: 1 }, // From discovery
@@ -676,13 +676,13 @@ const finalConfig = {
 **Sync Services** (NEEDS REFACTORING):
 - ~~`syncConfigToTable()`~~: Should NOT copy full endpoint to table!
 - ~~`syncTableToConfig()`~~: Should NOT copy full endpoint to config!
-- `applyConfigOverrides()`: Apply ONLY override fields to device_sensors
+- `applyConfigOverrides()`: Apply ONLY override fields to endpoints
 
 **Problem**: Target state config vs database table - which is source of truth?
 
 **Solution**: Both! Different purposes:
 - **Target State Config** (`config.endpoints`): Source of truth for **desired state** (what user wants)
-- **Database Table** (`device_sensors`): Source of truth for **deployed state** (what exists on device)
+- **Database Table** (`endpoints`): Source of truth for **deployed state** (what exists on device)
 
 **Sync Services**:
 - `syncConfigToTable()`: Config → Table (when deploying)
@@ -700,13 +700,13 @@ Deploy (version++)
   ↓
 Agent Polls (gets new version)
   ↓
-Agent Reconciles (updates SQLite device_sensors)
+Agent Reconciles (updates SQLite endpoints)
   ↓
 Adapters Reload (start polling enabled devices)
   ↓
 Agent Reports Current State (endpoints.enabled = 1)
   ↓
-Cloud Reconciles (device_sensors.deployment_status = 'deployed')
+Cloud Reconciles (endpoints.deployment_status = 'deployed')
   ↓
 Loop Closed! ✅
 ```
@@ -733,19 +733,19 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
 ### Adding New Protocol Discovery
 
 1. Create discovery plugin in `agent/src/features/discovery/` (e.g., `bacnet.discovery.ts`)
-2. Discovery saves to `device_sensors` table via `DeviceEndpointModel.create()`
+2. Discovery saves to `endpoints` table via `DeviceEndpointModel.create()`
 3. Agent reports endpoints in next state report
-4. Cloud syncs to cloud `device_sensors` table
+4. Cloud syncs to cloud `endpoints` table
 5. Target state automatically includes new endpoints
 6. No changes needed to dashboard or sync logic!
 
 ### Adding Per-Endpoint Configuration
 
-1. Add fields to `device_sensors` table (both cloud and agent)
+1. Add fields to `endpoints` table (both cloud and agent)
 2. Add fields to `EndpointDeviceConfig` interface (`api/src/services/device-endpoints.ts`)
 3. Dashboard form updates to show/edit new fields
 4. Sync services automatically handle new fields (JSONB columns)
-5. Adapters read new fields from `device_sensors` table
+5. Adapters read new fields from `endpoints` table
 
 ---
 
@@ -764,7 +764,7 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
 2. **Verify Database** (Agent):
    ```bash
    sqlite3 agent/data/device.sqlite
-   SELECT name, protocol, enabled FROM device_sensors;
+   SELECT name, protocol, enabled FROM endpoints;
    # Should show discovered devices with enabled=0
    ```
 
@@ -775,7 +775,7 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
 4. **Verify Database** (Cloud):
    ```sql
    SELECT name, protocol, enabled, deployment_status, health_connected 
-   FROM device_sensors 
+   FROM endpoints 
    WHERE device_uuid = 'your-device-uuid';
    ```
 
@@ -799,7 +799,7 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
 8. **Verify Agent Updated**:
    ```bash
    sqlite3 agent/data/device.sqlite
-   SELECT name, enabled FROM device_sensors WHERE name = 'your-endpoint';
+   SELECT name, enabled FROM endpoints WHERE name = 'your-endpoint';
    # Should show enabled=1
    ```
 
@@ -834,26 +834,26 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
    - **ONLY stores overrides, NOT discovery data!**
 
 3. **Agent reconciliation** = Merge pattern
-   - Read base from device_sensors table
+   - Read base from endpoints table
    - Apply overrides from config.endpoints
    - Result = final runtime configuration
 
 ### Flow
 
 1. **Discovery** (Agent → Cloud):
-   - Agent discovers devices → SQLite `device_sensors` (full details)
-   - Agent reports state → Cloud PostgreSQL `device_sensors` (full details)
+   - Agent discovers devices → SQLite `endpoints` (full details)
+   - Agent reports state → Cloud PostgreSQL `endpoints` (full details)
    - **NO automatic population of config.endpoints** (user configures manually)
 
 2. **Configuration** (Cloud → Agent):
    - User toggles endpoint → Creates/updates `config.endpoints[uuid].enabled = true`
    - Deploy increments version → Agent polls
-   - Agent merges device_sensors + config overrides → Final config
+   - Agent merges endpoints + config overrides → Final config
    - Adapters reload → Respect merged `enabled` flag
 
 3. **Reconciliation** (Bidirectional):
    - Agent reports actual state → Cloud marks `deployment_status='deployed'`
-   - Discovery data stays in device_sensors table
+   - Discovery data stays in endpoints table
    - Config overrides stay in target state
    - No duplication!
 
@@ -870,8 +870,8 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
 
 2. `agent/src/device-manager/config.ts`:
    - ❌ `setTarget()` - May store full endpoint from config
-   - ✅ `reconcile()` - Should merge device_sensors + config overrides
-   - ✅ `getCurrentConfig()` - Returns full endpoints from device_sensors
+   - ✅ `reconcile()` - Should merge endpoints + config overrides
+   - ✅ `getCurrentConfig()` - Returns full endpoints from endpoints
 
 3. `dashboard/src/pages/SensorsPage.tsx`:
    - ✅ Toggle should only store `{ uuid, enabled }` in config.endpoints
@@ -891,7 +891,7 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
 1. Check agent database:
    ```bash
    sqlite3 agent/data/device.sqlite
-   SELECT COUNT(*) FROM device_sensors;
+   SELECT COUNT(*) FROM endpoints;
    ```
 2. Check agent state report includes endpoints:
    - Agent logs: "Including endpoint health in report"
@@ -899,7 +899,7 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
    - API logs: "Reconciling current state from agent"
 4. Check cloud database:
    ```sql
-   SELECT COUNT(*) FROM device_sensors WHERE device_uuid = '...';
+   SELECT COUNT(*) FROM endpoints WHERE device_uuid = '...';
    ```
 
 **Common Causes**:
@@ -914,14 +914,14 @@ const enabledFromTarget = targetSensor?.enabled ?? row.enabled;
 The endpoint configuration flow is a **bidirectional sync system**:
 
 1. **Discovery** (Agent → Cloud):
-   - Agent discovers devices → SQLite `device_sensors`
-   - Agent reports state → Cloud PostgreSQL `device_sensors`
+   - Agent discovers devices → SQLite `endpoints`
+   - Agent reports state → Cloud PostgreSQL `endpoints`
    - Cloud generates `config.endpoints` in target state
 
 2. **Configuration** (Cloud → Agent):
    - User toggles endpoint → Updates `config.endpoints`
    - Deploy increments version → Agent polls
-   - Agent reconciles → Updates SQLite `device_sensors`
+   - Agent reconciles → Updates SQLite `endpoints`
    - Adapters reload → Respect `enabled` flag
 
 3. **Reconciliation** (Bidirectional):

@@ -8,7 +8,7 @@
 
 ## Overview
 
-Implemented complete Event Sourcing/CQRS architecture for sensor device management with agent reconciliation loop. This ensures the `device_sensors` table always reflects what's **actually deployed and running** on the agent.
+Implemented complete Event Sourcing/CQRS architecture for sensor device management with agent reconciliation loop. This ensures the `endpoints` table always reflects what's **actually deployed and running** on the agent.
 
 ---
 
@@ -23,7 +23,7 @@ Implemented complete Event Sourcing/CQRS architecture for sensor device manageme
    User saves sensor → writes to device_target_state.config
                        (version++, needs_deployment=true)
                        ↓
-                    IMMEDIATE sync to device_sensors table
+                    IMMEDIATE sync to endpoints table
                     (for backward compatibility)
 
 2. DEPLOY PATH (Agent Execution):
@@ -38,12 +38,12 @@ Implemented complete Event Sourcing/CQRS architecture for sensor device manageme
                   ↓
    API receives current state → syncCurrentStateToTable()
                   ↓
-   device_sensors table updated → reflects agent reality
+   endpoints table updated → reflects agent reality
                   ↓
    UI reads table → shows actual deployed state
 
 4. READ PATH (Query Performance):
-   UI queries → device_sensors table (fast, indexed)
+   UI queries → endpoints table (fast, indexed)
                ↓
    Shows what's actually running (not just desired)
 ```
@@ -90,10 +90,10 @@ await deviceSensorSync.syncCurrentStateToTable(uuid, {
 async getSensors(deviceUuid: string, protocol?: string): Promise<any[]>
 ```
 
-**Change**: Now reads from **device_sensors TABLE** (deployed state)
+**Change**: Now reads from **endpoints TABLE** (deployed state)
 
 **Before**: Read from `device_target_state.config` (desired state)  
-**After**: Read from `device_sensors` table (actual running state)
+**After**: Read from `endpoints` table (actual running state)
 
 **Reason**: UI should show what's deployed, not what's desired
 
@@ -137,7 +137,7 @@ await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
 
 ## Database Schema
 
-### `device_sensors` Table
+### `endpoints` Table
 
 **Purpose**: Read model for deployed sensors (CQRS pattern)
 
@@ -157,11 +157,11 @@ await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
 - `created_at`, `updated_at` - Timestamps
 
 **Indexes**:
-- `idx_device_sensors_device_uuid` - Fast device queries
-- `idx_device_sensors_protocol` - Filter by protocol
-- `idx_device_sensors_enabled` - Filter by status
-- `idx_device_sensors_device_protocol` - Composite queries
-- `idx_device_sensors_sync` - Sync status queries
+- `idx_endpoints_device_uuid` - Fast device queries
+- `idx_endpoints_protocol` - Filter by protocol
+- `idx_endpoints_enabled` - Filter by status
+- `idx_endpoints_device_protocol` - Composite queries
+- `idx_endpoints_sync` - Sync status queries
 
 ---
 
@@ -185,7 +185,7 @@ device_target_state.version = 43
 device_target_state.needs_deployment = true
 
 // 3. API syncs to table (immediate - for backward compatibility)
-device_sensors ← INSERT sensor (config_version=43)
+endpoints ← INSERT sensor (config_version=43)
 
 // 4. Agent polls and deploys
 GET /api/v1/device/:uuid/state
@@ -199,7 +199,7 @@ PATCH /api/v1/device/state
 }
 
 // 6. API reconciles table
-device_sensors ← UPDATE with agent's reality (config_version=43)
+endpoints ← UPDATE with agent's reality (config_version=43)
 
 // 7. UI queries table
 GET /api/v1/devices/:uuid/sensors
@@ -213,7 +213,7 @@ Returns: sensors actually running on agent
 device_target_state.config.protocolAdapterDevices = [sensor1, sensor2, sensor3]
 
 // 2. Table shows 3 sensors (desired state)
-device_sensors: sensor1, sensor2, sensor3
+endpoints: sensor1, sensor2, sensor3
 
 // 3. Agent tries to deploy but sensor3 fails
 Agent deploys: sensor1 ✅, sensor2 ✅, sensor3 ❌
@@ -226,7 +226,7 @@ PATCH /api/v1/device/state
 }
 
 // 5. Reconciliation updates table
-device_sensors: sensor1, sensor2 (sensor3 removed)
+endpoints: sensor1, sensor2 (sensor3 removed)
 
 // 6. UI shows reality
 GET /api/v1/devices/:uuid/sensors
@@ -248,7 +248,7 @@ PATCH /api/v1/device/state
 }
 
 // 2. Reconciliation syncs table to old version
-device_sensors ← UPDATE to match agent's current reality (version 40)
+endpoints ← UPDATE to match agent's current reality (version 40)
 
 // 3. Agent polls and sees newer config (version 43)
 GET /api/v1/device/:uuid/state
@@ -265,7 +265,7 @@ PATCH /api/v1/device/state
 }
 
 // 6. Reconciliation syncs table to version 43
-device_sensors ← UPDATE to match agent's new reality (version 43)
+endpoints ← UPDATE to match agent's new reality (version 43)
 ```
 
 ---
@@ -308,7 +308,7 @@ device_sensors ← UPDATE to match agent's new reality (version 43)
 
 **Schema**:
 ```sql
-ALTER TABLE device_sensors 
+ALTER TABLE endpoints 
 ADD COLUMN deployment_status VARCHAR(20) DEFAULT 'pending',
 ADD COLUMN last_deployed_at TIMESTAMPTZ,
 ADD COLUMN deployment_error TEXT,
@@ -376,7 +376,7 @@ curl -X POST http://localhost:3002/api/v1/devices/a24cd1ee/sensors \
 SELECT config FROM device_target_state WHERE device_uuid = 'a24cd1ee';
 
 # Verify in table
-SELECT * FROM device_sensors WHERE device_uuid = 'a24cd1ee' AND name = 'test-sensor';
+SELECT * FROM endpoints WHERE device_uuid = 'a24cd1ee' AND name = 'test-sensor';
 ```
 
 ### Test 2: Agent Reports State
@@ -387,7 +387,7 @@ curl -X PATCH http://localhost:3002/api/v1/device/state \
   -d '{"a24cd1ee": {"config": {"protocolAdapterDevices": [...]}, "version": 42}}'
 
 # Verify table updated
-SELECT * FROM device_sensors WHERE device_uuid = 'a24cd1ee';
+SELECT * FROM endpoints WHERE device_uuid = 'a24cd1ee';
 
 # Check logs for reconciliation messages
 # Should see: "🔄 Reconciling current state from agent for device a24cd1ee..."
@@ -408,7 +408,7 @@ GET /device/:uuid/state
 PATCH /device/state
 
 # 5. Verify table matches agent reality
-SELECT config_version FROM device_sensors WHERE device_uuid = :uuid;
+SELECT config_version FROM endpoints WHERE device_uuid = :uuid;
 ```
 
 ---

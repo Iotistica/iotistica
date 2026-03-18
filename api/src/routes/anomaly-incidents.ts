@@ -19,6 +19,7 @@ interface IncidentFilters {
   status?: 'open' | 'active' | 'resolved';
   severity?: 'info' | 'warning' | 'critical';
   deviceName?: string;
+  deviceUuid?: string;
   deviceType?: string;
   deviceState?: 'running' | 'idle' | 'fault' | 'unknown';
   metric?: string;
@@ -45,8 +46,8 @@ async function resolveEndpointDisplayName(
 
   const result = await query(
     `SELECT name
-     FROM device_sensors
-     WHERE device_uuid = $1 AND uuid::text = $2 AND deployment_status != 'deleted'
+     FROM endpoints
+     WHERE agent_uuid = $1 AND uuid::text = $2 AND deployment_status != 'deleted'
      ORDER BY updated_at DESC
      LIMIT 1`,
     [agentUuid, endpointUuid]
@@ -107,12 +108,13 @@ async function resolveDisplayFields(params: {
  */
 router.get('/anomaly-incidents', async (req, res) => {
   try {
-    const { status, severity, deviceName, deviceType, deviceState, metric, startTime, endTime, limit = 50, offset = 0 } = req.query;
+    const { status, severity, deviceName, deviceUuid, deviceType, deviceState, metric, startTime, endTime, limit = 50, offset = 0 } = req.query;
 
     const filters: IncidentFilters = {
       status: status as 'open' | 'active' | 'resolved' | undefined,
       severity: severity as 'info' | 'warning' | 'critical' | undefined,
       deviceName: deviceName as string | undefined,
+      deviceUuid: deviceUuid as string | undefined,
       deviceType: deviceType as string | undefined,
       deviceState: deviceState as 'running' | 'idle' | 'fault' | 'unknown' | undefined,
       metric: metric as string | undefined,
@@ -139,6 +141,11 @@ router.get('/anomaly-incidents', async (req, res) => {
     if (filters.deviceName) {
       whereConditions.push(`ai.device_name = $${queryParams.length + 1}`);
       queryParams.push(filters.deviceName);
+    }
+
+    if (filters.deviceUuid) {
+      whereConditions.push(`ai.device_uuid = $${queryParams.length + 1}`);
+      queryParams.push(filters.deviceUuid);
     }
 
     if (filters.deviceType) {
@@ -188,6 +195,7 @@ router.get('/anomaly-incidents', async (req, res) => {
         ai.incident_id,
         ai.fingerprint,
         ai.device_name,
+        ai.device_uuid,
         ai.device_type,
         COALESCE((
           SELECT ae.baseline->>'deviceState'
@@ -238,6 +246,7 @@ router.get('/anomaly-incidents', async (req, res) => {
         incident_id: inc.incident_id,
         fingerprint: inc.fingerprint,
         device_name: display.deviceName,
+        device_uuid: inc.device_uuid || null,
         device_type: inc.device_type,
         device_state: inc.device_state || 'unknown',
         metric: display.metric,
@@ -296,7 +305,8 @@ router.get('/anomaly-incidents/stats', async (req, res) => {
         COUNT(*) FILTER (WHERE severity = 'info') as info_count,
         COUNT(*) FILTER (WHERE severity = 'warning') as warning_count,
         COUNT(*) FILTER (WHERE severity = 'critical') as critical_count,
-        COUNT(DISTINCT device_name) as affected_devices
+        COUNT(DISTINCT device_name) as affected_devices,
+        COUNT(DISTINCT device_uuid) as affected_endpoints
       FROM anomaly_incidents
       WHERE first_seen >= $1
     `;
@@ -323,10 +333,11 @@ router.get('/anomaly-incidents/stats', async (req, res) => {
     const topDevicesQuery = `
       SELECT
         device_name,
+        device_uuid,
         COUNT(*) as count
       FROM anomaly_incidents
       WHERE first_seen >= $1
-      GROUP BY device_name
+      GROUP BY device_name, device_uuid
       ORDER BY count DESC
       LIMIT 10
     `;
@@ -349,12 +360,14 @@ router.get('/anomaly-incidents/stats', async (req, res) => {
           critical: parseInt(stats.critical_count),
         },
         affectedDevices: parseInt(stats.affected_devices),
+        affectedEndpoints: parseInt(stats.affected_endpoints),
         topMetrics: topMetrics.map((m: any) => ({
           metric: m.metric,
           count: parseInt(m.count),
         })),
         topDevices: topDevices.map((d: any) => ({
           deviceName: d.device_name,
+          deviceUuid: d.device_uuid || null,
           count: parseInt(d.count),
         })),
       },
@@ -383,6 +396,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         incident_id,
         fingerprint,
         device_name,
+        device_uuid,
         device_type,
         COALESCE((
           SELECT ae.baseline->>'deviceState'
@@ -466,11 +480,9 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
     const alerts = alertsResult.rows;
     const endpointNameCache = new Map<string, string>();
 
-    // Extract device_uuid from affected_agents (first one if available)
+    // Extract device_uuid from the incident record (populated during event ingestion)
     const affectedAgents = incident.affected_agents || [];
-    const deviceUuid = Array.isArray(affectedAgents) && affectedAgents.length > 0 
-      ? affectedAgents[0] 
-      : null;
+    const deviceUuid = incident.device_uuid || null;
 
     const incidentDisplay = await resolveDisplayFields({
       deviceType: incident.device_type,
@@ -590,6 +602,7 @@ router.patch('/anomaly-incidents/:incidentId/resolve', async (req, res) => {
         incident_id,
         fingerprint,
         device_name,
+        device_uuid,
         device_type,
         metric,
         severity,
@@ -652,6 +665,7 @@ router.patch('/anomaly-incidents/:incidentId/resolve', async (req, res) => {
         incident_id: incident.incident_id,
         fingerprint: incident.fingerprint,
         device_name: incident.device_name,
+        device_uuid: incident.device_uuid || null,
         device_type: incident.device_type,
         metric: incident.metric,
         severity: incident.severity,

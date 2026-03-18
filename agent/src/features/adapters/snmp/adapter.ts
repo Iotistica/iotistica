@@ -8,6 +8,10 @@ import { SNMPDeviceConfig, SNMPDataPoint } from './types.js';
 export class SNMPAdapter extends BaseProtocolAdapter {
   private clients: Map<string, SNMPClient> = new Map();
 
+  // Human-readable names resolved from the SNMP device at connect time.
+  // Priority: metadata.displayName (config override) > SNMP sysName OID > (unset, fall back to device.name)
+  private resolvedDeviceNames: Map<string, string> = new Map();
+
   constructor(devices: GenericDeviceConfig[], logger?: Logger) {
     // Use provided logger or create ConsoleLogger (matches Modbus pattern)
     super(devices, logger || new ConsoleLogger('info', false));
@@ -25,6 +29,27 @@ export class SNMPAdapter extends BaseProtocolAdapter {
     await client.connect();
     
     this.clients.set(device.name, client);
+
+    // Resolve human-readable display name.
+    // Priority: metadata.displayName (config) > SNMP sysName (1.3.6.1.2.1.1.5.0) > (unset)
+    const configDisplayName = device.metadata?.displayName as string | undefined;
+    if (configDisplayName && configDisplayName.trim()) {
+      this.resolvedDeviceNames.set(device.name, configDisplayName.trim());
+    } else {
+      try {
+        const rawName = await client.get('1.3.6.1.2.1.1.5.0'); // sysName OID
+        const sysName = Buffer.isBuffer(rawName)
+          ? rawName.toString('utf8').trim()
+          : typeof rawName === 'string' ? rawName.trim() : null;
+        if (sysName) {
+          this.resolvedDeviceNames.set(device.name, sysName);
+          this.logger.debug(`Resolved SNMP sysName for ${device.name}: "${sysName}"`);
+        }
+      } catch {
+        // Non-fatal: resolved name remains unset; enrichWithEndpointUuid falls back to device.name
+      }
+    }
+
     return client;
   }
 
@@ -34,6 +59,7 @@ export class SNMPAdapter extends BaseProtocolAdapter {
       await client.disconnect();
       this.clients.delete(deviceName);
     }
+    this.resolvedDeviceNames.delete(deviceName);
   }
 
   protected async readDeviceData(
@@ -48,6 +74,7 @@ export class SNMPAdapter extends BaseProtocolAdapter {
     const config = device as SNMPDeviceConfig;
     const dataPoints: SensorDataPoint[] = [];
     const timestamp = new Date().toISOString();
+    const resolvedDisplayName = this.resolvedDeviceNames.get(deviceName);
 
     // Read all OIDs using GET-BULK (v2c/v3) or GET (v1)
     for (const oid of config.dataPoints) {
@@ -70,7 +97,8 @@ export class SNMPAdapter extends BaseProtocolAdapter {
           unit: oid.unit || '',
           timestamp,
           quality: 'GOOD',
-          protocol: 'snmp'  // For enum namespacing
+          protocol: 'snmp',  // For enum namespacing
+          ...(resolvedDisplayName && { resolvedDisplayName }),
         });
       } catch (error) {
         this.logger.warn(`Failed to read OID ${oid.oid} from ${deviceName}: ${error}`);
@@ -84,7 +112,8 @@ export class SNMPAdapter extends BaseProtocolAdapter {
           timestamp,
           quality: 'BAD',
           qualityCode: 'READ_ERROR',
-          protocol: 'snmp'
+          protocol: 'snmp',
+          ...(resolvedDisplayName && { resolvedDisplayName }),
         });
       }
     }

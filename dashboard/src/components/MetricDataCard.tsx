@@ -30,6 +30,7 @@ export interface MetricDataCardConfig {
   widgetId: string;
   title?: string;
   agentName?: string;
+  endpointName?: string;
   deviceUuid?: string;
   endpointUuid?: string;
   alertEnabled?: boolean;

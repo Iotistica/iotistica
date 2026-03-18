@@ -84,7 +84,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 				
 				// Create session to browse the node tree
 				const session = await client.createSession();
-				const dataPoints: Array<{ nodeId: string; name: string }> = [];
+				const dataPoints: Array<{ nodeId: string; name: string; device_uuid?: string }> = [];
 				
 				try {
 					// Recursive tree browsing function
@@ -92,7 +92,8 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 						nodeId: string,
 						pathSegments: string[] = [],
 						depth: number = 0,
-						maxDepth: number = 10
+						maxDepth: number = 10,
+						inheritedDeviceUuid?: string  // UUID from parent folder's DeviceUUID node
 					): Promise<void> => {
 						// Protection against infinite loops
 						if (depth > maxDepth) {
@@ -105,8 +106,26 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 						
 						try {
 							const browseResult = await session.browse(nodeId);
+							const refs = browseResult.references || [];
+
+							// Pre-scan: look for a DeviceUUID variable in this folder to stamp on siblings
+							let folderDeviceUuid: string | undefined = inheritedDeviceUuid;
+							for (const ref of refs) {
+								if (ref.browseName?.name === 'DeviceUUID') {
+									try {
+										const val = await session.read({
+											nodeId: ref.nodeId.toString(),
+											attributeId: 13 // Value attribute
+										});
+										if (val.value?.value && typeof val.value.value === 'string') {
+											folderDeviceUuid = val.value.value;
+										}
+									} catch (_) { /* ignore read errors */ }
+									break;
+								}
+							}
 							
-							for (const ref of browseResult.references || []) {
+							for (const ref of refs) {
 								const nodeName = ref.browseName?.name || '';
 								const childNodeId = ref.nodeId.toString();
 								const currentPath = [...pathSegments, nodeName];
@@ -114,6 +133,11 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 								// Skip standard OPC UA system folders at root level (IEC 62541)
 								// ServerInfo contains metadata like ProfileName, SensorCount which pollute data_points
 								if (depth === 0 && ['Server', 'ServerInfo', 'Types', 'Views', 'Aliases'].includes(nodeName)) {
+									continue;
+								}
+
+								// Skip the DeviceUUID node itself — it's metadata, not a sensor reading
+								if (nodeName === 'DeviceUUID') {
 									continue;
 								}
 								
@@ -137,7 +161,8 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 										
 										dataPoints.push({
 											nodeId: childNodeId,
-											name: metricName
+											name: metricName,
+											...(folderDeviceUuid && { device_uuid: folderDeviceUuid }),
 										});
 										
 										this.logger?.debugSync(`Discovered variable: ${currentPath.join('/')}`, {
@@ -145,17 +170,18 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 											nodeId: childNodeId,
 											browseName: nodeName,
 											metricName,
-											depth
+											depth,
+											...(folderDeviceUuid && { device_uuid: folderDeviceUuid }),
 										});
 									} else if (actualNodeClass === 1) {
-										// Verified folder - recurse into it
+										// Verified folder - recurse into it, propagating any UUID found
 										this.logger?.debugSync(`Browsing into folder: ${currentPath.join('/')}`, {
 											component: LogComponents.discovery + "] [" + this.protocol as any,
 											nodeId: childNodeId,
 											depth
 										});
 										
-										await browseRecursive(childNodeId, currentPath, depth + 1, maxDepth);
+										await browseRecursive(childNodeId, currentPath, depth + 1, maxDepth, folderDeviceUuid);
 									}
 								} catch (readError) {
 									// If we can't read NodeClass, skip this node

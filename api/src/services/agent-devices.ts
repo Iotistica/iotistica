@@ -1,7 +1,7 @@
 /**
  * Device Sensor Sync Service
  * 
- * Purpose: Keep device_sensors table in sync with device_target_state.config
+ * Purpose: Keep endpoints table in sync with device_target_state.config
  * Pattern: Dual-write - config is source of truth, table for querying
  * 
  * Responsibilities:
@@ -97,7 +97,7 @@ export class DeviceSensorSyncService {
       const metricName = (metric?.name || '').trim();
       if (!metricName) return true;
 
-      // Canonical naming: endpointUuid_metricName
+      // Canonical naming: endpointUuid_metricName (legacy pre-qualified format)
       if (endpointUuid && metricName.startsWith(`${endpointUuid}_`)) {
         return false;
       }
@@ -105,6 +105,18 @@ export class DeviceSensorSyncService {
       // Legacy naming compatibility: endpointName_metricName
       if (endpointName && metricName.startsWith(`${endpointName}_`)) {
         return false;
+      }
+
+      // Device-scoped naming: metric has a separate deviceName field whose value
+      // matches the endpoint UUID or name (endpoint-level device groups).
+      const metricDeviceName = ((metric as any)?.deviceName || '').trim();
+      if (metricDeviceName) {
+        if (endpointUuid && (metricDeviceName === endpointUuid || metricDeviceName.startsWith(`${endpointUuid}_`))) {
+          return false;
+        }
+        if (endpointName && (metricDeviceName === endpointName || metricDeviceName.startsWith(`${endpointName}_`))) {
+          return false;
+        }
       }
 
       return true;
@@ -209,7 +221,7 @@ export class DeviceSensorSyncService {
       // Set to 'pending' for draft devices, update config_version for already-pending
       // Don't touch 'deployed' (those represent actual agent state)
       const result = await query(
-        `UPDATE device_sensors 
+        `UPDATE endpoints 
          SET deployment_status = CASE 
                WHEN deployment_status = 'draft' THEN 'pending'
                ELSE deployment_status
@@ -217,8 +229,7 @@ export class DeviceSensorSyncService {
              config_version = $1,
              updated_by = $2,
              updated_at = NOW()
-         WHERE device_uuid = $3 
-           AND uuid = ANY($4) 
+         WHERE agent_uuid = $3 AND uuid = ANY($4) 
            AND deployment_status NOT IN ('deployed')`,
         [configVersion, userId || 'system', deviceUuid, uuids]
       );
@@ -257,7 +268,7 @@ export class DeviceSensorSyncService {
     try {
       // Get existing sensors from table (fetch full records to compare changes AND health status)
       const existingResult = await query(
-        'SELECT id, name, uuid, config_id, enabled, poll_interval, connection, data_points, metadata, deployment_status, health_connected, location FROM device_sensors WHERE device_uuid = $1',
+        'SELECT id, name, uuid, config_id, enabled, poll_interval, connection, data_points, metadata, deployment_status, health_connected, location FROM endpoints WHERE agent_uuid = $1',
         [deviceUuid]
       );
       const existingByUuid = new Map(existingResult.rows.map((r: any) => [r.uuid, r]));
@@ -321,7 +332,7 @@ export class DeviceSensorSyncService {
           const stableSensorUuid = existing.uuid || endpoint.uuid || endpoint.id || uuidv4();
 
           await query(
-            `UPDATE device_sensors SET
+            `UPDATE endpoints SET
               name = $1,
               uuid = $2,
               protocol = $3,
@@ -390,12 +401,12 @@ export class DeviceSensorSyncService {
           }
           
           await query(
-            `INSERT INTO device_sensors (
-              device_uuid, uuid, name, protocol, enabled, poll_interval,
+            `INSERT INTO endpoints (
+              agent_uuid, uuid, name, protocol, enabled, poll_interval,
               connection, data_points, metadata, location, created_by, updated_by,
               config_version, synced_to_config, deployment_status, config_id
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, true, $14, $15)
-            ON CONFLICT (device_uuid, name) DO UPDATE SET
+            ON CONFLICT (agent_uuid, name) DO UPDATE SET
               uuid = EXCLUDED.uuid,
               protocol = EXCLUDED.protocol,
               enabled = EXCLUDED.enabled,
@@ -495,12 +506,12 @@ export class DeviceSensorSyncService {
         
         if (uuidsToMarkPending.length > 0) {
           const result = await query(
-            `UPDATE device_sensors 
+            `UPDATE endpoints 
              SET deployment_status = 'pending',
                  config_version = $1,
                  updated_by = $2,
                  updated_at = NOW()
-             WHERE device_uuid = $3 AND uuid = ANY($4)`,
+             WHERE agent_uuid = $3 AND uuid = ANY($4)`,
             [newVersion, userId || 'system', deviceUuid, uuidsToMarkPending]
           );
         }
@@ -541,8 +552,8 @@ export class DeviceSensorSyncService {
       // Get all sensors from table
       const result = await query(
         `SELECT id, uuid, name, protocol, enabled, poll_interval, connection, data_points, metadata
-         FROM device_sensors
-         WHERE device_uuid = $1
+         FROM endpoints 
+         WHERE agent_uuid = $1
          ORDER BY created_at`,
         [deviceUuid]
       );
@@ -555,7 +566,7 @@ export class DeviceSensorSyncService {
         // If UUID was just generated, update the table
         if (!row.uuid) {
           query(
-            'UPDATE device_sensors SET uuid = $1 WHERE id = $2',
+            'UPDATE endpoints SET uuid = $1 WHERE id = $2',
             [endpointUuid, row.id]
           ).catch(err => logger.error('Failed to update sensor UUID:', err));
         }
@@ -606,7 +617,7 @@ export class DeviceSensorSyncService {
             minSamples: 5
           },
           alerts: { cooldownMs: 300000, maxQueueSize: 1000, minConfidence: 0.7 },
-          systemMetrics: [],  // System metrics (cpu, memory, temp) - managed separately
+          metrics: [],  // Unified metric list (system + sensor) - managed separately
           storage: { retention: 30, minSamples: 5 },
           sensitivity: 5,
           warmupPeriodMs: 900000
@@ -711,7 +722,7 @@ export class DeviceSensorSyncService {
 
       // Update table records with new version
       await query(
-        'UPDATE device_sensors SET config_version = $1, synced_to_config = true WHERE device_uuid = $2',
+        'UPDATE endpoints SET config_version = $1, synced_to_config = true WHERE agent_uuid = $2',
         [newVersion, deviceUuid]
       );
 
@@ -730,7 +741,7 @@ export class DeviceSensorSyncService {
    * This closes the Event Sourcing loop: config → agent → current state → table
    * 
   * CRITICAL: Also handles finalization of devices marked pending_deletion:
-  * - If device is pending_deletion and NOT in agent's current state → remove the row from device_sensors
+  * - If device is pending_deletion and NOT in agent's current state → remove the row from endpoints
    */
   async syncCurrentStateToTable(deviceUuid: string, currentState: any): Promise<void> {
     logger.info(`Reconciling current state from agent for device ${deviceUuid.substring(0, 8)}...`);
@@ -778,8 +789,8 @@ export class DeviceSensorSyncService {
       const agentEndpointByName = new Map(runningEndpoints.map(e => [e.name, e]));
       
       const pendingDeletionResult = await query(
-        `SELECT uuid, name FROM device_sensors 
-         WHERE device_uuid = $1 AND deployment_status = 'pending_deletion'`,
+        `SELECT uuid, name FROM endpoints 
+         WHERE agent_uuid = $1 AND deployment_status = 'pending_deletion'`,
         [deviceUuid]
       );
 
@@ -788,7 +799,7 @@ export class DeviceSensorSyncService {
         const isMissingFromAgentState = !agentEndpoint;
 
         if (isMissingFromAgentState) {
-          logger.info(`Device "${row.name}" is pending_deletion and missing from agent state → removing device_sensors row`);
+          logger.info(`Device "${row.name}" is pending_deletion and missing from agent state → removing endpoints row`);
           await this.markEndpointDeleted(deviceUuid, row.uuid, 'agent-reconciliation');
         } else {
           logger.warn(`Device "${row.name}" is pending_deletion but still present in agent state - waiting for removal`);
@@ -972,22 +983,22 @@ export class DeviceSensorSyncService {
         // Update target state with new endpoints
         targetConfig.endpoints = updatedEndpoints;
 
-        // CRITICAL: Delete parents from device_sensors table by name
+        // CRITICAL: Delete parents from endpoints table by name
         // Parents are identified by having connection.slaveRange and matching parent names we identified
-        logger.info(`Deleting ${parentNamesToDelete.length} parent(s) from device_sensors table: ${parentNamesToDelete.join(', ')}`);
+        logger.info(`Deleting ${parentNamesToDelete.length} parent(s) from endpoints table: ${parentNamesToDelete.join(', ')}`);
         
         for (const parentName of parentNamesToDelete) {
           try {
             const deleteResult = await query(
-              `DELETE FROM device_sensors 
-               WHERE device_uuid = $1 AND name = $2 AND protocol = 'modbus'`,
+              `DELETE FROM endpoints 
+         WHERE agent_uuid = $1 AND name = $2 AND protocol = 'modbus'`,
               [deviceUuid, parentName]
             );
             
             if (deleteResult.rowCount && deleteResult.rowCount > 0) {
-              logger.info(`Deleted discovery parent "${parentName}" from device_sensors (${deleteResult.rowCount} row(s))`);
+              logger.info(`Deleted discovery parent "${parentName}" from endpoints (${deleteResult.rowCount} row(s))`);
             } else {
-              logger.warn(`Discovery parent "${parentName}" not found in device_sensors for deletion`);
+              logger.warn(`Discovery parent "${parentName}" not found in endpoints for deletion`);
             }
           } catch (deleteError) {
             logger.error(`Failed to delete parent device "${parentName}": ${deleteError}`);
@@ -1013,7 +1024,7 @@ export class DeviceSensorSyncService {
 
   /**
    * Get sensor devices from TABLE (deployed state for UI)
-   * Reads from device_sensors table which represents agent's actual running state
+   * Reads from endpoints table which represents agent's actual running state
    * Table is kept in sync via reconciliation when agent reports current state
    * 
    * IMPORTANT: For 'enabled' field, we read from device_target_state.config.sensors
@@ -1035,14 +1046,14 @@ export class DeviceSensorSyncService {
       // Read from TABLE (deployed/running state)
       // Include ALL devices (regular + virtual/sidecar) - agent sees them all
       let sql = `
-        SELECT id, uuid, device_uuid, name, protocol, enabled, poll_interval,
+        SELECT id, uuid, agent_uuid, name, protocol, enabled, poll_interval,
                connection, data_points, metadata, config_version, synced_to_config,
                deployment_status, last_deployed_at, deployment_error, deployment_attempts,
                config_id, created_at, updated_at, created_by, updated_by,
                health_status, health_connected, health_last_poll, health_error_count,
                health_last_error, health_updated_at, last_telemetry_at
-        FROM device_sensors 
-        WHERE device_uuid = $1 AND deployment_status != 'deleted'
+        FROM endpoints 
+         WHERE agent_uuid = $1 AND deployment_status != 'deleted'
       `;
       const params: any[] = [deviceUuid];
 
@@ -1127,11 +1138,11 @@ export class DeviceSensorSyncService {
     logger.info(`Updating device "${endpointIdentifier}" for node ${deviceUuid.substring(0, 8)}...`);
 
     try {
-      // 1. Check if endpoint exists in device_sensors table (source of truth)
+      // 1. Check if endpoint exists in endpoints table (source of truth)
       const tableResult = await query(
         `SELECT id, uuid, name, protocol, enabled, poll_interval, connection, data_points, metadata, location
-         FROM device_sensors 
-         WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)`,
+         FROM endpoints 
+         WHERE agent_uuid = $1 AND (uuid::text = $2 OR name = $2)`,
         [deviceUuid, endpointIdentifier]
       );
 
@@ -1176,7 +1187,7 @@ export class DeviceSensorSyncService {
 
       // 3. Update table directly (source of truth)
       await query(
-        `UPDATE device_sensors SET
+        `UPDATE endpoints SET
            name = $1,
            protocol = $2,
            enabled = $3,
@@ -1188,7 +1199,7 @@ export class DeviceSensorSyncService {
            updated_by = $9,
            updated_at = NOW(),
            synced_to_config = false
-         WHERE device_uuid = $10 AND uuid = $11`,
+         WHERE agent_uuid = $10 AND uuid = $11`,
         [
           updatedEndpoint.name,
           updatedEndpoint.protocol,
@@ -1389,7 +1400,7 @@ export class DeviceSensorSyncService {
     try {
       // 1. Check if sensor exists in database first (may not be in target state config yet)
       const sensorCheck = await query(
-        'SELECT uuid, name FROM device_sensors WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)',
+        'SELECT uuid, name FROM endpoints WHERE agent_uuid = $1 AND (uuid::text = $2 OR name = $2)',
         [deviceUuid, sensorIdentifier]
       );
 
@@ -1400,13 +1411,13 @@ export class DeviceSensorSyncService {
       const sensorToDelete = sensorCheck.rows[0];
 
       // 2. SOFT DELETE: Mark in database (sensor may or may not be in config)
-      // Update deployment_status to 'pending_deletion' in device_sensors table
+      // Update deployment_status to 'pending_deletion' in endpoints table
       await query(
-        `UPDATE device_sensors 
+        `UPDATE endpoints 
          SET deployment_status = 'pending_deletion',
              enabled = false,
              updated_at = NOW()
-         WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)`,
+         WHERE agent_uuid = $1 AND (uuid::text = $2 OR name = $2)`,
         [deviceUuid, sensorIdentifier]
       );
 
@@ -1495,8 +1506,8 @@ export class DeviceSensorSyncService {
     userId?: string
   ): Promise<void> {
     const result = await query(
-      `DELETE FROM device_sensors
-       WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)
+      `DELETE FROM endpoints 
+         WHERE agent_uuid = $1 AND (uuid::text = $2 OR name = $2)
        RETURNING uuid, name`,
       [deviceUuid, sensorIdentifier]
     );
@@ -1519,7 +1530,7 @@ export class DeviceSensorSyncService {
       }
     );
 
-    logger.info(`Deleted sensor "${row.name}" from device_sensors after agent confirmation`);
+    logger.info(`Deleted sensor "${row.name}" from endpoints after agent confirmation`);
   }
 
   /**
@@ -1587,7 +1598,7 @@ export class DeviceSensorSyncService {
 
       // 5. Hard delete from database
       await query(
-        'DELETE FROM device_sensors WHERE device_uuid = $1 AND (uuid::text = $2 OR name = $2)',
+        'DELETE FROM endpoints WHERE agent_uuid = $1 AND (uuid::text = $2 OR name = $2)',
         [deviceUuid, sensorIdentifier]
       );
 
@@ -1635,10 +1646,10 @@ export class DeviceSensorSyncService {
       for (const [endpointName, health] of Object.entries(endpointsHealth)) {
         const { status, connected, lastPoll, errorCount, lastError } = health;
 
-        // Update health columns in device_sensors table (match by name)
+        // Update health columns in endpoints table (match by name)
         // Note: Store actual boolean state even for disabled sensors (needed for out-of-sync detection)
         const result = await query(
-          `UPDATE device_sensors SET
+          `UPDATE endpoints SET
              health_status = $1,
              health_connected = $2,
              health_last_poll = $3,
@@ -1649,7 +1660,7 @@ export class DeviceSensorSyncService {
                WHEN deployment_status IN ('pending', 'draft') THEN 'deployed'
                ELSE deployment_status
              END
-           WHERE device_uuid = $6 AND name = $7`,
+           WHERE agent_uuid = $6 AND name = $7`,
           [
             status,
             connected, // Always store boolean value (true/false), not null
@@ -1662,7 +1673,7 @@ export class DeviceSensorSyncService {
         );
 
         if (result.rowCount === 0) {
-          logger.warn(`Endpoint "${endpointName}" not found in device_sensors table`);
+          logger.warn(`Endpoint "${endpointName}" not found in endpoints table`);
         }
       }
 

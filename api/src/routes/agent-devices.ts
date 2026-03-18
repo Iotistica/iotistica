@@ -4,7 +4,7 @@
  * 
  * Pattern: Dual-write with sync service
  * - Config in device_target_state remains source of truth for agent
- * - device_sensors table for efficient querying/display
+ * - endpoints table for efficient querying/display
  * 
  * CRUD Endpoints:
  * - GET /api/v1/devices/:uuid/sensors - List all sensors
@@ -33,7 +33,7 @@ const virtualDeviceManager = new VirtualDeviceManager();
  * List all sensors for a device
  * GET /api/v1/devices/:uuid/sensors
  * 
- * Reads from device_sensors table (faster, allows filtering/sorting)
+ * Reads from endpoints table (faster, allows filtering/sorting)
  */
 router.get('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
   try {
@@ -268,7 +268,7 @@ router.put('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
  * DELETE /api/v1/devices/:uuid/sensors/:name
  * 
  * Query Parameters:
- * - hard=true: Hard delete immediately (remove from target state config + device_sensors)
+ * - hard=true: Hard delete immediately (remove from target state config + endpoints)
  * - hard=false (default): Soft delete (mark pending_deletion, wait for agent reconciliation)
  */
 router.delete('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
@@ -320,7 +320,7 @@ router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
     const { uuid } = req.params;
     const { protocolType } = req.query;
 
-    let whereClause = 'device_uuid = $1';
+    let whereClause = 'agent_uuid = $1';
     const params: any[] = [uuid];
 
     if (protocolType) {
@@ -347,7 +347,7 @@ router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
         ds.health_updated_at,
         ds.last_telemetry_at,
         ds.location
-      FROM device_sensors ds
+      FROM endpoints ds
       WHERE ${whereClause}
       ORDER BY ds.protocol, ds.name`,
       params
@@ -787,7 +787,7 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
  * }
  * 
  * Flow:
- * 1. Creates record in device_sensors table with virtual=true metadata
+ * 1. Creates record in endpoints table with virtual=true metadata
  * 2. Auto-assigns port (502, 503, 504... for Modbus)
  * 3. If parent is K8s virtual agent, patches Deployment to add sidecar container
  * 4. If parent is physical agent, agent will reconcile sidecar on next state sync
@@ -898,7 +898,7 @@ router.get('/devices/:uuid/virtual-devices', jwtAuth, async (req, res) => {
  * DELETE /api/v1/devices/:uuid/virtual-devices/:virtualDeviceUuid
  * 
  * Flow:
- * 1. Deletes record from device_sensors table
+ * 1. Deletes record from endpoints table
  * 2. If parent is K8s virtual agent, patches Deployment to remove sidecar
  * 3. If parent is physical agent, agent will remove sidecar on next state sync
  */

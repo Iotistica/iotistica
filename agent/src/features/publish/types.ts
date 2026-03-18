@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Sensor State enumeration
  */
-export enum SensorState {
+export enum DeviceState {
   DISCONNECTED = 'DISCONNECTED',
   CONNECTING = 'CONNECTING',
   CONNECTED = 'CONNECTED',
@@ -13,7 +13,7 @@ export enum SensorState {
 /**
  * Sensor Configuration Schema
  */
-export const SensorConfigSchema = z.object({
+export const DeviceConfigSchema = z.object({
   name: z.string().optional(),
   enabled: z.boolean().optional().default(true),
   addr: z.string(),
@@ -28,17 +28,17 @@ export const SensorConfigSchema = z.object({
   heartbeatTimeSec: z.number().optional().default(300)
 });
 
-export type SensorConfig = z.infer<typeof SensorConfigSchema>;
+export type DeviceConfig = z.infer<typeof DeviceConfigSchema>;
 
 /**
  * Sensor Publish Feature Configuration Schema
  */
-export const SensorPublishConfigSchema = z.object({
+export const DevicePublishConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  endpoints: z.array(SensorConfigSchema).max(10)
+  endpoints: z.array(DeviceConfigSchema).max(10)
 });
 
-export type SensorPublishConfig = z.infer<typeof SensorPublishConfigSchema> & {
+export type DevicePublishConfig = z.infer<typeof DevicePublishConfigSchema> & {
   enabled: boolean; // Make sure it extends FeatureConfig
 };
 
@@ -64,7 +64,7 @@ export interface Logger {
 /**
  * Sensor Statistics
  */
-export interface SensorStats {
+export interface DeviceStats {
   messagesReceived: number;
   messagesPublished: number;
   bytesReceived: number;

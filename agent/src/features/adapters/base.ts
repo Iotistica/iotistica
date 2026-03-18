@@ -21,6 +21,9 @@ import { DeviceEndpoint } from '../../db/models/endpoint.model.js';
  */
 export interface GenericDeviceConfig {
   name: string;
+  /** Optional human-readable label. When set (via config metadata or auto-discovered from the
+   * protocol server) this overrides the raw config `name` as the display name in payloads. */
+  displayName?: string;
   protocol: string;
   enabled: boolean;
   pollInterval: number;

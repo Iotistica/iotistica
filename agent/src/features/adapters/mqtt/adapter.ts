@@ -45,6 +45,8 @@ export class MqttAdapter extends EventEmitter {
   private lwtDeviceIdToName = new Map<string, string>();
   private brokerStatusTopic: string | null = null;
   private deviceUuid: string | null = null;
+  // Optional human-readable labels keyed by topic (resolve via subscriptions map at publish time)
+  private displayNamesByTopic = new Map<string, string>();
 
   constructor(config: MqttAdapterConfig, logger: Logger, deviceUuid?: string) {
     super();
@@ -55,6 +57,11 @@ export class MqttAdapter extends EventEmitter {
     for (const device of this.config.devices) {
       if (device.enabled) {
         this.subscriptions.set(device.topic, device);
+      }
+
+      // Cache displayName by topic for fast lookup in enqueueData
+      if (device.displayName && device.displayName.trim()) {
+        this.displayNamesByTopic.set(device.topic, device.displayName.trim());
       }
 
       const lwtDeviceId = device.deviceId?.trim();
@@ -508,7 +515,13 @@ export class MqttAdapter extends EventEmitter {
       return;
     }
 
-    this.emitQueue.push(points);
+    // Attach resolvedDisplayName if a config override exists for this topic
+    const resolvedDisplayName = this.displayNamesByTopic.get(topic);
+    const enriched = resolvedDisplayName
+      ? points.map(p => ({ ...p, resolvedDisplayName }))
+      : points;
+
+    this.emitQueue.push(enriched);
     void this.processEmitQueue();
   }
 

@@ -48,14 +48,14 @@ This change affects **6 major components** across agent and API:
 
 **API-side** (2 components):
 5. **State Sync Handler** - Process device state reports from agent
-6. **PostgreSQL Schema** - `device_sensors` table metadata column
+6. **PostgreSQL Schema** - `endpoints` table metadata column
 
 **Note**: MQTT Publishing is **NOT impacted** - all connections write to the same protocol-level socket (`/tmp/modbus.sock`) and publish to the same topic. Connection metadata is transparent to the publishing layer.
 
 ### Risks
 - **Medium**: Adapter configuration mismatch between discovery output and expected input
 - **Medium**: State sync may not preserve connection metadata (agent + API)
-- **Low**: API schema migration for `device_sensors` table (additive column)
+- **Low**: API schema migration for `endpoints` table (additive column)
 - **Low**: Performance impact of sequential multi-connection scanning
 
 ### Recommendation
@@ -234,12 +234,12 @@ CREATE TABLE endpoints (
 
 **Current Behavior**:
 - Agent sends state reports to cloud API: `PATCH /api/cloud/devices/:uuid/state`
-- API updates `device_sensors` table in PostgreSQL
+- API updates `endpoints` table in PostgreSQL
 - Syncs endpoint data: name, protocol, connection, data_points, metadata
 
-**Current Schema** (`device_sensors` table):
+**Current Schema** (`endpoints` table):
 ```sql
-CREATE TABLE device_sensors (
+CREATE TABLE endpoints (
   id SERIAL PRIMARY KEY,
   device_uuid UUID NOT NULL,
   name VARCHAR(255) NOT NULL,
@@ -260,7 +260,7 @@ CREATE TABLE device_sensors (
 **Impact**:
 If API doesn't preserve `connectionName`, metadata will be lost when:
 1. Agent reports state to API
-2. API updates `device_sensors` table
+2. API updates `endpoints` table
 3. Dashboard queries devices (loses connection context)
 
 ---
@@ -842,13 +842,13 @@ If users need connection-aware filtering, could add optional `connectionName` fi
          │
          ▼
 ┌─────────────────┐
-│ API State       │ ◄── Updates device_sensors table
+│ API State       │ ◄── Updates endpoints table
 │ Handler         │     ⚠️ Must preserve metadata.connectionName
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ PostgreSQL      │ ◄── device_sensors table (JSONB metadata)
+│ PostgreSQL      │ ◄── endpoints table (JSONB metadata)
 │ (Cloud DB)      │
 └─────────────────┘
 ```
@@ -945,7 +945,7 @@ If users need connection-aware filtering, could add optional `connectionName` fi
          ▼
 ┌─────────────────┐
 │ API State       │ ◄── Preserves metadata.connectionName
-│ Handler         │     Updates device_sensors table
+│ Handler         │     Updates endpoints table
 └────────┬────────┘
          │
          ▼

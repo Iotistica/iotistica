@@ -44,7 +44,15 @@ class ValueUpdater:
                 
                 # Write to OPC UA node
                 await device.node.write_value(value)
-                
+
+                logger.info(
+                    f"[OPC UA] Published: device={device.name!r}"
+                    f"  folder={device.folder!r}"
+                    f"  uuid={device.uuid!r}"
+                    f"  value={value}"
+                    f"  unit={device.unit!r}"
+                )
+
             except Exception as e:
                 logger.error(f"Error updating device {device.name}: {e}")
     

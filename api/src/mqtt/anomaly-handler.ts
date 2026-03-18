@@ -16,10 +16,23 @@ import logger from '../utils/logger';
 /**
  * Anomaly event from edge device (matches agent schema)
  */
+// Regex: metric names are stored as "{endpoint_uuid}_{metric_suffix}" for non-system metrics
+const ENDPOINT_METRIC_REGEX = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_/i;
+
+/**
+ * Extract the device/endpoint UUID from a metric name.
+ * Returns the UUID prefix if metric matches "{uuid}_{suffix}", otherwise null.
+ */
+function extractDeviceUuidFromMetric(metric: string): string | null {
+	const match = metric.match(ENDPOINT_METRIC_REGEX);
+	return match ? match[1] : null;
+}
+
 export interface AnomalyEvent {
 	msgId?: string;
 	agentUuid: string;          // Edge gateway UUID (infrastructure tracking)
 	deviceName: string;         // Monitored device name (e.g., 'COMAP-Main-Controller')
+	deviceUuid?: string;        // Per-sensor/endpoint UUID (extracted from metric name)
 	deviceType: 'modbus' | 'opcua' | 'bacnet' | 'mqtt' | 'system'; // Protocol/source type
 	deviceState?: 'running' | 'idle' | 'fault' | 'unknown'; // Canonical operational state
 	metric: string;
@@ -59,6 +72,7 @@ export interface Incident {
 	metric: string;
 	severity: 'info' | 'warning' | 'critical';
 	deviceName: string;         // Primary device name
+	deviceUuid: string | null;  // Per-sensor/endpoint UUID (from metric name)
 	deviceType: string;         // Protocol/source type
 	affectedDevices: string[];  // Array of device names
 	affectedAgents: string[];   // Array of agent UUIDs
@@ -218,6 +232,7 @@ export class AnomalyEventHandler {
 				msg_id,
 				agent_uuid,
 				device_name,
+				device_uuid,
 				device_type,
 				metric,
 				timestamp_ms,
@@ -238,11 +253,12 @@ export class AnomalyEventHandler {
 				cooldown_sec,
 				first_seen,
 				created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW())`,
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW())`,
 			[
 				event.msgId || randomUUID(),
 				event.agentUuid,
 				event.deviceName,
+				extractDeviceUuidFromMetric(event.metric),
 				event.deviceType,
 				event.metric,
 				event.timestampMs,
@@ -315,6 +331,7 @@ export class AnomalyEventHandler {
 				metric: event.metric,
 				severity: event.severity,
 				deviceName: event.deviceName,
+				deviceUuid: extractDeviceUuidFromMetric(event.metric),
 				deviceType: event.deviceType,
 				affectedDevices: [event.deviceName],
 				affectedAgents: [event.agentUuid],
@@ -344,6 +361,9 @@ export class AnomalyEventHandler {
 		}
 		if (!incident.deviceType) {
 			incident.deviceType = event.deviceType;
+		}
+		if (incident.deviceUuid === undefined) {
+			incident.deviceUuid = extractDeviceUuidFromMetric(event.metric);
 		}
 		if (!incident.affectedAgents) {
 			incident.affectedAgents = [event.agentUuid];
@@ -409,6 +429,7 @@ export class AnomalyEventHandler {
 				metric,
 				severity,
 				device_name,
+				device_uuid,
 				device_type,
 				affected_devices,
 				affected_agents,
@@ -420,13 +441,14 @@ export class AnomalyEventHandler {
 				status,
 				created_at,
 				updated_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())`,
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())`,
 			[
 				incident.incidentId,
 				incident.fingerprint,
 				incident.metric,
 				incident.severity,
 				incident.deviceName,
+				incident.deviceUuid,
 				incident.deviceType,
 				JSON.stringify(incident.affectedDevices),
 				JSON.stringify(incident.affectedAgents),
@@ -448,20 +470,22 @@ export class AnomalyEventHandler {
 			`UPDATE anomaly_incidents SET
 				severity = $2,
 				device_name = $3,
-				device_type = $4,
-				affected_devices = $5,
-				affected_agents = $6,
-				last_seen = $7,
-				max_anomaly_score = $8,
-				max_confidence = $9,
-				event_count = $10,
-				status = $11,
+				device_uuid = $4,
+				device_type = $5,
+				affected_devices = $6,
+				affected_agents = $7,
+				last_seen = $8,
+				max_anomaly_score = $9,
+				max_confidence = $10,
+				event_count = $11,
+				status = $12,
 				updated_at = NOW()
 			WHERE incident_id = $1`,
 			[
 				incident.incidentId,
 				incident.severity,
 				incident.deviceName,
+				incident.deviceUuid,
 				incident.deviceType,
 				JSON.stringify(incident.affectedDevices),
 				JSON.stringify(incident.affectedAgents),
@@ -515,16 +539,18 @@ export class AnomalyEventHandler {
 				incident_id,
 				severity,
 				metric,
+				device_uuid,
 				affected_devices,
 				max_anomaly_score,
 				message,
 				created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
 			[
 				randomUUID(),
 				incident.incidentId,
 				incident.severity,
 				incident.metric,
+				incident.deviceUuid,
 				JSON.stringify(incident.affectedDevices),
 				incident.maxAnomalyScore,
 				`Anomaly detected: ${incident.metric} in state ${event.deviceState || 'unknown'} on ${incident.affectedDevices.length} device(s). Score: ${incident.maxAnomalyScore.toFixed(3)}`,

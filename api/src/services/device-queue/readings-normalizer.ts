@@ -46,36 +46,27 @@ export function normalizeQuality(quality: any): string {
 
 /**
  * Extract identity fields from a reading or combined payload.
- * endpoint_uuid: explicit field first, then device_uuid / deviceUuid (OPC UA / Modbus send endpoint UUID as device_uuid).
- * deviceName: snake_case first, then camelCase fallback.
+ * Canonical wire format from the agent:
+ *   endpoint_uuid  (snake_case) — explicit endpoint UUID, optional
+ *   device_uuid    (snake_case) — stable asset device UUID
+ *   deviceName     (camelCase)  — human-readable device name
  */
 export function extractDeviceIdentity(reading: any): DeviceIdentity {
-  const pick = (...values: any[]): string | undefined => {
-    for (const value of values) {
-      if (typeof value !== 'string') continue;
-      const trimmed = value.trim();
-      if (trimmed.length > 0) return trimmed;
-    }
-    return undefined;
+  const pickUuid = (value: any): string | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'undefined' || trimmed.toLowerCase() === 'null') return undefined;
+    return UUID_REGEX.test(trimmed) ? trimmed : undefined;
   };
 
-  const pickUuid = (...values: any[]): string | undefined => {
-    for (const value of values) {
-      if (typeof value !== 'string') continue;
-      const trimmed = value.trim();
-      if (!trimmed || trimmed.toLowerCase() === 'undefined' || trimmed.toLowerCase() === 'null') continue;
-      if (UUID_REGEX.test(trimmed)) return trimmed;
-    }
-    return undefined;
-  };
+  const deviceName = typeof reading?.deviceName === 'string' ? reading.deviceName.trim() || undefined : undefined;
 
   return {
-    endpointUuid: pickUuid(
-      reading?.endpoint_uuid,
-      reading?.device_uuid,   // OPC UA / Modbus publish their sensor endpoint UUID here
-      reading?.deviceUuid,
-    ),
-    deviceName: pick(reading?.device_name, reading?.deviceName),
+    // Adapters send the endpoint UUID as device_uuid (via enrichWithEndpointUuid).
+    // Fall back to device_uuid when endpoint_uuid is not explicitly present.
+    endpointUuid: pickUuid(reading?.endpoint_uuid) ?? pickUuid(reading?.device_uuid),
+    deviceUuid: pickUuid(reading?.device_uuid),
+    deviceName,
   };
 }
 
@@ -86,16 +77,14 @@ export function buildExtraPayload(
   identityContext?: Record<string, any>,
 ): Record<string, any> {
   const combined = { ...(identityContext || {}), ...(payload || {}) };
-  const { endpointUuid, deviceName } = extractDeviceIdentity(combined);
+  const { endpointUuid, deviceUuid, deviceName } = extractDeviceIdentity(combined);
 
   const extra = {
     endpoint_uuid: endpointUuid ?? null,
-    device_uuid: entry.deviceUuid ?? null,
+    device_uuid: deviceUuid ?? null,
     device_name: deviceName ?? null,
     ingested_at: ingestedAt.toISOString(),
   };
-
-  logger.debug('buildExtraPayload', { extra });
 
   return extra;
 }
@@ -127,7 +116,7 @@ export function normalizeReading(
   }
 
   return {
-    device_uuid: entry.deviceUuid,
+    agent_uuid: entry.deviceUuid,
     metric_name: reading.metric || reading.nodeName || reading.name || entry.sensorName,
     value: typeof reading.value === 'number' ? reading.value : null,
     quality: normalizeQuality(reading.quality),
@@ -149,7 +138,9 @@ function expandFormat1(entry: SensorDataEntry, protocol: string, ingestedAt: Dat
         reading, entry, protocol, ingestedAt,
         message.timestamp, { ...(entry.data || {}), ...(message || {}) },
       );
-      if (normalized) readings.push(normalized);
+      if (normalized) {
+        readings.push(normalized);
+      }
     });
   });
   return readings;
@@ -171,7 +162,7 @@ function expandFormat3(entry: SensorDataEntry, protocol: string, ingestedAt: Dat
     ? (entry.data.value ?? entry.data.rawValue ?? null)
     : entry.data;
   return [{
-    device_uuid: entry.deviceUuid,
+    agent_uuid: entry.deviceUuid,
     metric_name: entry.sensorName,
     value: typeof value === 'number' ? value : null,
     quality: normalizeQuality(entry.data?.quality),
