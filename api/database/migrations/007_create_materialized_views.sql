@@ -11,6 +11,8 @@
 --
 -- Dependencies: readings hypertable (006), anomaly_events table (110), devices table
 
+SET search_path = public;
+
 -- ============================================================================
 -- SECTION 1: TRANSACTIONAL MATERIALIZED VIEW DEFINITIONS
 -- ============================================================================
@@ -25,8 +27,8 @@ BEGIN;
 -- ~50ms refresh per 1000 unique metric rows
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS latest_readings AS
-SELECT DISTINCT ON (device_uuid, extra->>'deviceName', metric_name)
-    r.device_uuid as agent_uuid,
+SELECT DISTINCT ON (agent_uuid, extra->>'deviceName', metric_name)
+    r.agent_uuid as agent_uuid,
     r.extra->>'deviceName' as device_name,
     r.metric_name,
     r.time,
@@ -42,9 +44,9 @@ SELECT DISTINCT ON (device_uuid, extra->>'deviceName', metric_name)
     d.uuid as agent_full_uuid,
     d.is_online as agent_is_online
 FROM readings r
-LEFT JOIN devices d ON r.device_uuid = d.uuid
+LEFT JOIN devices d ON r.agent_uuid = d.uuid
 WHERE r.time > NOW() - INTERVAL '1 hour'  -- Only recent data for performance
-ORDER BY device_uuid, extra->>'deviceName', metric_name, time DESC;
+ORDER BY agent_uuid, extra->>'deviceName', metric_name, time DESC;
 
 -- Indexes for fast lookups
 CREATE UNIQUE INDEX IF NOT EXISTS idx_latest_readings_unique 
@@ -68,7 +70,7 @@ COMMENT ON MATERIALIZED VIEW latest_readings
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS metric_catalog AS
 SELECT 
-    r.device_uuid as agent_uuid,
+    r.agent_uuid as agent_uuid,
     d.device_name as agent_name,
     r.extra->>'deviceName' as device_name,
     r.protocol,
@@ -88,11 +90,11 @@ SELECT
     MAX(r.anomaly_score) as max_anomaly_score,
     COUNT(*) FILTER (WHERE r.anomaly_score > r.anomaly_threshold) as anomaly_count
 FROM readings r
-LEFT JOIN devices d ON r.device_uuid = d.uuid
+LEFT JOIN devices d ON r.agent_uuid = d.uuid
 WHERE r.time > NOW() - INTERVAL '7 days'
   AND r.extra->>'deviceName' IS NOT NULL  -- Only include readings with device name
 GROUP BY 
-    r.device_uuid,
+    r.agent_uuid,
     d.device_name,
     r.extra->>'deviceName',
     r.protocol,
@@ -123,7 +125,7 @@ COMMENT ON MATERIALIZED VIEW metric_catalog
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS endpoint_devices AS
 SELECT DISTINCT
-    r.device_uuid as agent_uuid,
+    r.agent_uuid as agent_uuid,
     d.device_name as agent_name,
     d.is_online as agent_is_online,
     r.extra->>'deviceName' as device_name,
@@ -135,11 +137,11 @@ SELECT DISTINCT
     -- Quality summary
     (SUM(CASE WHEN r.quality = 'good' THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0) * 100) as overall_quality_percentage
 FROM readings r
-LEFT JOIN devices d ON r.device_uuid = d.uuid
+LEFT JOIN devices d ON r.agent_uuid = d.uuid
 WHERE r.time > NOW() - INTERVAL '7 days'
   AND r.extra->>'deviceName' IS NOT NULL  -- Filter out readings without device name
 GROUP BY 
-    r.device_uuid,
+    r.agent_uuid,
     d.device_name,
     d.is_online,
     r.extra->>'deviceName',

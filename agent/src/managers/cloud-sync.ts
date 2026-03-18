@@ -1814,8 +1814,8 @@ export class CloudSync extends EventEmitter {
 						deviceDiff[key] = newValue;
 					}
 				}
-				// Deep comparison for config object (sensors, features, settings)
-				// This prevents sending verbose sensor configs on every report
+				// Deep comparison for config object (devices, features, settings)
+				// This prevents sending verbose device configs on every report
 				// Use stable stringify to avoid key order issues
 				else if (key === 'config') {
 					const oldConfigStr = stableStringify(oldValue || {});

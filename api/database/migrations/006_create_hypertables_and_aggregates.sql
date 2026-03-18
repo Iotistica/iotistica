@@ -1,3 +1,4 @@
+-- NO TRANSACTION
 -- Migration: Create optimized readings table (TimescaleDB hypertable) and continuous aggregates
 -- 
 -- Purpose: Core time-series telemetry storage with automatic aggregation layers
@@ -9,6 +10,8 @@
 --  5. Refresh policies (background auto-refresh for all aggregates)
 -- 
 -- Dependencies: TimescaleDB extension (created in migration 103)
+
+SET search_path = public;
 
 -- ============================================================================
 -- 0. TIMESCALE PREFLIGHT CLEANUP (ORPHAN COMPRESSED TABLES)
@@ -112,7 +115,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS readings (
   time timestamptz NOT NULL,
-  device_uuid uuid NOT NULL,
+  agent_uuid uuid NOT NULL,
   metric_name text NOT NULL,
   value double precision,
   quality text DEFAULT 'good',
@@ -122,12 +125,12 @@ CREATE TABLE IF NOT EXISTS readings (
   anomaly_score double precision,
   anomaly_threshold double precision,
   
-  PRIMARY KEY (device_uuid, metric_name, time)
+  PRIMARY KEY (agent_uuid, metric_name, time)
 );
 
 COMMENT ON TABLE readings IS 'Normalized time-series sensor data (TimescaleDB hypertable with 1-day chunks)';
 COMMENT ON COLUMN readings.time IS 'Timestamp for time-series bucketing';
-COMMENT ON COLUMN readings.device_uuid IS 'UUID of the agent/device collecting the metric';
+COMMENT ON COLUMN readings.agent_uuid IS 'UUID of the agent/device collecting the metric';
 COMMENT ON COLUMN readings.metric_name IS 'Modbus register, OPC UA NodeId, MQTT topic, or sensor name';
 COMMENT ON COLUMN readings.value IS 'Numeric sensor reading';
 COMMENT ON COLUMN readings.quality IS 'Data quality: good, bad, uncertain';
@@ -188,7 +191,7 @@ SELECT create_hypertable(
 
 -- Query by device + time range (most common pattern)
 CREATE INDEX IF NOT EXISTS idx_readings_device_time 
-  ON readings (device_uuid, time DESC);
+  ON readings (agent_uuid, time DESC);
 
 -- Query by metric across devices
 CREATE INDEX IF NOT EXISTS idx_readings_metric_time 
@@ -209,7 +212,7 @@ CREATE INDEX IF NOT EXISTS idx_readings_extra
 
 ALTER TABLE readings SET (
   timescaledb.compress,
-  timescaledb.compress_segmentby = 'device_uuid, metric_name',
+  timescaledb.compress_segmentby = 'agent_uuid, metric_name',
   timescaledb.compress_orderby = 'time DESC'
 );
 
@@ -279,7 +282,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS readings_1m
 WITH (timescaledb.continuous) AS
 SELECT 
     time_bucket('1 minute', time) AS bucket,
-    device_uuid as agent_uuid,
+    agent_uuid as agent_uuid,
     extra->>'deviceName' as device_name,
     protocol,
     metric_name,
@@ -294,7 +297,7 @@ SELECT
     MAX(anomaly_score) as max_anomaly_score,
     AVG(anomaly_score) FILTER (WHERE anomaly_score IS NOT NULL) as avg_anomaly_score
 FROM readings
-GROUP BY bucket, device_uuid, extra->>'deviceName', protocol, metric_name, unit
+GROUP BY bucket, agent_uuid, extra->>'deviceName', protocol, metric_name, unit
 WITH NO DATA;
 
 -- ============================================================================
@@ -307,7 +310,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS readings_1h
 WITH (timescaledb.continuous) AS
 SELECT 
     time_bucket('1 hour', time) AS bucket,
-    device_uuid as agent_uuid,
+    agent_uuid as agent_uuid,
     extra->>'deviceName' as device_name,
     protocol,
     metric_name,
@@ -320,7 +323,7 @@ SELECT
     -- Quality ratio (0-1)
     SUM(CASE WHEN quality = 'good' THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0) as quality_ratio
 FROM readings
-GROUP BY bucket, device_uuid, extra->>'deviceName', protocol, metric_name, unit
+GROUP BY bucket, agent_uuid, extra->>'deviceName', protocol, metric_name, unit
 WITH NO DATA;
 
 -- ============================================================================
@@ -333,7 +336,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS readings_hourly
 WITH (timescaledb.continuous) AS
 SELECT
   time_bucket('1 hour', time) AS bucket,
-  device_uuid,
+  agent_uuid,
   metric_name,
   protocol,
   AVG(value) AS avg_value,
@@ -346,7 +349,7 @@ SELECT
   FIRST(value, time) AS first_value,
   FIRST(time, time) AS first_time
 FROM readings
-GROUP BY bucket, device_uuid, metric_name, protocol
+GROUP BY bucket, agent_uuid, metric_name, protocol
 WITH NO DATA;
 
 -- ============================================================================
@@ -359,7 +362,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS readings_daily
 WITH (timescaledb.continuous) AS
 SELECT
   time_bucket('1 day', time) AS bucket,
-  device_uuid,
+  agent_uuid,
   metric_name,
   protocol,
   AVG(value) AS avg_value,
@@ -368,7 +371,7 @@ SELECT
   STDDEV(value) AS stddev_value,
   COUNT(*) AS sample_count
 FROM readings
-GROUP BY bucket, device_uuid, metric_name, protocol
+GROUP BY bucket, agent_uuid, metric_name, protocol
 WITH NO DATA;
 
 -- ============================================================================

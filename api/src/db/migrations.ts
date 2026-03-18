@@ -296,6 +296,9 @@ async function applyMigration(migration: Migration): Promise<void> {
           // Execute migration SQL
           await client.query(executableSql);
 
+          // Reset search_path — migration SQL (e.g. pg_dump output) may have cleared it
+          await client.query("SET search_path = public");
+
           // Record migration as applied
           const executionTime = Date.now() - startTime;
           await client.query(
@@ -317,6 +320,9 @@ async function applyMigration(migration: Migration): Promise<void> {
 
           await client.query('SET statement_timeout = 600000');
           await client.query(executableSql);
+
+          // Reset search_path — migration SQL (e.g. pg_dump output) may have cleared it
+          await client.query("SET search_path = public");
 
           const executionTime = Date.now() - startTime;
           await client.query(

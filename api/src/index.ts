@@ -524,29 +524,21 @@ async function startServer() {
     // Migration flow:
     // 1) Connect DB
     // 2) Check schema_migrations status
-    // 3) If outdated, start async migration and continue startup immediately
-    // 4) Serve requests without waiting for migration completion
+    // 3) If outdated, run migrations synchronously before continuing startup
+    // 4) Only serve requests after migrations are complete
     if (process.env.DB_SKIP_MIGRATIONS !== 'true') {
       const { getMigrationStatus, runMigrations } = await import('./db/migrations');
       const migrationStatus = await getMigrationStatus();
 
       if (migrationStatus.pending.length > 0) {
-        logger.warn('Database schema is outdated - starting migrations in background', {
+        logger.warn('Database schema is outdated - running migrations before startup', {
           appliedMigrations: migrationStatus.applied.length,
           pendingMigrations: migrationStatus.pending.length,
           totalMigrations: migrationStatus.total,
         });
 
-        void (async () => {
-          try {
-            await runMigrations();
-            logger.info('Background database migrations completed successfully');
-          } catch (migrationError) {
-            logger.error('Background database migrations failed', {
-              error: migrationError instanceof Error ? migrationError.message : String(migrationError),
-            });
-          }
-        })();
+        await runMigrations();
+        logger.info('Database migrations completed successfully');
       } else {
         logger.info('Database schema is up to date (no pending migrations)');
       }

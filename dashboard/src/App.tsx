@@ -1427,7 +1427,10 @@ export default function App() {
               <div className="text-center max-w-md px-4">
                 <p className="text-xl font-semibold text-foreground mb-2">No Agents Found</p>
                 <p className="text-muted-foreground mb-4">Get started by adding your first agent.</p>
-                <Button onClick={handleAddDevice}>Add Agent</Button>
+                <div className="flex gap-2 justify-center">
+                  <Button onClick={() => handleGlobalViewChange('fleets')}>Add Fleet</Button>
+                  <Button variant="outline" onClick={handleAddDevice}>Add Agent</Button>
+                </div>
               </div>
             </div>
           ) : !selectedDevice ? (
