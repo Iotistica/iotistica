@@ -406,14 +406,16 @@ export interface TargetState {
 			maxLogs?: number;
 		};
 		features?: {
-			enableCloudJobs?: boolean;
-			enableJobEngine?: boolean;
 			enableDeviceJobs?: boolean;
+			enableAnomalyDetection?: boolean;
+			enableDeviceRemoteAccess?: boolean;
+			enableDeviceSensorPublish?: boolean;
+
+			// Legacy aliases (backward compatibility)
+			enableSensorPublish?: boolean;
+			enableJobEngine?: boolean;
 			enableShadow?: boolean;
 			enableLogs?: boolean;
-			
-			// Protocol adapter features
-			enableSensorPublish?: boolean;
 		};
 		logging?: {
 			level?: string;

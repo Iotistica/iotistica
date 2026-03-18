@@ -84,9 +84,6 @@ export async function configureAnomalyFeed(ctx: AgentInitContext): Promise<void>
 	const { configureAnomalyFeed: configureSystemMetrics, getSystemMetrics } = await import('../system/metrics.js');
 	configureSystemMetrics(ctx.anomalyService);
 
-	const { configureAnomalyFeed: configureSensorAnomaly } = await import('../features/publish/manager.js');
-	configureSensorAnomaly(ctx.anomalyService);
-
 	ctx.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {
 		component: LogComponents.agent,
 	});

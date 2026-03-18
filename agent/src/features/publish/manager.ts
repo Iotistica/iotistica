@@ -12,18 +12,6 @@ import { DeviceConnection } from './connection.js';
 import { PublishStats } from './stats.js';
 import { HeartbeatManager } from './heartbeat.js';
 
-// ============================================================================
-// MODULE-LEVEL ANOMALY SERVICE  backward compat for ai.ts:
-//   const { configureAnomalyFeed } = await import('../features/publish/manager.js');
-//   configureAnomalyFeed(anomalyService);
-// ============================================================================
-
-let anomalyService: AnomalyDetectionService | undefined;
-
-export function configureAnomalyFeed(service: AnomalyDetectionService | undefined): void {
-  anomalyService = service;
-}
-
 // Adaptive batch safety limits (calculated once at module load)
 const MAX_BATCH_MESSAGES = 10000;
 const MAX_BATCH_BYTES = (() => {
@@ -36,6 +24,8 @@ const MAX_BATCH_BYTES = (() => {
 // ============================================================================
 
 export class PublishManager extends EventEmitter {
+  private messageBufferModel?: typeof import('../../db/models/message-buffer.model.js').MessageBufferModel;
+  private messageBufferModelPromise?: Promise<typeof import('../../db/models/message-buffer.model.js').MessageBufferModel>;
   private readonly batcher: MessageBatcher;
   private readonly connection: DeviceConnection;
   private readonly compressor: PayloadCompressor;
@@ -45,6 +35,38 @@ export class PublishManager extends EventEmitter {
   private heartbeat?: HeartbeatManager;
   private bufferTimer: NodeJS.Timeout | null = null;
   private needStop = false;
+  private publishing = false;
+  private connectionHandlersAttached = false;
+
+  private readonly onConnected = (): void => {
+    if (this.needStop) return;
+    this.stats.recordConnected();
+    if (this.config.bufferTimeMs > 0) this.startBufferTimer();
+    this.emit('connected');
+  };
+
+  private readonly onData = (buf: Buffer): void => {
+    if (this.needStop) return;
+    this.stats.data.bytesReceived += buf.length;
+    this.batcher.appendData(buf);
+  };
+
+  private readonly onConnectionError = (err: Error): void => {
+    if (this.needStop) return;
+    this.stats.recordError(err.message);
+    this.emit('error', err);
+  };
+
+  private readonly onDisconnected = (): void => {
+    if (this.needStop) return;
+    if (this.batcher.messageCount > 0) this.publishBatch();
+    this.emit('disconnected');
+  };
+
+  private readonly onReconnecting = (): void => {
+    if (this.needStop) return;
+    this.stats.data.reconnectAttempts++;
+  };
 
   constructor(
     private readonly config: DeviceConfig,
@@ -56,6 +78,7 @@ export class PublishManager extends EventEmitter {
     useKeyCompactionPoc = false,
     useDeflatePoc = false,
     private readonly protocol?: string,
+    private readonly anomalyService?: AnomalyDetectionService,
   ) {
     super();
 
@@ -66,32 +89,11 @@ export class PublishManager extends EventEmitter {
       mqttConnection, dictionaryManager, logger, protocol, config.name,
     );
     this.stats = new PublishStats();
-    this.feed = new AnomalyFeed(() => anomalyService, deviceUuid, protocol, logger);
-    this.enricher = new AnomalyEnricher(() => anomalyService, deviceUuid, protocol, logger);
+    this.feed = new AnomalyFeed(() => this.anomalyService, deviceUuid, protocol, logger);
+    this.enricher = new AnomalyEnricher(() => this.anomalyService, deviceUuid, protocol, logger);
 
     this.batcher.on('flush', () => { this.publishBatch(); });
     this.batcher.on('message-added', () => { this.stats.data.messagesReceived++; });
-
-    this.connection.on('connected', () => {
-      this.stats.recordConnected();
-      if (config.bufferTimeMs > 0) this.startBufferTimer();
-      this.emit('connected');
-    });
-    this.connection.on('data', (buf: Buffer) => {
-      this.stats.data.bytesReceived += buf.length;
-      this.batcher.appendData(buf);
-    });
-    this.connection.on('error', (err: Error) => {
-      this.stats.recordError(err.message);
-      this.emit('error', err);
-    });
-    this.connection.on('disconnected', () => {
-      if (this.batcher.messageCount > 0) this.publishBatch();
-      this.emit('disconnected');
-    });
-    this.connection.on('reconnecting', () => {
-      this.stats.data.reconnectAttempts++;
-    });
   }
 
   async start(): Promise<void> {
@@ -102,6 +104,7 @@ export class PublishManager extends EventEmitter {
     }
     this.logger?.info(`Starting endpoint '${name}'`);
     this.needStop = false;
+    this.attachConnectionHandlers();
 
     if (this.config.mqttHeartbeatTopic) {
       this.heartbeat = new HeartbeatManager(this.config, this.mqttConnection, this.deviceUuid, this.logger);
@@ -121,6 +124,7 @@ export class PublishManager extends EventEmitter {
 
     this.heartbeat?.stop();
     this.clearBufferTimer();
+    this.detachConnectionHandlers();
     this.connection.disconnect();
 
     if (this.batcher.messageCount > 0) await this.publishBatch();
@@ -143,48 +147,84 @@ export class PublishManager extends EventEmitter {
   // --------------------------------------------------------------------------
 
   private async publishBatch(): Promise<void> {
+    if (this.needStop) return;
     if (this.batcher.messageCount === 0) return;
+    if (this.publishing) return;
 
-    const name = this.config.name || 'unknown';
-    const topic = deviceTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
-    const messageCount = this.batcher.messageCount;
-    const batchBytes = this.batcher.totalBytes;
+    this.publishing = true;
+    try {
 
-    // 1. Feed anomaly detection (side-effect only  mutates service state)
-    this.feed.processBatch(this.batcher.messages, name);
+      const name = this.config.name || 'unknown';
+      const topic = deviceTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
+      const messageCount = this.batcher.messageCount;
+      const batchBytes = this.batcher.totalBytes;
 
-    // 2. Enrich messages with anomaly scores / forecasts
-    const enriched = this.enricher.enrich(this.batcher.messages, name);
+      const enriched = this.processAnomaly(this.batcher.messages, name);
+      const { data, baselineSize } = this.buildPayload(name, enriched);
 
-    // 3. Build publish payload
-    const timestampIso = new Date().toISOString();
-    const data = { sensor: name, timestamp: timestampIso, messages: enriched };
-    const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
+      if (!this.mqttConnection.isConnected()) {
+        await this.publishOffline(topic, data, messageCount);
+        return;
+      }
 
-    // 4. Offline: buffer to local database
-    if (!this.mqttConnection.isConnected()) {
-      await this.bufferOfflineMessages(topic, data, messageCount);
-      return;
+      await this.publishOnline(topic, data, baselineSize, messageCount, batchBytes, enriched, name);
+    } finally {
+      this.publishing = false;
     }
+  }
 
-    // 5. Compress + publish
+  private processAnomaly(messages: any[], endpointName: string): any[] {
+    this.feed.processBatch(messages, endpointName);
+    return this.enricher.enrich(messages, endpointName);
+  }
+
+  private buildPayload(endpointName: string, messages: any[]): {
+    data: { sensor: string; timestamp: string; messages: any[] };
+    baselineSize: number;
+  } {
+    const timestampIso = new Date().toISOString();
+    const data = { sensor: endpointName, timestamp: timestampIso, messages };
+    const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
+    return { data, baselineSize };
+  }
+
+  private async publishOnline(
+    topic: string,
+    data: { sensor: string; timestamp: string; messages: any[] },
+    baselineSize: number,
+    messageCount: number,
+    batchBytes: number,
+    enriched: any[],
+    endpointName: string,
+  ): Promise<void> {
+    if (this.needStop) return;
     try {
       const { payload, info } = await this.compressor.compress(data, baselineSize, this.stats.data.messagesPublished);
+      if (this.needStop) return;
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
       this.stats.recordPublish(messageCount, batchBytes);
-      this.stats.logPublishSuccess(messageCount, batchBytes, info, name, this.logger);
+      this.stats.logPublishSuccess(messageCount, batchBytes, info, endpointName, this.logger);
       if (Array.isArray(enriched)) enriched.length = 0;
       this.batcher.reset();
     } catch (err) {
-      this.logger?.error(`Failed to publish batch from endpoint '${name}'`, err);
+      this.logger?.error(`Failed to publish batch from endpoint '${endpointName}'`, err);
     }
+  }
+
+  private async publishOffline(
+    topic: string,
+    data: { sensor: string; timestamp: string; messages: any[] },
+    messageCount: number,
+  ): Promise<void> {
+    if (this.needStop) return;
+    await this.bufferOfflineMessages(topic, data, messageCount);
   }
 
   private async bufferOfflineMessages(topic: string, data: unknown, messageCount: number): Promise<void> {
     const name = this.config.name || 'unknown';
     this.logger?.warn(`MQTT not connected  buffering ${messageCount} messages from '${name}'`);
     try {
-      const { MessageBufferModel } = await import('../../db/models/index.js');
+      const MessageBufferModel = await this.getMessageBufferModel();
       const jsonPayload = JSON.stringify(data);
       await MessageBufferModel.enqueue({
         endpoint_name: name,
@@ -199,9 +239,30 @@ export class PublishManager extends EventEmitter {
     }
   }
 
+  private async getMessageBufferModel(): Promise<typeof import('../../db/models/message-buffer.model.js').MessageBufferModel> {
+    if (this.messageBufferModel) {
+      return this.messageBufferModel;
+    }
+
+    if (!this.messageBufferModelPromise) {
+      this.messageBufferModelPromise = import('../../db/models/index.js')
+        .then(({ MessageBufferModel }) => {
+          this.messageBufferModel = MessageBufferModel;
+          return MessageBufferModel;
+        })
+        .finally(() => {
+          this.messageBufferModelPromise = undefined;
+        });
+    }
+
+    return this.messageBufferModelPromise;
+  }
+
   private startBufferTimer(): void {
+    if (this.needStop) return;
     this.clearBufferTimer();
     this.bufferTimer = setInterval(() => {
+      if (this.needStop) return;
       if (this.batcher.messageCount > 0) this.publishBatch();
     }, this.config.bufferTimeMs);
   }
@@ -211,5 +272,25 @@ export class PublishManager extends EventEmitter {
       clearInterval(this.bufferTimer);
       this.bufferTimer = null;
     }
+  }
+
+  private attachConnectionHandlers(): void {
+    if (this.connectionHandlersAttached) return;
+    this.connection.on('connected', this.onConnected);
+    this.connection.on('data', this.onData);
+    this.connection.on('error', this.onConnectionError);
+    this.connection.on('disconnected', this.onDisconnected);
+    this.connection.on('reconnecting', this.onReconnecting);
+    this.connectionHandlersAttached = true;
+  }
+
+  private detachConnectionHandlers(): void {
+    if (!this.connectionHandlersAttached) return;
+    this.connection.off('connected', this.onConnected);
+    this.connection.off('data', this.onData);
+    this.connection.off('error', this.onConnectionError);
+    this.connection.off('disconnected', this.onDisconnected);
+    this.connection.off('reconnecting', this.onReconnecting);
+    this.connectionHandlersAttached = false;
   }
 }

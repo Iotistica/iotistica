@@ -107,7 +107,10 @@ export interface LoggingConfig {
 
 export interface FeatureToggles {
 	enableSensorPublish: boolean;
+	enableDeviceSensorPublish: boolean;
 	enableAnomalyDetection: boolean;
+	enableDeviceJobs: boolean;
+	enableDeviceRemoteAccess: boolean;
 }
 
 export interface IntervalConfig {
@@ -481,10 +484,14 @@ export class ConfigManager extends EventEmitter {
 	 */
 	public getFeatures(): FeatureToggles {
 		const cloud = this.targetConfig.features;
+		const sensorPublishEnabled = cloud?.enableDeviceSensorPublish ?? cloud?.enableSensorPublish ?? false;
 
 		return {
-			enableSensorPublish: cloud?.enableDeviceSensorPublish ?? cloud?.enableSensorPublish ?? false,
+			enableSensorPublish: sensorPublishEnabled,
+			enableDeviceSensorPublish: sensorPublishEnabled,
 			enableAnomalyDetection: cloud?.enableAnomalyDetection ?? false,
+			enableDeviceJobs: cloud?.enableDeviceJobs ?? true,
+			enableDeviceRemoteAccess: cloud?.enableDeviceRemoteAccess ?? true,
 		};
 	}
 

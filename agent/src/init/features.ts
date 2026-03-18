@@ -128,7 +128,18 @@ export class FeatureInitializer {
   // ============================================================================
 
   private async initJobs(): Promise<void> {
-    const { logger, deviceInfo, configSettings, cloudApiEndpoint } = this.context;
+    const { logger, deviceInfo, configSettings, cloudApiEndpoint, configFeatures } = this.context;
+
+    const deviceJobsEnabled = configFeatures?.enableDeviceJobs !== false;
+
+    if (!deviceJobsEnabled) {
+      logger.infoSync('Jobs Feature skipped by feature toggle', {
+        component: LogComponents.agent,
+        enableDeviceJobs: deviceJobsEnabled,
+      });
+      this.features.jobs = undefined;
+      return;
+    }
 
     try {
       const cloudApiUrl = process.env.CLOUD_API_URL || cloudApiEndpoint;
@@ -138,7 +149,7 @@ export class FeatureInitializer {
 
       this.features.jobs = new JobsFeature(
         {
-          enabled: true,
+          enabled: deviceJobsEnabled,
           cloudApiUrl,
           deviceApiKey: deviceInfo.apiKey,
           pollingIntervalMs,
@@ -258,22 +269,12 @@ export class FeatureInitializer {
         sensorConfig as any,
         logger,
         deviceInfo.uuid,
-        this.context.dictionaryManager, // Pass dictionary manager for message compression
-        useMsgpackPoc, // Pass msgpack compression flag
-        useKeyCompactionPoc, // Pass key compaction flag
-        useDeflatePoc // Pass deflate compression flag
+        this.context.dictionaryManager,
+        useMsgpackPoc,
+        useKeyCompactionPoc,
+        useDeflatePoc,
+        anomalyService,
       );
-
-      // Configure edge AI anomaly detection if enabled
-      if (anomalyService) {
-        const { configureAnomalyFeed } = await import('../features/publish/manager.js');
-        configureAnomalyFeed(anomalyService);
-
-        logger.debugSync('Configured edge AI anomaly detection for device data', {
-          component: LogComponents.agent,
-          sensorCount: devices.length
-        });
-      }
 
       await this.features.sensorPublish.start();
 
