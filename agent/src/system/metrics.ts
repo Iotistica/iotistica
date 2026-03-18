@@ -877,9 +877,9 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 				{ metric: 'uptime', value: uptime, unit: 'seconds' },
 			];
 
-			// Process all metrics that have non-null values
+			// Process only metrics that are configured for anomaly detection
 			for (const item of metricsToFeed) {
-				if (item.value !== null && item.value !== undefined) {
+				if (item.value !== null && item.value !== undefined && anomalyService.isMetricConfigured(item.metric)) {
 					anomalyService.processDataPoint({
 						source: 'system',
 						protocol: 'system', // Agent system metrics

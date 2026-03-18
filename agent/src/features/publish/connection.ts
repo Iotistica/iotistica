@@ -12,7 +12,7 @@ import { DeviceState } from './types.js';
  *   'disconnected' — socket closed (reconnect scheduled internally unless stopped)
  *   'reconnecting' — about to retry (useful for stats tracking)
  */
-export class EndpointConnection extends EventEmitter {
+export class DeviceConnection extends EventEmitter {
   private socket: net.Socket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private stopped = false;
@@ -39,7 +39,7 @@ export class EndpointConnection extends EventEmitter {
     this.stopped = false;
     this._state = DeviceState.CONNECTING;
     const name = this.config.name || 'unknown';
-    this.logger?.debug(`Connecting to endpoint '${name}' at ${this.config.addr}`);
+    this.logger?.debug(`Connecting to device '${name}' at ${this.config.addr}`);
 
     try {
       this.socket = net.createConnection(this.config.addr);
@@ -68,7 +68,7 @@ export class EndpointConnection extends EventEmitter {
     this._state = DeviceState.CONNECTED;
     this._attempts = 0;
     this.currentDelay = this.INITIAL_DELAY_MS;
-    this.logger?.info(`Connected to endpoint '${this.config.name || 'unknown'}'`);
+    this.logger?.info(`Connected to device '${this.config.name || 'unknown'}'`);
     this.emit('connected');
   }
 
@@ -81,7 +81,7 @@ export class EndpointConnection extends EventEmitter {
   private onClose(): void {
     this._state = DeviceState.DISCONNECTED;
     this.socket = null;
-    this.logger?.info(`Connection closed for endpoint '${this.config.name || 'unknown'}'`);
+    this.logger?.info(`Connection closed for device '${this.config.name || 'unknown'}'`);
     this.emit('disconnected');
     if (!this.stopped) this.scheduleReconnect();
   }

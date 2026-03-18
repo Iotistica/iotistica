@@ -8,7 +8,7 @@ import { AnomalyFeed } from './anomaly/feed.js';
 import { AnomalyEnricher } from './anomaly/enrich.js';
 import { PayloadCompressor } from './compression/compress.js';
 import { MessageBatcher } from './batch.js';
-import { EndpointConnection } from './connection.js';
+import { DeviceConnection } from './connection.js';
 import { PublishStats } from './stats.js';
 import { HeartbeatManager } from './heartbeat.js';
 
@@ -37,7 +37,7 @@ const MAX_BATCH_BYTES = (() => {
 
 export class PublishManager extends EventEmitter {
   private readonly batcher: MessageBatcher;
-  private readonly connection: EndpointConnection;
+  private readonly connection: DeviceConnection;
   private readonly compressor: PayloadCompressor;
   private readonly stats: PublishStats;
   private readonly feed: AnomalyFeed;
@@ -60,7 +60,7 @@ export class PublishManager extends EventEmitter {
     super();
 
     this.batcher = new MessageBatcher(config, MAX_BATCH_MESSAGES, MAX_BATCH_BYTES, logger);
-    this.connection = new EndpointConnection(config, logger);
+    this.connection = new DeviceConnection(config, logger);
     this.compressor = new PayloadCompressor(
       { useMsgpack: useMsgpackPoc, useKeyCompaction: useKeyCompactionPoc, useDeflate: useDeflatePoc },
       mqttConnection, dictionaryManager, logger, protocol, config.name,
