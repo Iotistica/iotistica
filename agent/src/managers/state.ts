@@ -27,14 +27,14 @@ import semver from 'semver';
 /**
  * Simple state structure (compatible with existing code)
  */
-export interface DeviceState {
+export interface AgentState {
 	apps: Record<number, any>;
 	config?: DeviceConfig;
 	endpoints?: any[]; // Protocol device endpoints (Modbus, OPC-UA, SNMP, etc.)
 }
 
 interface StateReconcilerEvents {
-	'target-state-changed': (state: DeviceState) => void;
+	'target-state-changed': (state: AgentState) => void;
 	'state-applied': () => void;
 	'reconciliation-complete': () => void;
 	'logging-config-changed': (change: { old: any; new: any }) => void;
@@ -47,12 +47,13 @@ interface StateReconcilerEvents {
 }
 
 export class StateManager extends EventEmitter {
-	private targetState: DeviceState = { apps: {}, config: {} };
-	private previousState: DeviceState = { apps: {}, config: {} };
+	private targetState: AgentState = { apps: {}, config: {} };
+	private previousState: AgentState = { apps: {}, config: {} };
 	private containerManager: ContainerManager;
 	private configManager: ConfigManager;
 	private agentUpdater?: any; // AgentUpdater instance for version reconciliation
 	private lastSavedStateHash: string = '';
+	private lastSavedCurrentStateHash: string = '';
 	private logger?: AgentLogger;
 	private isReconciling = false;
 	private pendingReconcile = false;
@@ -163,7 +164,7 @@ export class StateManager extends EventEmitter {
 	/**
 	 * Set target state (unified entry point)
 	 */
-	public async setTarget(state: DeviceState): Promise<void> {
+	public async setTarget(state: AgentState): Promise<void> {
 		this.logger?.infoSync('Setting target state', {
 			component: LogComponents.stateReconciler,
 			operation: 'setTarget',
@@ -204,7 +205,7 @@ export class StateManager extends EventEmitter {
 	 * Use this for state updates that should not trigger a reconciliation cycle,
 	 * such as merging discovered metrics during initialization.
 	 */
-	public async updateTargetStateQuietly(state: DeviceState): Promise<void> {
+	public async updateTargetStateQuietly(state: AgentState): Promise<void> {
 		this.logger?.debugSync('Updating target state quietly (no reconciliation)', {
 			component: LogComponents.stateReconciler,
 			operation: 'updateTargetStateQuietly',
@@ -228,14 +229,14 @@ export class StateManager extends EventEmitter {
 	 * Get current state (combined from both managers)
 	 * Returns the actual reconciled state from both managers
 	 */
-	public async getCurrentState(): Promise<DeviceState> {
+	public async getCurrentState(): Promise<AgentState> {
 		// Get current state from container manager (Docker runtime state)
 		const containerState = await this.containerManager.getCurrentState();
 		
 		// Get current config from config manager (reconciled device config + database sensors)
 		const currentConfig = await this.configManager.getCurrentConfig();
 	
-		const state: DeviceState = {
+		const state: AgentState = {
 			apps: containerState.apps || {},
 			config: currentConfig || {},
 		};
@@ -253,7 +254,7 @@ export class StateManager extends EventEmitter {
 	/**
 	 * Get target state
 	 */
-	public getTargetState(): DeviceState {
+	public getTargetState(): AgentState {
 		return _.cloneDeep(this.targetState);
 	}
 
@@ -325,6 +326,10 @@ export class StateManager extends EventEmitter {
 		
 		await this.reconcileAgentVersion(this.targetState);
 
+		// Guaranteed semantic checkpoint: persist runtime current state
+		// after a successful reconciliation cycle.
+		await this.saveCurrentStateToDB(true);
+
 		this.logger?.infoSync('Full state reconciliation complete', {
 			component: LogComponents.stateReconciler,
 			operation: 'reconcile',
@@ -383,7 +388,7 @@ export class StateManager extends EventEmitter {
 	/**
 	 * Reconcile agent version with target state
 	 */
-	private async reconcileAgentVersion(targetState: DeviceState): Promise<void> {
+	private async reconcileAgentVersion(targetState: AgentState): Promise<void> {
 		this.logger?.debugSync('Entering reconcileAgentVersion', {
 			component: LogComponents.stateReconciler,
 			operation: 'reconcileAgentVersion',
@@ -559,15 +564,65 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
+	 * Save current state snapshot to database.
+	 * Hash-gated by default to avoid duplicate snapshots.
+	 * Set force=true for semantic checkpoint snapshots (e.g., post-reconcile).
+	 */
+	private async saveCurrentStateToDB(force: boolean = false): Promise<void> {
+		try {
+			const currentState = await this.getCurrentState();
+			const stateHash = this.getStateHash(currentState);
+
+			if (!force && stateHash === this.lastSavedCurrentStateHash) {
+				this.logger?.debugSync('Skipping current snapshot save - state unchanged', {
+					component: LogComponents.stateReconciler,
+					operation: 'saveCurrentState',
+				});
+				return;
+			}
+
+			this.lastSavedCurrentStateHash = stateHash;
+			const stateJson = JSON.stringify(currentState);
+
+			await db('stateSnapshot').insert({
+				type: 'current',
+				state: stateJson,
+				stateHash: stateHash,
+			});
+
+			// Keep only latest 2 current snapshots to limit DB growth.
+			const oldSnapshots = await db('stateSnapshot')
+				.where({ type: 'current' })
+				.orderBy('createdAt', 'desc')
+				.offset(2);
+			if (oldSnapshots.length > 0) {
+				const oldIds = oldSnapshots.map((s: any) => s.id).filter(Boolean);
+				if (oldIds.length > 0) {
+					await db('stateSnapshot').whereIn('id', oldIds).delete();
+				}
+			}
+		} catch (error) {
+			this.logger?.errorSync(
+				'Failed to save current state to DB',
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					component: LogComponents.stateReconciler,
+					operation: 'saveCurrentState',
+				}
+			);
+		}
+	}
+
+	/**
 	 * Generate SHA-256 hash of state
 	 */
-	private getStateHash(state: DeviceState): string {
+	private getStateHash(state: AgentState): string {
 		const canonical = this.canonicalizeState(state);
 		const stateJson = stableStringify(canonical);
 		return crypto.createHash('sha256').update(stateJson).digest('hex');
 	}
 
-	private canonicalizeState(state: DeviceState): DeviceState {
+	private canonicalizeState(state: AgentState): AgentState {
 		const clone = _.cloneDeep(state);
 
 		// Sort apps by numeric key to stabilize hashing
@@ -612,7 +667,7 @@ export class StateManager extends EventEmitter {
 	/**
 	 * Detect configuration changes and emit granular events
 	 */
-	private emitConfigChangeEvents(oldState: DeviceState, newState: DeviceState): void {
+	private emitConfigChangeEvents(oldState: AgentState, newState: AgentState): void {
 		const oldConfig = oldState.config || {};
 		const newConfig = newState.config || {};
 

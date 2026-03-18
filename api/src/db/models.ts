@@ -584,7 +584,7 @@ export class DeviceCurrentStateModel {
   static async update(
     deviceUuid: string,
     apps: any,
-    config: any = {},
+    config?: any,
     systemInfo: any = {},
     version?: number
   ): Promise<DeviceCurrentState> {
@@ -594,17 +594,19 @@ export class DeviceCurrentStateModel {
       throw new Error(`Device ${deviceUuid} not found - cannot update current state`);
     }
 
+    const configJson = config !== undefined && config !== null ? JSON.stringify(config) : null;
+
     const result = await query<DeviceCurrentState>(
       `INSERT INTO device_current_state (device_uuid, apps, config, system_info, version, reported_at)
-       VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+       VALUES ($1, $2, COALESCE($3::jsonb, '{}'::jsonb), $4, $5, CURRENT_TIMESTAMP)
        ON CONFLICT (device_uuid) DO UPDATE SET
          apps = $2,
-         config = $3,
+         config = CASE WHEN $3 IS NOT NULL THEN $3::jsonb ELSE device_current_state.config END,
          system_info = $4,
          version = $5,
          reported_at = CURRENT_TIMESTAMP
        RETURNING *`,
-      [deviceUuid, JSON.stringify(apps), JSON.stringify(config), JSON.stringify(systemInfo), version || 0]
+      [deviceUuid, JSON.stringify(apps), configJson, JSON.stringify(systemInfo), version || 0]
     );
 
     return result.rows[0];

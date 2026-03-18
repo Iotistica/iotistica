@@ -17,7 +17,7 @@
  */
 
 import { EventEmitter } from 'events';
-import type { StateManager, DeviceState } from './state';
+import type { StateManager, AgentState } from './state';
 import type { DeviceManager } from '.';
 import * as systemMetrics from '../system/metrics';
 import { ConnectionMonitor } from '../health/connection-monitor';
@@ -143,11 +143,12 @@ export class CloudSync extends EventEmitter {
 	private agentUpdater?: any; // AgentUpdater instance for version reporting
 	
 	// State management
-	private targetState: DeviceState = { apps: {}, config: {} };
+	private targetState: AgentState = { apps: {}, config: {} };
 	private currentVersion: number = 1; // Track which version we've applied (never report 0)
 	private lastReport: DeviceStateReport = {};
 	private lastReportTime: number = -Infinity;
 	private lastMetricsTime: number = -Infinity;
+	private forceNextReport: boolean = false;
 	
 	// Static field tracking (only send when changed)
 	private lastOsVersion?: string;
@@ -224,7 +225,10 @@ export class CloudSync extends EventEmitter {
 	};
 	
 	private reconciliationCompleteHandler = () => {
+		// Force one near-immediate report after reconciliation checkpoint.
+		this.forceNextReport = true;
 		this.scheduleReport('state-change');
+		this.requestImmediateReport('reconciliation-complete');
 	};
 	
 	private mqttReconnectHandler = () => {
@@ -499,7 +503,7 @@ export class CloudSync extends EventEmitter {
 	/**
 	 * Get current target state
 	 */
-	public getTargetState(): DeviceState {
+	public getTargetState(): AgentState {
 		return this.targetState;
 	}
 	
@@ -780,7 +784,7 @@ export class CloudSync extends EventEmitter {
 		this.currentVersion = targetVersion;
 		
 		// Check if target state changed
-		const newTargetState: DeviceState = { 
+		const newTargetState: AgentState = { 
 			apps: deviceState.apps || {},
 			config: deviceState.config || {}
 		};
@@ -876,13 +880,15 @@ export class CloudSync extends EventEmitter {
 		if (this.reportLock.isLocked()) {
 			this.logger?.warnSync('Report already in progress, skipping', {
 				component: LogComponents.cloudSync,
-				operation: 'report-skip-locked'
+				operation: 'report-skip-locked',
+				forceNextReport: this.forceNextReport
 			});
+			const retryDelayMs = this.forceNextReport ? 250 : this.config.reportInterval;
 			// SAFETY: Check isReporting inside callback to prevent timer race if stop() called
 			this.reportTimer = setTimeout(() => {
 				if (!this.isReporting) return;
 				this.reportLoop();
-			}, this.config.reportInterval);
+			}, retryDelayMs);
 			return;
 		}
 		
@@ -967,6 +973,33 @@ export class CloudSync extends EventEmitter {
 	private scheduleReport(reason: 'state-change' | 'metrics' | 'scheduled'): void {
 		// Just emit event, actual reporting happens in reportLoop
 		this.emit('report-scheduled', reason);
+	}
+
+	/**
+	 * Request a near-immediate report loop iteration.
+	 * Used for reconciliation checkpoints so current state is reported ASAP.
+	 */
+	private requestImmediateReport(reason: string): void {
+		if (!this.isReporting) {
+			return;
+		}
+
+		if (this.reportTimer) {
+			clearTimeout(this.reportTimer);
+			this.reportTimer = undefined;
+		}
+
+		this.logger?.debugSync('Scheduling immediate report', {
+			component: LogComponents.cloudSync,
+			operation: 'report-immediate',
+			reason,
+			forceNextReport: this.forceNextReport,
+		});
+
+		this.reportTimer = setTimeout(() => {
+			if (!this.isReporting) return;
+			this.reportLoop();
+		}, 0);
 	}
 	
 	/**
@@ -1079,7 +1112,7 @@ export class CloudSync extends EventEmitter {
 		const timeSinceLastReport = now - this.lastReportTime;
 		const timeSinceLastMetrics = now - this.lastMetricsTime;
 		
-		if (timeSinceLastReport < this.config.reportInterval) {
+		if (!this.forceNextReport && timeSinceLastReport < this.config.reportInterval) {
 			// Too soon to report
 			return;
 		}
@@ -1097,23 +1130,20 @@ export class CloudSync extends EventEmitter {
 		const architecture = process.arch;
 		const architectureChanged = architecture !== this.lastArchitecture;
 		
-	// Hash-based endpoints change detection (bandwidth optimization)
-	// Only track endpoints, not full config (static fields like protocols, intervals, logging, etc. are not reported)
-	// Normalize to [] so undefined/null/empty consistently hash the same and don't cause false diffs.
-	const normalizedEndpoints = Array.isArray(currentState.config?.endpoints)
-		? currentState.config.endpoints
-		: [];
-	const endpointsHash = this.calculateHash(normalizedEndpoints);
+	// Hash-based config change detection (bandwidth optimization)
+	// Track the full runtime config snapshot so cloud current state remains complete.
+	const runtimeConfig = currentState.config || {};
+	const configHash = this.calculateHash(runtimeConfig);
 
 	// If no baseline exists yet, seed it immediately to avoid repeated false-positive
 	// "changed" logs while offline / before first successful report.
 	if (this.lastConfigHash === undefined) {
-		this.lastConfigHash = endpointsHash;
+		this.lastConfigHash = configHash;
 	}
 
-	const endpointsChanged =
-		endpointsHash !== this.lastConfigHash ||
-		(this.isFirstReport && normalizedEndpoints.length > 0);
+	const configChanged =
+		configHash !== this.lastConfigHash ||
+		(this.isFirstReport && Object.keys(runtimeConfig).length > 0);
 	
 	// Collect endpoint health (dynamic runtime status) - now async
 	const endpointHealth = await this.collectEndpointHealth();
@@ -1138,19 +1168,16 @@ export class CloudSync extends EventEmitter {
 		},
 	};
 	
-	// Only include dynamic config (endpoints) if changed or first report
-	// Static config (protocols, intervals, logging, features, runtime, anomalyDetection) is not reported back
-	// since it's controlled by target state and should not be echoed in current state
-	// Note: version is already reported at root level (stateReport.version), not in config
-	if (endpointsChanged) {
-		stateReport[deviceInfo.uuid].config = {
-			endpoints: normalizedEndpoints
-		};
+	// Always include full runtime config in current-state reports.
+	// This guarantees cloud current state table always has the latest runtime config snapshot.
+	stateReport[deviceInfo.uuid].config = runtimeConfig;
+	if (configChanged) {
 		this.logger?.infoSync('Devices config changed - including in report', {
 			component: LogComponents.cloudSync,
 			operation: 'config-change-detected',
-			configHash: endpointsHash,
-			endpointCount: normalizedEndpoints.length
+			configHash,
+			configKeys: Object.keys(runtimeConfig).length,
+			endpointCount: Array.isArray(runtimeConfig.endpoints) ? runtimeConfig.endpoints.length : 0
 		});
 	}
 	
@@ -1274,8 +1301,8 @@ export class CloudSync extends EventEmitter {
 		},
 	};
 	
-	// Include config in state comparison only if it was included in stateReport
-	if (endpointsChanged && stateReport[deviceInfo.uuid].config) {
+	// Include runtime config in state comparison.
+	if (stateReport[deviceInfo.uuid].config) {
 		stateOnlyReport[deviceInfo.uuid].config = stateReport[deviceInfo.uuid].config;
 	}
 	
@@ -1305,7 +1332,7 @@ export class CloudSync extends EventEmitter {
 	
 	// Determine if we should report
 	// Report if: there are changes in state OR we need to send metrics OR it's first report
-	const shouldReport = Object.keys(diff).length > 0 || includeMetrics || endpointsChanged || healthChanged;
+		const shouldReport = Object.keys(diff).length > 0 || includeMetrics || configChanged || healthChanged || this.forceNextReport;
 	
 	if (!shouldReport) {
 		// No changes to report
@@ -1322,8 +1349,8 @@ export class CloudSync extends EventEmitter {
 		},
 	};
 	
-	// Add config (endpoints only) if it changed
-	if (endpointsChanged && stateReport[deviceInfo.uuid].config) {
+	// Always include full runtime config in report payload.
+	if (stateReport[deviceInfo.uuid].config) {
 		reportToSend[deviceInfo.uuid].config = stateReport[deviceInfo.uuid].config;
 	}
 	
@@ -1392,12 +1419,17 @@ export class CloudSync extends EventEmitter {
 			const transport = await this.sendReport(reportToSend);
 
 			// Update hashes after successful send (ALWAYS, even if unchanged)
-			this.lastConfigHash = endpointsHash;
+			this.lastConfigHash = configHash;
 			this.lastEndpointHealthHash = healthHash;
 			
 			// Clear first report flag
 			if (this.isFirstReport) {
 				this.isFirstReport = false;
+			}
+
+			// Clear forced-report flag only after successful send.
+			if (this.forceNextReport) {
+				this.forceNextReport = false;
 			}
 			
 			// Update last report (state only, no metrics)
@@ -1411,7 +1443,7 @@ export class CloudSync extends EventEmitter {
 				includeMetrics,
 				version: effectiveVersion,
 				reportedVersion: stateReport[deviceInfo.uuid].version,
-			configIncluded: endpointsChanged,
+			configIncluded: reportToSend[deviceInfo.uuid].config !== undefined,
 			endpointHealthIncluded: (reportToSend[deviceInfo.uuid] as any).endpoints_health !== undefined,
 			isFirstReport: this.isFirstReport
 		};
@@ -1429,7 +1461,7 @@ export class CloudSync extends EventEmitter {
 				// Count of endpoints with runtime health included in this report.
 				endpointHealthCount,
 				// Extra diagnostics to avoid ambiguity between config payload and runtime health inventory.
-				configuredEndpointCount: normalizedEndpoints.length,
+				configuredEndpointCount: Array.isArray(runtimeConfig.endpoints) ? runtimeConfig.endpoints.length : 0,
 				runtimeHealthEndpointCount: endpointHealthCount
 			});
 			

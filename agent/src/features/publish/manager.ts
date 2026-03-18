@@ -138,6 +138,24 @@ export class PublishManager extends EventEmitter {
     return this.connection.state;
   }
 
+  getRuntimeSnapshot(staleThresholdMs = 60000): Record<string, any> {
+    const stats = this.getStats();
+    const state = this.getState();
+    const hasRecentData = stats.lastPublishTime &&
+      (Date.now() - new Date(stats.lastPublishTime).getTime()) < staleThresholdMs;
+    const healthy = state === DeviceState.CONNECTED && (hasRecentData || stats.messagesReceived === 0);
+
+    return {
+      state,
+      addr: this.config.addr,
+      enabled: this.config.enabled !== false,
+      healthy,
+      lastError: stats.lastError || null,
+      lastErrorTime: stats.lastErrorTime || null,
+      ...stats,
+    };
+  }
+
   updateInterval(intervalMs: number): void {
     if (intervalMs < 1000) throw new Error(`Invalid interval: minimum 1000ms`);
     this.config.publishInterval = intervalMs;
@@ -235,7 +253,7 @@ export class PublishManager extends EventEmitter {
       });
       this.batcher.reset();
     } catch (err) {
-      this.logger?.error(`Failed to buffer messages from endpoint '${name}'`, err);
+      this.logger?.error(`Failed to buffer messages from device '${name}'`, err);
     }
   }
 

@@ -12,7 +12,7 @@ import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/monitor.js';
 import { DiscoveryService } from '../features/adapters/discovery-service.js';
 
-import { SensorPublishFeature } from '../features/publish/index.js';
+import { DevicePublishFeature } from '../features/publish/index.js';
 import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
@@ -40,7 +40,7 @@ export interface FeatureContext {
 
 export interface InitializedFeatures {
   jobs?: JobsFeature;
-  sensorPublish?: SensorPublishFeature;
+  sensorPublish?: DevicePublishFeature;
   sensors?: SensorsFeature;
   updater?: AgentUpdater;
   firewall?: AgentFirewall;
@@ -265,7 +265,7 @@ export class FeatureInitializer {
       const useKeyCompactionPoc = process.env.USE_KEY_COMPACTION_POC === 'true';
       const useDeflatePoc = process.env.USE_DEFLATE_COMPRESSION === 'true';
 
-      this.features.sensorPublish = new SensorPublishFeature(
+      this.features.sensorPublish = new DevicePublishFeature(
         sensorConfig as any,
         logger,
         deviceInfo.uuid,

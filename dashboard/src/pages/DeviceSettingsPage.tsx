@@ -476,14 +476,14 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
           </CardHeader>
           <CardContent className="space-y-3">
             <FeatureToggle
-              label="Device Jobs"
+              label="Agent Jobs"
               description="Enable job execution engine on the agent"
               enabled={settings.features.enableDeviceJobs}
               onToggle={() => updateSetting('features.enableDeviceJobs', !settings.features.enableDeviceJobs)}
             />
             <FeatureToggle
               label="Anomaly Detection"
-              description="Enable AI-powered anomaly detection for metrics"
+              description="Enable anomaly detection for metrics"
               enabled={settings.features.enableAnomalyDetection}
               onToggle={() => updateSetting('features.enableAnomalyDetection', !settings.features.enableAnomalyDetection)}
             />

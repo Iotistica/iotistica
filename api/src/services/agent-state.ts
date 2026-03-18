@@ -131,7 +131,7 @@ export async function processAgentStateReport(
     await DeviceCurrentStateModel.update(
       uuid,
       deviceState.apps || {},
-      deviceState.config || {},
+      deviceState.config,
       {
         ip_address: deviceState.ip_address,
         mac_address: deviceState.mac_address,

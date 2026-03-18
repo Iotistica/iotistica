@@ -11,7 +11,7 @@ import { PublishManager } from './manager.js';
  * SensorPublishFeature - Manages multiple sensors and publishes data to MQTT
  * Ported from AWS IoT Device Client SensorPublishFeature.cpp
  */
-export class SensorPublishFeature extends BaseFeature {
+export class DevicePublishFeature extends BaseFeature {
   private static readonly MAX_SENSORS = 10;
   
   private sensors: PublishManager[] = [];
@@ -52,7 +52,7 @@ export class SensorPublishFeature extends BaseFeature {
    * Get feature name
    */
   public getName(): string {
-    return 'SensorPublish';
+    return 'DevicePublish';
   }
 
   /**
@@ -62,20 +62,19 @@ export class SensorPublishFeature extends BaseFeature {
     const sensorConfig = this.config as DevicePublishConfig;
     
     if (!sensorConfig.endpoints || !Array.isArray(sensorConfig.endpoints)) {
-      throw new Error('Sensor Publish configuration must include endpoints array');
+      throw new Error('Device Publish configuration must include endpoints array');
     }
 
     // Check max sensors limit
-    if (sensorConfig.endpoints.length > SensorPublishFeature.MAX_SENSORS) {
-      throw new Error(`Maximum ${SensorPublishFeature.MAX_SENSORS} sensors supported, got ${sensorConfig.endpoints.length}`);
+    if (sensorConfig.endpoints.length > DevicePublishFeature.MAX_SENSORS) {
+      throw new Error(`Maximum ${DevicePublishFeature.MAX_SENSORS} devices supported, got ${sensorConfig.endpoints.length}`);
     }
 
-    // Validate each sensor configuration
+    // Validate each Device configuration
     sensorConfig.endpoints.forEach((config: DeviceConfig) => {
-      this.validateSensorConfig(config);
+      this.validateDeviceConfig(config);
     });
 
-    this.logger.debug(`Validated configuration for ${sensorConfig.endpoints.length} sensors`);
   }
 
   /**
@@ -85,126 +84,46 @@ export class SensorPublishFeature extends BaseFeature {
     const sensorConfig = this.config as DevicePublishConfig;
     
     if (sensorConfig.endpoints.length === 0) {
-      this.logger.warn('No sensors configured');
+      this.logger.warn('No devices configured');
       return;
     }
 
-    this.logger.debug(`Starting Sensor Publish feature with ${sensorConfig.endpoints.length} sensors`);
+    this.logger.debug(`Starting Device Publish feature with ${sensorConfig.endpoints.length} sensors`);
   }
 
   /**
-   * Start the sensor publish feature
+   * Start the Device publish feature
    */
   protected async onStart(): Promise<void> {
     if (!this.mqttConnection) {
-      throw new Error('MQTT connection required for Sensor Publish feature');
+      throw new Error('MQTT connection required for Device Publish feature');
     }
 
-    const sensorConfig = this.config as DevicePublishConfig;
+    const deviceConfig = this.config as DevicePublishConfig;
     
-    if (sensorConfig.endpoints.length === 0) {
+    if (deviceConfig.endpoints.length === 0) {
       return;
     }
     
     // Create and start all sensors
-    for (let i = 0; i < sensorConfig.endpoints.length; i++) {
-      const config = sensorConfig.endpoints[i];
-      
-      // Set default name if not provided
-      if (!config.name) {
-        config.name = `sensor-${i + 1}`;
-      }
-      
-      try {
-        this.logger.debug(`Creating sensor '${config.name}' (${i + 1}/${sensorConfig.endpoints.length})`);
-        
-        // Extract protocol from sensor name (e.g., 'modbus-pipe' -> 'modbus')
-        const protocol = config.name?.split('-')[0] || 'unknown';
-        
-        // Create protocol-aware logger wrapper
-        const protocolLogger = {
-          debug: (message: string, ...args: any[]) => {
-            this.agentLogger.debugSync(message, {
-              component: LogComponents.sensorPublish + "] [" + protocol as any,
-              ...args[0]
-            });
-          },
-          info: (message: string, ...args: any[]) => {
-            this.agentLogger.infoSync(message, {
-              component: LogComponents.sensorPublish + "] [" + protocol as any,
-              ...args[0]
-            });
-          },
-          warn: (message: string, ...args: any[]) => {
-            this.agentLogger.warnSync(message, {
-              component: LogComponents.sensorPublish + "] [" + protocol as any,
-              ...args[0]
-            });
-          },
-          error: (message: string, ...args: any[]) => {
-            this.agentLogger.errorSync(message, args[0] instanceof Error ? args[0] : undefined, {
-              component: LogComponents.sensorPublish + "] [" + protocol as any,
-              ...(args[0] instanceof Error ? args[1] : args[0])
-            });
-          }
-        };
-        
-        // Create sensor
-        const sensor = new PublishManager(
-          config,
-          this.mqttConnection,
-          protocolLogger,
-          this.deviceUuid,
-          this.dictionaryManager,
-          this.useMsgpackPoc,
-          this.useKeyCompactionPoc,
-          this.useDeflatePoc,
-          protocol,
-          this.anomalyService,
-        );
-        
-        // Set up event handlers
-        sensor.on('connected', () => {
-          this.logger.debug(`Sensor '${config.name}' connected`);
-          this.emit('sensor-connected', config.name);
-        });
-        
-        sensor.on('disconnected', () => {
-          this.logger.debug(`Sensor '${config.name}' disconnected`);
-          this.emit('sensor-disconnected', config.name);
-        });
-        
-        sensor.on('error', (error: Error) => {
-          this.logger.error(`Sensor '${config.name}' error: ${error.message}`, error);
-          this.emit('sensor-error', config.name, error);
-        });
-        
-        this.sensors.push(sensor);
-        
-        this.logger.debug(`Starting sensor '${config.name}'...`);
-        
-        // Start sensor
-        await sensor.start();
-        
-        this.logger.debug(`Sensor '${config.name}' started successfully`);
-      } catch (error) {
-        this.logger.error(
-          `Failed to create/start sensor '${config.name}' at ${config.addr}`,
-          error
-        );
-        throw error; // Re-throw to prevent partial initialization
-      }
+    for (let i = 0; i < deviceConfig.endpoints.length; i++) {
+      const config = deviceConfig.endpoints[i];
+
+      const device = this.createDeviceManager(config, i, deviceConfig.endpoints.length);
+      this.attachDeviceEventHandlers(device, config.name!);
+      this.sensors.push(device);
+      await this.startDeviceManager(device, config);
     }
     
     this.emit('started');
   }
 
   /**
-   * Stop the sensor publish feature
+   * Stop the Device publish feature
    */
   protected async onStop(): Promise<void> {
     // Stop all sensors
-    await Promise.all(this.sensors.map(sensor => sensor.stop()));
+    await Promise.all(this.sensors.map(device => device.stop()));
     
     this.sensors = [];
     
@@ -216,41 +135,96 @@ export class SensorPublishFeature extends BaseFeature {
    */
   public getStats(): Record<string, any> {
     const stats: Record<string, any> = {};
-    const now = Date.now();
-    
-    for (const sensor of this.sensors) {
-      const config = this.config.sensors[this.sensors.indexOf(sensor)];
-      const sensorStats = sensor.getStats();
-      const sensorState = sensor.getState();
-      
-      // Smart health check: Connected AND receiving recent data
-      // If no data in last 60 seconds, something is wrong upstream (protocol adapters)
-      const hasRecentData = sensorStats.lastPublishTime && 
-        (now - new Date(sensorStats.lastPublishTime).getTime()) < 60000; // 60 seconds
-      
-      // Healthy if: connected to pipe AND receiving data flow
-      // This catches protocol adapter failures even when pipe connection is healthy
-      const isHealthy = sensorState === 'CONNECTED' && 
-        (hasRecentData || sensorStats.messagesReceived === 0); // Allow startup period
-      
-      stats[config.name!] = {
-        state: sensorState,
-        addr: config.addr,
-        enabled: config.enabled !== false,
-        healthy: isHealthy,
-        lastError: sensorStats.lastError || null,
-        lastErrorTime: sensorStats.lastErrorTime || null,
-        ...sensorStats
-      };
+    const publishConfig = this.config as DevicePublishConfig;
+
+    for (let i = 0; i < this.sensors.length; i++) {
+      const device = this.sensors[i];
+      const config = publishConfig.endpoints[i];
+      const name = config?.name || `device-${i + 1}`;
+      stats[name] = device.getRuntimeSnapshot(60000);
     }
-    
+
     return stats;
   }
 
+  private createDeviceManager(config: DeviceConfig, index: number, total: number): PublishManager {
+    config.name = config.name || `device-${index + 1}`;
+    this.logger.debug(`Creating device '${config.name}' (${index + 1}/${total})`);
+    const protocol = config.name.split('-')[0] || 'unknown';
+
+    const protocolLogger = {
+      debug: (message: string, ...args: any[]) => {
+        this.agentLogger.debugSync(message, {
+          component: LogComponents.sensorPublish + "] [" + protocol as any,
+          ...args[0]
+        });
+      },
+      info: (message: string, ...args: any[]) => {
+        this.agentLogger.infoSync(message, {
+          component: LogComponents.sensorPublish + "] [" + protocol as any,
+          ...args[0]
+        });
+      },
+      warn: (message: string, ...args: any[]) => {
+        this.agentLogger.warnSync(message, {
+          component: LogComponents.sensorPublish + "] [" + protocol as any,
+          ...args[0]
+        });
+      },
+      error: (message: string, ...args: any[]) => {
+        this.agentLogger.errorSync(message, args[0] instanceof Error ? args[0] : undefined, {
+          component: LogComponents.sensorPublish + "] [" + protocol as any,
+          ...(args[0] instanceof Error ? args[1] : args[0])
+        });
+      }
+    };
+
+    return new PublishManager(
+      config,
+      this.mqttConnection!,
+      protocolLogger,
+      this.deviceUuid,
+      this.dictionaryManager,
+      this.useMsgpackPoc,
+      this.useKeyCompactionPoc,
+      this.useDeflatePoc,
+      protocol,
+      this.anomalyService,
+    );
+  }
+
+  private attachDeviceEventHandlers(device: PublishManager, deviceName: string): void {
+    device.on('connected', () => {
+      this.logger.debug(`Device '${deviceName}' connected`);
+      this.emit('sensor-connected', deviceName);
+    });
+
+    device.on('disconnected', () => {
+      this.logger.debug(`Device '${deviceName}' disconnected`);
+      this.emit('sensor-disconnected', deviceName);
+    });
+
+    device.on('error', (error: Error) => {
+      this.logger.error(`Device '${deviceName}' error: ${error.message}`, error);
+      this.emit('sensor-error', deviceName, error);
+    });
+  }
+
+  private async startDeviceManager(device: PublishManager, config: DeviceConfig): Promise<void> {
+    try {
+      this.logger.debug(`Starting Device '${config.name}'...`);
+      await device.start();
+      this.logger.debug(`Device '${config.name}' started successfully`);
+    } catch (error) {
+      this.logger.error(`Failed to create/start Device '${config.name}' at ${config.addr}`, error);
+      throw error;
+    }
+  }
+
   /**
-   * Get sensor by name
+   * Get Device by name
    */
-  public getSensor(name: string): PublishManager | undefined {
+  public getDevice(name: string): PublishManager | undefined {
     const sensorConfig = this.config as DevicePublishConfig;
     const index = sensorConfig.endpoints.findIndex((s: DeviceConfig) => s.name === name);
     return index >= 0 ? this.sensors[index] : undefined;
@@ -259,11 +233,11 @@ export class SensorPublishFeature extends BaseFeature {
   /**
    * Get all sensors with their configuration
    */
-  public getSensors(): Array<{ name: string; enabled: boolean; addr: string; publishInterval: number }> {
-    const sensorConfig = this.config as DevicePublishConfig;
-    return sensorConfig.endpoints.map((config: DeviceConfig, index: number) => {
+  public getDevices(): Array<{ name: string; enabled: boolean; addr: string; publishInterval: number }> {
+    const deviceConfig = this.config as DevicePublishConfig;
+    return deviceConfig.endpoints.map((config: DeviceConfig, index: number) => {
       return {
-        name: config.name || `sensor-${index + 1}`,
+        name: config.name || `device-${index + 1}`,
         enabled: config.enabled !== false,
         addr: config.addr,
         publishInterval: config.publishInterval || 30000
@@ -272,51 +246,51 @@ export class SensorPublishFeature extends BaseFeature {
   }
 
   /**
-   * Enable a sensor by name
+   * Enable a Device by name
    */
-  public async enableSensor(sensorName: string): Promise<void> {
+  public async enableDevice(deviceName: string): Promise<void> {
     const publishConfig = this.config as DevicePublishConfig;
-    const index = publishConfig.endpoints.findIndex((s: DeviceConfig) => s.name === sensorName);
+    const index = publishConfig.endpoints.findIndex((s: DeviceConfig) => s.name === deviceName);
     if (index < 0) {
-      throw new Error(`Sensor not found: ${sensorName}`);
+      throw new Error(`Device not found: ${deviceName}`);
     }
 
-    const sensorConfig = publishConfig.endpoints[index];
-    const sensor = this.sensors[index];
+    const deviceConfig = publishConfig.endpoints[index];
+    const device = this.sensors[index];
 
-    if (sensorConfig.enabled === false) {
-      sensorConfig.enabled = true;
+    if (deviceConfig.enabled === false) {
+      deviceConfig.enabled = true;
       
-      if (sensor && this.isRunning) {
-        await sensor.start();
+      if (device && this.isRunning) {
+        await device.start();
       }
       
-      this.logger.debug(`Sensor '${sensorName}' enabled`);
-      this.emit('sensor-enabled', sensorName);
+      this.logger.debug(`Device '${deviceName}' enabled`);
+      this.emit('sensor-enabled', deviceName);
     }
   }
 
   /**
-   * Disable a sensor by name
+   * Disable a Device by name
    */
-  public async disableSensor(sensorName: string): Promise<void> {
+  public async disableDevice(sensorName: string): Promise<void> {
     const publishConfig = this.config as DevicePublishConfig;
     const index = publishConfig.endpoints.findIndex((s: DeviceConfig) => s.name === sensorName);
     if (index < 0) {
-      throw new Error(`Sensor not found: ${sensorName}`);
+      throw new Error(`Device not found: ${sensorName}`);
     }
 
     const sensorConfig = publishConfig.endpoints[index];
-    const sensor = this.sensors[index];
+    const device = this.sensors[index];
 
     if (sensorConfig.enabled !== false) {
       sensorConfig.enabled = false;
       
-      if (sensor && this.isRunning) {
-        await sensor.stop();
+      if (device && this.isRunning) {
+        await device.stop();
       }
       
-      this.logger.debug(`Sensor '${sensorName}' disabled`);
+      this.logger.debug(`Device '${sensorName}' disabled`);
       this.emit('sensor-disabled', sensorName);
     }
   }
@@ -328,11 +302,11 @@ export class SensorPublishFeature extends BaseFeature {
     const publishConfig = this.config as DevicePublishConfig;
     const index = publishConfig.endpoints.findIndex((s: DeviceConfig) => s.name === sensorName);
     if (index < 0) {
-      throw new Error(`Sensor not found: ${sensorName}`);
+      throw new Error(`Device not found: ${sensorName}`);
     }
 
     const sensorConfig = publishConfig.endpoints[index];
-    const sensor = this.sensors[index];
+    const device = this.sensors[index];
 
     if (intervalMs < 1000) {
       throw new Error(`Invalid interval for ${sensorName}: minimum 1000ms`);
@@ -341,8 +315,8 @@ export class SensorPublishFeature extends BaseFeature {
     sensorConfig.publishInterval = intervalMs;
     
     // Update the sensor's interval if it's running
-    if (sensor && this.isRunning && sensorConfig.enabled !== false) {
-      sensor.updateInterval(intervalMs);
+    if (device && this.isRunning && sensorConfig.enabled !== false) {
+      device.updateInterval(intervalMs);
     }
     
     this.logger.debug(`Updated interval for '${sensorName}': ${intervalMs}ms`);
@@ -359,34 +333,34 @@ export class SensorPublishFeature extends BaseFeature {
 
 
   /**
-   * Validate individual sensor configuration
+   * Validate individual Device configuration
    */
-  protected validateSensorConfig(config: DeviceConfig): void {
+  protected validateDeviceConfig(config: DeviceConfig): void {
     // Check required fields
     if (!config.addr) {
-      throw new Error(`Sensor '${config.name}': 'addr' is required`);
+      throw new Error(`Device '${config.name}': 'addr' is required`);
     }
 
     if (!config.eomDelimiter) {
-      throw new Error(`Sensor '${config.name}': 'eomDelimiter' is required`);
+      throw new Error(`Device '${config.name}': 'eomDelimiter' is required`);
     }
 
     if (!config.mqttTopic) {
-      throw new Error(`Sensor '${config.name}': 'mqttTopic' is required`);
+      throw new Error(`Device '${config.name}': 'mqttTopic' is required`);
     }
 
     // Validate buffer capacity
     if (config.bufferCapacity && config.bufferCapacity < 1024) {
-      throw new Error(`Sensor '${config.name}': 'bufferCapacity' must be at least 1024 bytes`);
+      throw new Error(`Device '${config.name}': 'bufferCapacity' must be at least 1024 bytes`);
     }
 
     // Validate regex
     try {
       new RegExp(config.eomDelimiter);
     } catch (error) {
-      throw new Error(`Sensor '${config.name}': Invalid 'eomDelimiter' regex: ${config.eomDelimiter}`);
+      throw new Error(`Device '${config.name}': Invalid 'eomDelimiter' regex: ${config.eomDelimiter}`);
     }
 
-    this.logger.debug(`Validated configuration for sensor '${config.name}'`);
+    this.logger.debug(`Validated configuration for Device '${config.name}'`);
   }
 }
