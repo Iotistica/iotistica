@@ -14,6 +14,9 @@ export class AnomalyFeed {
   // Per-batch dedup — reset at the start of every processBatch() call
   private batchVisited = new WeakSet<Record<string, unknown> | unknown[]>();
   private batchProcessedMetrics = new Set<string>();
+  private batchCandidateMetrics = new Set<string>();
+  private batchSkippedMetrics = new Set<string>();
+  private batchMetricLabels = new Map<string, string>();
   private currentService?: AnomalyDetectionService;
 
   constructor(
@@ -35,12 +38,30 @@ export class AnomalyFeed {
       hasConfiguredMetrics,
     });
 
-    if (!hasConfiguredMetrics) return;
+    if (!hasService) {
+      this.logger?.debug('[ANOMALY TRACE] Endpoint batch skipped: anomaly service unavailable', {
+        deviceName,
+        messageCount: messages.length,
+      });
+      return;
+    }
+
+    if (!hasConfiguredMetrics) {
+      this.logger?.debug('[ANOMALY TRACE] Endpoint batch skipped: no configured anomaly metrics', {
+        deviceName,
+        messageCount: messages.length,
+      });
+      return;
+    }
+
     this.currentService = service;
 
     const timestampMs = Date.now();
     this.batchVisited = new WeakSet();
     this.batchProcessedMetrics.clear();
+    this.batchCandidateMetrics.clear();
+    this.batchSkippedMetrics.clear();
+    this.batchMetricLabels.clear();
 
     try {
       for (const data of messages) {
@@ -58,6 +79,18 @@ export class AnomalyFeed {
         sampleMetrics: Array.from(this.batchProcessedMetrics).slice(0, 10),
       });
     }
+
+    this.logger?.debug('[ANOMALY TRACE] Endpoint batch evaluation summary', {
+      deviceName,
+      messageCount: messages.length,
+      candidateMetricCount: this.batchCandidateMetrics.size,
+      evaluatedMetricCount: this.batchProcessedMetrics.size,
+      skippedMetricCount: this.batchSkippedMetrics.size,
+      sampleSkippedMetrics: Array.from(this.batchSkippedMetrics).slice(0, 10),
+      sampleSkippedLabels: Array.from(this.batchSkippedMetrics)
+        .slice(0, 10)
+        .map((metricKey) => this.batchMetricLabels.get(metricKey) || metricKey),
+    });
   }
 
   // --- helpers ----------------------------------------------------------------
@@ -104,6 +137,8 @@ export class AnomalyFeed {
     point: Omit<Parameters<AnomalyDetectionService['processDataPoint']>[0], 'metric'>,
   ): boolean {
     const service = this.currentService;
+    this.batchCandidateMetrics.add(metricKey);
+    this.batchMetricLabels.set(metricKey, this.buildFriendlyMetricLabel(metricKey, point));
     if (!service) return false;
     const configured = service.isMetricConfigured(metricKey);
 
@@ -112,12 +147,35 @@ export class AnomalyFeed {
       configured,
     });
 
-    if (!configured) return false;
+    if (!configured) {
+      this.batchSkippedMetrics.add(metricKey);
+      return false;
+    }
     const dedupKey = `${metricKey}:${point.timestamp}`;
     if (this.batchProcessedMetrics.has(dedupKey)) return false;
     this.batchProcessedMetrics.add(dedupKey);
     service.processDataPoint({ metric: metricKey, ...point });
     return true;
+  }
+
+  private buildFriendlyMetricLabel(
+    metricKey: string,
+    point: Omit<Parameters<AnomalyDetectionService['processDataPoint']>[0], 'metric'>,
+  ): string {
+    const tags = (point as { tags?: Record<string, unknown> }).tags;
+    if (!tags || typeof tags !== 'object') return metricKey;
+
+    const deviceName = typeof tags.deviceName === 'string' && tags.deviceName.trim()
+      ? tags.deviceName.trim()
+      : (typeof tags.sensorName === 'string' && tags.sensorName.trim() ? tags.sensorName.trim() : undefined);
+
+    const fieldName = typeof tags.fieldName === 'string' && tags.fieldName.trim()
+      ? tags.fieldName.trim()
+      : (typeof tags.field === 'string' && tags.field.trim() ? tags.field.trim() : undefined);
+
+    if (deviceName && fieldName) return `${deviceName}/${fieldName}`;
+    if (fieldName) return fieldName;
+    return metricKey;
   }
 
   // Bare number payload — no device wrapper, falls back to endpoint identity.

@@ -207,7 +207,13 @@ export class PublishManager extends EventEmitter {
   }
 
   private processAnomaly(messages: any[], endpointName: string): any[] {
-    if (!this.anomalyService) return messages;
+    if (!this.anomalyService) {
+      this.logger?.debug('[ANOMALY TRACE] Skipping endpoint anomaly processing: no anomaly service bound', {
+        endpointName,
+        messageCount: messages.length,
+      });
+      return messages;
+    }
 
     this.logger?.debug('[ANOMALY TRACE] Dispatching endpoint batch to anomaly feed', {
       endpointName,

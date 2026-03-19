@@ -115,6 +115,11 @@ export class FeatureInitializer {
     return this.features;
   }
 
+  public setAnomalyService(anomalyService?: any): void {
+    this.context.anomalyService = anomalyService;
+    this.features.sensorPublish?.setAnomalyService?.(anomalyService);
+  }
+
   private isDevicePublishEnabled(): boolean {
     const dynamicFeatures = this.context.stateReconciler?.getConfigManager?.().getFeatures?.();
     if (dynamicFeatures && typeof dynamicFeatures.enableDeviceSensorPublish === 'boolean') {

@@ -83,6 +83,11 @@ interface MetricDevice {
     agentUuid?: string;
     agentName?: string;
     endpointName?: string;
+    device_uuid?: string;
+    endpoint_uuid?: string;
+    agent_uuid?: string;
+    agent_name?: string;
+    endpoint_name?: string;
   }>;
 }
 
@@ -92,6 +97,11 @@ type SourceRef = {
   agentUuid?: string;
   agentName?: string;
   endpointName?: string;
+  device_uuid?: string;
+  endpoint_uuid?: string;
+  agent_uuid?: string;
+  agent_name?: string;
+  endpoint_name?: string;
 };
 
 function sanitizeExpectedRange(range?: [number, number]): [number, number] | undefined {
@@ -110,10 +120,33 @@ function isMetricDeviceForAgent(device: MetricDevice, agentUuid: string): boolea
   return false;
 }
 
-function getSourceRefForAgent(device: MetricDevice | undefined, agentUuid: string): SourceRef | undefined {
+function getSourceRefForAgent(device: MetricDevice | undefined, agentUuid: string, scopeUuid?: string): SourceRef | undefined {
   if (!device || !agentUuid || !Array.isArray(device.source_refs)) return undefined;
 
-  return device.source_refs.find((item) => item?.agentUuid === agentUuid);
+  const refs = device.source_refs;
+
+  const normalize = (item: SourceRef) => ({
+    deviceUuid: item?.deviceUuid || item?.device_uuid,
+    endpointUuid: item?.endpointUuid || item?.endpoint_uuid,
+    agentUuid: item?.agentUuid || item?.agent_uuid,
+  });
+
+  const matchesScope = (item: SourceRef) => {
+    if (!scopeUuid) return true;
+    const normalized = normalize(item);
+    return normalized.deviceUuid === scopeUuid || normalized.endpointUuid === scopeUuid;
+  };
+
+  const exactAgentAndScope = refs.find((item) => {
+    const normalized = normalize(item);
+    return normalized.agentUuid === agentUuid && matchesScope(item);
+  });
+  if (exactAgentAndScope) return exactAgentAndScope;
+
+  const scopeOnly = refs.find((item) => matchesScope(item));
+  if (scopeOnly) return scopeOnly;
+
+  return refs.find((item) => normalize(item).agentUuid === agentUuid);
 }
 
 function isUuidLike(value: string): boolean {
@@ -202,6 +235,14 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
       fetchMetricDevices(editingIndex !== null);
     }
   }, [open, isFormDialogOpen]);
+
+  // Ensure device source references are available for UUID -> friendly name
+  // mapping in the table view (even when Add/Edit dialog is closed).
+  useEffect(() => {
+    if (open) {
+      fetchMetricDevices(true);
+    }
+  }, [open]);
 
   // Update available metrics when metric device changes
   useEffect(() => {
@@ -465,8 +506,10 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
     for (const metricDevice of metricDevices) {
       if (!isMetricDeviceForAgent(metricDevice, agentUuid)) continue;
 
-      const sourceRef = getSourceRefForAgent(metricDevice, agentUuid);
-      if (sourceRef?.deviceUuid === scope || sourceRef?.endpointUuid === scope) {
+      const sourceRef = getSourceRefForAgent(metricDevice, agentUuid, scope);
+      const refDeviceUuid = sourceRef?.deviceUuid || sourceRef?.device_uuid;
+      const refEndpointUuid = sourceRef?.endpointUuid || sourceRef?.endpoint_uuid;
+      if (refDeviceUuid === scope || refEndpointUuid === scope) {
         return metricDevice.device_name;
       }
     }

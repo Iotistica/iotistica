@@ -4,12 +4,23 @@ import { MqttManager } from '../mqtt/manager.js';
 import type { AgentInitContext } from './context.js';
 
 export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void> {
-	const features = ctx.configManager!.getFeatures();
+	const targetConfig = ctx.stateReconciler.getTargetState()?.config;
+	const targetConfigFeatures = targetConfig?.features;
+	const managerFeatures = ctx.configManager!.getFeatures();
+	const features = {
+		...managerFeatures,
+		enableAnomalyDetection: targetConfigFeatures?.enableAnomalyDetection ?? managerFeatures.enableAnomalyDetection,
+		enableDeviceSensorPublish: targetConfigFeatures?.enableDeviceSensorPublish ?? managerFeatures.enableDeviceSensorPublish,
+		enableSensorPublish: targetConfigFeatures?.enableDeviceSensorPublish ?? targetConfigFeatures?.enableSensorPublish ?? managerFeatures.enableSensorPublish,
+		enableDeviceJobs: targetConfigFeatures?.enableDeviceJobs ?? managerFeatures.enableDeviceJobs,
+		enableDeviceRemoteAccess: targetConfigFeatures?.enableDeviceRemoteAccess ?? managerFeatures.enableDeviceRemoteAccess,
+	};
 
 	ctx.agentLogger?.debugSync('Checking anomaly detection configuration', {
 		component: LogComponents.agent,
 		enableAnomalyDetection: features.enableAnomalyDetection,
-		targetConfigFeatures: ctx.configManager!.getTargetConfig().features
+		targetConfigFeatures,
+		managerFeatures
 	});
 
 	if (!features.enableAnomalyDetection) {
@@ -33,8 +44,7 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 	});
 
 	try {
-		const targetStateConfig = ctx.stateReconciler.getTargetState()?.config;
-		const config = loadConfigFromTargetState(targetStateConfig);
+		const config = loadConfigFromTargetState(targetConfig);
 
 		const { getKnex } = await import('../db/connection.js');
 		const dbInstance = getKnex();
@@ -84,6 +94,7 @@ export async function configureAnomalyFeed(ctx: AgentInitContext): Promise<void>
 	const { configureAnomalyFeed: configureSystemMetrics, getSystemMetrics } = await import('../system/metrics.js');
 	configureSystemMetrics(ctx.anomalyService);
 
+	ctx.featureInitializer?.setAnomalyService?.(ctx.anomalyService);
 	ctx.featureInitializer?.getFeatures()?.sensorPublish?.setAnomalyService?.(ctx.anomalyService);
 
 	ctx.agentLogger?.infoSync('Anomaly detection configured for system metrics and endpoints', {

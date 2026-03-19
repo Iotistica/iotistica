@@ -15,6 +15,7 @@ import { AnomalyMetricsTable } from '@/components/monitoring/AnomalyMetricsTable
 import { IncidentDetailsModal } from '@/components/monitoring/IncidentDetailsModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDeviceState } from '@/contexts/DeviceStateContext';
+import { formatMetricForDisplay } from '@/utils/metric-display';
 
 interface AnomalyEvent {
   msg_id: string;
@@ -575,7 +576,7 @@ export function AlertsPage({ initialDeviceUuid }: AlertsPageProps) {
                             {incident.device_state || 'unknown'}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-sm py-5">{incident.metric}</TableCell>
+                        <TableCell className="text-sm py-5">{formatMetricForDisplay(incident.metric)}</TableCell>
                         <TableCell className="py-5">
                           <StatusBadge status={incident.status} />
                         </TableCell>
@@ -670,7 +671,7 @@ export function AlertsPage({ initialDeviceUuid }: AlertsPageProps) {
                   Resolve Incident
                 </DialogTitle>
                 <DialogDescription>
-                  {selectedIncident.device_name} - {selectedIncident.metric}
+                  {selectedIncident.device_name} - {formatMetricForDisplay(selectedIncident.metric)}
                 </DialogDescription>
               </DialogHeader>
 

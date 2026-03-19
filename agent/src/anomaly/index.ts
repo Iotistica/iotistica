@@ -1206,8 +1206,11 @@ export class AnomalyDetectionService {
 		}
 		
 		const now = Date.now();
-		let savedCount = 0;
+		let attemptedCount = 0;
+		let persistedCount = 0;
+		let failedCount = 0;
 		let skippedCount = 0;
+		const persistedMetricSamples: string[] = [];
 		
 		// Minimum samples required for statistical baseline (default: 5 samples = ~5 minutes at 60s interval)
 		const minSamples = this.config.storage?.minSamples ?? 5;
@@ -1232,17 +1235,26 @@ export class AnomalyDetectionService {
 			if (buffer.size >= minSamples) {
 				const profile = this.getProfileForMetric(metricName);
 				savePromises.push(
-					this.storage.storeBaseline(metricName, buffer, now, -1, profile, deviceState, deviceId).catch(error => {
-						this.logger?.errorSync('Failed to save baseline', error as Error, {
-							component: LogComponents.metrics,
-							metric: metricName,
-							deviceState,
-							deviceId,
-							profile,
-						});
-					})
+					this.storage
+						.storeBaseline(metricName, buffer, now, -1, profile, deviceState, deviceId)
+						.then(() => {
+							persistedCount++;
+							if (persistedMetricSamples.length < 12) {
+								persistedMetricSamples.push(metricName);
+							}
+						})
+						.catch(error => {
+							failedCount++;
+							this.logger?.errorSync('Failed to save baseline', error as Error, {
+								component: LogComponents.metrics,
+								metric: metricName,
+								deviceState,
+								deviceId,
+								profile,
+							});
+						})
 				);
-				savedCount++;
+				attemptedCount++;
 			} else {
 				this.logger?.infoSync('Skipping baseline save - insufficient samples', {
 					component: LogComponents.metrics,
@@ -1259,11 +1271,15 @@ export class AnomalyDetectionService {
 		// Wait for all saves to complete
 		await Promise.all(savePromises);
 		
-		this.logger?.infoSync('Baseline save completed', {
+		this.logger?.infoSync('[ANOMALY] Baseline persistence summary', {
 			component: LogComponents.metrics,
-			saved: savedCount,
+			attempted: attemptedCount,
+			persisted: persistedCount,
+			failed: failedCount,
 			skipped: skippedCount,
 			totalBuffers: this.buffers.size,
+			minSamples,
+			samplePersistedMetrics: persistedMetricSamples,
 		});
 	}
 	
@@ -1493,6 +1509,18 @@ export class AnomalyDetectionService {
 	private resolveDeviceState(dataPoint: DataPoint): CanonicalDeviceState {
 		const protocol = dataPoint.protocol || this.deviceType || 'system';
 		const candidate = dataPoint.deviceState ?? dataPoint.rawDeviceState ?? dataPoint.tags?.deviceState ?? dataPoint.tags?.state;
+
+		if (candidate === undefined || candidate === null) {
+			if (protocol === 'opcua') {
+				if (dataPoint.quality === 'GOOD') {
+					return 'running';
+				}
+				if (dataPoint.quality === 'BAD' || dataPoint.quality === 'UNCERTAIN') {
+					return 'fault';
+				}
+			}
+		}
+
 		return normalizeDeviceState(protocol, candidate);
 	}
 

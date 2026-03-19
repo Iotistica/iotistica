@@ -163,6 +163,7 @@ export class CloudSync extends EventEmitter {
 	
 	// ETag caching for target state
 	private targetStateETag?: string;
+	private requireFullTargetRefresh: boolean = true;
 	
 	// Polling control
 	private pollTimer?: NodeJS.Timeout;
@@ -413,7 +414,8 @@ export class CloudSync extends EventEmitter {
 		this.logger?.infoSync('Starting target state polling', {
 			component: LogComponents.cloudSync,
 			endpoint: this.config.cloudApiEndpoint,
-			intervalMs: this.config.pollInterval
+			intervalMs: this.config.pollInterval,
+			requireFullTargetRefresh: this.requireFullTargetRefresh
 		});
 		
 		// Start polling loop
@@ -715,6 +717,7 @@ export class CloudSync extends EventEmitter {
 				component: LogComponents.cloudSync,
 				operation: 'poll',
 				currentETag: this.targetStateETag || 'none',
+				usingIfNoneMatch: !!(this.targetStateETag && !this.requireFullTargetRefresh),
 				hasApiKey: !!apiKey,
 				apiKeyPrefix: apiKey ? apiKey.substring(0, 16) : 'none'
 			});
@@ -722,13 +725,14 @@ export class CloudSync extends EventEmitter {
 			const response = await this.httpClient.get(endpoint, {
 				headers: {
 					'X-Device-API-Key': apiKey || '',
-					...(this.targetStateETag && { 'if-none-match': this.targetStateETag }),
+					...(this.targetStateETag && !this.requireFullTargetRefresh && { 'if-none-match': this.targetStateETag }),
 				},
 			});
 		
 		
 			// 304 Not Modified - target state unchanged
 			if (response.status === 304) {
+				this.requireFullTargetRefresh = false;
 				return;
 			}
 		
@@ -756,6 +760,7 @@ export class CloudSync extends EventEmitter {
 				});
 			});
 		}
+		this.requireFullTargetRefresh = false;
 		
 		// Parse response
 		const targetStateResponse = await response.json() as TargetStateResponse;

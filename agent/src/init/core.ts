@@ -36,6 +36,7 @@ export function setupConfigEventListeners(ctx: AgentInitContext): void {
 				});
 				ctx.anomalyService.stop();
 				ctx.anomalyService = undefined;
+				ctx.featureInitializer?.setAnomalyService?.(undefined);
 			}
 		}
 

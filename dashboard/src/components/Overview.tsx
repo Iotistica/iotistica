@@ -33,6 +33,7 @@ import { NetworkingCard, NetworkInterface } from "./NetworkingCard";
 import { GeneralInfoCard } from "./GeneralInfoCard";
 import { buildApiUrl } from "@/config/api";
 import { detectGaps, createGapDotRenderer } from "@/utils/chartGapDetection";
+import { formatMetricForDisplay } from "@/utils/metric-display";
 
 interface SystemMetricsProps {
   device: Device;
@@ -1200,7 +1201,7 @@ export function SystemMetrics({
                               <div className="flex-1 space-y-1">
                                 <div className="flex items-start justify-between gap-2">
                                   <h4 className="font-medium leading-none">
-                                    {incident.metric}
+                                    {formatMetricForDisplay(incident.metric)}
                                   </h4>
                                   <Badge
                                     variant={config.badgeVariant}

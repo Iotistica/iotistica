@@ -181,6 +181,11 @@ export class StateManager extends EventEmitter {
 			this.targetState.config = {};
 		}
 
+		// Keep ConfigManager getters in sync with the newest target immediately.
+		// Reconciliation is still debounced, but callers like anomaly init read feature
+		// toggles synchronously right after setTarget() during startup and cloud polls.
+		this.configManager.loadTarget(this.targetState.config);
+
 		// Persist complete target state to database
 		await this.saveTargetStateToDB();
 
@@ -220,6 +225,9 @@ export class StateManager extends EventEmitter {
 		if (!this.targetState.config) {
 			this.targetState.config = {};
 		}
+
+		// Keep ConfigManager target snapshot aligned even for quiet updates.
+		this.configManager.loadTarget(this.targetState.config);
 
 		// Persist to database only (no events, no reconciliation)
 		await this.saveTargetStateToDB();

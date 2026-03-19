@@ -8,6 +8,7 @@ import { Loader2, Calendar, TrendingUp } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { SeverityBadge, StatusBadge, ScoreBadge } from '@/components/alerts';
 import { buildApiUrl } from '@/config/api';
+import { formatMetricForDisplay } from '@/utils/metric-display';
 
 interface AnomalyEvent {
   msg_id: string;
@@ -268,7 +269,7 @@ export function IncidentDetailsModal({
             <StatusBadge status={incident.status} />
           </div>
           <DialogDescription>
-            Metric: <span className="font-semibold">{incident.metric}</span>
+            Metric: <span className="font-semibold">{formatMetricForDisplay(incident.metric)}</span>
           </DialogDescription>
         </DialogHeader>
 
