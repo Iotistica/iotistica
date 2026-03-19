@@ -1,6 +1,7 @@
 import { BaseFeature } from '../index.js';
 import { AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
+import type { Protocol } from '../../anomaly/types.js';
 import {
   DevicePublishConfig,
   DeviceConfig
@@ -20,7 +21,7 @@ export class DevicePublishFeature extends BaseFeature {
   private readonly useMsgpackPoc: boolean;
   private readonly useKeyCompactionPoc: boolean;
   private readonly useDeflatePoc: boolean;
-  private readonly anomalyService?: any;
+  private anomalyService?: any;
 
   constructor(
     config: DevicePublishConfig & { enabled: boolean },
@@ -46,6 +47,18 @@ export class DevicePublishFeature extends BaseFeature {
     this.useKeyCompactionPoc = useKeyCompactionPoc;
     this.useDeflatePoc = useDeflatePoc;
     this.anomalyService = anomalyService;
+  }
+
+  public setAnomalyService(anomalyService?: any): void {
+    this.anomalyService = anomalyService;
+    for (const sensor of this.sensors) {
+      sensor.setAnomalyService(anomalyService);
+    }
+
+    this.logger.debug('Updated anomaly service binding for Device Publish Feature', {
+      hasAnomalyService: !!anomalyService,
+      sensorCount: this.sensors.length,
+    });
   }
 
   /**
@@ -150,30 +163,32 @@ export class DevicePublishFeature extends BaseFeature {
   private createDeviceManager(config: DeviceConfig, index: number, total: number): PublishManager {
     config.name = config.name || `device-${index + 1}`;
     this.logger.debug(`Creating device '${config.name}' (${index + 1}/${total})`);
-    const protocol = config.name.split('-')[0] || 'unknown';
+    const protocolName = config.name.split('-')[0] || 'unknown';
+    // Safely convert derived protocol name to valid Protocol type
+    const protocol: Protocol | undefined = this.isValidProtocol(protocolName) ? (protocolName as Protocol) : undefined;
 
     const protocolLogger = {
       debug: (message: string, ...args: any[]) => {
         this.agentLogger.debugSync(message, {
-          component: LogComponents.sensorPublish + "] [" + protocol as any,
+          component: LogComponents.sensorPublish + "] [" + (protocol || 'unknown'),
           ...args[0]
         });
       },
       info: (message: string, ...args: any[]) => {
         this.agentLogger.infoSync(message, {
-          component: LogComponents.sensorPublish + "] [" + protocol as any,
+          component: LogComponents.sensorPublish + "] [" + (protocol || 'unknown'),
           ...args[0]
         });
       },
       warn: (message: string, ...args: any[]) => {
         this.agentLogger.warnSync(message, {
-          component: LogComponents.sensorPublish + "] [" + protocol as any,
+          component: LogComponents.sensorPublish + "] [" + (protocol || 'unknown'),
           ...args[0]
         });
       },
       error: (message: string, ...args: any[]) => {
         this.agentLogger.errorSync(message, args[0] instanceof Error ? args[0] : undefined, {
-          component: LogComponents.sensorPublish + "] [" + protocol as any,
+          component: LogComponents.sensorPublish + "] [" + (protocol || 'unknown'),
           ...(args[0] instanceof Error ? args[1] : args[0])
         });
       }
@@ -191,6 +206,11 @@ export class DevicePublishFeature extends BaseFeature {
       protocol,
       this.anomalyService,
     );
+  }
+
+  private isValidProtocol(value: string): boolean {
+    const validProtocols = ['modbus', 'opcua', 'bacnet', 'mqtt', 'system'];
+    return validProtocols.includes(value.toLowerCase());
   }
 
   private attachDeviceEventHandlers(device: PublishManager, deviceName: string): void {

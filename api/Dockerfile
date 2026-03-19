@@ -66,8 +66,11 @@ COPY --from=builder --chown=appuser:appgroup /app/database ./database
 # Copy package files for runtime reference
 COPY --chown=appuser:appgroup package*.json ./
 
-# Set proper ownership of application directory
-RUN chown -R appuser:appgroup /app
+# Create writable dirs
+RUN mkdir -p /app/logs && \
+    chown appuser:appgroup /app/logs && \
+    chown appuser:appgroup /app
+
 
 # Switch to non-root user
 USER appuser

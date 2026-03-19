@@ -1,4 +1,5 @@
 import type { AnomalyDetectionService } from '../../../anomaly/index.js';
+import type { Protocol } from '../../../anomaly/types.js';
 import { extractRawDeviceState } from '../../../anomaly/device-state.js';
 import type { Logger } from '../types.js';
 
@@ -8,26 +9,45 @@ import type { Logger } from '../types.js';
  * late injection (configureAnomalyFeed called after construction) is supported.
  */
 export class AnomalyFeed {
+  private static readonly MAX_RECURSION_DEPTH = 6;
+
   // Per-batch dedup — reset at the start of every processBatch() call
-  private batchVisited = new WeakSet<object>();
+  private batchVisited = new WeakSet<Record<string, unknown> | unknown[]>();
   private batchProcessedMetrics = new Set<string>();
+  private currentService?: AnomalyDetectionService;
 
   constructor(
     private readonly getService: () => AnomalyDetectionService | undefined,
     private readonly deviceUuid: string,
-    private readonly protocol: string | undefined,
+    private readonly protocol: Protocol | undefined,
     private readonly logger?: Logger,
   ) {}
 
   processBatch(messages: unknown[], deviceName: string): void {
     const service = this.getService();
-    if (!service?.hasConfiguredMetrics()) return;
+    const hasService = !!service;
+    const hasConfiguredMetrics = !!service?.hasConfiguredMetrics();
+
+    this.logger?.debug('[ANOMALY TRACE] processBatch entry', {
+      deviceName,
+      messageCount: messages.length,
+      hasService,
+      hasConfiguredMetrics,
+    });
+
+    if (!hasConfiguredMetrics) return;
+    this.currentService = service;
+
     const timestampMs = Date.now();
     this.batchVisited = new WeakSet();
     this.batchProcessedMetrics.clear();
 
-    for (const data of messages) {
-      this.extractNumericFields(data, deviceName, timestampMs);
+    try {
+      for (const data of messages) {
+        this.extractNumericFields(data, deviceName, timestampMs);
+      }
+    } finally {
+      this.currentService = undefined;
     }
 
     if (this.batchProcessedMetrics.size > 0) {
@@ -55,8 +75,20 @@ export class AnomalyFeed {
 
   // Canonical 3-part key: <endpointDeviceUuid>_<deviceIdentifier>_<fieldName>
   private buildMetricKey(deviceIdentifier: string | undefined, deviceName: string, fieldName: string): string {
-    const identifier = (deviceIdentifier || deviceName || 'unknown').trim();
-    return `${this.deviceUuid}_${identifier}_${fieldName}`;
+    const identifier =
+      typeof deviceIdentifier === 'string' && deviceIdentifier.trim()
+        ? deviceIdentifier.trim()
+        : (deviceName || 'unknown');
+    const metricKey = `${this.deviceUuid}_${identifier}_${fieldName}`;
+
+    this.logger?.debug('[ANOMALY TRACE] Built metricKey', {
+      metricKey,
+      deviceName,
+      deviceIdentifier: identifier,
+      fieldName,
+    });
+
+    return metricKey;
   }
 
   private resolveDeviceId(...candidates: unknown[]): string | undefined {
@@ -71,11 +103,19 @@ export class AnomalyFeed {
     metricKey: string,
     point: Omit<Parameters<AnomalyDetectionService['processDataPoint']>[0], 'metric'>,
   ): boolean {
-    const service = this.getService();
+    const service = this.currentService;
     if (!service) return false;
-    if (!service.isMetricConfigured(metricKey)) return false;
-    if (this.batchProcessedMetrics.has(metricKey)) return false;
-    this.batchProcessedMetrics.add(metricKey);
+    const configured = service.isMetricConfigured(metricKey);
+
+    this.logger?.debug('[ANOMALY TRACE] Config gate check', {
+      metricKey,
+      configured,
+    });
+
+    if (!configured) return false;
+    const dedupKey = `${metricKey}:${point.timestamp}`;
+    if (this.batchProcessedMetrics.has(dedupKey)) return false;
+    this.batchProcessedMetrics.add(dedupKey);
     service.processDataPoint({ metric: metricKey, ...point });
     return true;
   }
@@ -92,7 +132,7 @@ export class AnomalyFeed {
     });
 
     this.dispatchToAnomaly(metricKey, {
-      source: 'endpoint', protocol: this.protocol as any, rawDeviceState: undefined,
+      source: 'endpoint', protocol: this.protocol, rawDeviceState: undefined,
       value, unit: '', timestamp: timestampMs, quality: 'GOOD',
       deviceId: fallbackDeviceId,
       tags: { sensorName: deviceName, endpointId: deviceName, field: fieldName },
@@ -127,7 +167,7 @@ export class AnomalyFeed {
 
     const metricKey = this.buildMetricKey(payloadDeviceUuid || readingDeviceName, parentDeviceName, fieldName);
     this.dispatchToAnomaly(metricKey, {
-      source: 'endpoint', protocol: this.protocol as any,
+      source: 'endpoint', protocol: this.protocol,
       rawDeviceState: data.deviceState ?? data.state ?? data.status ?? extractRawDeviceState(data),
       value, unit: data.unit || '', timestamp: timestampMs,
       quality: quality === 'GOOD' || quality === 'Good' ? 'GOOD' : 'BAD',
@@ -174,7 +214,7 @@ export class AnomalyFeed {
 
       const metricKey = this.buildMetricKey(payloadDeviceUuid || readingDeviceName, parentDeviceName, fieldName);
       this.dispatchToAnomaly(metricKey, {
-        source: 'endpoint', protocol: this.protocol as any,
+        source: 'endpoint', protocol: this.protocol,
         rawDeviceState: reading.deviceState ?? reading.state ?? reading.status ?? extractRawDeviceState(reading),
         value, unit: reading.unit || '', timestamp: timestampMs,
         quality: quality === 'GOOD' || quality === 'Good' ? 'GOOD' : 'BAD',
@@ -191,13 +231,7 @@ export class AnomalyFeed {
   // Walk a payload recursively; routes each numeric field to the anomaly service.
   // Fast-paths (in order): bare number → OPC-UA object → Modbus array → generic walk.
   private extractNumericFields(data: any, deviceName: string, timestampMs: number, prefix = '', depth = 0): void {
-    if (!this.getService()) return;
-    if (depth > 3) return;
-
-    if (typeof data === 'object' && data !== null) { // circular-reference guard
-      if (this.batchVisited.has(data)) return;
-      this.batchVisited.add(data);
-    }
+    if (depth > AnomalyFeed.MAX_RECURSION_DEPTH) return;
 
     if (typeof data === 'number') {
       this.dispatchDirectNumeric(data, deviceName, timestampMs, prefix);
@@ -205,6 +239,10 @@ export class AnomalyFeed {
     }
 
     if (typeof data !== 'object' || data === null) return;
+
+    // Circular-reference guard: only reachable if data is an object and not null
+    if (this.batchVisited.has(data)) return;
+    this.batchVisited.add(data);
 
     if (!Array.isArray(data) && data.deviceName && (data.metric || data.name) && data.value !== undefined) {
       this.dispatchReadingObject(data, deviceName, timestampMs);
@@ -228,7 +266,8 @@ export class AnomalyFeed {
     const effectiveDeviceId = resolvedDeviceId || `endpoint:${deviceName}`;
 
     for (const [key, value] of Object.entries(data)) {
-      if (typeof value === 'number') {
+      const num = this.toFiniteNumber(value);
+      if (num !== undefined) {
         const metricName = prefix ? `${prefix}_${key}` : key;
         const metricKey = this.buildMetricKey(payloadDeviceUuid, deviceName, metricName);
 
@@ -241,8 +280,8 @@ export class AnomalyFeed {
         }
 
         this.dispatchToAnomaly(metricKey, {
-          source: 'sensor', protocol: this.protocol as any, rawDeviceState: rawState,
-          value, unit: '', timestamp: timestampMs, quality: 'GOOD',
+          source: 'sensor', protocol: this.protocol, rawDeviceState: rawState,
+          value: num, unit: '', timestamp: timestampMs, quality: 'GOOD',
           deviceId: effectiveDeviceId,
           tags: {
             sensorName: deviceName, endpointId: deviceName,

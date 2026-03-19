@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { getHeapStatistics } from 'v8';
 import { deviceTopic } from '../../mqtt/topics.js';
 import type { AnomalyDetectionService } from '../../anomaly/index.js';
+import type { Protocol } from '../../anomaly/types.js';
 import type { DeviceConfig, MqttConnection, Logger, DeviceStats } from './types.js';
 import { DeviceState } from './types.js';
 import { AnomalyFeed } from './anomaly/feed.js';
@@ -59,7 +60,11 @@ export class PublishManager extends EventEmitter {
 
   private readonly onDisconnected = (): void => {
     if (this.needStop) return;
-    if (this.batcher.messageCount > 0) this.publishBatch();
+    if (this.batcher.messageCount > 0) {
+      this.publishBatch().catch((err) => {
+        this.logger?.error('Failed to publish batch on disconnect', err);
+      });
+    }
     this.emit('disconnected');
   };
 
@@ -77,8 +82,8 @@ export class PublishManager extends EventEmitter {
     useMsgpackPoc = false,
     useKeyCompactionPoc = false,
     useDeflatePoc = false,
-    private readonly protocol?: string,
-    private readonly anomalyService?: AnomalyDetectionService,
+    private readonly protocol?: Protocol,
+    private anomalyService?: AnomalyDetectionService,
   ) {
     super();
 
@@ -86,14 +91,18 @@ export class PublishManager extends EventEmitter {
     this.connection = new DeviceConnection(config, logger);
     this.compressor = new PayloadCompressor(
       { useMsgpack: useMsgpackPoc, useKeyCompaction: useKeyCompactionPoc, useDeflate: useDeflatePoc },
-      mqttConnection, dictionaryManager, logger, protocol, config.name,
+      mqttConnection, dictionaryManager,  protocol,
     );
     this.stats = new PublishStats();
     this.feed = new AnomalyFeed(() => this.anomalyService, deviceUuid, protocol, logger);
-    this.enricher = new AnomalyEnricher(() => this.anomalyService, deviceUuid, protocol, logger);
+    this.enricher = new AnomalyEnricher(() => this.anomalyService, deviceUuid, protocol);
 
     this.batcher.on('flush', () => { this.publishBatch(); });
     this.batcher.on('message-added', () => { this.stats.data.messagesReceived++; });
+  }
+
+  public setAnomalyService(service?: AnomalyDetectionService): void {
+    this.anomalyService = service;
   }
 
   async start(): Promise<void> {
@@ -114,6 +123,8 @@ export class PublishManager extends EventEmitter {
       );
     }
 
+    this.clearBufferTimer();
+    if (this.config.bufferTimeMs > 0) this.startBufferTimer();
     this.connection.connect();
   }
 
@@ -142,7 +153,7 @@ export class PublishManager extends EventEmitter {
     const stats = this.getStats();
     const state = this.getState();
     const hasRecentData = stats.lastPublishTime &&
-      (Date.now() - new Date(stats.lastPublishTime).getTime()) < staleThresholdMs;
+      (Date.now() - stats.lastPublishTime.getTime()) < staleThresholdMs;
     const healthy = state === DeviceState.CONNECTED && (hasRecentData || stats.messagesReceived === 0);
 
     return {
@@ -176,9 +187,13 @@ export class PublishManager extends EventEmitter {
       const topic = deviceTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
       const messageCount = this.batcher.messageCount;
       const batchBytes = this.batcher.totalBytes;
+        const messages = [...this.batcher.messages];
 
-      const enriched = this.processAnomaly(this.batcher.messages, name);
+        const enriched = this.processAnomaly(messages, name);
+      if (this.needStop) return;
+
       const { data, baselineSize } = this.buildPayload(name, enriched);
+      if (this.needStop) return;
 
       if (!this.mqttConnection.isConnected()) {
         await this.publishOffline(topic, data, messageCount);
@@ -192,6 +207,12 @@ export class PublishManager extends EventEmitter {
   }
 
   private processAnomaly(messages: any[], endpointName: string): any[] {
+    if (!this.anomalyService) return messages;
+
+    this.logger?.debug('[ANOMALY TRACE] Dispatching endpoint batch to anomaly feed', {
+      endpointName,
+      messageCount: messages.length,
+    });
     this.feed.processBatch(messages, endpointName);
     return this.enricher.enrich(messages, endpointName);
   }
@@ -222,7 +243,6 @@ export class PublishManager extends EventEmitter {
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
       this.stats.recordPublish(messageCount, batchBytes);
       this.stats.logPublishSuccess(messageCount, batchBytes, info, endpointName, this.logger);
-      if (Array.isArray(enriched)) enriched.length = 0;
       this.batcher.reset();
     } catch (err) {
       this.logger?.error(`Failed to publish batch from endpoint '${endpointName}'`, err);

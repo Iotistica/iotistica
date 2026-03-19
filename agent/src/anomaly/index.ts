@@ -770,7 +770,9 @@ export class AnomalyDetectionService {
 	private getMetricConfig(metricName: string): MetricConfig | undefined {
 		// Exact match (system metrics, pre-qualified legacy names)
 		const exact = this.config.metrics.find(m => m.name === metricName);
-		if (exact) return exact;
+		if (exact) {
+			return exact;
+		}
 
 		// Device-scoped match
 		for (const m of this.config.metrics) {
@@ -778,6 +780,11 @@ export class AnomalyDetectionService {
 				return m;
 			}
 		}
+
+		this.logger?.debugSync('[ANOMALY TRACE] No metric config match', {
+			component: LogComponents.metrics,
+			metricName,
+		});
 
 		return undefined;
 	}
@@ -825,6 +832,11 @@ export class AnomalyDetectionService {
 	/** Returns true when at least one metric is enabled for anomaly detection. */
 	hasConfiguredMetrics(): boolean {
 		return this.enabled && this.config.metrics.some(m => m.enabled);
+	}
+
+	/** Returns the current agent/device UUID used for canonical metric keys. */
+	getDeviceUuid(): string | undefined {
+		return this.deviceUuid;
 	}
 
 	/** Returns true when the given canonical metric key is configured and enabled. */

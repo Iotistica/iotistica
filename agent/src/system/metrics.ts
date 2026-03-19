@@ -862,6 +862,11 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 	// Feed edge AI anomaly detection if configured
 	if (anomalyService) {
 		const timestamp = Date.now();
+		const deviceUuid = anomalyService.getDeviceUuid?.();
+
+		if (!deviceUuid) {
+			return metrics;
+		}
 
 			// Feed all numeric metrics to edge AI for local ML processing
 			const metricsToFeed = [
@@ -879,13 +884,14 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 
 			// Process only metrics that are configured for anomaly detection
 			for (const item of metricsToFeed) {
-				if (item.value !== null && item.value !== undefined && anomalyService.isMetricConfigured(item.metric)) {
+				const canonicalMetricName = `${deviceUuid}_system_${item.metric}`;
+				if (item.value !== null && item.value !== undefined && anomalyService.isMetricConfigured(canonicalMetricName)) {
 					anomalyService.processDataPoint({
 						source: 'system',
 						protocol: 'system', // Agent system metrics
 						deviceState: 'running',
 						deviceId: 'system-endpoint',
-						metric: item.metric,
+						metric: canonicalMetricName,
 						value: item.value,
 						unit: item.unit,
 						timestamp,

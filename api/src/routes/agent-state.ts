@@ -152,6 +152,118 @@ function sanitizeAnomalyExpectedRanges(config: any): any {
   return nextConfig;
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+const SYSTEM_METRIC_NAMES = new Set([
+  'cpu_usage',
+  'cpu_temp',
+  'cpu_cores',
+  'memory_usage',
+  'memory_total',
+  'memory_percent',
+  'storage_usage',
+  'storage_total',
+  'storage_percent',
+  'uptime',
+]);
+
+function normalizeAnomalyMetricNames(config: any, deviceUuid: string): any {
+  if (!config || typeof config !== 'object') {
+    return config;
+  }
+
+  const nextConfig = JSON.parse(JSON.stringify(config));
+  const metrics = nextConfig?.anomalyDetection?.metrics;
+  if (!Array.isArray(metrics)) {
+    return nextConfig;
+  }
+
+  // Build endpoint name → UUID map from config.endpoints so dashboard-submitted
+  // metrics with { name: 'vibration', deviceName: 'opcua-1' } can be canonicalized
+  // to <deviceUuid>_<endpointUuid>_vibration without a separate DB lookup.
+  const endpointNameToUuid: Record<string, string> = {};
+  const configEndpoints = Array.isArray(nextConfig.endpoints) ? nextConfig.endpoints : [];
+  for (const ep of configEndpoints) {
+    if (ep.name && ep.uuid) {
+      endpointNameToUuid[ep.name] = ep.uuid;
+    }
+  }
+
+  const deduped: any[] = [];
+  const seenNames = new Set<string>();
+  let droppedInvalidCount = 0;
+
+  for (const metric of metrics) {
+    if (!metric || typeof metric !== 'object') {
+      continue;
+    }
+
+    const rawMetricName = typeof metric.name === 'string' ? metric.name.trim() : '';
+    if (!rawMetricName) {
+      continue;
+    }
+
+    let normalizedName = rawMetricName;
+
+    // Canonical system naming: <deviceUuid>_system_<metricName>
+    if (SYSTEM_METRIC_NAMES.has(rawMetricName)) {
+      normalizedName = `${deviceUuid}_system_${rawMetricName}`;
+    } else if (metric.deviceName && endpointNameToUuid[metric.deviceName]) {
+      // Canonical endpoint naming: <deviceUuid>_<endpointUuid>_<metricName>
+      // Auto-canonicalize dashboard-submitted metrics that carry deviceName (endpoint display name)
+      // rather than a pre-built canonical key.
+      normalizedName = `${deviceUuid}_${endpointNameToUuid[metric.deviceName]}_${rawMetricName}`;
+    }
+
+    const firstSep = normalizedName.indexOf('_');
+    const secondSep = firstSep >= 0 ? normalizedName.indexOf('_', firstSep + 1) : -1;
+    const metricDeviceUuid = firstSep > 0 ? normalizedName.slice(0, firstSep) : '';
+    const scope = secondSep > firstSep ? normalizedName.slice(firstSep + 1, secondSep) : '';
+    const metricField = secondSep > firstSep ? normalizedName.slice(secondSep + 1) : '';
+
+    const isCanonicalSystem = (
+      metricDeviceUuid === deviceUuid
+      && scope === 'system'
+      && SYSTEM_METRIC_NAMES.has(metricField)
+    );
+
+    const isCanonicalEndpoint = (
+      metricDeviceUuid === deviceUuid
+      && isUuid(scope)
+      && metricField.trim().length > 0
+    );
+
+    if (!isCanonicalSystem && !isCanonicalEndpoint) {
+      droppedInvalidCount += 1;
+      continue;
+    }
+
+    const metricCopy: any = { ...metric };
+    metricCopy.name = normalizedName;
+    delete metricCopy.deviceName;
+
+    if (seenNames.has(metricCopy.name)) {
+      continue;
+    }
+
+    seenNames.add(metricCopy.name);
+    deduped.push(metricCopy);
+  }
+
+  if (droppedInvalidCount > 0) {
+    logger.warn('Dropped non-canonical anomaly metric entries', {
+      deviceUuid,
+      droppedCount: droppedInvalidCount,
+      requiredFormat: '<deviceUuid>_<endpointUuid>_<metricName>',
+    });
+  }
+
+  nextConfig.anomalyDetection.metrics = deduped;
+  return nextConfig;
+}
+
 // ============================================================================
 // Device State Endpoints (Device-Side - Used by devices themselves)
 // ============================================================================
@@ -386,6 +498,7 @@ router.post('/devices/:uuid/target-state', deviceAuth, validateTargetStateConfig
 
     config = await applyPendingMqttAuth(config || {});
     config = sanitizeAnomalyExpectedRanges(config);
+    config = normalizeAnomalyMetricNames(config, uuid);
 
     // 🎯 RESOLVE IMAGE DIGESTS
     // Convert all :latest and floating tags to @sha256:... digests
@@ -500,6 +613,7 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
 
     config = await applyPendingMqttAuth(config || {});
     config = sanitizeAnomalyExpectedRanges(config);
+    config = normalizeAnomalyMetricNames(config, uuid);
 
     // 🎯 RESOLVE IMAGE DIGESTS
     // Convert all :latest and floating tags to @sha256:... digests

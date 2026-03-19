@@ -761,17 +761,6 @@ export class ConfigManager extends EventEmitter {
 				});
 			}
 			
-			this.logger?.debugSync('=== CURRENT ENDPOINTS IN DB (BEFORE SYNC) ===', {
-				component: LogComponents.configManager,
-				operation: 'syncEndpointsToDatabase',
-				currentCount: currentDevices.length,
-				currentDevices: currentDevices.map(d => ({
-					uuid: d.uuid,
-					name: d.name,
-					protocol: d.protocol,
-					dataPointsCount: d.data_points?.length || 0
-				}))
-			});
 			
 		// UUID is the canonical endpoint identifier.
 		const targetDeviceUuids = new Set(

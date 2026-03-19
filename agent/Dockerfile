@@ -1,14 +1,23 @@
-# ---- Dependencies stage ----
-FROM node:20-alpine AS deps
+# ---- Shared base stage ----
+FROM node:20-alpine AS base
 
 WORKDIR /app
 
-# Install build tools needed for native dependencies (sqlite3, node-pty)
-# py3-setuptools provides distutils replacement for Python 3.12+
-RUN apk add --no-cache python3 py3-setuptools make g++ sqlite-dev linux-headers
+ENV npm_config_loglevel=warn \
+    npm_config_progress=false
 
-# Upgrade zlib to patched release from Alpine edge main.
-RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main zlib=1.3.2-r0
+# Shared build dependencies (used by deps and builder stages)
+# py3-setuptools provides distutils replacement for Python 3.12+
+RUN apk add --no-cache \
+    python3 py3-setuptools make g++ sqlite-dev linux-headers && \
+    apk add --no-cache \
+    --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
+    zlib=1.3.2-r0
+
+# ---- Dependencies stage ----
+FROM base AS deps
+
+WORKDIR /app
 
 # Copy package files
 COPY agent/package*.json ./
@@ -23,16 +32,9 @@ RUN --mount=type=cache,target=/root/.npm \
     PYTHON=python3 npm ci --omit=dev --legacy-peer-deps
 
 # ---- Build stage ----
-FROM node:20-alpine AS builder
+FROM base AS builder
 
 WORKDIR /app
-
-# Install build tools for native deps (sqlite3, node-pty)
-# py3-setuptools provides distutils replacement for Python 3.12+
-RUN apk add --no-cache python3 py3-setuptools make g++ sqlite-dev linux-headers
-
-# Upgrade zlib to patched release from Alpine edge main.
-RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main zlib=1.3.2-r0
 
 # Copy package files
 COPY agent/package*.json agent/tsconfig.json agent/tsconfig.build.json ./
@@ -87,7 +89,9 @@ RUN (deluser node || true) && \
     addgroup -g 1000 agentgroup && \
     adduser -u 1000 -G agentgroup -s /bin/sh -D agentuser && \
     mkdir -p /app/data/vpn && \
-    chown -R agentuser:agentgroup /app
+    chown agentuser:agentgroup /app/data && \
+    chown agentuser:agentgroup /app/data/vpn
+   
 
 # Copy package files from agent directory (contains version info)
 COPY --chown=agentuser:agentgroup agent/package*.json ./

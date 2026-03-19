@@ -18,6 +18,8 @@ export class MessageBatcher extends EventEmitter {
   private _totalReceived = 0;  // lifetime counter (never reset)
 
   private readonly delimiterRegex: RegExp;
+  private readonly delimiterLiteral?: string;
+  private readonly delimiterLiteralBytes?: Buffer;
 
   constructor(
     private readonly config: DeviceConfig,
@@ -26,8 +28,18 @@ export class MessageBatcher extends EventEmitter {
     private readonly logger?: Logger,
   ) {
     super();
+    if (!/^[\x00-\x7F]+$/.test(config.eomDelimiter)) {
+      throw new Error(`Invalid eom_delimiter: ${config.eomDelimiter}. Delimiter must be ASCII-safe.`);
+    }
+    if (config.eomDelimiter.length === 0) {
+      throw new Error('Invalid eom_delimiter: delimiter must not be empty.');
+    }
+    if (this.isPlainDelimiter(config.eomDelimiter)) {
+      this.delimiterLiteral = config.eomDelimiter;
+      this.delimiterLiteralBytes = Buffer.from(config.eomDelimiter, 'ascii');
+    }
     try {
-      this.delimiterRegex = new RegExp(config.eomDelimiter, 'g');
+      this.delimiterRegex = new RegExp(config.eomDelimiter);
     } catch {
       throw new Error(`Invalid eom_delimiter regex: ${config.eomDelimiter}`);
     }
@@ -53,12 +65,14 @@ export class MessageBatcher extends EventEmitter {
         `(current: ${this.readBuffer.length}, incoming: ${data.length}, max: ${this.config.bufferCapacity}). ` +
         `Discarding buffer — check delimiter or message size.`,
       );
+      // Drop accumulated partial state, then treat incoming bytes as a fresh segment.
+      this.readBuffer = Buffer.alloc(0);
+      if (data.length > this.config.bufferCapacity) {
+        this.logger?.error(`Single chunk exceeds capacity (${data.length}), discarding`);
+        return;
+      }
       this.readBuffer = data;
       this.parseFrames();
-      if (this.readBuffer.length > this.config.bufferCapacity) {
-        this.logger?.error(`Single chunk exceeds capacity (${data.length}), discarding`);
-        this.readBuffer = Buffer.alloc(0);
-      }
       return;
     }
 
@@ -80,17 +94,25 @@ export class MessageBatcher extends EventEmitter {
     this._messages.length = 0;
     this._totalBytes = 0;
     this._firstMessageTime = Date.now();
-    this.readBuffer = Buffer.alloc(0);
   }
 
   // --- internals --------------------------------------------------------------
 
-  private parseFrames(): void {
-    const str = this.readBuffer.toString('utf8');
-    const parts = str.split(this.delimiterRegex);
-    if (parts.length === 0) return;
+  private isPlainDelimiter(pattern: string): boolean {
+    // Fast-path only literal delimiters with no regex metacharacters.
+    return !/[\\^$.*+?()[\]{}|]/.test(pattern);
+  }
 
-    const tail = parts[parts.length - 1];
+  private parseFrames(): void {
+    if (this.delimiterLiteralBytes) {
+      this.parseFramesWithLiteralDelimiter(this.delimiterLiteralBytes);
+      return;
+    }
+
+    const str = this.readBuffer.toString('utf8');
+
+    const parts = str.split(this.delimiterRegex);
+    const tail = parts.length > 0 ? parts[parts.length - 1] : str;
     if (Buffer.byteLength(tail, 'utf8') > this.config.bufferCapacity) {
       this.logger?.error(
         `Incomplete frame exceeds capacity for '${this.config.name || 'unknown'}'. Discarding.`,
@@ -103,6 +125,33 @@ export class MessageBatcher extends EventEmitter {
     for (let i = 0; i < parts.length - 1; i++) {
       if (parts[i].length > 0) this.addMessage(parts[i]);
     }
+  }
+
+  private parseFramesWithLiteralDelimiter(delimiter: Buffer): void {
+    let scanIndex = 0;
+    let delimIndex = this.readBuffer.indexOf(delimiter, scanIndex);
+
+    while (delimIndex !== -1) {
+      const frameBytes = this.readBuffer.subarray(scanIndex, delimIndex);
+      if (frameBytes.length > 0) this.addMessage(frameBytes.toString('utf8'));
+      scanIndex = delimIndex + delimiter.length;
+      delimIndex = this.readBuffer.indexOf(delimiter, scanIndex);
+    }
+
+    // No delimiter found: keep buffered bytes untouched.
+    if (scanIndex === 0) return;
+
+    const tail = this.readBuffer.subarray(scanIndex);
+    if (tail.length > this.config.bufferCapacity) {
+      this.logger?.error(
+        `Incomplete frame exceeds capacity for '${this.config.name || 'unknown'}'. Discarding.`,
+      );
+      this.readBuffer = Buffer.alloc(0);
+      return;
+    }
+
+    // Copy tail to avoid retaining references to already-processed bytes.
+    this.readBuffer = tail.length > 0 ? Buffer.from(tail) : Buffer.alloc(0);
   }
 
   private addMessage(raw: string): void {

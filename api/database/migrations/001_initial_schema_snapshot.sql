@@ -1168,7 +1168,7 @@ BEGIN
         COALESCE((
             SELECT COUNT(*) 
             FROM endpoints ds 
-            WHERE ds.device_uuid IN (SELECT d2.uuid FROM devices d2 WHERE d2.fleet_id = f.fleet_id)
+                    WHERE ds.agent_uuid IN (SELECT d2.uuid FROM devices d2 WHERE d2.fleet_id = f.fleet_id)
         ), 0) as total_endpoints,
         ROUND(COALESCE(AVG(d.cpu_usage), 0)::numeric, 2) as avg_cpu_usage,
         ROUND(COALESCE(AVG(
@@ -1503,7 +1503,7 @@ BEGIN
     SELECT 
         COUNT(d.uuid),
         COUNT(d.uuid) FILTER (WHERE d.is_online = true),
-        (SELECT COUNT(*) FROM endpoints ds WHERE ds.device_uuid IN (SELECT d2.uuid FROM devices d2 WHERE d2.fleet_id = p_fleet_id)),
+            (SELECT COUNT(*) FROM endpoints ds WHERE ds.agent_uuid IN (SELECT d2.uuid FROM devices d2 WHERE d2.fleet_id = p_fleet_id)),
         f.current_cost,
         f.total_running_hours
     INTO v_device_count, v_devices_online, v_total_endpoints, v_current_cost, v_total_hours

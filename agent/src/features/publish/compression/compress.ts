@@ -4,8 +4,10 @@ import * as msgpack from 'msgpack-lite';
 import { createJsonPayload, createMsgpackPayload, serializePayload } from '../../../mqtt/manager.js';
 import { getCpuUsage } from '../../../system/metrics.js';
 import type { MqttConnection, Logger } from '../types.js';
+import type { Protocol } from '../../../anomaly/types.js';
 
 const deflateAsync = promisify(zlibDeflate);
+type Payload = Buffer | string;
 
 export interface CompressionInfo {
   method:
@@ -54,9 +56,7 @@ export class PayloadCompressor {
     private readonly opts: CompressorOptions,
     private readonly mqttConnection: MqttConnection,
     private readonly dictionaryManager?: any,
-    private readonly logger?: Logger,
-    private readonly protocol?: string,
-    private readonly deviceName?: string,
+    private readonly protocol?: Protocol,
   ) {}
 
   async compress(
@@ -75,14 +75,69 @@ export class PayloadCompressor {
 
   // --- strategies -------------------------------------------------------------
 
+  private sizeOf(payload: Payload): number {
+    return typeof payload === 'string' ? Buffer.byteLength(payload, 'utf-8') : payload.length;
+  }
+
+  private buildInfo(
+    method: CompressionInfo['method'],
+    baselineSize: number,
+    compressedSize: number,
+    t0: number,
+    isBaseline = false,
+    cpuUsage?: CompressionInfo['cpuUsage'],
+  ): CompressionInfo {
+    return {
+      method,
+      originalSize: baselineSize,
+      compressedSize,
+      ratio: isBaseline ? 0 : ((baselineSize - compressedSize) / baselineSize) * 100,
+      compressionMs: Date.now() - t0,
+      ...(isBaseline ? { isBaseline: true } : {}),
+      ...(cpuUsage ? { cpuUsage } : {}),
+    };
+  }
+
+  private dictionaryMethod(useMsgpack: boolean, useDeflate: boolean):
+    'dictionary' | 'dictionary+msgpack' | 'dictionary+deflate' | 'dictionary+msgpack+deflate' {
+    if (useMsgpack) return useDeflate ? 'dictionary+msgpack+deflate' : 'dictionary+msgpack';
+    return useDeflate ? 'dictionary+deflate' : 'dictionary';
+  }
+
+  private standardMethod(useMsgpack: boolean, useDeflate: boolean):
+    'json' | 'json+deflate' | 'msgpack' | 'msgpack+deflate' {
+    if (useMsgpack) return useDeflate ? 'msgpack+deflate' : 'msgpack';
+    return useDeflate ? 'json+deflate' : 'json';
+  }
+
+  private async maybeDeflatePayload(
+    payload: Payload,
+    enabled: boolean,
+  ): Promise<{ payload: Payload; deflateCpu?: { user: number; system: number } }> {
+    if (!enabled) {
+      return { payload };
+    }
+
+    const buf = typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload;
+    if (!shouldDeflate(buf.length, await getCpuUsage())) {
+      return { payload: buf };
+    }
+
+    const cpu1 = process.cpuUsage();
+    const finalPayload = await deflateAsync(buf);
+    const deflateCpu = process.cpuUsage(cpu1);
+
+    return { payload: finalPayload, deflateCpu };
+  }
+
   private async baseline(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
     const t0 = Date.now();
     const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
     const payload = serializePayload(createJsonPayload(data as object, msgIdGen));
-    const compressedSize = typeof payload === 'string' ? Buffer.byteLength(payload, 'utf-8') : payload.length;
+    const compressedSize = this.sizeOf(payload);
     return {
       payload,
-      info: { method: 'baseline', originalSize: baselineSize, compressedSize, ratio: 0, compressionMs: Date.now() - t0, isBaseline: true },
+      info: this.buildInfo('baseline', baselineSize, compressedSize, t0, true),
     };
   }
 
@@ -104,39 +159,21 @@ export class PayloadCompressor {
       intermediate = JSON.stringify(compacted);
     }
 
-    let deflateCpu: { user: number; system: number } | undefined;
-    let finalPayload: Buffer | string;
-    if (this.opts.useDeflate) {
-      const buf = typeof intermediate === 'string' ? Buffer.from(intermediate, 'utf-8') : intermediate;
-      const cpu1 = process.cpuUsage();
-      finalPayload = shouldDeflate(buf.length, await getCpuUsage()) ? await deflateAsync(buf) : buf;
-      deflateCpu = process.cpuUsage(cpu1);
-    } else {
-      finalPayload = intermediate;
-    }
+    const { payload: finalPayload, deflateCpu } = await this.maybeDeflatePayload(intermediate, this.opts.useDeflate);
 
-    const finalSize = typeof finalPayload === 'string' ? Buffer.byteLength(finalPayload, 'utf-8') : finalPayload.length;
-    const method = (
-      this.opts.useMsgpack
-        ? (this.opts.useDeflate ? 'dictionary+msgpack+deflate' : 'dictionary+msgpack')
-        : (this.opts.useDeflate ? 'dictionary+deflate' : 'dictionary')
-    ) as CompressionInfo['method'];
+    const finalSize = this.sizeOf(finalPayload);
+    const method = this.dictionaryMethod(this.opts.useMsgpack, this.opts.useDeflate);
 
     const serializationMethod = this.opts.useMsgpack ? 'msgpack' as const : 'dictionary' as const;
     const serializationCpu = this.opts.useMsgpack ? (msgpackCpu || dictCpu) : dictCpu;
 
     return {
       payload: finalPayload,
-      info: {
-        method, originalSize: baselineSize, compressedSize: finalSize,
-        ratio: ((baselineSize - finalSize) / baselineSize) * 100,
-        compressionMs: Date.now() - t0,
-        cpuUsage: {
-          serialization: { method: serializationMethod, cpu: serializationCpu },
-          compression: deflateCpu ? { method: 'deflate', cpu: deflateCpu } : undefined,
-          total: process.cpuUsage(cpu0),
-        },
-      },
+      info: this.buildInfo(method, baselineSize, finalSize, t0, false, {
+        serialization: { method: serializationMethod, cpu: serializationCpu },
+        compression: deflateCpu ? { method: 'deflate', cpu: deflateCpu } : undefined,
+        total: process.cpuUsage(cpu0),
+      }),
     };
   }
 
@@ -155,54 +192,35 @@ export class PayloadCompressor {
       let payload = serializePayload(createMsgpackPayload(data as object, msgIdGen));
       msgpackCpu = process.cpuUsage(cpu1);
 
-      if (this.opts.useDeflate && shouldDeflate(payload.length, await getCpuUsage())) {
-        const cpu2 = process.cpuUsage();
-        finalPayload = await deflateAsync(payload);
-        deflateCpu = process.cpuUsage(cpu2);
-      } else {
-        finalPayload = payload;
-      }
-      compressedSize = typeof finalPayload === 'string' ? Buffer.byteLength(finalPayload, 'utf-8') : finalPayload.length;
+      const deflated = await this.maybeDeflatePayload(payload, this.opts.useDeflate);
+      finalPayload = deflated.payload;
+      deflateCpu = deflated.deflateCpu;
+      compressedSize = this.sizeOf(finalPayload);
     } else {
       let payload = serializePayload(createJsonPayload(data as object, msgIdGen));
 
       if (this.opts.useDeflate) {
-        const buf = typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload;
-        if (shouldDeflate(buf.length, await getCpuUsage())) {
-          const cpu1 = process.cpuUsage();
-          finalPayload = await deflateAsync(buf);
-          deflateCpu = process.cpuUsage(cpu1);
-          compressedSize = finalPayload.length;
-        } else {
-          finalPayload = buf;
-          compressedSize = buf.length;
-        }
+        const deflated = await this.maybeDeflatePayload(payload, true);
+        finalPayload = deflated.payload;
+        deflateCpu = deflated.deflateCpu;
+        compressedSize = this.sizeOf(finalPayload);
       } else {
         finalPayload = payload;
         compressedSize = baselineSize;
       }
     }
 
-    const method = (
-      this.opts.useMsgpack
-        ? (this.opts.useDeflate ? 'msgpack+deflate' : 'msgpack')
-        : (this.opts.useDeflate ? 'json+deflate' : 'json')
-    ) as CompressionInfo['method'];
+    const method = this.standardMethod(this.opts.useMsgpack, this.opts.useDeflate);
 
     return {
       payload: finalPayload!,
-      info: {
-        method, originalSize: baselineSize, compressedSize: compressedSize!,
-        ratio: ((baselineSize - compressedSize!) / baselineSize) * 100,
-        compressionMs: Date.now() - t0,
-        cpuUsage: {
-          serialization: msgpackCpu
-            ? { method: 'msgpack', cpu: msgpackCpu }
-            : { method: 'json', cpu: { user: 0, system: 0 } },
-          compression: deflateCpu ? { method: 'deflate', cpu: deflateCpu } : undefined,
-          total: process.cpuUsage(cpu0),
-        },
-      },
+      info: this.buildInfo(method, baselineSize, compressedSize!, t0, false, {
+        serialization: msgpackCpu
+          ? { method: 'msgpack', cpu: msgpackCpu }
+          : { method: 'json', cpu: { user: 0, system: 0 } },
+        compression: deflateCpu ? { method: 'deflate', cpu: deflateCpu } : undefined,
+        total: process.cpuUsage(cpu0),
+      }),
     };
   }
 }

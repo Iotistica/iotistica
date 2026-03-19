@@ -77,7 +77,22 @@ interface MetricDevice {
   available_metrics: string[];
   metric_count: number;
   last_seen: string;
+  source_refs?: Array<{
+    deviceUuid?: string;
+    endpointUuid?: string;
+    agentUuid?: string;
+    agentName?: string;
+    endpointName?: string;
+  }>;
 }
+
+type SourceRef = {
+  deviceUuid?: string;
+  endpointUuid?: string;
+  agentUuid?: string;
+  agentName?: string;
+  endpointName?: string;
+};
 
 function sanitizeExpectedRange(range?: [number, number]): [number, number] | undefined {
   if (!Array.isArray(range) || range.length !== 2) return undefined;
@@ -93,6 +108,31 @@ function isMetricDeviceForAgent(device: MetricDevice, agentUuid: string): boolea
   if (device.agent_uuid && device.agent_uuid === agentUuid) return true;
   if (Array.isArray(device.agent_uuids) && device.agent_uuids.includes(agentUuid)) return true;
   return false;
+}
+
+function getSourceRefForAgent(device: MetricDevice | undefined, agentUuid: string): SourceRef | undefined {
+  if (!device || !agentUuid || !Array.isArray(device.source_refs)) return undefined;
+
+  return device.source_refs.find((item) => item?.agentUuid === agentUuid);
+}
+
+function isUuidLike(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function parseCanonicalMetricName(metricName: string): { deviceUuid: string; scope: string; metric: string } | null {
+  if (!metricName) return null;
+
+  const firstSep = metricName.indexOf('_');
+  const secondSep = firstSep >= 0 ? metricName.indexOf('_', firstSep + 1) : -1;
+  if (firstSep <= 0 || secondSep <= firstSep + 1) return null;
+
+  const deviceUuid = metricName.slice(0, firstSep);
+  const scope = metricName.slice(firstSep + 1, secondSep);
+  const metric = metricName.slice(secondSep + 1);
+
+  if (!deviceUuid || !scope || !metric) return null;
+  return { deviceUuid, scope, metric };
 }
 
 const DETECTION_METHOD_OPTIONS = [
@@ -120,7 +160,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { getPendingConfig, updatePendingConfig, fetchDeviceState } = useDeviceState();
+  const { updatePendingConfig, fetchDeviceState } = useDeviceState();
 
   const {
     register,
@@ -223,11 +263,21 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
   const loadMetricsForDevice = async (deviceUuid: string) => {
     setLoading(true);
     try {
-      // Fetch device state to get current config
+      // Refresh shared device state for the rest of the dashboard, but read the
+      // target-state payload directly here to avoid a stale context read.
       await fetchDeviceState(deviceUuid);
 
-      const pendingConfig = getPendingConfig(deviceUuid);
-      const configuredMetrics = pendingConfig?.anomalyDetection?.metrics ?? [];
+      const accessToken = localStorage.getItem('accessToken') || localStorage.getItem('token');
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`), {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load device state: ${response.statusText}`);
+      }
+
+      const deviceState = await response.json();
+      const configuredMetrics = deviceState?.target_state?.config?.anomalyDetection?.metrics ?? [];
 
       setMetrics(configuredMetrics);
       setError(null);
@@ -295,11 +345,13 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
       return;
     }
 
-    // Always derive deviceName from the current device selection so system metrics
-    // (protocol === 'system') never get a deviceName, regardless of form state.
+    // Keep selected catalog device_name for save-time canonicalization to
+    // <agentUuid>_<device_uuid>_<metricName>.
     const selectedDeviceInfo = metricDevices.find(d => d.device_name === selectedMetricDevice);
     const isSystemSelection = !selectedMetricDevice || selectedDeviceInfo?.protocol === 'system';
-    data.deviceName = isSystemSelection ? undefined : (selectedMetricDevice || undefined);
+    data.deviceName = isSystemSelection
+      ? undefined
+      : (selectedMetricDevice || undefined);
 
     let updated: AnomalyMetric[];
     if (editingIndex !== null) {
@@ -324,6 +376,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
     try {
       const normalizedMetrics = updatedMetrics.map(metric => {
         const metricName = (metric.name || '').trim();
+        let normalizedName = metricName;
 
         // Sanitize deviceName: clear it if the device is a 'system' protocol device in the
         // catalog. This self-heals any existing entries that were incorrectly saved with a
@@ -336,9 +389,31 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
           }
         }
 
+        // For non-system metrics, canonicalize using OPC-UA payload device_uuid
+        // (source_refs.deviceUuid) so runtime keys match anomaly feed keys.
+        const parsed = parseCanonicalMetricName(metricName);
+        const looksCanonical = !!(
+          parsed
+          && parsed.deviceUuid === selectedDeviceUuid
+          && (parsed.scope === 'system' || isUuidLike(parsed.scope))
+          && parsed.metric.trim().length > 0
+        );
+
+        if (!looksCanonical && deviceName) {
+          const deviceInfo = metricDevices.find(d => d.device_name === deviceName);
+          const sourceRef = getSourceRefForAgent(deviceInfo, selectedDeviceUuid);
+          const metricDeviceUuid = sourceRef?.deviceUuid;
+
+          if (metricDeviceUuid) {
+            normalizedName = `${selectedDeviceUuid}_${metricDeviceUuid}_${metricName}`;
+            // Canonical name is self-contained; avoid relying on deviceName at API layer.
+            deviceName = undefined;
+          }
+        }
+
         // Build with explicit field ordering: name → deviceName → rest
         const normalized: AnomalyMetric = {
-          name: metricName,
+          name: normalizedName,
           ...(deviceName ? { deviceName } : {}),
           enabled: metric.enabled,
           methods: metric.methods,
@@ -384,6 +459,21 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
   );
   const metricDeviceList = metricDeviceOptions.length > 0 ? metricDeviceOptions : metricDevices;
 
+  const resolveMetricScopeDeviceName = (agentUuid: string, scope: string): string | undefined => {
+    if (!agentUuid || !scope || scope === 'system') return undefined;
+
+    for (const metricDevice of metricDevices) {
+      if (!isMetricDeviceForAgent(metricDevice, agentUuid)) continue;
+
+      const sourceRef = getSourceRefForAgent(metricDevice, agentUuid);
+      if (sourceRef?.deviceUuid === scope || sourceRef?.endpointUuid === scope) {
+        return metricDevice.device_name;
+      }
+    }
+
+    return undefined;
+  };
+
   const formatMethod = (method?: string) => {
     if (!method) return '-';
     const labels: Record<string, string> = {
@@ -410,7 +500,41 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
     if (metric.deviceName) {
       return `${metric.deviceName} / ${name}`;
     }
-    return name;
+
+    const parsed = parseCanonicalMetricName(name);
+    if (!parsed) {
+      return name;
+    }
+
+    const resolvedDeviceName = resolveMetricScopeDeviceName(parsed.deviceUuid, parsed.scope);
+    const scopeLabel = parsed.scope === 'system'
+      ? 'System'
+      : (resolvedDeviceName || (isUuidLike(parsed.scope) ? `Endpoint ${parsed.scope.slice(0, 8)}` : parsed.scope));
+
+    return `${scopeLabel} / ${parsed.metric}`;
+  };
+
+  const formatMetricTitle = (metric: AnomalyMetric) => {
+    const name = metric.name || '';
+    if (metric.deviceName) {
+      return `${metric.deviceName}_${name}`;
+    }
+
+    const parsed = parseCanonicalMetricName(name);
+    if (!parsed) {
+      return name;
+    }
+
+    const resolvedDeviceName = resolveMetricScopeDeviceName(parsed.deviceUuid, parsed.scope);
+    if (resolvedDeviceName) {
+      return `${resolvedDeviceName}_${parsed.metric}`;
+    }
+
+    const prefix = parsed.deviceUuid === selectedDeviceUuid
+      ? parsed.scope
+      : `${parsed.deviceUuid}_${parsed.scope}`;
+
+    return `${prefix}_${parsed.metric}`;
   };
 
   return (
@@ -497,7 +621,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
                   <TableBody>
                     {metrics.map((metric, index) => (
                       <TableRow key={index}>
-                        <TableCell className="font-medium pl-8" title={metric.deviceName ? `${metric.deviceName}_${metric.name}` : metric.name}>{formatMetricNameForGrid(metric)}</TableCell>
+                        <TableCell className="font-medium pl-8" title={formatMetricTitle(metric)}>{formatMetricNameForGrid(metric)}</TableCell>
                         <TableCell className="px-4">
                           <Badge variant="secondary" className="text-xs whitespace-nowrap">
                             {formatMethod(metric.methods[0])}

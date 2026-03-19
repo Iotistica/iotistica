@@ -1,6 +1,37 @@
 import type { AnomalyDetectionService } from '../../../anomaly/index.js';
+import type { Protocol } from '../../../anomaly/types.js';
+import type { Prediction } from '../../../anomaly/forecaster.js';
 import { extractRawDeviceState, normalizeDeviceState } from '../../../anomaly/device-state.js';
-import type { Logger } from '../types.js';
+
+type Reading = {
+  [key: string]: any;
+  deviceName?: string;
+  metric?: string;
+  registerName?: string;
+  name?: string;
+  value?: unknown;
+  device_uuid?: string;
+  deviceUuid?: string;
+  deviceState?: unknown;
+  state?: unknown;
+  status?: unknown;
+  readings?: Reading[];
+  device_state?: unknown;
+  raw_device_state?: unknown;
+  anomaly_score?: number;
+  anomaly_threshold?: number;
+  baseline_samples?: number;
+  detection_methods?: string[];
+  predicted_next?: number;
+  trend?: string;
+  trend_strength?: number;
+  forecast_confidence?: number;
+  time_to_threshold?: {
+    threshold: number;
+    estimated_seconds: number;
+    confidence: number;
+  };
+};
 
 /**
  * Enriches pre-parsed messages with anomaly scores, thresholds, and forecasts
@@ -11,59 +42,82 @@ export class AnomalyEnricher {
   constructor(
     private readonly getService: () => AnomalyDetectionService | undefined,
     private readonly deviceUuid: string,
-    private readonly protocol: string | undefined,
-    private readonly logger?: Logger,
+    private readonly protocol: Protocol | undefined,
   ) {}
 
   enrich(messages: unknown[], deviceName: string): unknown[] {
     const service = this.getService();
     if (!service) return messages;
 
-    const predictions = service.getPredictions() || {};
-    const enriched: unknown[] = [];
+    const predictions = service.getPredictions();
 
     for (const data of messages) {
-      const d = data as any;
+      const d = data as Reading;
 
       // Modbus format: { readings: [...] }
       if (d.readings && Array.isArray(d.readings)) {
         for (const reading of d.readings) {
           if (typeof reading !== 'object' || reading === null) continue;
           const readingDeviceName: string = reading.deviceName || deviceName;
-          const fieldName: string | undefined = reading.metric || reading.registerName;
-          const rawState = reading.deviceState ?? reading.state ?? reading.status ?? extractRawDeviceState(d);
-          reading.device_state = normalizeDeviceState(this.protocol as any, rawState);
-          if (rawState !== undefined) reading.raw_device_state = rawState;
+          const fieldName: string | undefined = reading.metric || reading.registerName || reading.name;
+          if (!fieldName) continue;
 
-          if (fieldName) {
-            this.attachScores(service, predictions, reading, readingDeviceName, fieldName);
-          }
+          this.applyDeviceState(reading, reading);
+          this.attachScores(service, predictions, reading, readingDeviceName, fieldName);
         }
       }
       // OPC-UA format: direct reading object
-      else if (d.deviceName && (d.registerName || d.metric) && d.value !== undefined) {
+      else if (d.deviceName && (d.metric || d.registerName || d.name) && d.value !== undefined) {
         const readingDeviceName: string = d.deviceName;
-        const fieldName: string = d.registerName || d.metric;
-        const rawState = d.deviceState ?? d.state ?? d.status ?? extractRawDeviceState(d);
-        d.device_state = normalizeDeviceState(this.protocol as any, rawState);
-        if (rawState !== undefined) d.raw_device_state = rawState;
+        const fieldName: string | undefined = d.metric || d.registerName || d.name;
+        if (!fieldName) continue;
+
+        this.applyDeviceState(d, d);
         this.attachScores(service, predictions, d, readingDeviceName, fieldName);
       }
-
-      enriched.push(data);
     }
 
-    return enriched;
+    return messages;
+  }
+
+  private applyDeviceState(target: Reading, source: Reading): void {
+    const raw = extractRawDeviceState(source);
+
+    if (raw === undefined) return;
+
+    if (target.device_state === undefined) {
+      target.device_state = normalizeDeviceState(this.protocol, raw);
+    }
+    if (target.raw_device_state === undefined) {
+      target.raw_device_state = raw;
+    }
+  }
+
+  private buildMetricKey(
+    deviceIdentifier: string | undefined,
+    deviceName: string,
+    fieldName: string,
+  ): string {
+    const identifier =
+      typeof deviceIdentifier === 'string' && deviceIdentifier.trim()
+        ? deviceIdentifier.trim()
+        : deviceName || 'unknown';
+
+    return `${this.deviceUuid}_${identifier}_${fieldName}`;
   }
 
   private attachScores(
     service: AnomalyDetectionService,
-    predictions: Record<string, any>,
-    target: any,
-    deviceName: string,
+    predictions: Record<string, Prediction> | undefined,
+    target: Reading,
+    deviceIdentifierName: string,
     fieldName: string,
   ): void {
-    const metricName = `${this.deviceUuid}_${deviceName}_${fieldName}`;
+    const metricName = this.buildMetricKey(
+      target.device_uuid || target.deviceUuid || deviceIdentifierName,
+      deviceIdentifierName,
+      fieldName,
+    );
     const score = service.getAnomalyScore(metricName);
     if (score === undefined) return;
 
@@ -76,7 +130,7 @@ export class AnomalyEnricher {
       target.detection_methods = metadata.methods;
     }
 
-    const p = predictions[metricName];
+    const p = predictions?.[metricName];
     if (p) {
       target.predicted_next = p.predicted_next;
       target.trend = p.trend;

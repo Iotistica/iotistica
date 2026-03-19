@@ -17,8 +17,6 @@ export interface AnomalyAlerts {
 
 export interface AnomalyMetric {
   name: string;
-  deviceName?: string;             // Optional: scope this config to a specific device.
-                                   // When set, matches incoming metric "deviceName_name".
   enabled: boolean;
   methods: string[];
   threshold: number;

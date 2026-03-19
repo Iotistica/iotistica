@@ -82,41 +82,28 @@ export class DeviceSensorSyncService {
 
   /**
    * Remove anomaly metrics bound to an endpoint that is being deleted.
-   * Supports canonical endpointUuid_metric names and legacy endpoint-name prefixes.
+    * Supports canonical deviceUuid_endpointUuid_metric names only.
    */
-  private pruneAnomalyMetricsForEndpoint(config: any, endpoint?: { uuid?: string; name?: string }): number {
+  private pruneAnomalyMetricsForEndpoint(
+    config: any,
+    deviceUuid: string,
+    endpoint?: { uuid?: string; name?: string },
+  ): number {
     if (!config?.anomalyDetection || !Array.isArray(config.anomalyDetection.metrics) || !endpoint) {
       return 0;
     }
 
+    const agentUuid = (deviceUuid || '').trim();
     const endpointUuid = (endpoint.uuid || '').trim();
-    const endpointName = (endpoint.name || '').trim();
     const metrics: AnomalyMetric[] = config.anomalyDetection.metrics;
 
     const filtered = metrics.filter((metric) => {
       const metricName = (metric?.name || '').trim();
       if (!metricName) return true;
 
-      // Canonical naming: endpointUuid_metricName (legacy pre-qualified format)
-      if (endpointUuid && metricName.startsWith(`${endpointUuid}_`)) {
+      // Canonical naming: deviceUuid_endpointUuid_metricName
+      if (agentUuid && endpointUuid && metricName.startsWith(`${agentUuid}_${endpointUuid}_`)) {
         return false;
-      }
-
-      // Legacy naming compatibility: endpointName_metricName
-      if (endpointName && metricName.startsWith(`${endpointName}_`)) {
-        return false;
-      }
-
-      // Device-scoped naming: metric has a separate deviceName field whose value
-      // matches the endpoint UUID or name (endpoint-level device groups).
-      const metricDeviceName = ((metric as any)?.deviceName || '').trim();
-      if (metricDeviceName) {
-        if (endpointUuid && (metricDeviceName === endpointUuid || metricDeviceName.startsWith(`${endpointUuid}_`))) {
-          return false;
-        }
-        if (endpointName && (metricDeviceName === endpointName || metricDeviceName.startsWith(`${endpointName}_`))) {
-          return false;
-        }
       }
 
       return true;
@@ -1441,7 +1428,7 @@ export class DeviceSensorSyncService {
       ));
       const matchedInTarget = config.endpoints.length < originalCount;
 
-      const removedAnomalyMetrics = this.pruneAnomalyMetricsForEndpoint(config, {
+      const removedAnomalyMetrics = this.pruneAnomalyMetricsForEndpoint(config, deviceUuid, {
         uuid: sensorToDelete.uuid,
         name: sensorToDelete.name,
       });
@@ -1571,7 +1558,7 @@ export class DeviceSensorSyncService {
       );
       config.endpoints = existingDevices;
 
-      const removedAnomalyMetrics = this.pruneAnomalyMetricsForEndpoint(config, {
+      const removedAnomalyMetrics = this.pruneAnomalyMetricsForEndpoint(config, deviceUuid, {
         uuid: sensorToDelete?.uuid,
         name: sensorToDelete?.name,
       });
