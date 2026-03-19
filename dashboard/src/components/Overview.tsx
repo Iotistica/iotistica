@@ -1200,9 +1200,14 @@ export function SystemMetrics({
                               </div>
                               <div className="flex-1 space-y-1">
                                 <div className="flex items-start justify-between gap-2">
-                                  <h4 className="font-medium leading-none">
-                                    {formatMetricForDisplay(incident.metric)}
-                                  </h4>
+                                  <div className="flex flex-col">
+                                    <h4 className="font-medium leading-none">
+                                      {formatMetricForDisplay(incident.metric)}
+                                    </h4>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {incident.device_name}
+                                    </p>
+                                  </div>
                                   <Badge
                                     variant={config.badgeVariant}
                                     className={`shrink-0 ${(config as any).badgeClass ? (config as any).badgeClass : ''}`}
@@ -1216,8 +1221,6 @@ export function SystemMetrics({
                                 </p>
                                 <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1">
                                   <span>{formatTimestamp(incident.last_seen)}</span>
-                                  <span>•</span>
-                                  <span>{incident.device_name}</span>
                                   {incident.status === 'resolved' && (
                                     <>
                                       <span>•</span>

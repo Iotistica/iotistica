@@ -29,6 +29,7 @@ export interface ThresholdLine {
 export interface MetricDataCardConfig {
   widgetId: string;
   title?: string;
+  agentUuid?: string;
   agentName?: string;
   endpointName?: string;
   deviceUuid?: string;
@@ -95,13 +96,21 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       const cacheTtlMs = refreshInterval > 0
         ? Math.min(Math.max(refreshInterval * 1000, 5000), 60000)
         : 15000;
-      const requestKey = `${config.deviceName}|${config.metricName}|${config.timeRange}`;
+      const requestKey = `${config.agentUuid || 'all'}|${config.deviceName}|${config.metricName}|${config.timeRange}`;
 
       const result: TimeSeriesResponse = await metricsRequestQueue.enqueue(
         requestKey,
         async () => {
+          const params = new URLSearchParams({
+            deviceName: config.deviceName,
+            metricName: config.metricName,
+            timeRange: config.timeRange,
+          });
+          if (config.agentUuid) {
+            params.set('agentUuid', config.agentUuid);
+          }
           const url = buildApiUrl(
-            `/api/v1/metrics/timeseries?deviceName=${encodeURIComponent(config.deviceName)}&metricName=${encodeURIComponent(config.metricName)}&timeRange=${config.timeRange}`
+            `/api/v1/metrics/timeseries?${params.toString()}`
           );
 
           const response = await fetch(url, {

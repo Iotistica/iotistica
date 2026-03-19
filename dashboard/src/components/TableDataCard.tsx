@@ -4,6 +4,7 @@ import { Settings, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-rea
 import { buildApiUrl } from '../config/api';
 
 export interface TableDataCardConfig {
+  agentUuid?: string;
   deviceName: string;
   metricName: string;
   timeRange: string; // '1h', '6h', '12h', '24h'
@@ -75,8 +76,16 @@ function TableDataCardComponent({
 
     try {
       const token = localStorage.getItem('accessToken');
+      const params = new URLSearchParams({
+        deviceName: config.deviceName,
+        metricName: config.metricName,
+        timeRange: config.timeRange,
+      });
+      if (config.agentUuid) {
+        params.set('agentUuid', config.agentUuid);
+      }
       const response = await fetch(
-        buildApiUrl(`/api/v1/metrics/timeseries?deviceName=${encodeURIComponent(config.deviceName)}&metricName=${encodeURIComponent(config.metricName)}&timeRange=${config.timeRange}`),
+        buildApiUrl(`/api/v1/metrics/timeseries?${params.toString()}`),
         {
           headers: {
             'Authorization': `Bearer ${token}`

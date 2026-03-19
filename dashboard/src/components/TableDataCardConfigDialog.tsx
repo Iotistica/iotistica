@@ -22,6 +22,14 @@ interface EndpointDevice {
   protocol: string;
   metric_count: string;
   available_metrics: string[];
+  agent_count?: number;
+  agent_uuids?: string[];
+  agent_names?: string[];
+}
+
+interface AgentOption {
+  uuid: string;
+  name: string;
 }
 
 export function TableDataCardConfigDialog({ 
@@ -32,6 +40,7 @@ export function TableDataCardConfigDialog({
 }: TableDataCardConfigDialogProps) {
   const [devices, setDevices] = useState<EndpointDevice[]>([]);
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
+  const [selectedAgentUuid, setSelectedAgentUuid] = useState('');
   const [selectedDevice, setSelectedDevice] = useState('');
   const [selectedMetric, setSelectedMetric] = useState('');
   const [timeRange, setTimeRange] = useState('1h');
@@ -57,6 +66,7 @@ export function TableDataCardConfigDialog({
   // Sync form with initialConfig when dialog opens
   useEffect(() => {
     if (open && initialConfig) {
+      setSelectedAgentUuid(initialConfig.agentUuid || '');
       setSelectedDevice(initialConfig.deviceName || '');
       setSelectedMetric(initialConfig.metricName || '');
       setTimeRange(initialConfig.timeRange || '1h');
@@ -72,6 +82,7 @@ export function TableDataCardConfigDialog({
       });
     } else if (open && !initialConfig) {
       // Reset for new widget
+      setSelectedAgentUuid('');
       setSelectedDevice('');
       setSelectedMetric('');
       setTimeRange('1h');
@@ -120,8 +131,46 @@ export function TableDataCardConfigDialog({
     }
   };
 
+  const agentOptions: AgentOption[] = Array.from(
+    devices.reduce((acc, device) => {
+      const uuids = Array.isArray(device.agent_uuids) && device.agent_uuids.length > 0
+        ? device.agent_uuids
+        : (device.agent_uuid ? [device.agent_uuid] : []);
+      const names = Array.isArray(device.agent_names) && device.agent_names.length > 0
+        ? device.agent_names
+        : (device.agent_name ? [device.agent_name] : []);
+
+      uuids.forEach((uuid, index) => {
+        if (!uuid || acc.has(uuid)) return;
+        acc.set(uuid, {
+          uuid,
+          name: (names[index] || '').trim() || `Agent ${uuid.slice(0, 8)}`,
+        });
+      });
+      return acc;
+    }, new Map<string, AgentOption>()).values()
+  ).sort((a, b) => a.name.localeCompare(b.name));
+
+  const filteredDevices = selectedAgentUuid
+    ? devices.filter((device) => {
+        if (Array.isArray(device.agent_uuids) && device.agent_uuids.includes(selectedAgentUuid)) return true;
+        return device.agent_uuid === selectedAgentUuid;
+      })
+    : devices;
+
+  useEffect(() => {
+    if (!selectedDevice) return;
+    const stillVisible = filteredDevices.some((d) => d.device_name === selectedDevice);
+    if (!stillVisible) {
+      setSelectedDevice('');
+      setSelectedMetric('');
+      setAvailableMetrics([]);
+    }
+  }, [selectedAgentUuid, selectedDevice, filteredDevices]);
+
   const handleSave = () => {
     const config: TableDataCardConfig = {
+      agentUuid: selectedAgentUuid || undefined,
       deviceName: selectedDevice,
       metricName: selectedMetric,
       timeRange,
@@ -144,6 +193,26 @@ export function TableDataCardConfigDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="agent">Agent</Label>
+            <Select
+              value={selectedAgentUuid || 'all'}
+              onValueChange={(value) => setSelectedAgentUuid(value === 'all' ? '' : value)}
+            >
+              <SelectTrigger id="agent">
+                <SelectValue placeholder="All agents" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All agents</SelectItem>
+                {agentOptions.map((agent) => (
+                  <SelectItem key={agent.uuid} value={agent.uuid}>
+                    {agent.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Device Selection */}
           <div className="grid gap-2">
             <Label htmlFor="device">Device</Label>
@@ -152,7 +221,11 @@ export function TableDataCardConfigDialog({
                 <SelectValue placeholder="Select device" />
               </SelectTrigger>
               <SelectContent>
-                {devices.map(device => (
+                {filteredDevices.length === 0 ? (
+                  <SelectItem value="none" disabled>
+                    {selectedAgentUuid ? 'No devices for selected agent' : 'No devices available'}
+                  </SelectItem>
+                ) : filteredDevices.map(device => (
                   <SelectItem key={device.device_name} value={device.device_name}>
                     {device.device_name}
                   </SelectItem>

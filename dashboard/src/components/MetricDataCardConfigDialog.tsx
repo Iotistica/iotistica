@@ -45,10 +45,16 @@ interface MetricDataCardConfigDialogProps {
 }
 
 interface MetricSourceRef {
+  agentUuid?: string;
   deviceUuid: string;
   endpointUuid: string;
   agentName?: string;
   endpointName?: string;
+}
+
+interface AgentOption {
+  uuid: string;
+  name: string;
 }
 
 interface EndpointDevice {
@@ -78,6 +84,7 @@ export function MetricDataCardConfigDialog({
       ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
       : ''
   );
+  const [selectedAgentUuid, setSelectedAgentUuid] = useState<string>(initialConfig?.agentUuid || '');
   const [selectedMetric, setSelectedMetric] = useState<string>(initialConfig?.metricName || '');
   const [chartType, setChartType] = useState<'line' | 'area' | 'bar'>(initialConfig?.chartType || 'line');
   const [timeRange, setTimeRange] = useState<'1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d'>(initialConfig?.timeRange || '1h');
@@ -108,6 +115,7 @@ export function MetricDataCardConfigDialog({
           ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
           : ''
       );
+      setSelectedAgentUuid(initialConfig.agentUuid || '');
       setSelectedMetric(initialConfig.metricName || '');
       setChartType(initialConfig.chartType || 'line');
       setTimeRange(initialConfig.timeRange || '1h');
@@ -123,6 +131,7 @@ export function MetricDataCardConfigDialog({
       // Reset form for new widget
       setSelectedDevice('');
       setSelectedSourceKey('');
+      setSelectedAgentUuid('');
       setSelectedMetric('');
       setChartType('line');
       setTimeRange('1h');
@@ -143,43 +152,98 @@ export function MetricDataCardConfigDialog({
     }
   }, [open]);
 
-  useEffect(() => {
-    if (selectedDevice) {
-      const device = devices.find(d => d.device_name === selectedDevice);
-      if (device) {
-        setAvailableMetrics(device.available_metrics);
+  const sourceRefAgentUuid = (sourceRef: MetricSourceRef): string | undefined =>
+    sourceRef.agentUuid || (sourceRef as any).agent_uuid;
+
+  const agentOptions: AgentOption[] = Array.from(
+    devices.reduce((acc, device) => {
+      const uuids = Array.isArray(device.agent_uuids) ? device.agent_uuids : [];
+      const names = Array.isArray(device.agent_names) ? device.agent_names : [];
+      uuids.forEach((uuid, index) => {
+        if (!uuid || acc.has(uuid)) return;
+        const name = (names[index] || '').trim() || `Agent ${uuid.slice(0, 8)}`;
+        acc.set(uuid, { uuid, name });
+      });
+
+      const sourceRefs = Array.isArray(device.source_refs) ? device.source_refs : [];
+      sourceRefs.forEach((ref) => {
+        const refAgentUuid = sourceRefAgentUuid(ref);
+        if (!refAgentUuid || acc.has(refAgentUuid)) return;
+        const fallbackName = (ref.agentName || '').trim() || `Agent ${refAgentUuid.slice(0, 8)}`;
+        acc.set(refAgentUuid, { uuid: refAgentUuid, name: fallbackName });
+      });
+      return acc;
+    }, new Map<string, AgentOption>()).values()
+  ).sort((a, b) => a.name.localeCompare(b.name));
+
+  const filteredDevices = selectedAgentUuid
+    ? devices.filter((device) => {
+        if (Array.isArray(device.agent_uuids) && device.agent_uuids.includes(selectedAgentUuid)) return true;
         const sourceRefs = Array.isArray(device.source_refs) ? device.source_refs : [];
-        if (sourceRefs.length >= 1) {
-          setSelectedSourceKey(getSourceKey(sourceRefs[0]));
-          return;
-        }
+        return sourceRefs.some((ref) => sourceRefAgentUuid(ref) === selectedAgentUuid);
+      })
+    : devices;
 
-        const currentSourceStillValid = sourceRefs.some(sourceRef => getSourceKey(sourceRef) === selectedSourceKey);
-        if (!currentSourceStillValid) {
-          const matchesInitialConfig =
-            initialConfig?.deviceName === selectedDevice &&
-            initialConfig?.deviceUuid &&
-            initialConfig?.endpointUuid
-              ? sourceRefs.some(
-                  sourceRef =>
-                    sourceRef.deviceUuid === initialConfig.deviceUuid &&
-                    sourceRef.endpointUuid === initialConfig.endpointUuid
-                )
-              : false;
-
-          setSelectedSourceKey(
-            matchesInitialConfig && initialConfig?.deviceUuid && initialConfig?.endpointUuid
-              ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
-              : ''
-          );
-        }
-      }
+  useEffect(() => {
+    if (!selectedDevice) {
+      setAvailableMetrics([]);
+      return;
     }
-  }, [selectedDevice, devices, selectedSourceKey, initialConfig]);
 
-  const selectedDeviceData = devices.find(d => d.device_name === selectedDevice);
+    const device = filteredDevices.find(d => d.device_name === selectedDevice) || devices.find(d => d.device_name === selectedDevice);
+    if (!device) {
+      setAvailableMetrics([]);
+      return;
+    }
+
+    setAvailableMetrics(device.available_metrics);
+
+    const sourceRefs = (Array.isArray(device.source_refs) ? device.source_refs : [])
+      .filter((sourceRef) => !selectedAgentUuid || sourceRefAgentUuid(sourceRef) === selectedAgentUuid);
+    if (sourceRefs.length >= 1) {
+      const currentSourceStillValid = sourceRefs.some(sourceRef => getSourceKey(sourceRef) === selectedSourceKey);
+      if (!currentSourceStillValid) {
+        setSelectedSourceKey(getSourceKey(sourceRefs[0]));
+      }
+      return;
+    }
+
+    const matchesInitialConfig =
+      initialConfig?.deviceName === selectedDevice &&
+      initialConfig?.deviceUuid &&
+      initialConfig?.endpointUuid
+        ? sourceRefs.some(
+            sourceRef =>
+              sourceRef.deviceUuid === initialConfig.deviceUuid &&
+              sourceRef.endpointUuid === initialConfig.endpointUuid
+          )
+        : false;
+
+    setSelectedSourceKey(
+      matchesInitialConfig && initialConfig?.deviceUuid && initialConfig?.endpointUuid
+        ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
+        : ''
+    );
+  }, [selectedDevice, filteredDevices, devices, selectedAgentUuid, selectedSourceKey, initialConfig]);
+
+  useEffect(() => {
+    if (!selectedDevice) return;
+    const stillVisible = filteredDevices.some((device) => device.device_name === selectedDevice);
+    if (!stillVisible) {
+      setSelectedDevice('');
+      setSelectedMetric('');
+      setSelectedSourceKey('');
+      setAvailableMetrics([]);
+    }
+  }, [selectedAgentUuid, selectedDevice, filteredDevices]);
+
+  const selectedDeviceData = filteredDevices.find(d => d.device_name === selectedDevice) || devices.find(d => d.device_name === selectedDevice);
   const selectedDeviceSources = Array.isArray(selectedDeviceData?.source_refs)
-    ? selectedDeviceData.source_refs.filter(sourceRef => sourceRef.deviceUuid && sourceRef.endpointUuid)
+    ? selectedDeviceData.source_refs.filter(sourceRef => {
+        if (!sourceRef.deviceUuid || !sourceRef.endpointUuid) return false;
+        if (!selectedAgentUuid) return true;
+        return sourceRefAgentUuid(sourceRef) === selectedAgentUuid;
+      })
     : [];
   const selectedSourceRef = selectedDeviceSources.find(sourceRef => getSourceKey(sourceRef) === selectedSourceKey)
     ?? selectedDeviceSources[0];
@@ -253,6 +317,7 @@ export function MetricDataCardConfigDialog({
 
     const config: MetricDataCardConfig = {
       widgetId: initialConfig?.widgetId || `metric-${Date.now()}`,
+      agentUuid: selectedAgentUuid || sourceRefAgentUuid(selectedSourceRef),
       agentName: selectedSourceRef.agentName,
       endpointName: selectedSourceRef.endpointName,
       deviceUuid: selectedSourceRef.deviceUuid,
@@ -287,6 +352,26 @@ export function MetricDataCardConfigDialog({
 
         <div className="grid gap-4 py-4">
           <div className="grid gap-2">
+            <Label htmlFor="agent">Agent</Label>
+            <Select
+              value={selectedAgentUuid || 'all'}
+              onValueChange={(value) => setSelectedAgentUuid(value === 'all' ? '' : value)}
+            >
+              <SelectTrigger id="agent">
+                <SelectValue placeholder="All agents" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All agents</SelectItem>
+                {agentOptions.map((agent) => (
+                  <SelectItem key={agent.uuid} value={agent.uuid}>
+                    {agent.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-2">
             <Label>Device</Label>
             <Popover open={deviceOpen} onOpenChange={setDeviceOpen}>
               <PopoverTrigger asChild>
@@ -297,7 +382,7 @@ export function MetricDataCardConfigDialog({
                   className="w-full justify-between"
                 >
                   {selectedDevice
-                    ? devices.find((device) => device.device_name === selectedDevice)?.device_name
+                    ? filteredDevices.find((device) => device.device_name === selectedDevice)?.device_name
                     : "Select device..."}
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
@@ -310,7 +395,7 @@ export function MetricDataCardConfigDialog({
                       {loading ? "Loading devices..." : "No devices found."}
                     </CommandEmpty>
                     <CommandGroup>
-                      {devices.map((device) => {
+                      {filteredDevices.map((device) => {
                         // Check if any of the device's agents are registered and online
                         const hasOnlineAgent = device.agent_uuids?.some(uuid => {
                           const deviceInfo = registeredDevices.get(uuid);

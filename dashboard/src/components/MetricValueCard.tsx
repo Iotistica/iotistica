@@ -9,6 +9,7 @@ import { buildApiUrl } from '@/config/api';
 export interface MetricValueCardConfig {
   widgetId: string;
   title?: string;
+  agentUuid?: string;
   deviceName: string;
   metricName: string;
   timeRange: '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
@@ -65,8 +66,16 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
       setError(null);
 
       const token = localStorage.getItem('accessToken');
+      const params = new URLSearchParams({
+        deviceName: config.deviceName,
+        metricName: config.metricName,
+        timeRange: config.timeRange,
+      });
+      if (config.agentUuid) {
+        params.set('agentUuid', config.agentUuid);
+      }
       const apiUrl = buildApiUrl(
-        `/api/v1/metrics/timeseries?deviceName=${encodeURIComponent(config.deviceName)}&metricName=${encodeURIComponent(config.metricName)}&timeRange=${config.timeRange}`
+        `/api/v1/metrics/timeseries?${params.toString()}`
       );
 
       const response = await fetch(apiUrl, {

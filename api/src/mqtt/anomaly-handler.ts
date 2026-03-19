@@ -28,6 +28,21 @@ function extractDeviceUuidFromMetric(metric: string): string | null {
 	return match ? match[1] : null;
 }
 
+/**
+ * Extract just the metric suffix/name from a canonical metric.
+ * Converts "{uuid}_{metric_name}" → "metric_name"
+ * If no UUID prefix found, returns the input unchanged.
+ */
+function extractMetricSuffix(metric: string): string {
+	const match = metric.match(ENDPOINT_METRIC_REGEX);
+	if (match) {
+		// Remove UUID prefix and underscore
+		return metric.substring(match[0].length);
+	}
+	// No UUID prefix, return as-is (e.g., system metrics like "cpu_usage")
+	return metric;
+}
+
 export interface AnomalyEvent {
 	msgId?: string;
 	agentUuid: string;          // Edge gateway UUID (infrastructure tracking)
@@ -260,7 +275,7 @@ export class AnomalyEventHandler {
 				event.deviceName,
 				extractDeviceUuidFromMetric(event.metric),
 				event.deviceType,
-				event.metric,
+				extractMetricSuffix(event.metric),
 				event.timestampMs,
 				event.windowStartMs,
 				event.windowEndMs,
@@ -328,7 +343,7 @@ export class AnomalyEventHandler {
 			const incident: Incident = {
 				incidentId: randomUUID(),
 				fingerprint: event.fingerprint,
-				metric: event.metric,
+				metric: extractMetricSuffix(event.metric),
 				severity: event.severity,
 				deviceName: event.deviceName,
 				deviceUuid: extractDeviceUuidFromMetric(event.metric),

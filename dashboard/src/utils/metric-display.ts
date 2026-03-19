@@ -42,10 +42,22 @@ function humanizeMetricLeaf(metricName: string): string {
 }
 
 export function formatMetricForDisplay(metricName: string): string {
+  if (!metricName) return metricName;
+
+  // Handle UUID prefix (e.g., "0d68c638 78c9 541a Bafe 8968fc28f4ab Vibration")
+  // First, try parsing as canonical format with underscores
   const parsed = parseCanonicalMetricName(metricName);
   if (parsed) {
     return humanizeMetricLeaf(parsed.metric);
   }
 
-  return humanizeMetricLeaf(metricName);
+  // Handle space-separated or dash-separated UUID pattern at the start
+  // Remove leading UUID-like patterns (including malformed ones with spaces)
+  const cleanedName = metricName
+    .trim()
+    // Remove patterns that look like UUIDs (with spaces or dashes)
+    .replace(/^[0-9a-f\s\-]{30,}\s+/i, '')
+    .trim();
+
+  return humanizeMetricLeaf(cleanedName);
 }
