@@ -14,6 +14,7 @@ import { DiscoveryService } from '../features/adapters/discovery-service.js';
 
 import { DevicePublishFeature } from '../features/publish/index.js';
 import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js';
+import type { PipelineService } from '../features/pipeline/index.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { MqttManager } from '../mqtt/manager.js';
@@ -36,6 +37,7 @@ export interface FeatureContext {
   anomalyService?: any;
   discoveryService?: any; // Discovery service for endpoint auto-reload
   dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
+  pipelineService?: PipelineService; // Node-RED payload transform pipeline (optional)
 }
 
 export interface InitializedFeatures {
@@ -118,6 +120,11 @@ export class FeatureInitializer {
   public setAnomalyService(anomalyService?: any): void {
     this.context.anomalyService = anomalyService;
     this.features.sensorPublish?.setAnomalyService?.(anomalyService);
+  }
+
+  public setPipelineService(pipeline?: PipelineService): void {
+    this.context.pipelineService = pipeline;
+    this.features.sensorPublish?.setPipelineService?.(pipeline);
   }
 
   private isDevicePublishEnabled(): boolean {
@@ -321,6 +328,10 @@ export class FeatureInitializer {
         useDeflatePoc,
         anomalyService,
       );
+
+      if (this.context.pipelineService) {
+        this.features.sensorPublish.setPipelineService(this.context.pipelineService);
+      }
 
       await this.features.sensorPublish.start();
 
@@ -825,6 +836,14 @@ export class FeatureInitializer {
       });
     }
 
+    // Stop pipeline (after sensorPublish so no in-flight transforms at shutdown)
+    if (this.context.pipelineService) {
+      await this.context.pipelineService.stop();
+      logger.debugSync('Pipeline stopped', {
+        component: LogComponents.agent,
+      });
+    }
+
     // Stop Protocol Adapters
     if (this.features.sensors) {
       await this.features.sensors.stop();
@@ -894,7 +913,8 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
     cloudApiEndpoint: ctx.configManager!.getCloudApiEndpoint(),
     deviceApiPort: ctx.configManager!.getDeviceApiPort(),
     anomalyService: ctx.anomalyService,
-    dictionaryManager: ctx.dictionaryManager
+    dictionaryManager: ctx.dictionaryManager,
+    pipelineService: ctx.pipelineService,
 	};
 
 	const initializer = new FeatureInitializer(featureContext);
@@ -902,6 +922,14 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 
   await initDiscoveryService(ctx);
   featureContext.discoveryService = ctx.discoveryService;
+
+  // Initialize Node-RED pipeline before sensor publish so it is bound at start
+  const { initPipeline } = await import('./pipeline.js');
+  await initPipeline(ctx);
+  if (ctx.pipelineService) {
+    featureContext.pipelineService = ctx.pipelineService;
+    initializer.setPipelineService(ctx.pipelineService);
+  }
 
 	await initializer.initSensorFeatures();
 	await initializer.initJobsFeature();

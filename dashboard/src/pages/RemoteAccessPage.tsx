@@ -531,6 +531,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
   const flushInputBuffer = () => {
     if (inputBufferRef.current && wsRef.current?.readyState === WebSocket.OPEN && currentSessionIdRef.current) {
+      console.log(`[RemoteShell] flushing buffer: ${JSON.stringify(inputBufferRef.current)}`);
       wsRef.current.send(JSON.stringify({
         type: 'shell-input',
         data: {
@@ -538,7 +539,10 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           input: inputBufferRef.current,
         },
       }));
+      console.log(`[RemoteShell] buffer cleared after flush`);
       inputBufferRef.current = '';
+    } else {
+      console.log(`[RemoteShell] flush skipped - socket: ${wsRef.current?.readyState}, buffer: ${JSON.stringify(inputBufferRef.current)}, sessionId: ${currentSessionIdRef.current}`);
     }
   };
 
@@ -552,7 +556,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     }
 
     // Add to buffer
+    console.log(`[RemoteShell] sendInput called with: ${JSON.stringify(data)} (buffer before: ${JSON.stringify(inputBufferRef.current)})`);
     inputBufferRef.current += data;
+    console.log(`[RemoteShell] buffer after add: ${JSON.stringify(inputBufferRef.current)}`);
     
     // Clear existing timer and set new one to flush after 50ms
     if (flushTimerRef.current) {
@@ -691,15 +697,19 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
     // Handle user input
     term.onData((data) => {
+      console.log(`[RemoteShell] term.onData fired with: ${JSON.stringify(data)}`);
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        console.log('[RemoteShell] onData: socket not open');
         return;
       }
 
       if (!currentSessionIdRef.current) {
+        console.log('[RemoteShell] onData: no session');
         term.write('\x1b[31m✗ Not attached to a session\x1b[0m\r\n');
         return;
       }
 
+      console.log(`[RemoteShell] onData: calling sendInput`);
       sendInput(data);
     });
 

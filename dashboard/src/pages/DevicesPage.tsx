@@ -3,15 +3,15 @@
  * Hides technical pipeline details, focuses on sensor configuration and status
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
-import { Activity, Pencil, Plus, FileText, Settings } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { Activity, Pencil, Plus, FileText } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -112,7 +112,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addSensorDialogOpen, setAddSensorDialogOpen] = useState(false);
-  const [anomalyConfigOpen, setAnomalyConfigOpen] = useState(false);
+  const anomalyAddRef = useRef<(() => void) | undefined>(undefined);
+  const [anomalyFilterDevice, setAnomalyFilterDevice] = useState<string>('all');
+  const [anomalyFilterMethod, setAnomalyFilterMethod] = useState<string>('all');
+  const [anomalyDeviceOptions, setAnomalyDeviceOptions] = useState<string[]>([]);
+  const [anomalyMethodOptions, setAnomalyMethodOptions] = useState<string[]>([]);
+  const [anomalyMetricsSummary, setAnomalyMetricsSummary] = useState<{ total: number; filtered: number }>({ total: 0, filtered: 0 });
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   
@@ -1046,54 +1051,32 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
         {/* Tabs for Devices and Profiles */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          {/*
-          <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start gap-20 border-0">
-            <TabsTrigger 
+          <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start border-0">
+            <TabsTrigger
               value="devices"
-              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-2xl"
+              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-base leading-none font-normal data-[state=active]:font-medium"
               style={
                 activeTab === 'devices'
-                  ? {
-                      color: 'hsl(var(--foreground))',
-                      fontWeight: 700,
-                      textDecoration: 'underline',
-                      textUnderlineOffset: '8px',
-                      textDecorationThickness: '2px',
-                      textDecorationColor: 'hsl(var(--foreground))',
-                    }
-                  : {
-                      color: 'hsl(var(--foreground))',
-                      fontWeight: 400,
-                      textDecoration: 'none',
-                    }
+                  ? { color: 'hsl(var(--foreground))', marginRight: '1.5rem', fontWeight: 700, textDecoration: 'underline', textUnderlineOffset: '8px', textDecorationThickness: '2px', textDecorationColor: 'hsl(var(--foreground))' }
+                  : { color: 'hsl(var(--foreground))', marginRight: '1.5rem', textDecoration: 'none' }
               }
             >
-              Configured Devices
+              Devices
             </TabsTrigger>
-            <TabsTrigger 
-              value="profiles"
-              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-2xl"
-              style={
-                activeTab === 'profiles'
-                  ? {
-                      color: 'hsl(var(--foreground))',
-                      fontWeight: 700,
-                      textDecoration: 'underline',
-                      textUnderlineOffset: '8px',
-                      textDecorationThickness: '2px',
-                      textDecorationColor: 'hsl(var(--foreground))',
-                    }
-                  : {
-                      color: 'hsl(var(--foreground))',
-                      fontWeight: 400,
-                      textDecoration: 'none',
-                    }
-              }
-            >
-              Profiles
-            </TabsTrigger>
+            {getPendingConfig(deviceUuid)?.features?.enableAnomalyDetection && (
+              <TabsTrigger
+                value="anomaly"
+                className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-base leading-none font-normal data-[state=active]:font-medium"
+                style={
+                  activeTab === 'anomaly'
+                    ? { color: 'hsl(var(--foreground))', fontWeight: 700, textDecoration: 'underline', textUnderlineOffset: '8px', textDecorationThickness: '2px', textDecorationColor: 'hsl(var(--foreground))' }
+                    : { color: 'hsl(var(--foreground))', textDecoration: 'none' }
+                }
+              >
+                Anomaly Detection
+              </TabsTrigger>
+            )}
           </TabsList>
-          */}
 
           {/* Devices Tab */}
           <TabsContent value="devices" className="space-y-6">
@@ -1274,12 +1257,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           )}
           
           <div className="flex gap-2">
-            {sensors.length > 0 && getPendingConfig(deviceUuid)?.features?.enableAnomalyDetection && (
-              <Button variant="outline" onClick={() => setAnomalyConfigOpen(true)}>
-                <Settings className="w-4 h-4 mr-2" />
-                Configure Anomaly Detection
-              </Button>
-            )}
             {deviceType !== 'virtual' && (
               <Button onClick={() => setAddSensorDialogOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -1444,6 +1421,75 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           </CardContent>
         </Card>
           </TabsContent>
+
+          {/* Anomaly Detection Tab */}
+          {getPendingConfig(deviceUuid)?.features?.enableAnomalyDetection && (
+            <TabsContent value="anomaly" className="space-y-6">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <Select value={anomalyFilterDevice} onValueChange={setAnomalyFilterDevice}>
+                    <SelectTrigger className="h-9 w-44 text-sm">
+                      <SelectValue placeholder="All devices" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All devices</SelectItem>
+                      {anomalyDeviceOptions.map(label => (
+                        <SelectItem key={label} value={label}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={anomalyFilterMethod} onValueChange={setAnomalyFilterMethod}>
+                    <SelectTrigger className="h-9 w-40 text-sm">
+                      <SelectValue placeholder="All methods" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All methods</SelectItem>
+                      {anomalyMethodOptions.map(m => (
+                        <SelectItem key={m} value={m}>{m}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={() => anomalyAddRef.current?.()}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Metric
+                </Button>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardDescription>
+                    {anomalyMetricsSummary.total === 0
+                      ? 'No anomaly metrics configured yet.'
+                      : (() => {
+                          const hasFilters = anomalyFilterDevice !== 'all' || anomalyFilterMethod !== 'all';
+                          return hasFilters
+                            ? `${anomalyMetricsSummary.filtered} of ${anomalyMetricsSummary.total} anomaly metric(s) matching filters`
+                            : `${anomalyMetricsSummary.total} anomaly metric(s) configured`;
+                        })()}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <AnomalyMetricsTable
+                    inline
+                    addTriggerRef={anomalyAddRef}
+                    initialDeviceUuid={deviceUuid}
+                    open={true}
+                    onOpenChange={() => {}}
+                    filterDevice={anomalyFilterDevice}
+                    onFilterDeviceChange={setAnomalyFilterDevice}
+                    filterMethod={anomalyFilterMethod}
+                    onFilterMethodChange={setAnomalyFilterMethod}
+                    onFilterOptionsChange={(devices, methods) => {
+                      setAnomalyDeviceOptions(devices);
+                      setAnomalyMethodOptions(methods);
+                    }}
+                    onMetricsSummaryChange={setAnomalyMetricsSummary}
+                  />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
 
           {false && (
           <TabsContent value="profiles" className="space-y-6">
@@ -1703,13 +1749,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             </DialogFooter>
           </DialogContent>
         </Dialog>
-
-        {/* Anomaly Detection Configuration */}
-        <AnomalyMetricsTable
-          open={anomalyConfigOpen}
-          onOpenChange={setAnomalyConfigOpen}
-          initialDeviceUuid={deviceUuid}
-        />
 
         {/* Add/Edit Profile Dialog - Separate Component */}
         <EditProfileDialog

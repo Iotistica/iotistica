@@ -1,0 +1,10 @@
+[
+  {
+    "id": "func-filter-drop",
+    "type": "function",
+    "name": "Filter & Transform",
+    "func": "// Example: drop messages where temperature is out-of-range, rename keys\nconst raw = msg.payload;\nlet data = typeof raw === 'string' ? JSON.parse(raw) : raw;\n\n// Drop messages with null/undefined temperature\nif (data.temperature === undefined || data.temperature === null) {\n  node.warn('Dropping message: missing temperature');\n  msg.drop = true;\n  return msg;\n}\n\n// Clamp unreasonable readings\nif (data.temperature > 200 || data.temperature < -100) {\n  msg.drop = true;\n  return msg;\n}\n\n// Rename 'temperature' -> 'temp_c', add unit\nmsg.payload = {\n  temp_c: data.temperature,\n  humidity: data.humidity ?? null,\n  unit: 'Celsius',\n  ts: Date.now()\n};\n\nreturn msg;",
+    "outputs": 1,
+    "wires": []
+  }
+]

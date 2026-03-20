@@ -95,7 +95,7 @@ export class SensorsFeature extends BaseFeature {
         ? `${displayBase}-${uuidSuffix}`
         : displayBase;
 
-      this.logger.debug('[ANOMALY TRACE] Built endpoint deviceName', {
+      this.logger.debug('Built endpoint deviceName', {
         displayBase,
         device_uuid,
         endpointUuid,

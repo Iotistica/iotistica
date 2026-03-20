@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { getHeapStatistics } from 'v8';
 import { deviceTopic } from '../../mqtt/topics.js';
+import type { PipelineService } from '../pipeline/index.js';
 import type { AnomalyDetectionService } from '../../anomaly/index.js';
 import type { Protocol } from '../../anomaly/types.js';
 import type { DeviceConfig, MqttConnection, Logger, DeviceStats } from './types.js';
@@ -38,6 +39,7 @@ export class PublishManager extends EventEmitter {
   private needStop = false;
   private publishing = false;
   private connectionHandlersAttached = false;
+  private pipelineService?: PipelineService;
 
   private readonly onConnected = (): void => {
     if (this.needStop) return;
@@ -103,6 +105,10 @@ export class PublishManager extends EventEmitter {
 
   public setAnomalyService(service?: AnomalyDetectionService): void {
     this.anomalyService = service;
+  }
+
+  public setPipelineService(service?: PipelineService): void {
+    this.pipelineService = service;
   }
 
   async start(): Promise<void> {
@@ -192,8 +198,31 @@ export class PublishManager extends EventEmitter {
         const enriched = this.processAnomaly(messages, name);
       if (this.needStop) return;
 
-      const { data, baselineSize } = this.buildPayload(name, enriched);
+      let { data, baselineSize } = this.buildPayload(name, enriched);
       if (this.needStop) return;
+
+      // Run payload through the Node-RED pipeline (if configured)
+      if (this.pipelineService) {
+        try {
+          const pipelineStart = Date.now();
+          const result = await this.pipelineService.transform({
+            payload: data,
+            topic,
+            deviceId: name,
+          });
+          if (result.drop) {
+            this.logger?.debug(`Pipeline dropped batch from endpoint '${name}'`);
+            this.batcher.reset();
+            return;
+          }
+          const transformed = result.payload as typeof data;
+          baselineSize = Buffer.byteLength(JSON.stringify(transformed), 'utf8');
+          data = transformed;
+          this.logger?.debug(`Pipeline transform applied for '${name}': ${transformed.messages?.length ?? 0} messages, ${baselineSize} bytes in ${Date.now() - pipelineStart}ms`);
+        } catch (err) {
+          this.logger?.warn(`Pipeline transform failed for '${name}', publishing original payload`, err);
+        }
+      }
 
       if (!this.mqttConnection.isConnected()) {
         await this.publishOffline(topic, data, messageCount);
@@ -208,14 +237,14 @@ export class PublishManager extends EventEmitter {
 
   private processAnomaly(messages: any[], endpointName: string): any[] {
     if (!this.anomalyService) {
-      this.logger?.debug('[ANOMALY TRACE] Skipping endpoint anomaly processing: no anomaly service bound', {
+      this.logger?.debug('Skipping endpoint anomaly processing: no anomaly service bound', {
         endpointName,
         messageCount: messages.length,
       });
       return messages;
     }
 
-    this.logger?.debug('[ANOMALY TRACE] Dispatching endpoint batch to anomaly feed', {
+    this.logger?.debug('Dispatching endpoint batch to anomaly feed', {
       endpointName,
       messageCount: messages.length,
     });

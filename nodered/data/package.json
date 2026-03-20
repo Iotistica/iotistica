@@ -4,6 +4,7 @@
     "version": "0.0.1",
     "private": true,
     "dependencies": {
-        "@iotistic/nr-auth": "file:./@iotistic/nr-auth"
+        "@iotistic/nr-auth": "file:./@iotistic/nr-auth",
+        "@iotistic/nr-pipeline": "file:./@iotistic/nr-pipeline"
     }
 }

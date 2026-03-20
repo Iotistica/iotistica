@@ -2,6 +2,7 @@ import { BaseFeature } from '../index.js';
 import { AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
 import type { Protocol } from '../../anomaly/types.js';
+import type { PipelineService } from '../pipeline/index.js';
 import {
   DevicePublishConfig,
   DeviceConfig
@@ -22,6 +23,7 @@ export class DevicePublishFeature extends BaseFeature {
   private readonly useKeyCompactionPoc: boolean;
   private readonly useDeflatePoc: boolean;
   private anomalyService?: any;
+  private pipelineService?: PipelineService;
 
   constructor(
     config: DevicePublishConfig & { enabled: boolean },
@@ -57,6 +59,18 @@ export class DevicePublishFeature extends BaseFeature {
 
     this.logger.debug('Updated anomaly service binding for Device Publish Feature', {
       hasAnomalyService: !!anomalyService,
+      sensorCount: this.sensors.length,
+    });
+  }
+
+  public setPipelineService(pipeline?: PipelineService): void {
+    this.pipelineService = pipeline;
+    for (const sensor of this.sensors) {
+      sensor.setPipelineService(pipeline);
+    }
+
+    this.logger.debug('Updated pipeline service binding for Device Publish Feature', {
+      hasPipelineService: !!pipeline,
       sensorCount: this.sensors.length,
     });
   }
@@ -123,6 +137,7 @@ export class DevicePublishFeature extends BaseFeature {
       const config = deviceConfig.endpoints[i];
 
       const device = this.createDeviceManager(config, i, deviceConfig.endpoints.length);
+      if (this.pipelineService) device.setPipelineService(this.pipelineService);
       this.attachDeviceEventHandlers(device, config.name!);
       this.sensors.push(device);
       await this.startDeviceManager(device, config);
@@ -170,25 +185,29 @@ export class DevicePublishFeature extends BaseFeature {
     const protocolLogger = {
       debug: (message: string, ...args: any[]) => {
         this.agentLogger.debugSync(message, {
-          component: LogComponents.sensorPublish + "] [" + (protocol || 'unknown'),
+          component: LogComponents.sensorPublish,
+          protocol: protocol || 'unknown',
           ...args[0]
         });
       },
       info: (message: string, ...args: any[]) => {
         this.agentLogger.infoSync(message, {
-          component: LogComponents.sensorPublish + "] [" + (protocol || 'unknown'),
+          component: LogComponents.sensorPublish,
+          protocol: protocol || 'unknown',
           ...args[0]
         });
       },
       warn: (message: string, ...args: any[]) => {
         this.agentLogger.warnSync(message, {
-          component: LogComponents.sensorPublish + "] [" + (protocol || 'unknown'),
+          component: LogComponents.sensorPublish,
+          protocol: protocol || 'unknown',
           ...args[0]
         });
       },
       error: (message: string, ...args: any[]) => {
         this.agentLogger.errorSync(message, args[0] instanceof Error ? args[0] : undefined, {
-          component: LogComponents.sensorPublish + "] [" + (protocol || 'unknown'),
+          component: LogComponents.sensorPublish,
+          protocol: protocol || 'unknown',
           ...(args[0] instanceof Error ? args[1] : args[0])
         });
       }

@@ -83,6 +83,7 @@ param(
     [string]$UseKeyCompactionPoc = "false",
     [string]$UseDeflateCompression = "false",
     [string]$EnableHeapProfiling = "true",
+    [string]$PipelineFlowsFile = "/app/data/flows/opcua-transform.flows.json",
     
     # Protocol Adapter Configuration
     [string]$EnableProtocolAdapters = "true",
@@ -536,6 +537,7 @@ $networkConfig
       - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc
       - USE_DEFLATE_COMPRESSION=$UseDeflateCompression
       - ENABLE_HEAP_PROFILING=$EnableHeapProfiling
+      - PIPELINE_FLOWS_FILE=$PipelineFlowsFile
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=wcw3eFT/zyVZ7HYwP+bApLjJX2gW/e1mHW2+WPG2gBk=
       - AGENT_SHELL_MAX_SESSION_MS=3600000

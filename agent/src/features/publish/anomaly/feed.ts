@@ -31,7 +31,7 @@ export class AnomalyFeed {
     const hasService = !!service;
     const hasConfiguredMetrics = !!service?.hasConfiguredMetrics();
 
-    this.logger?.debug('[ANOMALY TRACE] processBatch entry', {
+    this.logger?.debug('processBatch entry', {
       deviceName,
       messageCount: messages.length,
       hasService,
@@ -39,7 +39,7 @@ export class AnomalyFeed {
     });
 
     if (!hasService) {
-      this.logger?.debug('[ANOMALY TRACE] Endpoint batch skipped: anomaly service unavailable', {
+      this.logger?.debug('Endpoint batch skipped: anomaly service unavailable', {
         deviceName,
         messageCount: messages.length,
       });
@@ -47,7 +47,7 @@ export class AnomalyFeed {
     }
 
     if (!hasConfiguredMetrics) {
-      this.logger?.debug('[ANOMALY TRACE] Endpoint batch skipped: no configured anomaly metrics', {
+      this.logger?.debug('Endpoint batch skipped: no configured anomaly metrics', {
         deviceName,
         messageCount: messages.length,
       });
@@ -72,7 +72,7 @@ export class AnomalyFeed {
     }
 
     if (this.batchProcessedMetrics.size > 0) {
-      this.logger?.debug('[ANOMALY] Endpoint processing complete', {
+      this.logger?.debug('Endpoint processing complete', {
         deviceName,
         messageCount: messages.length,
         extractedMetricCount: this.batchProcessedMetrics.size,
@@ -80,7 +80,7 @@ export class AnomalyFeed {
       });
     }
 
-    this.logger?.debug('[ANOMALY TRACE] Endpoint batch evaluation summary', {
+    this.logger?.debug('Endpoint batch evaluation summary', {
       deviceName,
       messageCount: messages.length,
       candidateMetricCount: this.batchCandidateMetrics.size,
@@ -114,7 +114,7 @@ export class AnomalyFeed {
         : (deviceName || 'unknown');
     const metricKey = `${this.deviceUuid}_${identifier}_${fieldName}`;
 
-    this.logger?.debug('[ANOMALY TRACE] Built metricKey', {
+    this.logger?.debug('Built metricKey', {
       metricKey,
       deviceName,
       deviceIdentifier: identifier,
@@ -142,7 +142,7 @@ export class AnomalyFeed {
     if (!service) return false;
     const configured = service.isMetricConfigured(metricKey);
 
-    this.logger?.debug('[ANOMALY TRACE] Config gate check', {
+    this.logger?.debug('Config gate check', {
       metricKey,
       configured,
     });
@@ -184,7 +184,7 @@ export class AnomalyFeed {
     const metricKey = this.buildMetricKey(undefined, deviceName, fieldName);
     const fallbackDeviceId = deviceName ? `endpoint:${deviceName}` : undefined;
 
-    this.logger?.warn('[ANOMALY] No explicit deviceId in payload; using fallback identity', {
+    this.logger?.warn('No explicit deviceId in payload; using fallback identity', {
       device: deviceName, protocol: this.protocol,
       metricKey, fallbackDeviceId, reason: 'direct_numeric_payload',
     });
@@ -207,7 +207,7 @@ export class AnomalyFeed {
     const quality: string = data.quality || 'GOOD';
 
     if (value === undefined) {
-      this.logger?.debug('[ANOMALY] Skipping non-numeric reading', {
+      this.logger?.debug('Skipping non-numeric reading', {
         endpoint: parentDeviceName, deviceName: readingDeviceName, fieldName,
         rawType: typeof data.value, rawValue: data.value,
       });
@@ -216,7 +216,7 @@ export class AnomalyFeed {
 
     const effectiveDeviceId = resolvedDeviceId || `endpoint:${parentDeviceName}`;
     if (!resolvedDeviceId && !payloadDeviceUuid) {
-      this.logger?.warn('[ANOMALY] No explicit deviceId in payload; using fallback identity', {
+      this.logger?.warn('No explicit deviceId in payload; using fallback identity', {
         device: parentDeviceName, protocol: this.protocol,
         metricName: fieldName, deviceName: readingDeviceName, fallbackDeviceId: effectiveDeviceId,
         reason: 'reading_object_missing_device_id',
@@ -254,7 +254,7 @@ export class AnomalyFeed {
       if (!fieldName) continue;
 
       if (value === undefined) {
-        this.logger?.debug('[ANOMALY] Skipping non-numeric array reading', {
+        this.logger?.debug('Skipping non-numeric array reading', {
           endpoint: parentDeviceName, deviceName: readingDeviceName, fieldName,
           rawType: typeof reading.value, rawValue: reading.value,
         });
@@ -263,7 +263,7 @@ export class AnomalyFeed {
 
       const effectiveDeviceId = resolvedDeviceId || `endpoint:${parentDeviceName}`;
       if (!resolvedDeviceId && !payloadDeviceUuid) {
-        this.logger?.warn('[ANOMALY] No explicit deviceId in payload; using fallback identity', {
+        this.logger?.warn('No explicit deviceId in payload; using fallback identity', {
           device: parentDeviceName, protocol: this.protocol,
           metricName: fieldName, deviceName: readingDeviceName, fallbackDeviceId: effectiveDeviceId,
           reason: 'readings_array_missing_device_id',
@@ -330,7 +330,7 @@ export class AnomalyFeed {
         const metricKey = this.buildMetricKey(payloadDeviceUuid, deviceName, metricName);
 
         if (!resolvedDeviceId) {
-          this.logger?.warn('[ANOMALY] No explicit deviceId in payload; using fallback identity', {
+          this.logger?.warn('No explicit deviceId in payload; using fallback identity', {
             device: deviceName, protocol: this.protocol,
             metricKey, field: metricName, fallbackDeviceId: effectiveDeviceId,
             reason: 'nested_numeric_missing_device_id',

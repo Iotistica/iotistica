@@ -129,6 +129,8 @@ export class ShellHandler {
   private mqttManager: any = null;
   private commandBuffers: Map<string, string> = new Map();
   private shellListenersRegistered = false;
+  private recentInputBySession: Map<string, { input: string; timestamp: number }> = new Map();
+  private readonly duplicateInputWindowMs = 25;
 
   constructor(private deps: ShellHandlerDeps) {}
 
@@ -224,6 +226,10 @@ export class ShellHandler {
 
       const signedCommand = this.signShellCommand(data, deviceUuid);
       const payload = JSON.stringify(signedCommand);
+
+      if (data.action === 'input') {
+        console.log(`[SHELL] Publishing input to MQTT: sessionId=${data.sessionId?.substring(0, 8)}, data=${JSON.stringify(data.data)}`);
+      }
 
       logger.debug('SHELL: Publishing command to MQTT', {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
@@ -483,6 +489,7 @@ export class ShellHandler {
       await this.handleShellCommand(session.deviceUuid, { action: 'stop', sessionId });
       await sessionManager.terminateSession(sessionId);
       this.commandBuffers.delete(sessionId);
+      this.recentInputBySession.delete(sessionId);
 
       logger.debug('SHELL: Terminated session');
     } catch (error: any) {
@@ -526,6 +533,7 @@ export class ShellHandler {
       sessionsBefore.forEach(session => {
         if (session.userId === userId) {
           this.commandBuffers.delete(session.sessionId);
+          this.recentInputBySession.delete(session.sessionId);
         }
       });
       logger.debug('Command buffers cleaned');
@@ -577,6 +585,11 @@ export class ShellHandler {
   async handleShellInput(client: WebSocketClient, message: WebSocketMessage): Promise<void> {
     try {
       const userId = this.deps.getUserIdentifier(client.user);
+      const sessionId = message.data?.sessionId;
+      const input = message.data?.input ?? message.data?.data;
+      
+      console.log(`[SHELL] handleShellInput called: sessionId=${sessionId?.substring(0, 8)}, input=${JSON.stringify(input)}`);
+      
       if (userId === 'unknown') {
         logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to send shell input');
         this.deps.send(client.ws, {
@@ -585,9 +598,6 @@ export class ShellHandler {
         });
         return;
       }
-
-      const sessionId = message.data?.sessionId;
-      const input = message.data?.input ?? message.data?.data;
 
       if (!sessionId || input === undefined) {
         this.deps.send(client.ws, { type: 'error', message: 'Session ID and input required' });
@@ -610,6 +620,18 @@ export class ShellHandler {
         });
         return;
       }
+
+      const now = Date.now();
+      const previousInput = this.recentInputBySession.get(sessionId);
+      if (
+        previousInput &&
+        previousInput.input === input &&
+        now - previousInput.timestamp <= this.duplicateInputWindowMs
+      ) {
+        logger.debug(`🐚 [SESSION] Ignoring duplicate input for session ${sessionId.substring(0, 8)}...`);
+        return;
+      }
+      this.recentInputBySession.set(sessionId, { input, timestamp: now });
 
       await this.trackShellCommand(sessionId, input, session.deviceUuid, session.userId);
 
@@ -718,5 +740,6 @@ export class ShellHandler {
 
   shutdown(): void {
     this.commandBuffers.clear();
+    this.recentInputBySession.clear();
   }
 }

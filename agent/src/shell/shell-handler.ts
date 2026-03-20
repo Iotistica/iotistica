@@ -83,6 +83,8 @@ function verifyCommandSignature(command: ShellCommand, secret: string, deviceUui
  * - Minimal environment (no credential leakage via 'env' command)
  */
 export class ShellHandler {
+  private static activeInstance: ShellHandler | null = null;
+
   private deviceUuid: string;
   private logger: AgentLogger;
   private mqtt: MqttManager;
@@ -100,6 +102,7 @@ export class ShellHandler {
   private hmacSecret: string | undefined; // HMAC secret for command signature verification
   private sessionStartTime: number | null = null; // Track session start for max duration enforcement
   private readonly shellEnabled: boolean; // Shell disabled if no HMAC secret (prevents misconfigured containers)
+  private initialized = false;
   
   // SECURITY: Shell path allowlist (prevents arbitrary code execution via AGENT_SHELL env injection)
   private readonly ALLOWED_SHELLS = [
@@ -199,13 +202,37 @@ export class ShellHandler {
    * Initialize shell handler - subscribe to shell commands
    */
   async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    // Guard against duplicate shell handlers after soft restarts. If an older
+    // instance is still active, clean it up before subscribing this one.
+    if (ShellHandler.activeInstance && ShellHandler.activeInstance !== this) {
+      this.logger.warnSync('Replacing existing active shell handler instance', {
+        component: LogComponents.shell,
+      });
+
+      await ShellHandler.activeInstance.cleanup();
+    }
+
+    ShellHandler.activeInstance = this;
 
     // Subscribe to shell command topic
-    await this.mqtt.subscribe(
-      this.commandTopic,
-      { qos: 1 },
-      (topic, payload) => this.handleCommand(payload)
-    );
+    try {
+      await this.mqtt.subscribe(
+        this.commandTopic,
+        { qos: 1 },
+        (topic, payload) => this.handleCommand(payload)
+      );
+
+      this.initialized = true;
+    } catch (error) {
+      if (ShellHandler.activeInstance === this) {
+        ShellHandler.activeInstance = null;
+      }
+      throw error;
+    }
 
   }
 
@@ -626,12 +653,20 @@ export class ShellHandler {
     
     this.stopSession();
     
-    try {
-      await this.mqtt.unsubscribe(this.commandTopic);
-    } catch (error) {
-      this.logger.errorSync('Error unsubscribing from shell topic', error as Error, {
-        component: LogComponents.shell,
-      });
+    if (this.initialized) {
+      try {
+        await this.mqtt.unsubscribe(this.commandTopic);
+      } catch (error) {
+        this.logger.errorSync('Error unsubscribing from shell topic', error as Error, {
+          component: LogComponents.shell,
+        });
+      }
+
+      this.initialized = false;
+    }
+
+    if (ShellHandler.activeInstance === this) {
+      ShellHandler.activeInstance = null;
     }
 
     this.logger.infoSync('Shell handler cleaned up', {

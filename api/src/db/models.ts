@@ -877,6 +877,7 @@ export class DeviceLogsModel {
       level?: string;
       isSystem?: boolean;
       isStderr?: boolean;
+      meta?: Record<string, any> | null;
     }>,
     batchSize: number = 500
   ): Promise<void> {
@@ -899,9 +900,9 @@ export class DeviceLogsModel {
         const placeholders: string[] = [];
 
         batch.forEach((log, index) => {
-          const offset = index * 7;
+          const offset = index * 8;
           placeholders.push(
-            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`
+            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`
           );
           values.push(
             deviceUuid,
@@ -910,12 +911,13 @@ export class DeviceLogsModel {
             log.message,
             log.level || 'info',
             log.isSystem || false,
-            log.isStderr || false
+            log.isStderr || false,
+            log.meta ? JSON.stringify(log.meta) : null
           );
         });
 
         await query(
-          `INSERT INTO device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr)
+          `INSERT INTO device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta)
            VALUES ${placeholders.join(', ')}`,
           values
         );

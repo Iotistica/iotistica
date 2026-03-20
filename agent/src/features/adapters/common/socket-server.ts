@@ -296,7 +296,7 @@ export class SocketServer {
     const readings = dataPoints.map(point => ({
       timestamp: point.timestamp,
       deviceName: point.deviceName,
-      ...(point.deviceId && { deviceId: point.deviceId, device_id: point.deviceId }),
+      ...(point.deviceId && { deviceId: point.deviceId }),
       ...(point.endpoint_uuid && { endpoint_uuid: point.endpoint_uuid }),
       ...(point.device_uuid && { device_uuid: point.device_uuid }),
       metric: point.metric,

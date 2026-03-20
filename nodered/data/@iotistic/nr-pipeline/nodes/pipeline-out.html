@@ -1,0 +1,62 @@
+<script type="text/javascript">
+    RED.nodes.registerType('iotistica-pipeline-out', {
+        category:  'Iotistica',
+        color:     '#3FAED8',
+        defaults:  {
+            name: { value: '' }
+        },
+        inputs:  1,
+        outputs: 0,
+        icon:    'font-awesome/fa-sign-in',
+        label:   function () { return this.name || 'pipeline out'; },
+        labelStyle: function () { return this.name ? 'node_label_italic' : ''; },
+        paletteLabel: 'pipeline out',
+        inputLabels:  'transformed payload',
+    });
+</script>
+
+<script type="text/html" data-template-name="iotistica-pipeline-out">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="pipeline out">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="iotistica-pipeline-out">
+    <p>
+        Marks the end of an <strong>Iotistica pipeline flow</strong>. Place this
+        node at the end of your transformation logic and wire any branch to it
+        when you are finished modifying the batch.
+    </p>
+
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>
+            The (optionally modified) batch payload. If not changed, the original
+            batch from <code>pipeline in</code> is forwarded as-is to the MQTT
+            publisher.
+        </dd>
+        <dt class="optional">topic <span class="property-type">string</span></dt>
+        <dd>Override the MQTT topic. Leave empty to keep the original topic.</dd>
+        <dt class="optional">drop <span class="property-type">boolean</span></dt>
+        <dd>
+            Set to <code>true</code> to tell the agent to <em>discard</em> this
+            batch entirely and skip publishing.
+        </dd>
+    </dl>
+
+    <h3>Details</h3>
+    <p>
+        Every message injected by <code>pipeline in</code> carries a
+        <code>_correlationId</code> that is used to resolve the internal
+        agent promise. Always ensure the message flows to <em>exactly one</em>
+        <code>pipeline out</code> node.
+    </p>
+    <p>
+        When running inside the Iotistica agent the node status changes to
+        <em>connected</em> (green). In a standalone Node-RED editor it shows
+        <em>waiting for agent</em> (grey) — this is normal; the node will work
+        correctly once the flow JSON is loaded by the agent.
+    </p>
+</script>

@@ -12,6 +12,9 @@ COPY data/@iotistic/nr-auth/lib /data/@iotistic/nr-auth/lib
 COPY data/@iotistic/nr-storage/package*.json /data/@iotistic/nr-storage/
 COPY data/@iotistic/nr-storage/*.js /data/@iotistic/nr-storage/
 
+COPY data/@iotistic/nr-pipeline/package*.json /data/@iotistic/nr-pipeline/
+COPY data/@iotistic/nr-pipeline/nodes /data/@iotistic/nr-pipeline/nodes
+
 # Copy Node-RED config files
 COPY data/package.json /data/
 COPY data/settings.js /data/settings.js
@@ -40,8 +43,11 @@ RUN npm install --no-fund --no-update-notifier --production
 WORKDIR /data/@iotistic/nr-storage
 RUN npm install --no-fund --no-update-notifier --production
 
+# nr-pipeline has no runtime dependencies, nothing to install here
+
 # Install plugins into Node-RED
 WORKDIR /usr/src/node-red
 RUN npm install --no-fund --no-update-notifier /data/@iotistic/nr-devices-plugin
 RUN npm install --no-fund --no-update-notifier /data/@iotistic/nr-auth
 RUN npm install --no-fund --no-update-notifier /data/@iotistic/nr-storage
+RUN npm install --no-fund --no-update-notifier /data/@iotistic/nr-pipeline

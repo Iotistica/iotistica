@@ -1,0 +1,10 @@
+[
+  {
+    "id": "func-enrich",
+    "type": "function",
+    "name": "Enrich Payload",
+    "func": "// Add metadata and convert temperature from raw to Celsius\nconst raw = msg.payload;\n\n// If payload is a string, try to parse it\nlet data = {};\nif (typeof raw === 'string') {\n  try { data = JSON.parse(raw); } catch(e) { data = { raw }; }\n} else if (typeof raw === 'object' && raw !== null) {\n  data = raw;\n} else {\n  data = { value: raw };\n}\n\n// Example transformation: scale raw ADC value to Celsius\nif (data.rawAdc !== undefined) {\n  data.temperatureCelsius = ((data.rawAdc / 4095) * 330) - 40;\n}\n\n// Attach pipeline metadata\ndata._pipeline = {\n  processedAt: new Date().toISOString(),\n  agentVersion: '1.0.0',\n  deviceId: msg.deviceId || 'unknown'\n};\n\nmsg.payload = data;\nreturn msg;",
+    "outputs": 1,
+    "wires": []
+  }
+]

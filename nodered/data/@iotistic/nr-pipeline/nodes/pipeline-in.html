@@ -1,0 +1,51 @@
+<script type="text/javascript">
+    RED.nodes.registerType('iotistica-pipeline-in', {
+        category:    'Iotistica',
+        color:       '#3FAED8',
+        defaults: {
+            name: { value: '' }
+        },
+        inputs:  0,
+        outputs: 1,
+        icon:    'arrow-in.svg',
+        paletteLabel: 'pipeline in',
+        label: function () { return this.name || 'pipeline in'; },
+        outputLabels: ['transformed payload']
+    });
+</script>
+
+<script type="text/html" data-template-name="iotistica-pipeline-in">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="pipeline in">
+    </div>
+</script>
+
+<script type="text/html" data-help-name="iotistica-pipeline-in">
+    <p>
+        <b>Iotistica Pipeline In</b> — entry point for an agent payload transform flow.
+    </p>
+    <p>
+        Place this node at the start of your flow. At runtime the Iotistica agent
+        injects each outbound device batch here before it is published to MQTT.
+    </p>
+    <h3>Output message</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">object</span></dt>
+        <dd>The raw batch payload: <code>{ sensor, timestamp, messages[] }</code></dd>
+        <dt>topic <span class="property-type">string</span></dt>
+        <dd>The MQTT topic the batch will be published to.</dd>
+        <dt>deviceId <span class="property-type">string</span></dt>
+        <dd>Name of the endpoint (e.g. <code>opcua-pipe</code>).</dd>
+    </dl>
+    <h3>Notes</h3>
+    <p>
+        Wire the output of your transform logic into an
+        <b>iotistica-pipeline-out</b> node to return the (modified) payload
+        to the agent. Set <code>msg.drop = true</code> to suppress publishing.
+    </p>
+    <p>
+        This node is inert when viewed in a standalone Node-RED instance —
+        it only activates when loaded by the embedded agent runtime.
+    </p>
+</script>

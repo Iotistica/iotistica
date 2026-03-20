@@ -1,0 +1,94 @@
+import path from 'path';
+import fs from 'fs';
+import { LogComponents } from '../logging/types.js';
+import type { AgentInitContext } from './context.js';
+
+/**
+ * Initialize the Node-RED payload transform pipeline.
+ *
+ * Controlled entirely by environment variables - no DB/config-system changes needed:
+ *   PIPELINE_FLOWS_FILE  - absolute or cwd-relative path to a flows JSON file (required to enable)
+ *   PIPELINE_TIMEOUT_MS  - per-transform timeout in ms (default: 5000)
+ *
+ * If PIPELINE_FLOWS_FILE is not set the pipeline is simply skipped (fail-open).
+ */
+export async function initPipeline(ctx: AgentInitContext): Promise<void> {
+	const logger = ctx.agentLogger;
+	const flowsFile = process.env['PIPELINE_FLOWS_FILE'];
+
+	if (!flowsFile) {
+		logger?.debugSync('Pipeline not configured (PIPELINE_FLOWS_FILE not set)', {
+			component: LogComponents.agent,
+		});
+		return;
+	}
+
+	// Stop any existing pipeline instance before reinitializing
+	if (ctx.pipelineService) {
+		logger?.infoSync('Stopping existing pipeline before reinitializing', {
+			component: LogComponents.agent,
+		});
+		await ctx.pipelineService.stop();
+		ctx.pipelineService = undefined;
+	}
+
+	const resolvedFlows = (() => {
+		const candidate = path.isAbsolute(flowsFile)
+			? flowsFile
+			: path.resolve(process.cwd(), flowsFile);
+
+		if (fs.existsSync(candidate)) return candidate;
+
+		// Fall back to the built-in flows bundled with the dist (same basename)
+		const builtIn = path.resolve(__dirname, '../features/pipeline/flows', path.basename(flowsFile));
+		if (fs.existsSync(builtIn)) {
+			logger?.warnSync(`Flows file not found at '${candidate}', falling back to built-in: ${builtIn}`, {
+				component: LogComponents.agent,
+			});
+			return builtIn;
+		}
+
+		return candidate; // Let PipelineService produce the descriptive ENOENT
+	})();
+
+	const timeoutMs = parseInt(process.env['PIPELINE_TIMEOUT_MS'] ?? '5000', 10);
+
+	logger?.infoSync('Initializing Node-RED pipeline', {
+		component: LogComponents.agent,
+		flowsFile: resolvedFlows,
+		timeoutMs,
+	});
+
+	try {
+		const { PipelineService } = await import('../features/pipeline/index.js');
+
+		const pipelineLogger = {
+			debug: (msg: string, ...a: unknown[]) => logger?.debugSync(msg, { component: LogComponents.agent, ...a[0] as object }),
+			info:  (msg: string, ...a: unknown[]) => logger?.infoSync(msg,  { component: LogComponents.agent, ...a[0] as object }),
+			warn:  (msg: string, ...a: unknown[]) => logger?.warnSync(msg,  { component: LogComponents.agent, ...a[0] as object }),
+			error: (msg: string, ...a: unknown[]) => logger?.errorSync(msg, undefined, { component: LogComponents.agent, ...a[0] as object }),
+		};
+
+		const pipeline = new PipelineService({
+			flows: resolvedFlows,
+			timeoutMs,
+			logger: pipelineLogger,
+		});
+
+		await pipeline.start();
+
+		ctx.pipelineService = pipeline;
+
+		logger?.infoSync('Pipeline initialized', {
+			component: LogComponents.agent,
+			flowsFile: resolvedFlows,
+		});
+	} catch (error) {
+		logger?.errorSync(
+			'Failed to initialize pipeline — continuing without transform',
+			error as Error,
+			{ component: LogComponents.agent, flowsFile: resolvedFlows },
+		);
+		ctx.pipelineService = undefined;
+	}
+}

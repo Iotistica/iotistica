@@ -25,6 +25,7 @@ interface LogEntry {
   level?: string;
   is_stderr: boolean;
   is_system: boolean;
+  meta?: unknown;
 }
 
 interface LogsPageProps {
@@ -44,6 +45,38 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
   const [wsConnected, setWsConnected] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  const normalizeMeta = (meta: unknown): unknown => {
+    if (meta == null) {
+      return undefined;
+    }
+
+    if (typeof meta === 'string') {
+      try {
+        return JSON.parse(meta);
+      } catch {
+        return meta;
+      }
+    }
+
+    return meta;
+  };
+
+  const formatMeta = (meta: unknown): string => {
+    if (meta == null) {
+      return '';
+    }
+
+    if (typeof meta === 'string') {
+      return meta;
+    }
+
+    try {
+      return JSON.stringify(meta);
+    } catch {
+      return String(meta);
+    }
+  };
 
   // Initialize date range to "Last 7 Days" on mount
   useEffect(() => {
@@ -86,7 +119,11 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
       const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/logs?${params}`));
       if (response.ok) {
         const data = await response.json();
-        setLogs(data.logs || []);
+        const normalizedLogs = (data.logs || []).map((log: any) => ({
+          ...log,
+          meta: normalizeMeta(log.meta ?? log.context),
+        }));
+        setLogs(normalizedLogs);
       } 
     } catch (error) {
       console.error('[LogsPage] Error fetching historical logs:', error);
@@ -163,6 +200,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
             level: log.level,
             is_stderr: log.is_stderr ?? log.isStderr,
             is_system: log.is_system ?? log.isSystem,
+            meta: normalizeMeta(log.meta ?? log.context),
           }));
           
           setLogs(prev => {
@@ -301,7 +339,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
 
   const downloadLogs = () => {
     const logText = sortedFilteredLogs.map(log =>
-      `[${formatTimestamp(log.timestamp)}] [${log.service_name}] ${log.message}`
+      `[${formatTimestamp(log.timestamp)}] [${log.service_name}] ${log.message}${log.meta != null ? ` | meta=${formatMeta(log.meta)}` : ''}`
     ).join('\n');
 
     const blob = new Blob([logText], { type: 'text/plain' });
@@ -612,6 +650,11 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
                 <span className="ml-2" style={{ color: messageColor }}>
                   {log.message}
                 </span>
+                {log.meta != null && (
+                  <span className="ml-2" style={{ color: '#94a3b8' }}>
+                    {formatMeta(log.meta)}
+                  </span>
+                )}
               </div>
             );
           })}

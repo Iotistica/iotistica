@@ -77,6 +77,7 @@ export const LogComponents = {
   // System
   systemInfo: 'SystemInfo',
   metrics: 'Metrics',
+	anomaly: 'Anomaly',
   
   // Features
   jobEngine: 'JobEngine',

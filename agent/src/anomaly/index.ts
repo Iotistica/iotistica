@@ -110,7 +110,7 @@ export class AnomalyDetectionService {
 				.then(() => this.checkAndSkipWarmupIfBaselinesExist())
 				.catch(error => {
 					this.logger?.errorSync('Failed to initialize anomaly storage', error as Error, {
-						component: LogComponents.metrics,
+						component: LogComponents.anomaly,
 					});
 					this.storage = undefined; // Disable storage on error
 				});
@@ -123,7 +123,7 @@ export class AnomalyDetectionService {
 		// This ensures metricsTracked reflects only actively monitored metrics
 		
 		this.logger?.debugSync('Anomaly detection service initialized', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			metricsConfigured: config.metrics.filter(m => m.enabled).length,
 			methods: this.getUniqueDetectionMethods(),
 			storageEnabled: !!this.storage,
@@ -145,7 +145,7 @@ export class AnomalyDetectionService {
 		// Skip BAD quality data
 		if (dataPoint.quality === 'BAD') {
 			this.logger?.debugSync('Skipping BAD quality data point', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 			});
 			return;
@@ -162,8 +162,8 @@ export class AnomalyDetectionService {
 					.slice(0, 12)
 					.map(m => m.name);
 
-				this.logger?.debugSync('[ANOMALY] Ignoring datapoint - metric not configured', {
-					component: LogComponents.metrics,
+				this.logger?.debugSync('Ignoring datapoint - metric not configured', {
+					component: LogComponents.anomaly,
 					metric: dataPoint.metric,
 					source: dataPoint.source,
 					quality: dataPoint.quality,
@@ -177,8 +177,8 @@ export class AnomalyDetectionService {
 		}
 		
 		// LOG: Entry point - new data point received
-		this.logger?.debugSync('[ANOMALY] Processing data point', {
-			component: LogComponents.metrics,
+		this.logger?.debugSync('Processing data point', {
+			component: LogComponents.anomaly,
 			metric: dataPoint.metric,
 			value: dataPoint.value,
 			quality: dataPoint.quality,
@@ -192,8 +192,8 @@ export class AnomalyDetectionService {
 		if (!buffer) {
 			buffer = createBuffer(metricConfig.windowSize);
 			this.buffers.set(bufferKey, buffer);
-			this.logger?.infoSync('[ANOMALY] Created new buffer', {
-				component: LogComponents.metrics,
+			this.logger?.infoSync('Created new buffer', {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				deviceState: normalizedState,
 				windowSize: metricConfig.windowSize,
@@ -205,8 +205,8 @@ export class AnomalyDetectionService {
 		
 		// Run detection if buffer has enough samples (async, updates cache)
 		if (buffer.size >= 10) {
-			this.logger?.debugSync('[ANOMALY] Buffer sufficient for detection', {
-				component: LogComponents.metrics,
+			this.logger?.debugSync('Buffer sufficient for detection', {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				deviceState: normalizedState,
 				bufferSize: buffer.size,
@@ -216,8 +216,8 @@ export class AnomalyDetectionService {
 			this.runDetection(dataPoint, buffer, metricConfig);
 		} else {
 			// Buffer still building, cache zero score for this metric
-			this.logger?.debugSync('[ANOMALY] Buffer building', {
-				component: LogComponents.metrics,
+			this.logger?.debugSync('Buffer building', {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				deviceState: normalizedState,
 				bufferSize: buffer.size,
@@ -304,7 +304,7 @@ export class AnomalyDetectionService {
 		if (agentUptimeMs < this.warmupPeriodMs) {
 			const remainingMinutes = Math.ceil((this.warmupPeriodMs - agentUptimeMs) / 60000);
 			this.logger?.debugSync(`Anomaly detection in warm-up mode (${remainingMinutes} min remaining)`, {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				uptimeMs: agentUptimeMs,
 				warmupMs: this.warmupPeriodMs,
@@ -342,8 +342,8 @@ export class AnomalyDetectionService {
 					deviceId
 				);
 				if (dbBaseline) {
-					this.logger?.debugSync('[ANOMALY] Loaded baseline from database', {
-						component: LogComponents.metrics,
+					this.logger?.debugSync('Loaded baseline from database', {
+						component: LogComponents.anomaly,
 						metric: dataPoint.metric,
 						deviceState,
 						timeSlot,
@@ -355,7 +355,7 @@ export class AnomalyDetectionService {
 				}
 			} catch (error) {
 				this.logger?.debugSync('Failed to load baseline from database, using buffer stats', {
-					component: LogComponents.metrics,
+					component: LogComponents.anomaly,
 					metric: dataPoint.metric,
 					deviceState,
 					timeSlot,
@@ -367,8 +367,8 @@ export class AnomalyDetectionService {
 		// Validate baseline before using it for detection.
 		// Protects against stale data, state mismatches, metric identity drift, and insufficient samples.
 		if (dbBaseline && !this.isBaselineValid(dbBaseline, dataPoint, metricConfig, timeSlot, minimumSamples)) {
-			this.logger?.debugSync('[ANOMALY] Baseline failed validation -- falling back to buffer stats', {
-				component: LogComponents.metrics,
+			this.logger?.debugSync('Baseline failed validation -- falling back to buffer stats', {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				deviceState,
 				timeSlot,
@@ -384,8 +384,8 @@ export class AnomalyDetectionService {
 			methodsToRun.unshift('expected_range'); // Add first for priority
 		}
 		
-		this.logger?.debugSync('[ANOMALY] Running detection methods', {
-			component: LogComponents.metrics,
+		this.logger?.debugSync('Running detection methods', {
+			component: LogComponents.anomaly,
 			metric: dataPoint.metric,
 			deviceState,
 			value: dataPoint.value,
@@ -399,15 +399,15 @@ export class AnomalyDetectionService {
 			const detector = getDetector(method);
 			if (!detector) {
 				this.logger?.warnSync(`Unknown detection method: ${method}`, {
-					component: LogComponents.metrics,
+					component: LogComponents.anomaly,
 				});
 				continue;
 			}
 			
 			const result = detector.detect(dataPoint.value, buffer, metricConfig, dbBaseline);
 			
-			this.logger?.debugSync(`[ANOMALY] Detector result: ${method}`, {
-				component: LogComponents.metrics,
+			this.logger?.debugSync(`Detector result: ${method}`, {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				method,
 				isAnomaly: result.isAnomaly,
@@ -426,8 +426,8 @@ export class AnomalyDetectionService {
 			// Filter by confidence threshold for alerts
 			const minConfidence = metricConfig.minConfidence || this.config.alerts.minConfidence || 0.7; // Default: 0.7
 			if (result.isAnomaly && result.confidence >= minConfidence) {
-				this.logger?.infoSync('[ANOMALY] Creating alert (confidence threshold met)', {
-					component: LogComponents.metrics,
+				this.logger?.infoSync('Creating alert (confidence threshold met)', {
+					component: LogComponents.anomaly,
 					metric: dataPoint.metric,
 					method,
 					confidence: result.confidence?.toFixed(3) ?? 'N/A',
@@ -436,8 +436,8 @@ export class AnomalyDetectionService {
 				const alert = this.createAlert(dataPoint, buffer, metricConfig, result);
 				results.push(alert);
 			} else if (result.isAnomaly) {
-				this.logger?.debugSync('[ANOMALY] Anomaly detected but confidence below threshold', {
-					component: LogComponents.metrics,
+				this.logger?.debugSync('Anomaly detected but confidence below threshold', {
+					component: LogComponents.anomaly,
 					metric: dataPoint.metric,
 					method,
 					confidence: result.confidence?.toFixed(3) ?? 'N/A',
@@ -449,8 +449,8 @@ export class AnomalyDetectionService {
 		// Cache the anomaly score for this metric (0.0-1.0 range)
 		this.anomalyScores.set(this.getBufferKey(dataPoint.metric, deviceState, deviceId), maxConfidence);
 		
-		this.logger?.debugSync('[ANOMALY] Detection complete', {
-			component: LogComponents.metrics,
+		this.logger?.debugSync('Detection complete', {
+			component: LogComponents.anomaly,
 			metric: dataPoint.metric,
 			maxConfidence: maxConfidence?.toFixed(3) ?? '0.000',
 			alertsCreated: results.length,
@@ -472,13 +472,13 @@ export class AnomalyDetectionService {
 			if (this.storage) {
 				this.storage.storeAlert(alert).catch(error => {
 					this.logger?.errorSync('Failed to store alert to database', error as Error, {
-						component: LogComponents.metrics,
+						component: LogComponents.anomaly,
 					});
 				});
 			}
 			
 			this.logger?.warnSync('Anomaly detected', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				metric: alert.metric,
 				deviceState: alert.deviceState || 'unknown',
 				value: alert.value,
@@ -583,7 +583,7 @@ export class AnomalyDetectionService {
 		
 		// Log canonical event
 		this.logger?.warnSync('Anomaly event', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			deviceName: event.deviceName,
 			deviceType: event.deviceType,
 			deviceState: event.deviceState,
@@ -600,7 +600,7 @@ export class AnomalyDetectionService {
 		
 		if (!mqttConnected || !hasDeviceUuid || !this.mqttManager || !this.deviceUuid) {
 			this.logger?.infoSync('Cannot publish anomaly event to MQTT', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				metric: event.metric,
 				mqttConnected,
 				hasDeviceUuid,
@@ -618,14 +618,14 @@ export class AnomalyDetectionService {
 		this.mqttManager.publish(topic, payload, { qos: 1, retain: false })
 			.then(() => {
 				this.logger?.infoSync('Published anomaly event to MQTT', {
-					component: LogComponents.metrics,
+					component: LogComponents.anomaly,
 					metric: event.metric,
 					topic,
 				});
 			})
 			.catch(error => {
 				this.logger?.errorSync('Failed to publish anomaly event to MQTT', error as Error, {
-					component: LogComponents.metrics,
+					component: LogComponents.anomaly,
 					metric: event.metric,
 					topic,
 				});
@@ -781,8 +781,8 @@ export class AnomalyDetectionService {
 			}
 		}
 
-		this.logger?.debugSync('[ANOMALY TRACE] No metric config match', {
-			component: LogComponents.metrics,
+		this.logger?.debugSync('No metric config match', {
+			component: LogComponents.anomaly,
 			metricName,
 		});
 
@@ -971,8 +971,8 @@ export class AnomalyDetectionService {
 				continue;
 			}
 			
-			this.logger?.debugSync('[ANOMALY] Generating forecast', {
-				component: LogComponents.metrics,
+			this.logger?.debugSync('Generating forecast', {
+				component: LogComponents.anomaly,
 				metric: metricName,
 				bufferSize: buffer.size,
 				lookback: LINEAR_PREDICTOR_LOOKBACK,
@@ -982,16 +982,16 @@ export class AnomalyDetectionService {
 			const prediction = this.predictor.predict(buffer, LINEAR_PREDICTOR_LOOKBACK);
 			recordForecastResult(cadenceState, null, now); // Track run even if no publish
 			if (!prediction) {
-				this.logger?.debugSync('[ANOMALY] Forecast generation failed', {
-					component: LogComponents.metrics,
+				this.logger?.debugSync('Forecast generation failed', {
+					component: LogComponents.anomaly,
 					metric: metricName,
 					reason: 'Insufficient data or no trend',
 				});
 				continue;
 			}
 			
-			this.logger?.debugSync('[ANOMALY] Forecast generated', {
-				component: LogComponents.metrics,
+			this.logger?.debugSync('Forecast generated', {
+				component: LogComponents.anomaly,
 				metric: metricName,
 				current: prediction.current?.toFixed(3) ?? 'N/A',
 				predicted_next: prediction.predicted_next?.toFixed(3) ?? 'N/A',
@@ -1025,16 +1025,16 @@ export class AnomalyDetectionService {
 			
 			const shouldPublish = shouldPublishForecast(prediction, cadenceState, this.predictionCadence);
 			if (!shouldPublish) {
-				this.logger?.debugSync('[ANOMALY] Forecast not published (cadence control)', {
-					component: LogComponents.metrics,
+				this.logger?.debugSync('Forecast not published (cadence control)', {
+					component: LogComponents.anomaly,
 					metric: metricName,
 					reason: 'No significant change from last forecast',
 				});
 				continue;
 			}
 
-			this.logger?.infoSync('[ANOMALY] Publishing forecast', {
-				component: LogComponents.metrics,
+			this.logger?.infoSync('Publishing forecast', {
+				component: LogComponents.anomaly,
 				metric: metricName,
 				predicted_next: prediction.predicted_next?.toFixed(3) ?? 'N/A',
 				trend: prediction.trend,
@@ -1061,7 +1061,7 @@ export class AnomalyDetectionService {
 	setEnabled(enabled: boolean): void {
 		this.enabled = enabled;
 		this.logger?.infoSync(`Anomaly detection ${enabled ? 'enabled' : 'disabled'}`, {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 		});
 	}
 	
@@ -1089,7 +1089,7 @@ export class AnomalyDetectionService {
 		}
 		
 		this.logger?.infoSync('Anomaly detection service stopped and cleaned up', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 		});
 	}
 	
@@ -1128,7 +1128,7 @@ export class AnomalyDetectionService {
 		}
 		
 		this.logger?.infoSync('Anomaly detection configuration updated', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			prunedMetrics,
 		});
 	}
@@ -1144,7 +1144,7 @@ export class AnomalyDetectionService {
 		}, this.baselineSaveIntervalMs);
 		
 		this.logger?.infoSync('Started periodic baseline saving', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			interval_hours: this.baselineSaveIntervalMs / (60 * 60 * 1000),
 		});
 	}
@@ -1175,7 +1175,7 @@ export class AnomalyDetectionService {
 			// Sufficient baselines exist - skip warm-up by backdating startup timestamp
 			this.startupTimestamp = Date.now() - this.warmupPeriodMs;
 			this.logger?.infoSync('Skipping warm-up period - sufficient baselines exist', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				coveragePercent: (coveragePercent * 100).toFixed(1) + '%',
 				metricsWithBaselines,
 				totalMetrics: enabledMetrics.length,
@@ -1183,7 +1183,7 @@ export class AnomalyDetectionService {
 			});
 		} else {
 			this.logger?.infoSync('Warm-up period active - insufficient baseline coverage', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				coveragePercent: (coveragePercent * 100).toFixed(1) + '%',
 				metricsWithBaselines,
 				totalMetrics: enabledMetrics.length,
@@ -1200,7 +1200,7 @@ export class AnomalyDetectionService {
 	async saveBaselines(): Promise<void> {
 		if (!this.storage) {
 			this.logger?.warnSync('Cannot save baselines - storage not initialized', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 			});
 			return;
 		}
@@ -1222,7 +1222,7 @@ export class AnomalyDetectionService {
 		}
 		
 		this.logger?.debugSync('Baseline save starting', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			minSamples,
 			bufferSizes,
 		});
@@ -1246,7 +1246,7 @@ export class AnomalyDetectionService {
 						.catch(error => {
 							failedCount++;
 							this.logger?.errorSync('Failed to save baseline', error as Error, {
-								component: LogComponents.metrics,
+								component: LogComponents.anomaly,
 								metric: metricName,
 								deviceState,
 								deviceId,
@@ -1257,7 +1257,7 @@ export class AnomalyDetectionService {
 				attemptedCount++;
 			} else {
 				this.logger?.infoSync('Skipping baseline save - insufficient samples', {
-					component: LogComponents.metrics,
+					component: LogComponents.anomaly,
 					metric: metricName,
 					deviceState,
 					deviceId,
@@ -1271,8 +1271,8 @@ export class AnomalyDetectionService {
 		// Wait for all saves to complete
 		await Promise.all(savePromises);
 		
-		this.logger?.infoSync('[ANOMALY] Baseline persistence summary', {
-			component: LogComponents.metrics,
+		this.logger?.infoSync('Baseline persistence summary', {
+			component: LogComponents.anomaly,
 			attempted: attemptedCount,
 			persisted: persistedCount,
 			failed: failedCount,
@@ -1299,7 +1299,7 @@ export class AnomalyDetectionService {
 		this.metricProfiles.set(metricPattern, profile);
 		
 		this.logger?.infoSync('Profile set for metric pattern', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			metricPattern,
 			profile,
 		});
@@ -1318,7 +1318,7 @@ export class AnomalyDetectionService {
 	 */
 	handleProfileChange(newProfile: string, metricPattern: string = 'modbus_%'): void {
 		this.logger?.infoSync('Handling profile change', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			newProfile,
 			metricPattern,
 		});
@@ -1343,7 +1343,7 @@ export class AnomalyDetectionService {
 		}
 		
 		this.logger?.infoSync('Reset in-memory buffers for new profile', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			newProfile,
 			clearedBuffers,
 			count: clearedBuffers.length,
@@ -1370,7 +1370,7 @@ export class AnomalyDetectionService {
 		// System metrics (cpu_usage, memory_percent, etc.) don't have profile
 		if (metricName.startsWith('modbus_') || metricName.startsWith('opcua_') || metricName.startsWith('snmp_')) {
 			this.logger?.debugSync('Protocol metric without profile mapping', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				metric: metricName,
 				note: 'Consider calling setProfileForMetrics()',
 			});
@@ -1401,8 +1401,8 @@ export class AnomalyDetectionService {
 	): boolean {
 		// 1. Metric identity
 		if (baseline.metric !== dataPoint.metric) {
-			this.logger?.warnSync('[ANOMALY] Baseline metric mismatch — discarding', {
-				component: LogComponents.metrics,
+			this.logger?.warnSync('Baseline metric mismatch — discarding', {
+				component: LogComponents.anomaly,
 				baselineMetric: baseline.metric,
 				currentMetric: dataPoint.metric,
 			});
@@ -1412,8 +1412,8 @@ export class AnomalyDetectionService {
 		// 2. Device state
 		const currentState = this.resolveDeviceState(dataPoint);
 		if (baseline.device_state !== currentState) {
-			this.logger?.debugSync('[ANOMALY] Baseline device_state mismatch — discarding', {
-				component: LogComponents.metrics,
+			this.logger?.debugSync('Baseline device_state mismatch — discarding', {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				baselineState: baseline.device_state,
 				currentState,
@@ -1423,8 +1423,8 @@ export class AnomalyDetectionService {
 
 		// 3. Minimum samples
 		if (baseline.sample_count < minimumSamples) {
-			this.logger?.debugSync('[ANOMALY] Baseline sample_count below minimum — discarding', {
-				component: LogComponents.metrics,
+			this.logger?.debugSync('Baseline sample_count below minimum — discarding', {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				baselineSamples: baseline.sample_count,
 				minimumSamples,
@@ -1437,8 +1437,8 @@ export class AnomalyDetectionService {
 		const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
 		const ageMs = Date.now() - baseline.calculated_at;
 		if (ageMs > maxAgeMs) {
-			this.logger?.warnSync('[ANOMALY] Baseline is stale — discarding', {
-				component: LogComponents.metrics,
+			this.logger?.warnSync('Baseline is stale — discarding', {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				ageHours: Math.round(ageMs / 3600000),
 				maxAgeDays,
@@ -1449,8 +1449,8 @@ export class AnomalyDetectionService {
 		// 5. Profile — only reject when both sides explicitly specify a profile and they differ
 		const currentProfile = this.getProfileForMetric(dataPoint.metric);
 		if (currentProfile !== null && baseline.profile !== null && baseline.profile !== currentProfile) {
-			this.logger?.debugSync('[ANOMALY] Baseline profile mismatch — discarding', {
-				component: LogComponents.metrics,
+			this.logger?.debugSync('Baseline profile mismatch — discarding', {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				baselineProfile: baseline.profile,
 				currentProfile,
@@ -1461,8 +1461,8 @@ export class AnomalyDetectionService {
 		// 6. Time slot — only check when seasonality is active and the baseline is not an overall (-1) slot
 		const seasonality = config.seasonality || 'none';
 		if (seasonality !== 'none' && baseline.time_slot !== -1 && baseline.time_slot !== timeSlot) {
-			this.logger?.debugSync('[ANOMALY] Baseline time_slot mismatch — discarding', {
-				component: LogComponents.metrics,
+			this.logger?.debugSync('Baseline time_slot mismatch — discarding', {
+				component: LogComponents.anomaly,
 				metric: dataPoint.metric,
 				baselineTimeSlot: baseline.time_slot,
 				currentTimeSlot: timeSlot,

@@ -1,0 +1,17 @@
+{
+    "name": "@iotistic/nr-pipeline",
+    "version": "1.0.0",
+    "description": "Iotistic pipeline boundary nodes for Node-RED — inject into and collect from an agent payload transform flow",
+    "keywords": ["node-red", "iotistic", "pipeline"],
+    "author": {
+        "name": "Iotistic Inc."
+    },
+    "license": "Apache-2.0",
+    "node-red": {
+        "version": ">=3.0.0",
+        "nodes": {
+            "pipeline-in":  "nodes/pipeline-in.js",
+            "pipeline-out": "nodes/pipeline-out.js"
+        }
+    }
+}

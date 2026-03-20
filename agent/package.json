@@ -5,8 +5,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm run copy:migrations",
+    "build": "tsc -p tsconfig.build.json && npm run copy:migrations && npm run copy:pipeline-assets",
     "copy:migrations": "node -e \"const fs=require('fs'); fs.cpSync('src/db/migrations','dist/db/migrations',{recursive:true}); fs.mkdirSync('dist/db',{recursive:true}); fs.copyFileSync('src/db/template.sqlite.sql','dist/db/template.sqlite.sql');\"",
+    "copy:pipeline-assets": "node -e \"const fs=require('fs'); fs.cpSync('src/features/pipeline/nr-nodes','dist/features/pipeline/nr-nodes',{recursive:true}); fs.cpSync('src/features/pipeline/flows','dist/features/pipeline/flows',{recursive:true});\"",
     "watch": "tsc --watch",
     "clean": "rimraf dist && rimraf protocol-adapters/dist",
     "dev": "tsx watch src/app.ts",
@@ -41,6 +42,8 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
+    "@node-red/nodes": "^4.1.7",
+    "@node-red/runtime": "^4.1.7",
     "@types/mqtt": "^0.0.34",
     "@types/uuid": "^10.0.0",
     "axios": "^1.12.2",
@@ -68,6 +71,7 @@
     "net-snmp": "^3.26.0",
     "network-checker": "^1.0.6",
     "node-pty": "^1.0.0",
+    "node-red": "^4.1.7",
     "p-limit": "^7.2.0",
     "semver": "^7.7.4",
     "sqlite3": "^6.0.1",

@@ -4,6 +4,7 @@ import type { DiscoveryService } from '../features/adapters/discovery-service.js
 import type { AgentUpdater } from '../updater.js';
 import type { AgentFirewall } from '../network/firewall.js';
 import type { ConfigManager } from '../managers/config.js';
+import type { PipelineService } from '../features/pipeline/index.js';
 
 export interface AgentInitContext {
 	agent: {
@@ -23,6 +24,7 @@ export interface AgentInitContext {
 	updater?: AgentUpdater;
 	featureInitializer?: FeatureInitializer;
 	anomalyService?: any;
+	pipelineService?: PipelineService;
 	simulationOrchestrator?: any;
 	discoveryService?: DiscoveryService;
 	dictionaryManager?: any;

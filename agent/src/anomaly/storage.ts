@@ -87,7 +87,7 @@ export class AnomalyStorageService {
 		}
 
 		this.logger?.infoSync('Anomaly storage service initialized', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			retention: this.retention,
 		});
 
@@ -131,7 +131,7 @@ export class AnomalyStorageService {
 				    insertError?.message?.includes('no such column: consecutive_count') ||
 				    insertError?.message?.includes('has no column named cooldown_sec')) {
 					this.logger?.debugSync('Inserting alert without suppression metadata (legacy schema)', {
-						component: LogComponents.metrics,
+						component: LogComponents.anomaly,
 						alert_id: alert.id,
 						note: 'Run migration 003_add_alert_suppression_metadata.sql to enable suppression tracking',
 					});
@@ -145,14 +145,14 @@ export class AnomalyStorageService {
 			}
 
 			this.logger?.debugSync('Stored anomaly alert', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				alert_id: alert.id,
 				metric: alert.metric,
 				severity: alert.severity,
 			});
 		} catch (error) {
 			this.logger?.errorSync('Failed to store anomaly alert', error as Error, {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				alert_id: alert.id,
 			});
 		}
@@ -201,7 +201,7 @@ export class AnomalyStorageService {
 			};
 
 			this.logger?.debugSync('Inserting baseline record', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				metric,
 				device_id: deviceId,
 				device_state: deviceState,
@@ -225,7 +225,7 @@ export class AnomalyStorageService {
 				insertError?.message?.includes('has no column named device_id')
 			) {
 				this.logger?.debugSync('Storing baseline without device_state/device_id (legacy schema)', {
-					component: LogComponents.metrics,
+					component: LogComponents.anomaly,
 					metric,
 					device_id: deviceId,
 					device_state: deviceState,
@@ -243,7 +243,7 @@ export class AnomalyStorageService {
 		}
 	} catch (error) {
 		this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			metric,
 			device_id: deviceId,
 			device_state: deviceState,
@@ -270,7 +270,7 @@ export class AnomalyStorageService {
 			return alerts;
 		} catch (error) {
 			this.logger?.errorSync('Failed to fetch recent alerts', error as Error, {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				metric,
 			});
 			return [];
@@ -297,7 +297,7 @@ export class AnomalyStorageService {
 			return await query;
 		} catch (error) {
 			this.logger?.errorSync('Failed to fetch alerts by time range', error as Error, {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 			});
 			return [];
 		}
@@ -345,7 +345,7 @@ export class AnomalyStorageService {
 			return { hasCoverage, coveragePercent, metricsWithBaselines };
 		} catch (error: any) {
 			this.logger?.warnSync('Failed to check baseline coverage', {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				error: error.message,
 			});
 			return { hasCoverage: false, coveragePercent: 0, metricsWithBaselines: 0 };
@@ -419,7 +419,7 @@ export class AnomalyStorageService {
 				
 				// Fall back to overall baseline if seasonal baseline insufficient
 				this.logger?.debugSync('Seasonal baseline insufficient, falling back to overall', {
-					component: LogComponents.metrics,
+					component: LogComponents.anomaly,
 					metric,
 					deviceState,
 					timeSlot,
@@ -430,7 +430,7 @@ export class AnomalyStorageService {
 				// Backward compatibility: if time_slot column doesn't exist, fall back to old schema
 				if (seasonalError?.message?.includes('no such column: time_slot')) {
 					this.logger?.debugSync('Seasonality not supported (time_slot column missing), using legacy baseline', {
-						component: LogComponents.metrics,
+						component: LogComponents.anomaly,
 						metric,
 						note: 'Run migration 002_add_seasonality_support.sql to enable seasonality',
 					});
@@ -440,7 +440,7 @@ export class AnomalyStorageService {
 					seasonalError?.message?.includes('no such column: device_id')
 				) {
 					this.logger?.debugSync('State/device-aware baselines not supported (device_state/device_id column missing), using legacy baseline', {
-						component: LogComponents.metrics,
+						component: LogComponents.anomaly,
 						metric,
 						deviceState,
 						deviceId,
@@ -545,7 +545,7 @@ export class AnomalyStorageService {
 			return stats;
 		} catch (error) {
 			this.logger?.errorSync('Failed to calculate alert stats', error as Error, {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				metric,
 			});
 			return { total: 0, by_severity: {}, by_method: {} };
@@ -572,7 +572,7 @@ export class AnomalyStorageService {
 			
 			if (deleted > 0) {
 				this.logger?.infoSync('Cleared baselines after profile change', {
-					component: LogComponents.metrics,
+					component: LogComponents.anomaly,
 					profile,
 					metricPattern: metricPattern || 'all',
 					deleted,
@@ -582,7 +582,7 @@ export class AnomalyStorageService {
 			return deleted;
 		} catch (error) {
 			this.logger?.errorSync('Failed to clear baselines for profile', error as Error, {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 				profile,
 				metricPattern,
 			});
@@ -609,7 +609,7 @@ export class AnomalyStorageService {
 
 			if (deletedAlerts > 0 || deletedBaselines > 0) {
 				this.logger?.infoSync('Cleaned up old anomaly records', {
-					component: LogComponents.metrics,
+					component: LogComponents.anomaly,
 					deleted_alerts: deletedAlerts,
 					deleted_baselines: deletedBaselines,
 					retention_days: this.retention,
@@ -617,7 +617,7 @@ export class AnomalyStorageService {
 			}
 		} catch (error) {
 			this.logger?.errorSync('Failed to cleanup old anomaly records', error as Error, {
-				component: LogComponents.metrics,
+				component: LogComponents.anomaly,
 			});
 		}
 	}
@@ -635,7 +635,7 @@ export class AnomalyStorageService {
 		}, this.cleanupIntervalMs);
 
 		this.logger?.infoSync('Started periodic anomaly cleanup', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			interval_hours: this.cleanupIntervalMs / (60 * 60 * 1000),
 		});
 	}
@@ -650,7 +650,7 @@ export class AnomalyStorageService {
 		}
 
 		this.logger?.infoSync('Anomaly storage service stopped', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 		});
 	}
 
@@ -660,7 +660,7 @@ export class AnomalyStorageService {
 	updateRetention(days: number): void {
 		this.retention = days;
 		this.logger?.infoSync('Updated anomaly retention period', {
-			component: LogComponents.metrics,
+			component: LogComponents.anomaly,
 			retention: days,
 		});
 	}

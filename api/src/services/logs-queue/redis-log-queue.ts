@@ -33,6 +33,8 @@ interface LogEntry {
   level?: string;
   isSystem?: boolean;
   isStderr?: boolean;
+  meta?: Record<string, any> | null;
+  context?: Record<string, any> | null;
 }
 
 interface CompressedLogEntry {
@@ -107,6 +109,26 @@ class RedisLogQueue {
     this.redisConsumer.on('connect', () => {
       logger.info('Redis log consumer connected');
     });
+  }
+
+  private normalizeMeta(meta: any, context: any): Record<string, any> | null {
+    const isPlainObject = (value: any): value is Record<string, any> => {
+      return !!value && typeof value === 'object' && !Array.isArray(value);
+    };
+
+    if (isPlainObject(meta) && isPlainObject(context)) {
+      return { ...context, ...meta };
+    }
+
+    if (isPlainObject(meta)) {
+      return meta;
+    }
+
+    if (isPlainObject(context)) {
+      return context;
+    }
+
+    return null;
   }
 
   /**
@@ -390,6 +412,7 @@ class RedisLogQueue {
         level?: string;
         isSystem?: boolean;
         isStderr?: boolean;
+        meta?: Record<string, any> | null;
       }> = [];
 
       // Process each entry (decompress if needed, parse, validate)
@@ -413,7 +436,11 @@ class RedisLogQueue {
           }
         } else {
           // LEGACY: Already parsed entry
-          allLogs.push(entry.data as LogEntry);
+          const legacy = entry.data as LogEntry;
+          allLogs.push({
+            ...legacy,
+            meta: this.normalizeMeta(legacy.meta, legacy.context)
+          });
         }
       }
 
@@ -495,6 +522,7 @@ class RedisLogQueue {
     level?: string;
     isSystem?: boolean;
     isStderr?: boolean;
+    meta?: Record<string, any> | null;
   }>> {
     const { createBrotliDecompress, createGunzip, createInflate } = await import('zlib');
     const { promisify } = await import('util');
@@ -598,7 +626,8 @@ class RedisLogQueue {
         message: log.message,
         isSystem: log.isSystem || false,
         isStderr: log.isStderr || log.isStdErr || false,
-        level: log.level || 'info'
+        level: log.level || 'info',
+        meta: this.normalizeMeta(log.meta, log.context)
       }))
       .filter(log => {
         // Validate message field (prevent database constraint violations)
@@ -654,6 +683,7 @@ class RedisLogQueue {
       level?: string;
       isSystem?: boolean;
       isStderr?: boolean;
+      meta?: Record<string, any> | null;
     }>
   ): Promise<void> {
     const useCopyProtocol = process.env.USE_COPY_PROTOCOL !== 'false'; // Default: enabled
@@ -688,6 +718,7 @@ class RedisLogQueue {
       level?: string;
       isSystem?: boolean;
       isStderr?: boolean;
+      meta?: Record<string, any> | null;
     }>
   ): Promise<void> {
     const { from: copyFrom } = await import('pg-copy-streams');
@@ -700,7 +731,7 @@ class RedisLogQueue {
 
     try {
       // Convert logs to CSV format (tab-delimited TEXT)
-      // Format: device_uuid\tservice_name\ttimestamp\tmessage\tlevel\tis_system\tis_stderr
+      // Format: device_uuid\tservice_name\ttimestamp\tmessage\tlevel\tis_system\tis_stderr\tmeta
       const csvData = logs.map(log => {
         const message = (log.message || '[empty log message]').replace(/\t/g, ' ').replace(/\n/g, '\\n');
         const serviceName = (log.serviceName || '\\N').replace(/\t/g, ' '); // \N = NULL in COPY
@@ -708,8 +739,15 @@ class RedisLogQueue {
         const level = log.level || 'info';
         const isSystem = log.isSystem ? 't' : 'f'; // PostgreSQL boolean format
         const isStderr = log.isStderr ? 't' : 'f';
+        const meta = log.meta
+          ? JSON.stringify(log.meta)
+              .replace(/\\/g, '\\\\')
+              .replace(/\t/g, ' ')
+              .replace(/\n/g, '\\n')
+              .replace(/\r/g, '\\r')
+          : '\\N';
 
-        return `${log.deviceUuid}\t${serviceName}\t${timestamp}\t${message}\t${level}\t${isSystem}\t${isStderr}`;
+        return `${log.deviceUuid}\t${serviceName}\t${timestamp}\t${message}\t${level}\t${isSystem}\t${isStderr}\t${meta}`;
       }).join('\n');
 
       // Create readable stream from CSV data
@@ -717,7 +755,7 @@ class RedisLogQueue {
 
       // Execute COPY command
       const copyStream = client.query(
-        copyFrom(`COPY device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr) FROM STDIN WITH (FORMAT text, DELIMITER E'\\t', NULL '\\N')`)
+        copyFrom(`COPY device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta) FROM STDIN WITH (FORMAT text, DELIMITER E'\\t', NULL '\\N')`)
       );
 
       // Pipe data to PostgreSQL
@@ -749,6 +787,7 @@ class RedisLogQueue {
       level?: string;
       isSystem?: boolean;
       isStderr?: boolean;
+      meta?: Record<string, any> | null;
     }>
   ): Promise<void> {
     const batchSize = parseInt(process.env.LOG_INSERT_BATCH_SIZE || '500', 10);
@@ -769,9 +808,9 @@ class RedisLogQueue {
           const message = log.message || '[empty log message]';
           const serviceName = log.serviceName || null; // Use NULL for missing service names
 
-          const offset = index * 7;
+          const offset = index * 8;
           placeholders.push(
-            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`
+            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`
           );
           values.push(
             log.deviceUuid,
@@ -780,12 +819,13 @@ class RedisLogQueue {
             message,
             log.level || 'info',
             log.isSystem || false,
-            log.isStderr || false
+            log.isStderr || false,
+            log.meta ? JSON.stringify(log.meta) : null
           );
         });
 
         await query(
-          `INSERT INTO device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr)
+          `INSERT INTO device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta)
            VALUES ${placeholders.join(', ')}`,
           values
         );

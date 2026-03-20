@@ -1,0 +1,10 @@
+<!-- Headless node – no editor UI needed -->
+<script type="text/javascript">
+  RED.nodes.registerType('iotistica-pipeline-in', {
+    category: 'iotistica',
+    defaults: { name: { value: '' } },
+    inputs: 0,
+    outputs: 1,
+    label: function() { return this.name || 'pipeline in'; }
+  });
+</script>
