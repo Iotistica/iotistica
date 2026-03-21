@@ -18,7 +18,7 @@ on:
 jobs:
   build:
     name: Test, Build, Scan & Push Dashboard
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
     permissions:
       contents: read
     env:

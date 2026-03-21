@@ -43,7 +43,7 @@ jobs:
   version:
     name: Bump Version
     needs: [test]
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
     outputs:
       package_version: ${{ steps.bump.outputs.package_version }}
       sha_short: ${{ steps.bump.outputs.sha_short }}
@@ -98,7 +98,7 @@ jobs:
   build-x86:
     name: Build x86_64 Tarballs
     needs: [version]
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
 
     steps:
       - name: Checkout repository
@@ -136,7 +136,7 @@ jobs:
   build-arm64:
     name: Build ARM64 Tarballs
     needs: [version]
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
 
     steps:
       - name: Checkout repository
@@ -170,7 +170,7 @@ jobs:
   prepare-install-script:
     name: Prepare Latest install.sh
     needs: [version]
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
 
     steps:
       - name: Checkout repository
@@ -273,9 +273,9 @@ jobs:
       - name: Run latest install.sh in CI systemd mode
         env:
           CI: true
-          IOTISTIC_INSTALL_METHOD: systemd
-          IOTISTIC_AGENT_VERSION: ${{ needs.version.outputs.package_version }}
-          IOTISTIC_DEVICE_PORT: 48484
+          IOTISTICA_INSTALL_METHOD: systemd
+          IOTISTICA_AGENT_VERSION: ${{ needs.version.outputs.package_version }}
+          IOTISTICA_DEVICE_PORT: 48484
           IOTISTICA_API: ''
           PROVISIONING_KEY: ''
         run: |
@@ -283,10 +283,10 @@ jobs:
 
       - name: Validate service health
         run: |
-          sudo systemctl status iotistic-agent --no-pager || true
-          sudo journalctl -u iotistic-agent -n 200 --no-pager || true
+          sudo systemctl status iotistica-agent --no-pager || true
+          sudo journalctl -u iotistica-agent -n 200 --no-pager || true
 
-          if ! sudo systemctl is-active --quiet iotistic-agent; then
+          if ! sudo systemctl is-active --quiet iotistica-agent; then
             echo "Service is not active"
             exit 1
           fi
