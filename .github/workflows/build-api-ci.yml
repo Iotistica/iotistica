@@ -127,7 +127,7 @@ jobs:
 
           if docker image inspect "$IMAGE_TAG" > /dev/null 2>&1; then
             SIZE_BYTES=$(docker image inspect "$IMAGE_TAG" --format='{{.Size}}')
-            SIZE_MB=$(awk "BEGIN {printf \"%.2f\", $SIZE_BYTES / 1024 / 1024}")
+            SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
             LAYERS=$(docker image inspect "$IMAGE_TAG" --format='{{len .RootFS.Layers}}')
           else
             SIZE_BYTES=0
