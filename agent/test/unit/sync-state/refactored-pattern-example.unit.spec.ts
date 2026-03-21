@@ -7,7 +7,7 @@
  */
 
 import { MockHttpClient } from '../../helpers/mock-http-client';
-import { CloudSync } from '../../../src/device-manager/sync';
+import { CloudSync } from '../../../src/managers/cloud-sync';
 import { createMockDeviceInfo, createMockTargetStateResponse } from '../../helpers/fixtures';
 import { stub } from 'sinon';
 import { EventEmitter } from 'events';

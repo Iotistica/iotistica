@@ -4,7 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { MqttDiscoveryPlugin } from '../../../../src/features/discovery/mqtt.discovery';
+import { MqttDiscoveryPlugin } from '../../../../src/features/adapters/mqtt/discovery';
 import { LogComponents } from '../../../../src/logging/types';
 
 /**

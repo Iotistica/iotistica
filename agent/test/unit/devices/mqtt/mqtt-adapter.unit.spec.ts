@@ -46,79 +46,74 @@ describe('MqttAdapter', () => {
 
   describe('parsePayload', () => {
     it('should parse plain numeric string', () => {
-      const result = parsePayload(Buffer.from('42'), 'number');
+      const result = parsePayload(Buffer.from('42'));
       expect(result).toBe(42);
     });
 
     it('should parse JSON with value key', () => {
       const result = parsePayload(
-        Buffer.from(JSON.stringify({ value: 23.5 })), 
-        'number'
+        Buffer.from(JSON.stringify({ value: 23.5 }))
       );
-      expect(result).toBe(23.5);
+      expect(result).toEqual({ value: 23.5 });
     });
 
     it('should parse JSON object without value key', () => {
       const result = parsePayload(
-        Buffer.from(JSON.stringify({ temperature: 23.5, humidity: 65 })), 
-        'json'
+        Buffer.from(JSON.stringify({ temperature: 23.5, humidity: 65 }))
       );
-      expect(result).toBe('{"temperature":23.5,"humidity":65}');
+      expect(result).toEqual({ temperature: 23.5, humidity: 65 });
     });
 
-    it('should throw on invalid numeric string', () => {
-      expect(() => {
-        parsePayload(Buffer.from('not a number'), 'number');
-      }).toThrow();
+    it('should return plain string for non-JSON input', () => {
+      const result = parsePayload(Buffer.from('not a number'));
+      expect(result).toBe('not a number');
     });
 
     it('should parse boolean true', () => {
-      const result = parsePayload(Buffer.from('true'), 'boolean');
+      const result = parsePayload(Buffer.from('true'));
       expect(result).toBe(true);
     });
 
     it('should parse boolean false', () => {
-      const result = parsePayload(Buffer.from('false'), 'boolean');
+      const result = parsePayload(Buffer.from('false'));
       expect(result).toBe(false);
     });
 
-    it('should parse numeric 1 as boolean true', () => {
-      const result = parsePayload(Buffer.from('1'), 'boolean');
-      expect(result).toBe(true);
+    it('should parse numeric 1 as the number 1', () => {
+      const result = parsePayload(Buffer.from('1'));
+      expect(result).toBe(1);
     });
 
-    it('should parse numeric 0 as boolean false', () => {
-      const result = parsePayload(Buffer.from('0'), 'boolean');
-      expect(result).toBe(false);
+    it('should parse numeric 0 as the number 0', () => {
+      const result = parsePayload(Buffer.from('0'));
+      expect(result).toBe(0);
     });
 
     it('should return string as-is', () => {
-      const result = parsePayload(Buffer.from('hello world'), 'string');
+      const result = parsePayload(Buffer.from('hello world'));
       expect(result).toBe('hello world');
     });
 
-    it('should handle JSON value extraction with coercion', () => {
+    it('should return JSON object with value key unchanged', () => {
       const result = parsePayload(
-        Buffer.from(JSON.stringify({ value: '42.5' })), 
-        'number'
+        Buffer.from(JSON.stringify({ value: '42.5' }))
       );
-      expect(result).toBe(42.5);
+      expect(result).toEqual({ value: '42.5' });
     });
 
-    it('should handle whitespace in numeric values', () => {
-      const result = parsePayload(Buffer.from(' 42 '), 'number');
+    it('should parse JSON number with surrounding whitespace', () => {
+      const result = parsePayload(Buffer.from(' 42 '));
       expect(result).toBe(42);
     });
 
-    it('should handle negative numbers', () => {
-      const result = parsePayload(Buffer.from('-123.45'), 'number');
+    it('should parse negative JSON number', () => {
+      const result = parsePayload(Buffer.from('-123.45'));
       expect(result).toBe(-123.45);
     });
 
-    it('should throw on NaN result', () => {
-      expect(() => {
-        parsePayload(Buffer.from('NaN'), 'number');
-      }).toThrow('Numeric coercion resulted in NaN');
+    it('should return NaN string as plain string (no throw)', () => {
+      const result = parsePayload(Buffer.from('NaN'));
+      expect(result).toBe('NaN');
     });
   });
 
@@ -179,15 +174,15 @@ describe('MqttAdapter', () => {
 
       const adapter = new MqttAdapter(config, mockLogger);
       
-      // Set queue depth to exceed threshold (MAX_QUEUE_DEPTH = 1000)
-      (adapter as any).emitQueueDepth = 2000;
+      // Fill the emitQueue to exceed MAX_QUEUE_DEPTH (1000)
+      (adapter as any).emitQueue = new Array(1000).fill([]);
 
       // Try to handle message
       (adapter as any).handleMessage('test/topic', Buffer.from('42'), false);
 
       // Should log warning about dropped message
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('backpressure'),
+        expect.stringContaining('bounded queue limit'),
         expect.anything()
       );
 
@@ -606,20 +601,14 @@ describe('MqttAdapter', () => {
     it('should throw on JSON without value key when expecting number', () => {
       // JSON object { temp: 42 } without 'value' key, expected type 'number'
       // coerceType receives the object, tries parseFloat(object) → NaN → throw
-      expect(() => {
-        parsePayload(
-          Buffer.from(JSON.stringify({ temp: 42 })),
-          'number'
-        );
-      }).toThrow('Numeric coercion resulted in NaN');
+      const rawValue = parsePayload(Buffer.from(JSON.stringify({ temp: 42 })));
+      expect(() => coerceType(rawValue, 'number')).toThrow('Numeric coercion resulted in NaN');
     });
 
     it('should handle JSON without value key for json dataType', () => {
       // JSON object without 'value' key, but type is 'json' → should stringify
-      const result = parsePayload(
-        Buffer.from(JSON.stringify({ temp: 42, humidity: 65 })),
-        'json'
-      );
+      const rawValue = parsePayload(Buffer.from(JSON.stringify({ temp: 42, humidity: 65 })));
+      const result = coerceType(rawValue, 'json');
       expect(result).toBe('{\"temp\":42,\"humidity\":65}');
     });
   });
