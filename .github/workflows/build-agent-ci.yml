@@ -264,6 +264,7 @@ jobs:
           image-ref: 'iotistic/agent:${{ needs.build.outputs.agent_version }}'
           output-file: 'trivy-results.sarif'
           fail-on-critical: 'true'
+          ignore-file: 'agent/.trivyignore'
 
       - name: Docker Summary
         if: always()

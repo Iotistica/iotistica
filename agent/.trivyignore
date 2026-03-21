@@ -1,0 +1,4 @@
+# CVE-2026-31988 - yauzl < 3.2.1 (transitive via node-opcua-pki)
+# No fix available on npm yet (3.2.1 not published). Re-evaluate once node-opcua-pki
+# ships a version that depends on yauzl >= 3.2.1.
+CVE-2026-31988
