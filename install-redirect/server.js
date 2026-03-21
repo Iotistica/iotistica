@@ -82,7 +82,7 @@ app.get('/agent/info', (req, res) => {
   const protocol = req.secure || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   
   res.json({
-    description: 'Iotistic Device Agent Installer',
+    description: 'Iotistica Agent Installer',
     usage: `curl -sfL ${protocol}://${publicDomain}/agent | sh`,
     install_url: `${protocol}://${publicDomain}/agent`,
     checksum_url: `${protocol}://${publicDomain}/agent.sha256`,

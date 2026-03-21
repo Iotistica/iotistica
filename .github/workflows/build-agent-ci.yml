@@ -4,15 +4,25 @@ on:
   push:
     branches:
       - master
+    tags:
+      - 'v*'
     paths:
       - 'agent/**' 
-      - '.github/workflows/build-device-agent-ci.yml'
+      - '.github/workflows/build-agent-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: agent-ci
+  cancel-in-progress: true
 
 
 jobs:
-  test:
-    name: Run Unit Tests
+  build:
+    name: Build & Test
     runs-on: [ubuntu-latest]
+    outputs:
+      sha_short: ${{ steps.meta.outputs.sha_short }}
+      agent_version: ${{ steps.meta.outputs.agent_version }}
     
     steps:
       - name: Checkout repository
@@ -27,7 +37,7 @@ jobs:
 
       - name: Install Agent dependencies
         working-directory: ./agent
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit
 
       - name: Run unit tests
         working-directory: ./agent
@@ -37,114 +47,173 @@ jobs:
       - name: Build Agent
         working-directory: ./agent
         run: npm run build
+      - name: Calculate build metadata
+        id: meta
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "agent_version=$(jq -r '.version' agent/package.json)" >> $GITHUB_OUTPUT
 
-  version:
-    name: Bump Version
-    needs: [test]
+      - name: Build Summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ steps.meta.outputs.agent_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.meta.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+
+  package:
+    name: Package Tarballs (${{ matrix.arch }})
+    needs: build
     runs-on: [ubuntu-latest]
-    permissions:
-      contents: write
-    outputs:
-      package_version: ${{ steps.bump.outputs.package_version }}
-      sha_short: ${{ steps.bump.outputs.sha_short }}
-    
+    if: ${{ matrix.arch != 'arm64' || startsWith(github.ref, 'refs/tags/') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: agent/package-lock.json
 
-      - name: Bump version in package.json
-        id: bump
+      - name: Set up QEMU (ARM64 only)
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Build tarball (${{ matrix.arch }})
         run: |
+          VERSION="${{ needs.build.outputs.agent_version }}"
+          ARCH="${{ matrix.arch }}"
+
           cd agent
-          # Get current version1
-          CURRENT_VERSION=$(jq -r '.version' package.json)
-          echo "Current version: $CURRENT_VERSION"
-          
-          # Bump patch version (e.g., 1.0.0 -> 1.0.1)3
-          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          MAJOR="${VERSION_PARTS[0]}"
-          MINOR="${VERSION_PARTS[1]}"
-          PATCH="${VERSION_PARTS[2]}"
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-          
-          echo "New version: $NEW_VERSION"
-          
-          # Update package.json
-          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
-          
-          # Set outputs1
-          echo "package_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          npm ci --prefer-offline --no-audit --legacy-peer-deps
+          npm run build
 
-      - name: Commit and push version bump
+          if [ "$ARCH" = "arm64" ]; then
+            echo "Rebuilding sqlite3 for ARM64..."
+            docker run --rm -v "$(pwd)":/app -w /app --platform linux/arm64 \
+              node:20-slim bash -c "
+                apt-get update && apt-get install -y build-essential python3 libsqlite3-dev
+                npm rebuild sqlite3 --build-from-source
+              "
+          fi
+
+          mkdir -p /tmp/iotistic-artifacts
+
+          tar -czf /tmp/iotistic-artifacts/agent-${VERSION}-${ARCH}.tar.gz \
+            dist/ \
+            package.json \
+            package-lock.json \
+            node_modules/ \
+            bin/
+
+          cp /tmp/iotistic-artifacts/agent-${VERSION}-${ARCH}.tar.gz \
+             /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz
+
+          if [ "$ARCH" = "x86_64" ]; then
+            cp /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz /tmp/iotistic-artifacts/agent-latest.tar.gz
+          fi
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Generate checksums (${{ matrix.arch }})
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add agent/package.json
-          git commit -m "chore: bump agent version to ${{ steps.bump.outputs.package_version }} [skip ci]"
-          
-          # Retry push with rebase up to 5 times (handles concurrent workflow runs)
-          for i in {1..5}; do
-            echo "Push attempt $i of 5..."
-            
-            # Fetch latest state from remote
-            git fetch origin master
-            
-            # Rebase our commit on top of latest origin/master
-            git -c rebase.autoStash=true rebase origin/master
-            
-            # Try to push
-            if git push origin HEAD:master; then
-              echo "Successfully pushed version bump!"
-              exit 0
-            fi
-            
-            # If push failed, wait before retry
-            if [ $i -lt 5 ]; then
-              echo "Push failed, retrying in 2 seconds..."
-              sleep 2
-            fi
-          done
-          
-          echo "Failed to push after 5 attempts"
-          exit 1
+          VERSION="${{ needs.build.outputs.agent_version }}"
+          ARCH="${{ matrix.arch }}"
 
-  buildx:
-    name: Build & Push to Docker
-    needs: version
+          cd /tmp/iotistic-artifacts
+          sha256sum agent-${VERSION}-${ARCH}.tar.gz > agent-${VERSION}-${ARCH}.tar.gz.sha256
+          sha256sum agent-latest-${ARCH}.tar.gz > agent-latest-${ARCH}.tar.gz.sha256
+
+          if [ "$ARCH" = "x86_64" ]; then
+            sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
+          fi
+
+      - name: Upload versioned tarball and checksum (${{ matrix.arch }})
+        run: |
+          VERSION="${{ needs.build.outputs.agent_version }}"
+          ARCH="${{ matrix.arch }}"
+
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${VERSION}-${ARCH}.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-${VERSION}-${ARCH}.tar.gz \
+            --overwrite true \
+            --content-type application/gzip
+
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/versions/agent-${VERSION}-${ARCH}.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-${VERSION}-${ARCH}.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain
+
+      - name: Upload latest tarball and checksum (${{ matrix.arch }})
+        run: |
+          ARCH="${{ matrix.arch }}"
+
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-${ARCH}.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz \
+            --overwrite true \
+            --content-type application/gzip
+
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-${ARCH}.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain
+
+      - name: Upload generic latest tarball and checksum (x86_64 only)
+        if: matrix.arch == 'x86_64'
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
+            --overwrite true \
+            --content-type application/gzip
+
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
+            --overwrite true \
+            --content-type text/plain
+
+  docker:
+    name: Docker Build, Scan & Push
+    needs: build
     runs-on: [ubuntu-latest]
     permissions:
-      contents: write
+      contents: read
       security-events: write
       actions: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: master
-
-      - name: Display Version Update
-        run: |
-          echo "## Building Version ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Docker Images:" >> $GITHUB_STEP_SUMMARY
-          echo "- [\`iotistic/agent:latest\`](https://hub.docker.com/r/iotistic/agent/tags?name=latest)" >> $GITHUB_STEP_SUMMARY
-          echo "- [\`iotistic/agent:${{ needs.version.outputs.sha_short }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.version.outputs.sha_short }})" >> $GITHUB_STEP_SUMMARY
-          echo "- [\`iotistic/agent:${{ needs.version.outputs.package_version }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.version.outputs.package_version }})" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Installation Scripts:" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-docker.sh](https://apps.iotistic.ca/agent/install-docker.sh) ([checksum](https://apps.iotistic.ca/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-systemd.sh](https://apps.iotistic.ca/agent/install-systemd.sh) ([checksum](https://apps.iotistic.ca/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-docker-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-systemd-${{ needs.version.outputs.package_version }}.sh](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.version.outputs.package_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -153,383 +222,54 @@ jobs:
             image=moby/buildkit:buildx-stable-1
             network=host
 
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-agent-${{ hashFiles('agent/package-lock.json', 'agent/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-agent-
-
-      # Login to Docker Hub
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      # Build image locally for scanning (no push yet)
-      - name: Build image for scanning
-        id: docker_build
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./agent/Dockerfile
-          push: false
-          load: true
+          push: true
+          provenance: false
           platforms: linux/amd64
-          cache-from: |
-            type=local,src=/tmp/.buildx-cache
-            type=registry,ref=iotistic/agent:buildcache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          tags: iotistic/agent:${{ needs.version.outputs.package_version }}
+          cache-from: type=registry,ref=iotistic/agent:buildcache
+          cache-to: type=registry,ref=iotistic/agent:buildcache,mode=max
+          tags: |
+            iotistic/agent:${{ needs.build.outputs.agent_version }}
+            iotistic/agent:${{ needs.build.outputs.sha_short }}
+            iotistic/agent:latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
-      # Security scan with Trivy
       - name: Scan Agent image with Trivy
         uses: ./.github/actions/trivy-scan
         with:
-          image-ref: 'iotistic/agent:${{ needs.version.outputs.package_version }}'
+          image-ref: 'iotistic/agent:${{ needs.build.outputs.agent_version }}'
           output-file: 'trivy-results.sarif'
           fail-on-critical: 'true'
 
-      # Push scanned image to registry
-      - name: Push image to Docker Hub
-        if: success()
-        run: |
-          docker push iotistic/agent:${{ needs.version.outputs.package_version }}
-          docker tag iotistic/agent:${{ needs.version.outputs.package_version }} iotistic/agent:latest
-          docker tag iotistic/agent:${{ needs.version.outputs.package_version }} iotistic/agent:${{ needs.version.outputs.sha_short }}
-          docker push iotistic/agent:latest
-          docker push iotistic/agent:${{ needs.version.outputs.sha_short }}
-
-      # Move cache to prevent unlimited growthe
-      - name: Move cache
+      - name: Docker Summary
         if: always()
         run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache || true
-
-  build-x86:
-    name: Build x86_64
-    needs: [version, buildx]
-    runs-on: [ubuntu-latest]
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build agent (x86_64)
-        run: |
-          echo "Building agent for x86_64..."
-          cd agent
-          
-          # Install dependencies and build
-          npm ci --legacy-peer-deps
-          npm run build
-          
-          mkdir -p /tmp/iotistic-artifacts
-          
-          # Create x86_64 tarball
-          echo "Creating x86_64 tarball..."
-          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-            dist/ \
-            package.json \
-            package-lock.json \
-            node_modules/ \
-            bin/
-          
-          # Create 'latest' version
-          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz
-          
-          # Also create generic 'latest' (for backwards compatibility)
-          cp /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest.tar.gz
-          
-          echo "✓ Created x86_64 tarballs:"
-          ls -lh /tmp/iotistic-artifacts/
-
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Generate checksums
-        run: |
-          cd /tmp/iotistic-artifacts
-          sha256sum agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz > agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256
-          sha256sum agent-latest-x86_64.tar.gz > agent-latest-x86_64.tar.gz.sha256
-          sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
-          echo "✓ Generated checksums"
-
-      - name: Upload to Azure (versioned)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-            --overwrite true \
-            --content-type application/gzip
-          echo "✓ Uploaded versioned x86_64 tarball"
-
-      - name: Upload to Azure (latest)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-x86_64.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz \
-            --overwrite true \
-            --content-type application/gzip
-          
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
-            --overwrite true \
-            --content-type application/gzip
-          echo "✓ Uploaded latest x86_64 tarballs"
-
-      - name: Upload checksums to Azure
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain
-          
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-x86_64.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain
-          
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain
-          echo "✓ Uploaded x86_64 checksums"
-
-  build-arm64:
-    name: Build ARM64
-    needs: [version, buildx]
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU for ARM64 emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Verify QEMU installation
-        run: |
-          echo "Testing ARM64 emulation..."
-          docker run --rm --platform linux/arm64 arm64v8/alpine uname -m
-          echo "✓ QEMU ARM64 emulation working"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: agent/package-lock.json
-
-      - name: Backup current package files
-        run: |
-          # Store current package files BEFORE cache restore
-          cp agent/package.json /tmp/package.json.current
-          cp agent/package-lock.json /tmp/package-lock.json.current
-          echo "✓ Backed up current package files"
-
-      - name: Cache ARM64 node_modules
-        id: cache-arm64-modules
-        uses: actions/cache@v4
-        with:
-          path: agent/node_modules
-          key: ${{ runner.os }}-arm64-node-modules-${{ hashFiles('agent/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-arm64-node-modules-
-
-      - name: Restore current package files
-        run: |
-          # Always restore current package files after cache (cache may have old versions)
-          cp /tmp/package.json.current agent/package.json
-          cp /tmp/package-lock.json.current agent/package-lock.json
-          echo "✓ Restored current package files"
-
-      - name: Build agent (ARM64)
-        run: |
-          echo "Building agent for ARM64...."
-          cd agent
-          
-          if [ "${{ steps.cache-arm64-modules.outputs.cache-hit }}" == "true" ]; then
-            # Using cached ARM64 node_modules - skip npm ci
-            echo "✓ Using cached ARM64 node_modules"
-            npm run build
-          else
-            # No cache - fresh build
-            echo "No cache - building from scratch"
-            npm ci --legacy-peer-deps
-            npm run build
-            
-            # Rebuild sqlite3 for ARM64 using Docker with QEMU
-            echo "Rebuilding native modules for ARM64..."
-            docker run --rm -v "$(pwd)":/app -w /app --platform linux/arm64 \
-              node:20-slim bash -c "
-                apt-get update && apt-get install -y build-essential python3 libsqlite3-dev
-                npm rebuild sqlite3 --build-from-source
-              "
-          fi
-          
-          mkdir -p /tmp/iotistic-artifacts
-          
-          # Create ARM64 tarball
-          echo "Creating ARM64 tarball..."
-          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-            dist/ \
-            package.json \
-            package-lock.json \
-            node_modules/ \
-            bin/
-          
-          # Create 'latest' version
-          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz
-          
-          echo "✓ Created ARM64 tarballs:"
-          ls -lh /tmp/iotistic-artifacts/
-
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Generate checksums
-        run: |
-          cd /tmp/iotistic-artifacts
-          sha256sum agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz > agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256
-          sha256sum agent-latest-arm64.tar.gz > agent-latest-arm64.tar.gz.sha256
-          echo "✓ Generated checksums"
-
-      - name: Upload to Azure (versioned)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-            --overwrite true \
-            --content-type application/gzip
-          echo "✓ Uploaded versioned ARM64 tarball"
-
-      - name: Upload to Azure (latest)
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-arm64.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz \
-            --overwrite true \
-            --content-type application/gzip
-          echo "✓ Uploaded latest ARM64 tarball"
-
-      - name: Upload checksums to Azure
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain
-          
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-arm64.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain
-          echo "✓ Uploaded ARM64 checksums"
-
-  report:
-    name: Generate Changelog
-    needs: [version, buildx, build-x86, build-arm64]
-    runs-on: ubuntu-latest
-    if: success() && needs.version.outputs.package_version != ''
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          # Get the previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous tag found, using all commits"
-            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
-          else
-            echo "Generating changelog from $PREV_TAG to HEAD"
-            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
-          fi
-          
-          # Save to file
-          echo "$COMMITS" > changelog.txt
-          
-          # Save first 20 lines for summary
-          echo "$COMMITS" | head -20 > changelog_summary.txt
-
-      - name: Generate Summary Report
-        run: |
-          echo "# Build & Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Image Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.build.outputs.agent_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ needs.build.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Agent Tarballs" >> $GITHUB_STEP_SUMMARY
-          echo "- **x86_64:** [agent-latest-x86_64.tar.gz](https://apps.iotistica.com/agent/agent-latest-x86_64.tar.gz)" >> $GITHUB_STEP_SUMMARY
-          echo "- **ARM64:** [agent-latest-arm64.tar.gz](https://apps.iotistica.com/agent/agent-latest-arm64.tar.gz)" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Images:" >> $GITHUB_STEP_SUMMARY
+          echo "- [\`iotistic/agent:latest\`](https://hub.docker.com/r/iotistic/agent/tags?name=latest)" >> $GITHUB_STEP_SUMMARY
+          echo "- [\`iotistic/agent:${{ needs.build.outputs.sha_short }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.build.outputs.sha_short }})" >> $GITHUB_STEP_SUMMARY
+          echo "- [\`iotistic/agent:${{ needs.build.outputs.agent_version }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.build.outputs.agent_version }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Changelog" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          cat changelog_summary.txt >> $GITHUB_STEP_SUMMARY
-          
-          TOTAL_COMMITS=$(wc -l < changelog.txt)
-          SHOWN_COMMITS=$(wc -l < changelog_summary.txt)
-          if [ $TOTAL_COMMITS -gt $SHOWN_COMMITS ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "_...and $((TOTAL_COMMITS - SHOWN_COMMITS)) more commits_" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
-          echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "### Installation Scripts:" >> $GITHUB_STEP_SUMMARY
+          echo "- [install-docker.sh](https://apps.iotistic.ca/agent/install-docker.sh) ([checksum](https://apps.iotistic.ca/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+          echo "- [install-systemd.sh](https://apps.iotistic.ca/agent/install-systemd.sh) ([checksum](https://apps.iotistic.ca/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+          echo "- [install-docker-${{ needs.build.outputs.agent_version }}.sh](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.build.outputs.agent_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.build.outputs.agent_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+          echo "- [install-systemd-${{ needs.build.outputs.agent_version }}.sh](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.build.outputs.agent_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.build.outputs.agent_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
 
   # trigger-integration-tests:
   #   name: Trigger Integration Tests
@@ -558,40 +298,4 @@ jobs:
             
   #           console.log('Integration tests triggered with agent version: ${{ needs.version.outputs.package_version }}');
 
-  cleanup:
-      name: Clean up
-      runs-on: ubuntu-latest
-      needs: [report]
-      if: always()
-      steps:
-       - name: Cleanup systemd service
-         if: always()
-         run: |
-            # Stop and disable systemd service (only if it exists)
-            if sudo systemctl list-unit-files | grep -q iotistic-agent.service; then
-              echo "Stopping and disabling iotistic-agent service..."
-              sudo systemctl stop iotistic-agent 2>/dev/null || true
-              sudo systemctl disable iotistic-agent 2>/dev/null || true
-              sudo rm -f /etc/systemd/system/iotistic-agent.service
-              sudo systemctl daemon-reload
-              echo "✓ Systemd service stopped and removed"
-            else
-              echo "ℹ Systemd service not found (already cleaned or not installed)"
-            fi
-            
-            # Remove installation directories
-            if [ -d /opt/iotistic ] || [ -d /var/lib/iotistic ] || [ -d /var/log/iotistic ] || [ -d /etc/iotistic ]; then
-              echo "Removing installation directories..."
-              sudo rm -rf /opt/iotistic/agent
-              sudo rm -rf /var/lib/iotistic/agent
-              sudo rm -rf /var/log/iotistic
-              sudo rm -rf /etc/iotistic
-              echo "✓ Installation directories removed"
-            else
-              echo "ℹ Installation directories not found (already cleaned)"
-            fi
-       
-       - name: Cleanup Docker
-         if: always()
-         run: |
-            docker system prune -af
+  # cleanup removed: GitHub-hosted runners are ephemeral and cleaned automatically.

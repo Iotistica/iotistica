@@ -286,11 +286,11 @@ BEGIN
     -- Get apps from both versions
     SELECT apps INTO v_from_apps
     FROM agent_target_state_history
-    WHERE device_uuid = p_device_uuid AND version = p_from_version;
+    WHERE agent_uuid = p_device_uuid AND version = p_from_version;
     
     SELECT apps INTO v_to_apps
     FROM agent_target_state_history
-    WHERE device_uuid = p_device_uuid AND version = p_to_version;
+    WHERE agent_uuid = p_device_uuid AND version = p_to_version;
     
     -- Build comparison result
     v_result := jsonb_build_object(
@@ -908,7 +908,7 @@ BEGIN
         h.is_rollback,
         h.changes_summary
     FROM agent_target_state_history h
-    WHERE h.device_uuid = p_device_uuid
+    WHERE h.agent_uuid = p_device_uuid
     ORDER BY h.version DESC
     LIMIT p_limit;
 END;
@@ -931,13 +931,13 @@ BEGIN
             COUNT(DISTINCT deployed_by) as deployers,
             MAX(deployed_by) as top_deployer
         FROM agent_target_state_history h
-        WHERE (p_device_uuid IS NULL OR h.device_uuid = p_device_uuid)
+        WHERE (p_device_uuid IS NULL OR h.agent_uuid = p_device_uuid)
           AND h.deployed_at > NOW() - (p_days_back || ' days')::INTERVAL
     ),
     timing AS (
-        SELECT AVG(deployed_at - LAG(deployed_at) OVER (PARTITION BY device_uuid ORDER BY version)) as avg_interval
+        SELECT AVG(deployed_at - LAG(deployed_at) OVER (PARTITION BY agent_uuid ORDER BY version)) as avg_interval
         FROM agent_target_state_history h
-        WHERE (p_device_uuid IS NULL OR h.device_uuid = p_device_uuid)
+        WHERE (p_device_uuid IS NULL OR h.agent_uuid = p_device_uuid)
           AND h.deployed_at > NOW() - (p_days_back || ' days')::INTERVAL
     )
     SELECT 
@@ -966,7 +966,7 @@ BEGIN
         h.deployed_at,
         h.deployed_by
     FROM agent_target_state_history h
-    WHERE h.device_uuid = p_device_uuid
+    WHERE h.agent_uuid = p_device_uuid
       AND h.version = p_version;
 END;
 $$;
@@ -6776,7 +6776,7 @@ ALTER SEQUENCE public.device_tags_id_seq OWNED BY public.agent_tags.id;
 
 CREATE TABLE public.agent_target_state (
     id integer NOT NULL,
-    device_uuid uuid NOT NULL,
+    agent_uuid uuid NOT NULL,
     apps jsonb DEFAULT '{}'::jsonb NOT NULL,
     config jsonb DEFAULT '{}'::jsonb,
     version integer DEFAULT 1,
@@ -6815,7 +6815,7 @@ COMMENT ON COLUMN public.agent_target_state.deployed_by IS 'User/system that tri
 
 CREATE TABLE public.agent_target_state_history (
     id integer NOT NULL,
-    device_uuid uuid NOT NULL,
+    agent_uuid uuid NOT NULL,
     version integer NOT NULL,
     apps jsonb DEFAULT '{}'::jsonb NOT NULL,
     config jsonb DEFAULT '{}'::jsonb,
@@ -17038,7 +17038,7 @@ ALTER TABLE ONLY public.agent_tags
 --
 
 ALTER TABLE ONLY public.agent_target_state
-    ADD CONSTRAINT device_target_state_device_uuid_key UNIQUE (device_uuid);
+    ADD CONSTRAINT device_target_state_device_uuid_key UNIQUE (agent_uuid);
 
 
 --
@@ -18822,7 +18822,7 @@ ALTER TABLE ONLY public.agent_flows
 --
 
 ALTER TABLE ONLY public.agent_target_state_history
-    ADD CONSTRAINT unique_device_version UNIQUE (device_uuid, version);
+    ADD CONSTRAINT unique_device_version UNIQUE (agent_uuid, version);
 
 
 --
@@ -25810,7 +25810,7 @@ CREATE INDEX idx_device_target_state_deployed_at ON public.agent_target_state US
 -- Name: idx_device_target_state_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_target_state_device_uuid ON public.agent_target_state USING btree (device_uuid);
+CREATE INDEX idx_device_target_state_device_uuid ON public.agent_target_state USING btree (agent_uuid);
 
 
 --
@@ -27259,7 +27259,7 @@ CREATE INDEX idx_tag_definitions_key ON public.tag_definitions USING btree (key)
 -- Name: idx_target_history_deployed_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_target_history_deployed_at ON public.agent_target_state_history USING btree (device_uuid, deployed_at DESC);
+CREATE INDEX idx_target_history_deployed_at ON public.agent_target_state_history USING btree (agent_uuid, deployed_at DESC);
 
 
 --
@@ -27273,14 +27273,14 @@ CREATE INDEX idx_target_history_deployed_by ON public.agent_target_state_history
 -- Name: idx_target_history_device_version; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_target_history_device_version ON public.agent_target_state_history USING btree (device_uuid, version DESC);
+CREATE INDEX idx_target_history_device_version ON public.agent_target_state_history USING btree (agent_uuid, version DESC);
 
 
 --
 -- Name: idx_target_history_rollback; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_target_history_rollback ON public.agent_target_state_history USING btree (device_uuid, is_rollback) WHERE (is_rollback = true);
+CREATE INDEX idx_target_history_rollback ON public.agent_target_state_history USING btree (agent_uuid, is_rollback) WHERE (is_rollback = true);
 
 
 --
@@ -32862,7 +32862,7 @@ ALTER TABLE ONLY public.agent_tags
 --
 
 ALTER TABLE ONLY public.agent_target_state
-    ADD CONSTRAINT device_target_state_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT device_target_state_device_uuid_fkey FOREIGN KEY (agent_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32870,7 +32870,7 @@ ALTER TABLE ONLY public.agent_target_state
 --
 
 ALTER TABLE ONLY public.agent_target_state_history
-    ADD CONSTRAINT device_target_state_history_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT device_target_state_history_device_uuid_fkey FOREIGN KEY (agent_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --

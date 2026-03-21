@@ -16,12 +16,13 @@ on:
         type: string
 
 jobs:
-  test:
-    name: Run Tests
+  build:
+    name: Test, Build, Scan & Push Dashboard
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./dashboard
+    permissions:
+      contents: read
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: 0
     
     steps:
       - name: Checkout repository
@@ -37,43 +38,31 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        working-directory: ./dashboard
+        run: npm ci --prefer-offline --no-audit
 
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
+      - name: Install Playwright browser
+        working-directory: ./dashboard
+        run: npx playwright install chromium
 
       - name: Build dashboard
+        working-directory: ./dashboard
         run: npm run build
 
       - name: Start preview server
+        working-directory: ./dashboard
         run: |
-          npm install -g serve
-          serve -s build -l 3000 &
+          npx serve -s build -l 3000 &
           echo $! > .serve.pid
-          
+
           # Wait for server to be ready
           timeout 30 bash -c 'until curl -f http://localhost:3000; do sleep 1; done'
 
       - name: Run Playwright Smoke Tests
+        working-directory: ./dashboard
         run: npm run test:e2e:smoke
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:3000
-
-      - name: Generate test summary
-        if: always()
-        run: |
-          echo "## Dashboard Smoke Test Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Tests verify that the dashboard builds and loads correctly." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Test Coverage" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Homepage loads successfully" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Root element exists" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ No critical console errors" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Responsive load time" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Valid HTML structure" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ CSS styles loaded" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ JavaScript executed" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload test results
         if: always()
@@ -85,32 +74,12 @@ jobs:
 
       - name: Stop preview server
         if: always()
+        working-directory: ./dashboard
         run: |
           if [ -f .serve.pid ]; then
             kill $(cat .serve.pid) || true
             rm .serve.pid
           fi
-
-  buildx:
-    name: Build & Push Dashboard Image
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      sha: ${{ steps.sha.outputs.sha }}
-      short_sha: ${{ steps.sha.outputs.short_sha }}
-    strategy:
-      matrix:
-        include:
-          - board: x86
-            platform: linux/amd64
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.ref || github.sha }}
 
       - name: Calculate commit SHA
         id: sha
@@ -128,14 +97,6 @@ jobs:
             image=moby/buildkit:buildx-stable-1
             network=host
 
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache/${{ matrix.board }}
-          key: ${{ runner.os }}-buildx-dashboard-${{ matrix.board }}-${{ hashFiles('dashboard/package-lock.json', 'dashboard/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-dashboard-${{ matrix.board }}-
-
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -148,11 +109,10 @@ jobs:
           context: ./dashboard
           file: ./dashboard/Dockerfile
           push: true
-          platforms: ${{ matrix.platform }}
-          cache-from: |
-            type=local,src=/tmp/.buildx-cache/${{ matrix.board }}
-            type=registry,ref=iotistic/dashboard:buildcache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new/${{ matrix.board }},mode=max
+          provenance: false
+          platforms: linux/amd64
+          cache-from: type=registry,ref=iotistic/dashboard:buildcache
+          cache-to: type=registry,ref=iotistic/dashboard:buildcache,mode=max
           tags: |
             iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}
           build-args: |
@@ -166,47 +126,28 @@ jobs:
           output-file: 'trivy-results.sarif'
           fail-on-critical: 'true'
 
-      # Move cache to prevent unlimited growth
-      - name: Move cache
+      - name: Generate CI summary
         if: always()
-        run: |
-          rm -rf /tmp/.buildx-cache/${{ matrix.board }}
-          mv /tmp/.buildx-cache-new/${{ matrix.board }} /tmp/.buildx-cache/${{ matrix.board }} || true
-
-  report:
-    name: Generate Build Report
-    needs: buildx
-    runs-on: ubuntu-latest
-    if: always()
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.ref || github.sha }}
-
-      - name: Generate changelog
-        id: changelog
         run: |
           echo "## Dashboard Build Report" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Recent Changes" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          git log --oneline --no-merges -10 -- dashboard/ >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-
-      - name: Image size report
-        run: |
+          echo "### Smoke Test Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "- Homepage loads successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- Root element exists" >> $GITHUB_STEP_SUMMARY
+          echo "- No critical console errors" >> $GITHUB_STEP_SUMMARY
+          echo "- Responsive load time" >> $GITHUB_STEP_SUMMARY
+          echo "- Valid HTML structure" >> $GITHUB_STEP_SUMMARY
+          echo "- CSS styles loaded" >> $GITHUB_STEP_SUMMARY
+          echo "- JavaScript executed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Image" >> $GITHUB_STEP_SUMMARY
-          
-          # Pull image to inspect locally
-          if docker pull "iotistic/dashboard:ci-${{ needs.buildx.outputs.short_sha }}" >/dev/null 2>&1; then
-            SIZE_BYTES=$(docker image inspect "iotistic/dashboard:ci-${{ needs.buildx.outputs.short_sha }}" --format='{{.Size}}')
+          echo "**Tag:** iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}" >> $GITHUB_STEP_SUMMARY
+
+          # Pull image to inspect size locally
+          if docker pull "iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}" >/dev/null 2>&1; then
+            SIZE_BYTES=$(docker image inspect "iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}" --format='{{.Size}}')
             SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
-            echo "**Tag:** \`iotistic/dashboard:ci-${{ needs.buildx.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
             echo "**Size:** ${SIZE_MB} MB" >> $GITHUB_STEP_SUMMARY
           else
-            echo "**Tag:** \`iotistic/dashboard:ci-${{ needs.buildx.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
             echo "_(Size unavailable)_" >> $GITHUB_STEP_SUMMARY
           fi

@@ -17,7 +17,7 @@ import zlib from 'zlib';
 import pLimit from 'p-limit';
 import logger, { logOperation } from '../utils/logger';
 import { isDuplicateMessage } from '../utils/mqtt-deduplication';
-import { CloudDictionaryManager } from './dictionary-manager';
+import { CloudDictionaryManager } from './dictionary';
 import { mqttDevicePattern, parseMqttTopic } from './topics';
 import { getTenantId } from '../redis/tenant-keys';
 

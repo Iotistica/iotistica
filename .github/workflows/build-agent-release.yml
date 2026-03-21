@@ -7,6 +7,10 @@ permissions:
   contents: write
   actions: read
 
+concurrency:
+  group: agent-release
+  cancel-in-progress: false
+
 jobs:
   test:
     name: Run Unit Tests
@@ -49,6 +53,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
 
       - name: Bump version in package.json
         id: bump

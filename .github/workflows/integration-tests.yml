@@ -78,7 +78,7 @@ on:
 jobs:
   determine-versions:
     name: Determine Versions to Test
-    runs-on: [iotistic-lab-sc]
+    runs-on: [ubuntu-latest]
     outputs:
       agent_version: ${{ steps.versions.outputs.agent_version }}
       api_version: ${{ steps.versions.outputs.api_version }}
@@ -220,7 +220,7 @@ jobs:
   setup:
     name: Setup Environment
     needs: determine-versions
-    runs-on: [iotistic-lab-sc]
+    runs-on: [ubuntu-latest]
     
     steps:
       - name: Display test suite information
@@ -280,7 +280,7 @@ jobs:
   test-api:
     name: Test API Server
     needs: [determine-versions, setup]
-    runs-on: [iotistic-lab-sc]
+    runs-on: [ubuntu-latest]
     timeout-minutes: 10
     
     env:
@@ -426,7 +426,7 @@ jobs:
   test-agents:
     name: Test Agent (Systemd Installation)
     needs: [determine-versions, setup]
-    runs-on: [iotistic-lab-sc]
+    runs-on: [ubuntu-latest]
     timeout-minutes: 15
     
     env:
@@ -792,7 +792,7 @@ jobs:
   test-modbus-discovery:
     name: Test Modbus Discovery (Full Stack)
     needs: [determine-versions, setup]
-    runs-on: [iotistic-lab-sc]
+    runs-on: [ubuntu-latest]
     timeout-minutes: 20
     
     env:
@@ -1049,7 +1049,7 @@ jobs:
   test-dashboard:
     name: Test Dashboard
     needs: [determine-versions, setup]
-    runs-on: [iotistic-lab-sc]
+    runs-on: [ubuntu-latest]
     timeout-minutes: 10
     
     env:
@@ -1154,7 +1154,7 @@ jobs:
   cleanup:
     name: Cleanup Environment
     needs: [determine-versions, setup, test-api, test-agents, test-dashboard]
-    runs-on: [iotistic-lab-sc]
+    runs-on: [ubuntu-latest]
     if: always()
     
     steps:
