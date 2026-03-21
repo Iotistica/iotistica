@@ -64,7 +64,6 @@ jobs:
     name: Package Tarballs (${{ matrix.arch }})
     needs: build
     runs-on: [arc-runner-set-iotistica-v2]
-    if: ${{ matrix.arch != 'arm64' || startsWith(github.ref, 'refs/tags/') }}
     strategy:
       fail-fast: false
       matrix:
@@ -90,7 +89,17 @@ jobs:
         with:
           platforms: linux/arm64
 
+      - name: Gate (skip arm64 on non-tag builds)
+        id: gate
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ] && [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "false" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build tarball (${{ matrix.arch }})
+        if: steps.gate.outputs.skip != 'true'
         run: |
           VERSION="${{ needs.build.outputs.agent_version }}"
           ARCH="${{ matrix.arch }}"
@@ -125,11 +134,13 @@ jobs:
           fi
 
       - name: Azure login
+        if: steps.gate.outputs.skip != 'true'
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Generate checksums (${{ matrix.arch }})
+        if: steps.gate.outputs.skip != 'true'
         run: |
           VERSION="${{ needs.build.outputs.agent_version }}"
           ARCH="${{ matrix.arch }}"
@@ -143,6 +154,7 @@ jobs:
           fi
 
       - name: Upload versioned tarball and checksum (${{ matrix.arch }})
+        if: steps.gate.outputs.skip != 'true'
         run: |
           VERSION="${{ needs.build.outputs.agent_version }}"
           ARCH="${{ matrix.arch }}"
@@ -164,6 +176,7 @@ jobs:
             --content-type text/plain
 
       - name: Upload latest tarball and checksum (${{ matrix.arch }})
+        if: steps.gate.outputs.skip != 'true'
         run: |
           ARCH="${{ matrix.arch }}"
 
