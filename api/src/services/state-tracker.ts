@@ -8,7 +8,7 @@ import crypto from 'crypto';
 
 export interface StateSnapshot {
   id: number;
-  device_uuid: string;
+  agent_uuid: string;
   timestamp: Date;
   state_type: 'target' | 'current';
   state: any;
@@ -20,7 +20,7 @@ export interface StateSnapshot {
 
 export interface StateChange {
   id: number;
-  device_uuid: string;
+  agent_uuid: string;
   timestamp: Date;
   state_type: 'target' | 'current';
   change_type: string;
@@ -36,7 +36,7 @@ export interface StateChange {
 
 export interface ReconciliationRecord {
   id: number;
-  device_uuid: string;
+  agent_uuid: string;
   started_at: Date;
   completed_at?: Date;
   status: 'in_progress' | 'success' | 'failed' | 'partial';
@@ -118,7 +118,7 @@ export class StateTracker {
   ): Promise<number> {
     const result = await pool.query(
       `INSERT INTO reconciliation_history 
-       (device_uuid, target_snapshot_id, current_snapshot_id, status, correlation_id)
+       (agent_uuid, target_snapshot_id, current_snapshot_id, status, correlation_id)
        VALUES ($1, $2, $3, 'in_progress', $4)
        RETURNING id`,
       [deviceUuid, targetSnapshotId || null, currentSnapshotId || null, correlationId || crypto.randomUUID()]
@@ -178,8 +178,8 @@ export class StateTracker {
     limit: number = 50
   ): Promise<StateChange[]> {
     const query = stateType
-      ? `SELECT * FROM state_changes WHERE device_uuid = $1 AND state_type = $2 ORDER BY timestamp DESC LIMIT $3`
-      : `SELECT * FROM state_changes WHERE device_uuid = $1 ORDER BY timestamp DESC LIMIT $2`;
+      ? `SELECT * FROM state_changes WHERE agent_uuid = $1 AND state_type = $2 ORDER BY timestamp DESC LIMIT $3`
+      : `SELECT * FROM state_changes WHERE agent_uuid = $1 ORDER BY timestamp DESC LIMIT $2`;
     
     const params = stateType ? [deviceUuid, stateType, limit] : [deviceUuid, limit];
     const result = await pool.query(query, params);
@@ -228,7 +228,7 @@ export class StateTracker {
   ): Promise<StateSnapshot | null> {
     const result = await pool.query(
       `SELECT * FROM state_snapshots 
-       WHERE device_uuid = $1 AND state_type = $2
+       WHERE agent_uuid = $1 AND state_type = $2
        ORDER BY version DESC LIMIT 1`,
       [deviceUuid, stateType]
     );

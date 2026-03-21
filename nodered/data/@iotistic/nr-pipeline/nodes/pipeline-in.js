@@ -9,6 +9,7 @@
 'use strict';
 
 module.exports = function (RED) {
+    /** @param {PipelineInConfig} config */
     function PipelineInNode(config) {
         RED.nodes.createNode(this, config);
         const node = this;
@@ -17,12 +18,13 @@ module.exports = function (RED) {
 
         if (!emitter) {
             // Standalone editor / preview mode — show idle status
-            node.status({ fill: 'grey', shape: 'ring', text: 'waiting for agent' });
+            node.status({ fill: 'grey', shape: 'ring', text: 'deploy to activate' });
             return;
         }
 
         node.status({ fill: 'green', shape: 'dot', text: 'connected' });
 
+        /** @param {PipelineTransformInput} data */
         const handler = function (data) {
             node.send({
                 _correlationId: data.correlationId,

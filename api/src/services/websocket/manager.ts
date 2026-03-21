@@ -1237,7 +1237,7 @@ export class WebSocketManager {
 
   private async fetchNetworkInterfaces(deviceUuid: string): Promise<any> {
     try {
-      // Use same logic as HTTP endpoint /api/v1/devices/:uuid/network-interfaces
+      // Use same logic as HTTP endpoint /api/v1/agents/:uuid/network-interfaces
       const device = await DeviceModel.getByUuid(deviceUuid);
       if (!device) return null;
 

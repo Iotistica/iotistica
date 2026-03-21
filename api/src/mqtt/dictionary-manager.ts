@@ -38,7 +38,7 @@ interface DictionaryPayload {
   format_version?: number;      // 2 = Phase 7
   enums?: EnumMaps;             // Global enums
   metrics?: ProtocolEnumMaps;   // Protocol-namespaced metrics
-  devices?: ProtocolEnumMaps;   // Protocol-namespaced devices
+  agents?: ProtocolEnumMaps;   // Protocol-namespaced agents
   metadata?: {
     totalMetricsPromoted?: number;
     totalDevicesPromoted?: number;
@@ -55,7 +55,7 @@ interface DictionaryDelta {
   format_version?: number;
   enums?: EnumMaps;
   metrics?: ProtocolEnumMaps;
-  devices?: ProtocolEnumMaps;
+  agents?: ProtocolEnumMaps;
   metadata?: {
     totalMetricsPromoted?: number;
     totalDevicesPromoted?: number;
@@ -90,7 +90,7 @@ export class CloudDictionaryManager {
   private logger?: any; // Winston logger
   private strictVersioning: boolean; // Reject version mismatches by default
   private mqttPublish?: (topic: string, payload: any) => Promise<void>; // For resync requests
-  private resyncRequested: Set<string> = new Set(); // Track devices we've requested resync from
+  private resyncRequested: Set<string> = new Set(); // Track agents we've requested resync from
 
   constructor(
     redis: any, 
@@ -151,8 +151,8 @@ export class CloudDictionaryManager {
         if (dict.metrics) {
           await this.redis.setex(`${key}:metrics`, 30 * 24 * 60 * 60, JSON.stringify(dict.metrics));
         }
-        if (dict.devices) {
-          await this.redis.setex(`${key}:devices`, 30 * 24 * 60 * 60, JSON.stringify(dict.devices));
+        if (dict.agents) {
+          await this.redis.setex(`${key}:agents`, 30 * 24 * 60 * 60, JSON.stringify(dict.agents));
         }
         
         this.logger?.info('Phase 7 enums stored', {
@@ -160,7 +160,7 @@ export class CloudDictionaryManager {
           deviceUuid,
           version: dict.version,
           metricsPromoted: dict.metadata?.totalMetricsPromoted || 0,
-          devicesPromoted: dict.metadata?.totalDevicesPromoted || 0,
+          agentsPromoted: dict.metadata?.totalDevicesPromoted || 0,
           qualityCodesPromoted: dict.metadata?.totalQualityCodesPromoted || 0,
         });
       }
@@ -278,8 +278,8 @@ export class CloudDictionaryManager {
         if (delta.metrics) {
           await this.redis.setex(`${key}:metrics`, 30 * 24 * 60 * 60, JSON.stringify(delta.metrics));
         }
-        if (delta.devices) {
-          await this.redis.setex(`${key}:devices`, 30 * 24 * 60 * 60, JSON.stringify(delta.devices));
+        if (delta.agents) {
+          await this.redis.setex(`${key}:agents`, 30 * 24 * 60 * 60, JSON.stringify(delta.agents));
         }
         
         this.logger?.info('Phase 7 enums updated via delta', {
@@ -287,7 +287,7 @@ export class CloudDictionaryManager {
           deviceUuid,
           version: delta.version,
           metricsPromoted: delta.metadata?.totalMetricsPromoted || 0,
-          devicesPromoted: delta.metadata?.totalDevicesPromoted || 0,
+          agentsPromoted: delta.metadata?.totalDevicesPromoted || 0,
           qualityCodesPromoted: delta.metadata?.totalQualityCodesPromoted || 0,
         });
       }
@@ -431,20 +431,20 @@ export class CloudDictionaryManager {
   async getEnumMappings(deviceUuid: string): Promise<{
     enums?: EnumMaps;
     metrics?: ProtocolEnumMaps;
-    devices?: ProtocolEnumMaps;
+    agents?: ProtocolEnumMaps;
   } | null> {
     try {
       const key = `dict:${deviceUuid}`;
-      const [enumsJson, metricsJson, devicesJson] = await Promise.all([
+      const [enumsJson, metricsJson, agentsJson] = await Promise.all([
         this.redis.get(`${key}:enums`),
         this.redis.get(`${key}:metrics`),
-        this.redis.get(`${key}:devices`)
+        this.redis.get(`${key}:agents`)
       ]);
 
       const result: any = {};
       if (enumsJson) result.enums = JSON.parse(enumsJson);
       if (metricsJson) result.metrics = JSON.parse(metricsJson);
-      if (devicesJson) result.devices = JSON.parse(devicesJson);
+      if (agentsJson) result.agents = JSON.parse(agentsJson);
 
       return Object.keys(result).length > 0 ? result : null;
     } catch (error) {
@@ -563,7 +563,7 @@ export class CloudDictionaryManager {
     enumMaps?: {
       enums?: EnumMaps;
       metrics?: ProtocolEnumMaps;
-      devices?: ProtocolEnumMaps;
+      agents?: ProtocolEnumMaps;
     } | null
   ): Record<string, any> {
     const expanded: Record<string, any> = {};
@@ -624,7 +624,7 @@ export class CloudDictionaryManager {
     enumMaps?: {
       enums?: EnumMaps;
       metrics?: ProtocolEnumMaps;
-      devices?: ProtocolEnumMaps;
+      agents?: ProtocolEnumMaps;
     } | null
   ): any {
     // Only decode numeric values
@@ -644,9 +644,9 @@ export class CloudDictionaryManager {
         }
       }
     } else if (fieldName === 'deviceName' || fieldName.endsWith('.deviceName')) {
-      if (enumMaps.devices) {
-        for (const protocol of Object.keys(enumMaps.devices)) {
-          const reverseMap = this.reverseEnumMap(enumMaps.devices[protocol]);
+      if (enumMaps.agents) {
+        for (const protocol of Object.keys(enumMaps.agents)) {
+          const reverseMap = this.reverseEnumMap(enumMaps.agents[protocol]);
           if (reverseMap[value]) {
             return reverseMap[value];
           }

@@ -34,14 +34,14 @@ export interface Event {
 
 export interface Actor {
   type: 'user' | 'device' | 'system' | 'api' | 'scheduled_job';
-  id: string;           // user_id, device_uuid, job_id
+  id: string;           // user_id, agent_uuid, job_id
   name?: string;        // Display name
   ip_address?: string;  // For user/API actions
 }
 
 export interface SnapshotResult {
   timestamp: Date;
-  device_uuid: string;
+  agent_uuid: string;
   target_state: any;
   current_state: any;
   containers: Record<string, any>;
@@ -276,7 +276,7 @@ export class EventStore {
    */
   static async rebuildDeviceState(deviceUuid: string): Promise<any> {
     const result = await pool.query(
-      `SELECT rebuild_device_state($1) as state`,
+      `SELECT rebuild_agent_state($1) as state`,
       [deviceUuid]
     );
 
@@ -374,7 +374,7 @@ export class EventStore {
 
     return {
       timestamp: atTime,
-      device_uuid: deviceUuid,
+      agent_uuid: deviceUuid,
       target_state: state.target_state,
       current_state: state.current_state,
       containers: state.containers || {},
@@ -694,7 +694,7 @@ export class ProjectionBuilder {
         try {
           // Get current projection state
           const stateResult = await pool.query(
-            `SELECT * FROM state_projections WHERE device_uuid = $1`,
+            `SELECT * FROM state_projections WHERE agent_uuid = $1`,
             [event.aggregate_id]
           );
 

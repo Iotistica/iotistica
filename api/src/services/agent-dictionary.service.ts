@@ -9,14 +9,14 @@ import { query } from '../db/connection';
 import { createHash } from 'crypto';
 
 export interface DictionaryEntry {
-  device_uuid: string;
+  agent_uuid: string;
   field_name: string;
   field_index: number;
   version_added: number;
 }
 
 export interface DictionaryMetadata {
-  device_uuid: string;
+  agent_uuid: string;
   current_version: number;
   last_full_sync: Date | null;
   last_delta_sync: Date | null;
@@ -33,7 +33,7 @@ export class DeviceDictionaryService {
     const result = await query(
       `SELECT field_name, field_index 
        FROM dictionary_entries 
-       WHERE device_uuid = $1 
+       WHERE agent_uuid = $1 
        ORDER BY field_index ASC`,
       [deviceUuid]
     );
@@ -62,7 +62,7 @@ export class DeviceDictionaryService {
 
     // Delete existing entries
     await query(
-      'DELETE FROM dictionary_entries WHERE device_uuid = $1',
+      'DELETE FROM dictionary_entries WHERE agent_uuid = $1',
       [deviceUuid]
     );
 
@@ -74,7 +74,7 @@ export class DeviceDictionaryService {
       ).join(',');
       
       await query(
-        `INSERT INTO dictionary_entries (device_uuid, field_name, field_index, version_added) 
+        `INSERT INTO dictionary_entries (agent_uuid, field_name, field_index, version_added) 
          VALUES ${values}`
       );
     }
@@ -82,9 +82,9 @@ export class DeviceDictionaryService {
     // Upsert metadata
     await query(
       `INSERT INTO dictionary_metadata 
-       (device_uuid, current_version, last_full_sync, dictionary_hash, total_fields, updated_at)
+       (agent_uuid, current_version, last_full_sync, dictionary_hash, total_fields, updated_at)
        VALUES ($1, $2, NOW(), $3, $4, NOW())
-       ON CONFLICT (device_uuid) 
+       ON CONFLICT (agent_uuid) 
        DO UPDATE SET 
          current_version = $2,
          last_full_sync = NOW(),
@@ -110,22 +110,22 @@ export class DeviceDictionaryService {
       ).join(',');
       
       await query(
-        `INSERT INTO dictionary_entries (device_uuid, field_name, field_index, version_added) 
+        `INSERT INTO dictionary_entries (agent_uuid, field_name, field_index, version_added) 
          VALUES ${values}
-         ON CONFLICT (device_uuid, field_name) DO NOTHING`
+         ON CONFLICT (agent_uuid, field_name) DO NOTHING`
       );
     }
 
     // Get total field count
     const countResult = await query(
-      'SELECT COUNT(*) as count FROM dictionary_entries WHERE device_uuid = $1',
+      'SELECT COUNT(*) as count FROM dictionary_entries WHERE agent_uuid = $1',
       [deviceUuid]
     );
     const totalFields = parseInt(countResult.rows[0]?.count || '0', 10);
 
     // Recalculate hash
     const fieldsResult = await query(
-      'SELECT field_name FROM dictionary_entries WHERE device_uuid = $1 ORDER BY field_name ASC',
+      'SELECT field_name FROM dictionary_entries WHERE agent_uuid = $1 ORDER BY field_name ASC',
       [deviceUuid]
     );
     const sortedFields = fieldsResult.rows.map(r => r.field_name).sort();
@@ -136,9 +136,9 @@ export class DeviceDictionaryService {
     // Upsert metadata
     await query(
       `INSERT INTO dictionary_metadata 
-       (device_uuid, current_version, last_delta_sync, dictionary_hash, total_fields, updated_at)
+       (agent_uuid, current_version, last_delta_sync, dictionary_hash, total_fields, updated_at)
        VALUES ($1, $2, NOW(), $3, $4, NOW())
-       ON CONFLICT (device_uuid) 
+       ON CONFLICT (agent_uuid) 
        DO UPDATE SET 
          current_version = $2,
          last_delta_sync = NOW(),
@@ -154,7 +154,7 @@ export class DeviceDictionaryService {
    */
   static async getMetadata(deviceUuid: string): Promise<DictionaryMetadata | null> {
     const result = await query(
-      'SELECT * FROM dictionary_metadata WHERE device_uuid = $1',
+      'SELECT * FROM dictionary_metadata WHERE agent_uuid = $1',
       [deviceUuid]
     );
 
@@ -166,7 +166,7 @@ export class DeviceDictionaryService {
    */
   static async exists(deviceUuid: string): Promise<boolean> {
     const result = await query(
-      'SELECT COUNT(*) as count FROM dictionary_entries WHERE device_uuid = $1',
+      'SELECT COUNT(*) as count FROM dictionary_entries WHERE agent_uuid = $1',
       [deviceUuid]
     );
 
@@ -178,12 +178,12 @@ export class DeviceDictionaryService {
    */
   static async deleteDictionary(deviceUuid: string): Promise<void> {
     await query(
-      'DELETE FROM dictionary_entries WHERE device_uuid = $1',
+      'DELETE FROM dictionary_entries WHERE agent_uuid = $1',
       [deviceUuid]
     );
 
     await query(
-      'DELETE FROM dictionary_metadata WHERE device_uuid = $1',
+      'DELETE FROM dictionary_metadata WHERE agent_uuid = $1',
       [deviceUuid]
     );
   }

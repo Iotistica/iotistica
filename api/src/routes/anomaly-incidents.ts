@@ -144,7 +144,7 @@ router.get('/anomaly-incidents', async (req, res) => {
     }
 
     if (filters.deviceUuid) {
-      whereConditions.push(`ai.device_uuid = $${queryParams.length + 1}`);
+      whereConditions.push(`ai.agent_uuid = $${queryParams.length + 1}`);
       queryParams.push(filters.deviceUuid);
     }
 
@@ -195,7 +195,7 @@ router.get('/anomaly-incidents', async (req, res) => {
         ai.incident_id,
         ai.fingerprint,
         ai.device_name,
-        ai.device_uuid,
+        ai.agent_uuid,
         ai.device_type,
         COALESCE((
           SELECT ae.baseline->>'deviceState'
@@ -206,7 +206,7 @@ router.get('/anomaly-incidents', async (req, res) => {
         ), 'unknown') AS device_state,
         ai.metric,
         ai.severity,
-        ai.affected_devices,
+        ai.affected_agents,
         ai.affected_agents,
         ai.first_seen,
         ai.last_seen,
@@ -246,12 +246,11 @@ router.get('/anomaly-incidents', async (req, res) => {
         incident_id: inc.incident_id,
         fingerprint: inc.fingerprint,
         device_name: display.deviceName,
-        device_uuid: inc.device_uuid || null,
+        agent_uuid: inc.agent_uuid || null,
         device_type: inc.device_type,
         device_state: inc.device_state || 'unknown',
         metric: display.metric,
         severity: inc.severity,
-        affected_devices: inc.affected_devices || [],
         affected_agents: inc.affected_agents || [],
         first_seen: parseInt(inc.first_seen),
         last_seen: parseInt(inc.last_seen),
@@ -305,8 +304,8 @@ router.get('/anomaly-incidents/stats', async (req, res) => {
         COUNT(*) FILTER (WHERE severity = 'info') as info_count,
         COUNT(*) FILTER (WHERE severity = 'warning') as warning_count,
         COUNT(*) FILTER (WHERE severity = 'critical') as critical_count,
-        COUNT(DISTINCT device_name) as affected_devices,
-        COUNT(DISTINCT device_uuid) as affected_endpoints
+        COUNT(DISTINCT device_name) as affected_agents,
+        COUNT(DISTINCT agent_uuid) as affected_endpoints
       FROM anomaly_incidents
       WHERE first_seen >= $1
     `;
@@ -329,21 +328,21 @@ router.get('/anomaly-incidents/stats', async (req, res) => {
     const metricsResult = await query(topMetricsQuery, [startTime]);
     const topMetrics = metricsResult.rows;
 
-    // Get top affected devices
+    // Get top affected agents
     const topDevicesQuery = `
       SELECT
         device_name,
-        device_uuid,
+        agent_uuid,
         COUNT(*) as count
       FROM anomaly_incidents
       WHERE first_seen >= $1
-      GROUP BY device_name, device_uuid
+      GROUP BY device_name, agent_uuid
       ORDER BY count DESC
       LIMIT 10
     `;
 
-    const devicesResult = await query(topDevicesQuery, [startTime]);
-    const topDevices = devicesResult.rows;
+    const agentsResult = await query(topDevicesQuery, [startTime]);
+    const topDevices = agentsResult.rows;
 
     res.json({
       success: true,
@@ -359,7 +358,7 @@ router.get('/anomaly-incidents/stats', async (req, res) => {
           warning: parseInt(stats.warning_count),
           critical: parseInt(stats.critical_count),
         },
-        affectedDevices: parseInt(stats.affected_devices),
+        affectedDevices: parseInt(stats.affected_agents),
         affectedEndpoints: parseInt(stats.affected_endpoints),
         topMetrics: topMetrics.map((m: any) => ({
           metric: m.metric,
@@ -367,7 +366,7 @@ router.get('/anomaly-incidents/stats', async (req, res) => {
         })),
         topDevices: topDevices.map((d: any) => ({
           deviceName: d.device_name,
-          deviceUuid: d.device_uuid || null,
+          deviceUuid: d.agent_uuid || null,
           count: parseInt(d.count),
         })),
       },
@@ -396,7 +395,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         incident_id,
         fingerprint,
         device_name,
-        device_uuid,
+        agent_uuid,
         device_type,
         COALESCE((
           SELECT ae.baseline->>'deviceState'
@@ -407,7 +406,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         ), 'unknown') AS device_state,
         metric,
         severity,
-        affected_devices,
+        affected_agents,
         affected_agents,
         first_seen,
         last_seen,
@@ -467,7 +466,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         severity,
         device_name,
         metric,
-        affected_devices,
+        affected_agents,
         max_anomaly_score,
         message,
         created_at
@@ -480,9 +479,9 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
     const alerts = alertsResult.rows;
     const endpointNameCache = new Map<string, string>();
 
-    // Extract device_uuid from the incident record (populated during event ingestion)
+    // Extract agent_uuid from the incident record (populated during event ingestion)
     const affectedAgents = incident.affected_agents || [];
-    const deviceUuid = incident.device_uuid || null;
+    const deviceUuid = incident.agent_uuid || null;
 
     const incidentDisplay = await resolveDisplayFields({
       deviceType: incident.device_type,
@@ -526,12 +525,11 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         incident_id: incident.incident_id,
         fingerprint: incident.fingerprint,
         device_name: incidentDisplay.deviceName,
-        device_uuid: deviceUuid,
+        agent_uuid: deviceUuid,
         device_type: incident.device_type,
         device_state: incident.device_state || 'unknown',
         metric: incidentDisplay.metric,
         severity: incident.severity,
-        affected_devices: incident.affected_devices || [],
         affected_agents: incident.affected_agents || [],
         first_seen: parseInt(incident.first_seen),
         last_seen: parseInt(incident.last_seen),
@@ -551,7 +549,7 @@ router.get('/anomaly-incidents/:incidentId', async (req, res) => {
         severity: a.severity,
         device_name: a.device_name,
         metric: a.metric,
-        affected_devices: a.affected_devices || [],
+        affected_agents: a.affected_agents || [],
         max_anomaly_score: parseFloat(a.max_anomaly_score),
         message: a.message,
         created_at: a.created_at,
@@ -602,11 +600,11 @@ router.patch('/anomaly-incidents/:incidentId/resolve', async (req, res) => {
         incident_id,
         fingerprint,
         device_name,
-        device_uuid,
+        agent_uuid,
         device_type,
         metric,
         severity,
-        affected_devices,
+        affected_agents,
         affected_agents,
         first_seen,
         last_seen,
@@ -665,11 +663,10 @@ router.patch('/anomaly-incidents/:incidentId/resolve', async (req, res) => {
         incident_id: incident.incident_id,
         fingerprint: incident.fingerprint,
         device_name: incident.device_name,
-        device_uuid: incident.device_uuid || null,
+        agent_uuid: incident.agent_uuid || null,
         device_type: incident.device_type,
         metric: incident.metric,
         severity: incident.severity,
-        affected_devices: incident.affected_devices || [],
         affected_agents: incident.affected_agents || [],
         first_seen: incident.first_seen,
         last_seen: incident.last_seen,

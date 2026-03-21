@@ -56,7 +56,7 @@ export async function getDeviceTags(deviceUuid: string): Promise<Record<string, 
   // Create new request
   const request = (async () => {
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/tags`));
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/tags`));
       
       if (!response.ok) {
         throw new Error('Failed to fetch device tags');
@@ -95,7 +95,7 @@ export async function setDeviceTag(
   key: string,
   value: string
 ): Promise<void> {
-  const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/tags`), {
+  const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/tags`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -119,7 +119,7 @@ export async function deleteDeviceTag(
   deviceUuid: string,
   key: string
 ): Promise<void> {
-  const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/tags/${key}`), {
+  const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/tags/${key}`), {
     method: 'DELETE',
   });
   
@@ -139,7 +139,7 @@ export async function replaceDeviceTags(
   deviceUuid: string,
   tags: Record<string, string>
 ): Promise<void> {
-  const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/tags`), {
+  const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/tags`), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',

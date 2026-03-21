@@ -20,7 +20,7 @@ function isDeviceRequest(req: Request): boolean {
  * Try: URL params, req.device (set by deviceAuth middleware), body
  */
 function extractDeviceUuid(req: Request): string | null {
-  // 1. From URL params (most common: /devices/:uuid/...)
+  // 1. From URL params (most common: /agents/:uuid/...)
   if (req.params.uuid) {
     return req.params.uuid;
   }

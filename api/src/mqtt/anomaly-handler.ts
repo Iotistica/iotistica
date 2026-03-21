@@ -2,7 +2,7 @@
  * ANOMALY EVENT HANDLER - CLOUD CORRELATION
  * ==========================================
  * 
- * Receives anomaly events from edge devices via MQTT and performs:
+ * Receives anomaly events from edge agents via MQTT and performs:
  * - Deduplication by fingerprint
  * - Cross-device correlation into incidents
  * - Severity escalation
@@ -247,7 +247,7 @@ export class AnomalyEventHandler {
 				msg_id,
 				agent_uuid,
 				device_name,
-				device_uuid,
+				agent_uuid,
 				device_type,
 				metric,
 				timestamp_ms,
@@ -444,9 +444,9 @@ export class AnomalyEventHandler {
 				metric,
 				severity,
 				device_name,
-				device_uuid,
+				agent_uuid,
 				device_type,
-				affected_devices,
+				affected_agents,
 				affected_agents,
 				first_seen,
 				last_seen,
@@ -485,9 +485,9 @@ export class AnomalyEventHandler {
 			`UPDATE anomaly_incidents SET
 				severity = $2,
 				device_name = $3,
-				device_uuid = $4,
+				agent_uuid = $4,
 				device_type = $5,
-				affected_devices = $6,
+				affected_agents = $6,
 				affected_agents = $7,
 				last_seen = $8,
 				max_anomaly_score = $9,
@@ -554,8 +554,8 @@ export class AnomalyEventHandler {
 				incident_id,
 				severity,
 				metric,
-				device_uuid,
-				affected_devices,
+				agent_uuid,
+				affected_agents,
 				max_anomaly_score,
 				message,
 				created_at

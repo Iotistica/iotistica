@@ -3,7 +3,7 @@
  * 
  * Priority order for broker configuration:
  * 1. Environment variables (MQTT_BROKER_HOST, MQTT_BROKER_PORT, MQTT_BROKER_PROTOCOL)
- * 2. Device-specific broker assignment (devices.mqtt_broker_id)
+ * 2. Device-specific broker assignment (agents.mqtt_broker_id)
  * 3. Default broker (mqtt_broker_config.is_default = true)
  * 
  * Database: Uses mqtt_broker_config table directly (not system_config)
@@ -37,7 +37,7 @@ export interface MqttBrokerConfig {
  * Priority order:
  * 1. Environment variables (full override if all required vars present)
  * 2. Environment MQTT_BROKER_TYPE preference ('local' or 'cloud')
- * 3. Device-specific broker assignment (devices.mqtt_broker_id)
+ * 3. Device-specific broker assignment (agents.mqtt_broker_id)
  * 4. Default broker from database
  * 
  * @param deviceUuid - Device UUID
@@ -94,7 +94,7 @@ export async function getBrokerConfigForDevice(deviceUuid: string): Promise<Mqtt
     // Priority 3: Device-specific broker from mqtt_broker_config table
     const deviceResult = await query(
       `SELECT bc.* FROM mqtt_broker_config bc
-       JOIN devices d ON d.mqtt_broker_id = bc.id
+       JOIN agents d ON d.mqtt_broker_id = bc.id
        WHERE d.uuid = $1 AND bc.is_active = true`,
       [deviceUuid]
     );
@@ -356,7 +356,7 @@ export function formatBrokerConfigForClient(config: any, credentials?: { usernam
 export async function assignBrokerToDevice(deviceUuid: string, brokerId: number | null): Promise<boolean> {
   try {
     await query(
-      `UPDATE devices
+      `UPDATE agents
        SET mqtt_broker_id = $1, updated_at = CURRENT_TIMESTAMP
        WHERE uuid = $2`,
       [brokerId, deviceUuid]

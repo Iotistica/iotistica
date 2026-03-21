@@ -5,8 +5,8 @@
  * 
  * Features:
  * - Scheduled rotation before key expiry
- * - Grace period for old keys (allows devices time to update)
- * - Automatic notification to devices via MQTT
+ * - Grace period for old keys (allows agents time to update)
+ * - Automatic notification to agents via MQTT
  * - Rotation history tracking
  * - Emergency key revocation
  */
@@ -60,7 +60,7 @@ export async function rotateDeviceApiKey(
   // Get device info
   const deviceResult = await query(
     `SELECT uuid, device_name, device_api_key_hash, api_key_rotation_days
-     FROM devices
+     FROM agents
      WHERE uuid = $1 AND is_active = true`,
     [deviceUuid]
   );
@@ -85,7 +85,7 @@ export async function rotateDeviceApiKey(
 
   // Update device with new key
   await query(
-    `UPDATE devices
+    `UPDATE agents
      SET 
        device_api_key_hash = $2,
        api_key_expires_at = $3,
@@ -130,26 +130,26 @@ export async function rotateDeviceApiKey(
 }
 
 /**
- * Rotate keys for all devices that need rotation
+ * Rotate keys for all agents that need rotation
  */
 export async function rotateExpiredKeys(
   config: Partial<KeyRotationConfig> = {}
 ): Promise<DeviceKeyRotation[]> {
   logger.info('Starting automatic API key rotation');
 
-  // Get devices needing rotation (keys expiring soon)
+  // Get agents needing rotation (keys expiring soon)
   const result = await query(
     `SELECT uuid, device_name, days_until_expiry
-     FROM devices_needing_rotation
+     FROM agents_needing_rotation
      ORDER BY api_key_expires_at ASC`
   );
 
   if (result.rows.length === 0) {
-    logger.info('No devices need key rotation at this time');
+    logger.info('No agents need key rotation at this time');
     return [];
   }
 
-  logger.info('Found devices needing rotation', { count: result.rows.length });
+  logger.info('Found agents needing rotation', { count: result.rows.length });
 
   const rotations: DeviceKeyRotation[] = [];
 
@@ -230,11 +230,11 @@ async function scheduleOldKeyRevocation(
 ): Promise<void> {
   // Mark old key in history as expiring
   await query(
-    `UPDATE device_api_key_history
+    `UPDATE agent_api_key_history
      SET 
        expires_at = $3,
        is_active = true  -- Still active during grace period
-     WHERE device_uuid = $1 AND key_hash = $2`,
+     WHERE agent_uuid = $1 AND key_hash = $2`,
     [deviceUuid, oldKeyHash, gracePeriodEnds]
   );
 
@@ -251,7 +251,7 @@ export async function revokeExpiredKeys(): Promise<number> {
   logger.info('Revoking expired API keys');
 
   const result = await query(
-    `UPDATE device_api_key_history
+    `UPDATE agent_api_key_history
      SET 
        is_active = false,
        revoked_at = NOW(),
@@ -260,7 +260,7 @@ export async function revokeExpiredKeys(): Promise<number> {
        is_active = true
        AND expires_at IS NOT NULL
        AND expires_at <= NOW()
-     RETURNING device_uuid`
+     RETURNING agent_uuid`
   );
 
   if (result.rows.length > 0) {
@@ -268,7 +268,7 @@ export async function revokeExpiredKeys(): Promise<number> {
     
     // Log revocation events
     for (const row of result.rows) {
-      await logRotationEvent(row.device_uuid, 'old_key_revoked', {
+      await logRotationEvent(row.agent_uuid, 'old_key_revoked', {
         reason: 'Grace period expired'
       });
     }
@@ -292,7 +292,7 @@ export async function emergencyRevokeApiKey(
 
   // Update device with new key (0 grace period)
   await query(
-    `UPDATE devices
+    `UPDATE agents
      SET 
        device_api_key_hash = $2,
        api_key_expires_at = NOW() + INTERVAL '90 days',
@@ -303,12 +303,12 @@ export async function emergencyRevokeApiKey(
 
   // Revoke all old keys immediately
   await query(
-    `UPDATE device_api_key_history
+    `UPDATE agent_api_key_history
      SET 
        is_active = false,
        revoked_at = NOW(),
        revoked_reason = $2
-     WHERE device_uuid = $1 AND is_active = true`,
+     WHERE agent_uuid = $1 AND is_active = true`,
     [deviceUuid, reason]
   );
 
@@ -338,7 +338,7 @@ async function logRotationEvent(
 ): Promise<void> {
   try {
     await query(
-      `INSERT INTO audit_logs (event_type, device_uuid, severity, details)
+      `INSERT INTO audit_logs (event_type, agent_uuid, severity, details)
        VALUES ($1, $2, $3, $4)`,
       [eventType, deviceUuid, 'info', JSON.stringify(details)]
     );
@@ -364,9 +364,9 @@ export async function getDeviceRotationStatus(deviceUuid: string): Promise<any> 
        d.api_key_rotation_enabled,
        d.api_key_rotation_days,
        EXTRACT(DAY FROM (d.api_key_expires_at - NOW())) as days_until_expiry,
-       (SELECT COUNT(*) FROM device_api_key_history WHERE device_uuid = d.uuid) as total_rotations,
-       (SELECT COUNT(*) FROM device_api_key_history WHERE device_uuid = d.uuid AND is_active = true) as active_keys
-     FROM devices d
+       (SELECT COUNT(*) FROM agent_api_key_history WHERE agent_uuid = d.uuid) as total_rotations,
+       (SELECT COUNT(*) FROM agent_api_key_history WHERE agent_uuid = d.uuid AND is_active = true) as active_keys
+     FROM agents d
      WHERE d.uuid = $1`,
     [deviceUuid]
   );
@@ -394,8 +394,8 @@ export async function getDeviceRotationHistory(
        revoked_at,
        revoked_reason,
        is_active
-     FROM device_api_key_history
-     WHERE device_uuid = $1
+     FROM agent_api_key_history
+     WHERE agent_uuid = $1
      ORDER BY issued_at DESC
      LIMIT $2`,
     [deviceUuid, limit]

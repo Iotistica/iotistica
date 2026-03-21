@@ -54,7 +54,7 @@ export const DeviceDetailPage: React.FC<DeviceDetailPageProps> = ({
         setLoading(true);
         
         // Fetch current sensor status from device-health endpoint
-        const sensorsResponse = await fetch(`/api/v1/devices/${deviceUuid}/device-health`);
+        const sensorsResponse = await fetch(`/api/v1/agents/${deviceUuid}/device-health`);
         const sensorsData = await sensorsResponse.json();
         const currentSensor = sensorsData.devices.find((d: any) => d.name === sensorName);
         
@@ -74,7 +74,7 @@ export const DeviceDetailPage: React.FC<DeviceDetailPageProps> = ({
 
           // Fetch 24-hour history from protocol adapter history
           const historyResponse = await fetch(
-            `/api/v1/devices/${deviceUuid}/protocol-adapters/${currentSensor.protocol}/${sensorName}/history?hours=24`
+            `/api/v1/agents/${deviceUuid}/protocol-adapters/${currentSensor.protocol}/${sensorName}/history?hours=24`
           );
           
           if (historyResponse.ok) {

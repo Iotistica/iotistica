@@ -31,7 +31,7 @@ export interface VpnConfig {
  * Falls back to default VPN config if device has no specific config assigned
  * 
  * Priority:
- * 1. Device-specific VPN config (devices.vpn_config_id)
+ * 1. Device-specific VPN config (agents.vpn_config_id)
  * 2. Default VPN config (vpn_config.is_default = true)
  * 3. Environment variables (VPN_ENABLED, VPN_SERVER_HOST, etc.)
  * 4. NULL (VPN disabled)
@@ -74,9 +74,9 @@ export async function getVpnConfigForDevice(deviceUuid: string): Promise<VpnConf
       };
     }
     
-    // Query device-specific config ID from devices table
+    // Query device-specific config ID from agents table
     const deviceResult = await query(
-      `SELECT vpn_config_id FROM devices WHERE uuid = $1`,
+      `SELECT vpn_config_id FROM agents WHERE uuid = $1`,
       [deviceUuid]
     );
     
@@ -227,7 +227,7 @@ ${caCert}
 export async function assignVpnConfigToDevice(deviceUuid: string, vpnConfigId: number | null): Promise<boolean> {
   try {
     await query(
-      `UPDATE devices 
+      `UPDATE agents 
        SET vpn_config_id = $1, updated_at = CURRENT_TIMESTAMP
        WHERE uuid = $2`,
       [vpnConfigId, deviceUuid]

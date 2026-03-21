@@ -256,7 +256,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   const fetchSensors = useCallback(async () => {
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors`));
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/sensors`));
       if (!response.ok) {
         const text = await response.text();
         let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -462,9 +462,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const handleAddProtocolDevice = async (device: any, options?: any) => {
     try {
       
-      // Call POST /api/v1/devices/:uuid/sensors?validateOnly=true
+      // Call POST /api/v1/agents/:uuid/sensors?validateOnly=true
       // This validates the sensor config without persisting to DB
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors?validateOnly=true`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/sensors?validateOnly=true`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -521,9 +521,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   const handleUpdateProtocolDevice = async (deviceName: string, updates: any) => {
     try {
-      // Call PUT /api/v1/devices/:uuid/sensors/:name?validateOnly=true
+      // Call PUT /api/v1/agents/:uuid/sensors/:name?validateOnly=true
       // This validates updates without persisting to DB
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}?validateOnly=true`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}?validateOnly=true`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -572,9 +572,9 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     // Physical devices use soft delete and rely on reconciliation for permanent removal
     try {
       
-      // Call DELETE /api/v1/devices/:uuid/sensors/:name
+      // Call DELETE /api/v1/agents/:uuid/sensors/:name
       // Soft delete marks pending_deletion and waits for agent reconciliation.
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}`), {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -660,7 +660,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     setVirtualDeviceLoading(true);
 
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual-devices`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(virtualFormData),
@@ -692,7 +692,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
     try {
       const response = await fetch(
-        buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices/${virtualDeviceUuid}`),
+        buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual-devices/${virtualDeviceUuid}`),
         { method: 'DELETE' }
       );
 

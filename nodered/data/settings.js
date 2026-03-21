@@ -277,7 +277,11 @@ module.exports = {
         header: {
             title: process.env.NODERED_TITLE || 'Iotistic'
         },
-        theme: 'dracula'
+        theme: 'dracula',
+        tours: false,
+        updateCheck: {
+            enabled: false
+        }
     },
 
     functionExternalModules: true,

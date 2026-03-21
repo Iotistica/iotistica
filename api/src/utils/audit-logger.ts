@@ -145,7 +145,7 @@ export async function logAuditEvent(entry: AuditLogEntry): Promise<void> {
   // Log to database
   try {
     await query(
-      `INSERT INTO audit_logs (event_type, device_uuid, user_id, ip_address, user_agent, details, severity)
+      `INSERT INTO audit_logs (event_type, agent_uuid, user_id, ip_address, user_agent, details, severity)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         eventType,
@@ -180,7 +180,7 @@ export async function logProvisioningAttempt(
 ): Promise<void> {
   try {
     await query(
-      `INSERT INTO provisioning_attempts (ip_address, device_uuid, provisioning_key_id, success, error_message, user_agent)
+      `INSERT INTO provisioning_attempts (ip_address, agent_uuid, provisioning_key_id, success, error_message, user_agent)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [ipAddress, deviceUuid, provisioningKeyId, success, errorMessage || null, userAgent || null]
     );

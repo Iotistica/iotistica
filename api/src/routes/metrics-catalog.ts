@@ -3,7 +3,7 @@
  * Query materialized views for metric discovery and time-series data
  * 
  * Endpoints:
- * - GET /api/v1/metrics/devices - List all endpoint devices
+ * - GET /api/v1/metrics/agents - List all endpoint agents
  * - GET /api/v1/metrics/catalog - Get metric catalog (optionally filtered by device)
  * - GET /api/v1/metrics/latest - Get latest readings for a device
  * - GET /api/v1/metrics/timeseries - Get time-series data for a metric
@@ -24,19 +24,19 @@ const deviceNameSchema = z.string().min(1).max(255).regex(/^[a-zA-Z0-9_\-\.\s]+$
 const metricNameSchema = z.string().min(1).max(100).regex(/^[a-zA-Z0-9_\-\.]+$/, 'Invalid metric name format');
 const timeRangeSchema = z.enum(['1m', '1h', '6h', '12h', '24h', '7d', '30d']).default('1h');
 const aggregationSchema = z.enum(['auto', '1min', '1hour', '1day']).default('auto');
-const viewSchema = z.enum(['catalog', 'devices', 'latest', 'all']);
+const viewSchema = z.enum(['catalog', 'agents', 'latest', 'all']);
 
 /**
- * Get list of endpoint devices (from extra.deviceName)
- * GET /api/v1/metrics/devices
+ * Get list of endpoint agents (from extra.deviceName)
+ * GET /api/v1/metrics/agents
  * 
  * Query params:
  * - protocol: filter by protocol (optional)
  * - agentUuid: filter by agent UUID (optional)
  * 
- * Returns devices discovered from readings with their available metrics
+ * Returns agents discovered from readings with their available metrics
  */
-router.get('/devices', jwtAuth, async (req, res) => {
+router.get('/agents', jwtAuth, async (req, res) => {
   try {
     const { protocol, agentUuid } = req.query;
     const requestId = (req as any).id || 'unknown';
@@ -45,7 +45,7 @@ router.get('/devices', jwtAuth, async (req, res) => {
     const validatedProtocol = protocolSchema.parse(protocol);
     const validatedAgentUuid = uuidSchema.parse(agentUuid);
     
-    // Group by device_name to get unique devices across all agents while preserving
+    // Group by device_name to get unique agents across all agents while preserving
     // exact source references (asset_uuid, endpoint_uuid) for widget configs that need stable IDs.
     let sql = `
       WITH unnested AS (
@@ -56,11 +56,11 @@ router.get('/devices', jwtAuth, async (req, res) => {
           ed.agent_uuid,
           ed.agent_name,
           ed.overall_quality_percentage,
-          ed.device_uuid,
+          ed.agent_uuid,
           ed.endpoint_uuid,
           ep.name AS endpoint_name,
           unnest(ed.available_metrics) as metric_name
-        FROM endpoint_devices ed
+        FROM endpoint_agents ed
         LEFT JOIN endpoints ep ON ep.uuid::text = ed.endpoint_uuid
           AND ep.agent_uuid = ed.agent_uuid
         WHERE 1=1
@@ -95,7 +95,7 @@ router.get('/devices', jwtAuth, async (req, res) => {
         array_agg(DISTINCT agent_name ORDER BY agent_name) as agent_names,
         COALESCE(
           jsonb_agg(DISTINCT jsonb_build_object(
-            'deviceUuid', device_uuid,
+            'deviceUuid', agent_uuid,
             'endpointUuid', endpoint_uuid,
             'agentUuid', agent_uuid::text,
             'agentName', agent_name,
@@ -112,15 +112,15 @@ router.get('/devices', jwtAuth, async (req, res) => {
     
     res.json({
       count: result.rows.length,
-      devices: result.rows
+      agents: result.rows
     });
   } catch (error: any) {
     const requestId = (req as any).id || 'unknown';
     if (error instanceof z.ZodError) {
-      logger.warn('Invalid devices parameters', { requestId, errors: error.errors });
+      logger.warn('Invalid agents parameters', { requestId, errors: error.errors });
       return res.status(400).json({ error: 'Invalid parameters', requestId });
     }
-    logger.error('Error getting endpoint devices', { requestId, userId: (req as any).user?.id, error: error.message });
+    logger.error('Error getting endpoint agents', { requestId, userId: (req as any).user?.id, error: error.message });
     res.status(500).json({ error: 'Internal server error', requestId });
   }
 });
@@ -153,7 +153,7 @@ router.get('/catalog', jwtAuth, async (req, res) => {
         agent_uuid,
         agent_name,
         device_name,
-        device_uuid,
+        agent_uuid,
         endpoint_uuid,
         protocol,
         metric_name,
@@ -251,7 +251,7 @@ router.get('/latest', jwtAuth, async (req, res) => {
         unit,
         protocol,
         ingested_at,
-        device_uuid,
+        agent_uuid,
         endpoint_uuid,
         anomaly_score,
         anomaly_threshold,
@@ -394,7 +394,7 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
     let sql = `
       SELECT
         bucket as time,
-        device_uuid,
+        agent_uuid,
         endpoint_uuid,
         avg_value,
         min_value,
@@ -469,7 +469,7 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
  * POST /api/v1/metrics/refresh
  * 
  * Query params:
- * - view: which view to refresh (catalog, devices, latest, all)
+ * - view: which view to refresh (catalog, agents, latest, all)
  * 
  * Requires admin access
  */
@@ -495,8 +495,8 @@ router.post('/refresh', jwtAuth, async (req, res) => {
       case 'catalog':
         sql = 'SELECT refresh_metric_catalog()';
         break;
-      case 'devices':
-        sql = 'SELECT refresh_endpoint_devices()';
+      case 'agents':
+        sql = 'SELECT refresh_endpoint_agents()';
         break;
       case 'latest':
         sql = 'SELECT refresh_latest_readings()';

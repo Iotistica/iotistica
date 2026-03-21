@@ -266,10 +266,10 @@ export async function processAgentStateReport(
         });
       }
       
-      // Update latest snapshot in devices table (still needed for quick access)
+      // Update latest snapshot in agents table (still needed for quick access)
       if (deviceState.top_processes) {
         await query(
-          `UPDATE devices SET top_processes = $1 WHERE uuid = $2`,
+          `UPDATE agents SET top_processes = $1 WHERE uuid = $2`,
           [JSON.stringify(deviceState.top_processes), uuid]
         );
       }
@@ -277,7 +277,7 @@ export async function processAgentStateReport(
       // Store network interfaces if provided
       if (deviceState.network_interfaces) {
         await query(
-          `UPDATE devices SET network_interfaces = $1 WHERE uuid = $2`,
+          `UPDATE agents SET network_interfaces = $1 WHERE uuid = $2`,
           [JSON.stringify(deviceState.network_interfaces), uuid]
         );
       }

@@ -282,7 +282,7 @@ export function MetricDataCardConfigDialog({
       setDevices(metricsResult.devices || []);
       
       // Fetch registered devices to check status
-      const devicesUrl = buildApiUrl('/api/v1/devices?limit=1000');
+      const devicesUrl = buildApiUrl('/api/v1/agents?limit=1000');
       const devicesResponse = await fetch(devicesUrl, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('accessToken')}`,

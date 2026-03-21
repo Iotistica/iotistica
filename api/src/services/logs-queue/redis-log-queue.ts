@@ -487,12 +487,12 @@ class RedisLogQueue {
 
       const duration = Date.now() - startTime;
       
-      // Count unique devices for logging
+      // Count unique agents for logging
       const uniqueDevices = new Set(allLogs.map(log => log.deviceUuid)).size;
       
       logger.info('Processed log batch from Redis', {
         totalLogs: allLogs.length,
-        devices: uniqueDevices,
+        agents: uniqueDevices,
         compressedEntries: entries.filter(e => e.isCompressed).length,
         legacyEntries: entries.filter(e => !e.isCompressed).length,
         durationMs: duration,
@@ -670,7 +670,7 @@ class RedisLogQueue {
   }
 
   /**
-   * Insert all logs in a single batch INSERT (across all devices)
+   * Insert all logs in a single batch INSERT (across all agents)
    * Uses PostgreSQL COPY protocol for maximum throughput (20-50× faster than INSERT)
    * Falls back to batch INSERT if COPY fails
    */
@@ -731,7 +731,7 @@ class RedisLogQueue {
 
     try {
       // Convert logs to CSV format (tab-delimited TEXT)
-      // Format: device_uuid\tservice_name\ttimestamp\tmessage\tlevel\tis_system\tis_stderr\tmeta
+      // Format: agent_uuid\tservice_name\ttimestamp\tmessage\tlevel\tis_system\tis_stderr\tmeta
       const csvData = logs.map(log => {
         const message = (log.message || '[empty log message]').replace(/\t/g, ' ').replace(/\n/g, '\\n');
         const serviceName = (log.serviceName || '\\N').replace(/\t/g, ' '); // \N = NULL in COPY
@@ -755,7 +755,7 @@ class RedisLogQueue {
 
       // Execute COPY command
       const copyStream = client.query(
-        copyFrom(`COPY device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta) FROM STDIN WITH (FORMAT text, DELIMITER E'\\t', NULL '\\N')`)
+        copyFrom(`COPY agent_logs (agent_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta) FROM STDIN WITH (FORMAT text, DELIMITER E'\\t', NULL '\\N')`)
       );
 
       // Pipe data to PostgreSQL
@@ -825,7 +825,7 @@ class RedisLogQueue {
         });
 
         await query(
-          `INSERT INTO device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta)
+          `INSERT INTO agent_logs (agent_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta)
            VALUES ${placeholders.join(', ')}`,
           values
         );

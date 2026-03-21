@@ -8,14 +8,14 @@
  * - Runs continuously in background
  * - Uses XREADGROUP for reliable at-least-once delivery
  * - Reads up to 100 metrics from Redis Streams every 10 seconds
- * - Batch inserts into device_metrics table
+ * - Batch inserts into agent_metrics table
  * - Acknowledges processed messages with XACK
  * - Graceful shutdown on SIGTERM/SIGINT
  * - Crash recovery: unacknowledged messages will be redelivered
  * 
  * Performance:
  * - Before: 1 INSERT per device state update (~6 INSERTs/minute/device)
- * - After: 1 batch INSERT per 10 seconds (~6 INSERTs/minute total, all devices)
+ * - After: 1 batch INSERT per 10 seconds (~6 INSERTs/minute total, all agents)
  * - Reduction: ~90% fewer database transactions
  */
 
@@ -105,7 +105,7 @@ export class MetricsBatchWorker {
       // Consumer groups track position automatically - no lastId needed
       const entries = await redisClient.readMetrics(
         tenantId,
-        '*', // All devices
+        '*', // All agents
         this.batchSize, // Max count
         0 // Don't block (return immediately)
       );

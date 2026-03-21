@@ -2,7 +2,7 @@
  * Virtual Device Types
  * 
  * Type definitions for virtual device management system.
- * Virtual devices are protocol simulators (Modbus, OPC UA) that run as
+ * Virtual agents are protocol simulators (Modbus, OPC UA) that run as
  * sidecar containers alongside agents, accessed via localhost.
  * 
  * Architecture:
@@ -105,7 +105,7 @@ export interface VirtualDeviceSensor {
   uuid: string;
   
   /** Parent agent UUID */
-  device_uuid: string;
+  agent_uuid: string;
   
   /** Display name */
   name: string;

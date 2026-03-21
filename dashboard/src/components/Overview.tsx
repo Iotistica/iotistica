@@ -320,7 +320,7 @@ export function SystemMetrics({
     try {
       const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
       const response = await fetch(
-        buildApiUrl(`/api/v1/devices/${device.deviceUuid}`),
+        buildApiUrl(`/api/v1/agents/${device.deviceUuid}`),
         {
           headers: token
             ? {
@@ -372,7 +372,7 @@ export function SystemMetrics({
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(
-        buildApiUrl(`/api/v1/devices/${device.deviceUuid}/processes`),
+        buildApiUrl(`/api/v1/agents/${device.deviceUuid}/processes`),
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -422,7 +422,7 @@ export function SystemMetrics({
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(
-        buildApiUrl(`/api/v1/devices/${device.deviceUuid}/metrics?period=${period}`),
+        buildApiUrl(`/api/v1/agents/${device.deviceUuid}/metrics?period=${period}`),
         {
           headers: {
             'Authorization': `Bearer ${token}`,

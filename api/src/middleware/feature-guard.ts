@@ -36,15 +36,15 @@ export async function checkDeviceLimit(req: Request, res: Response, next: NextFu
   const license = LicenseValidator.getInstance();
   const maxDevices = license.getLicense().features.maxDevices;
   
-  // Count current devices
+  // Count current agents
   const { DeviceModel } = await import('../db/models');
-  const devices = await DeviceModel.list({ isActive: true });
+  const agents = await DeviceModel.list({ isActive: true });
   
-  if (devices.length >= maxDevices) {
+  if (agents.length >= maxDevices) {
     return res.status(403).json({
       error: 'Device limit reached',
-      message: `Maximum devices (${maxDevices}) reached. Upgrade your plan to add more devices.`,
-      currentDevices: devices.length,
+      message: `Maximum agents (${maxDevices}) reached. Upgrade your plan to add more agents.`,
+      currentDevices: agents.length,
       maxDevices,
       upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistica.com/upgrade',
     });

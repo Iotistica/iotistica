@@ -19,7 +19,7 @@ export interface VirtualAgentConfig {
   deviceUuid: string;
   deviceName: string;
   provisioningKey: string; // Server-generated, injected to pod
-  fleetUuid?: string | null; // Optional, null for unassigned devices
+  fleetUuid?: string | null; // Optional, null for unassigned agents
   namespace?: string; // defaults to 'virtual-agents'
   resourceLimits?: {
     cpu?: string; // default: '1000m'
@@ -229,7 +229,7 @@ export class VirtualAgentDeployer {
     if (config.fleetUuid) {
       const { query } = await import('../db/connection');
       const result = await query(
-        'SELECT agent_count, devices_per_agent, k8s_namespace FROM fleets WHERE fleet_uuid = $1',
+        'SELECT agent_count, agents_per_agent, k8s_namespace FROM fleets WHERE fleet_uuid = $1',
         [config.fleetUuid]
       );
       if (result.rows.length > 0) {
@@ -237,7 +237,7 @@ export class VirtualAgentDeployer {
         logger.info('Fleet configuration loaded', {
           fleetUuid: config.fleetUuid,
           agentCount: fleetConfig.agent_count,
-          devicesPerAgent: fleetConfig.devices_per_agent
+          agentsPerAgent: fleetConfig.agents_per_agent
         });
       }
     }
@@ -614,7 +614,7 @@ export class VirtualAgentDeployer {
                   }
                 },
                 env: [
-                  { name: 'DEVICE_UUID', value: config.deviceUuid },
+                  { name: 'AGENT_UUID', value: config.deviceUuid },
                   { name: 'FLEET_UUID', value: config.fleetUuid || 'unassigned' },
                   { name: 'REQUIRE_PROVISIONING', value: 'true' },
                   { name: 'IS_VIRTUAL_AGENT', value: 'true' },
@@ -1288,7 +1288,7 @@ export class VirtualAgentDeployer {
    *   - Agent container: 250m CPU, 256Mi memory (request), 500m CPU, 512Mi memory (limit)
    *   - Per simulator/endpoint (1 per device): 100m CPU, 128Mi memory (request), 300m CPU, 512Mi memory (limit)
    * 
-   * Resource calculation uses devices_per_agent to estimate simulator count
+   * Resource calculation uses agents_per_agent to estimate simulator count
    * (assumes 1 simulator per device = 1 protocol endpoint per device)
    */
   async createFleetNamespace(params: {
@@ -1296,7 +1296,7 @@ export class VirtualAgentDeployer {
     fleet_name: string;
     customer_id: string;
     agent_count: number;
-    devices_per_agent: number;
+    agents_per_agent: number;
   }): Promise<string> {
     // Check if K8s is available
     if (!this.k8sAvailable || !this.coreApi) {
@@ -1305,9 +1305,9 @@ export class VirtualAgentDeployer {
 
     const namespace = `fleet-${params.fleet_uuid.substring(0, 8)}`; // Use first 8 chars of UUID for namespace
     
-    // Use devices_per_agent to estimate number of simulators per agent
+    // Use agents_per_agent to estimate number of simulators per agent
     // (each device typically has 1 protocol endpoint: OPC UA, Modbus, BACnet, etc)
-    const simulatorsPerAgent = params.devices_per_agent;
+    const simulatorsPerAgent = params.agents_per_agent;
     
     try {
       // Create namespace
@@ -1323,8 +1323,8 @@ export class VirtualAgentDeployer {
           },
           annotations: {
             'iotistica.com/agent-count': params.agent_count.toString(),
-            'iotistica.com/devices-per-agent': params.devices_per_agent.toString(),
-            'iotistica.com/total-devices': (params.agent_count * params.devices_per_agent).toString()
+            'iotistica.com/agents-per-agent': params.agents_per_agent.toString(),
+            'iotistica.com/total-agents': (params.agent_count * params.agents_per_agent).toString()
           }
         }
       };
@@ -1348,7 +1348,7 @@ export class VirtualAgentDeployer {
       const simulatorCpuLimit = 0.15;      // 150m per simulator (reduced to fit 800m pod limit)
       const simulatorMemoryLimit = 512;    // 512Mi per simulator
       
-      // Total per agent = agent + (simulator * devices_per_agent)
+      // Total per agent = agent + (simulator * agents_per_agent)
       const cpuRequestPerAgent = agentCpuRequest + (simulatorCpuRequest * simulatorsPerAgent);
       const memoryRequestPerAgent = agentMemoryRequest + (simulatorMemoryRequest * simulatorsPerAgent);
       const cpuLimitPerAgent = agentCpuLimit + (simulatorCpuLimit * simulatorsPerAgent);
@@ -1381,13 +1381,13 @@ export class VirtualAgentDeployer {
       
       await this.coreApi.createNamespacedResourceQuota({ namespace, body: quota });
       
-      logger.info('Fleet ResourceQuota created based on devices_per_agent estimate', {
+      logger.info('Fleet ResourceQuota created based on agents_per_agent estimate', {
         namespace,
         fleet_uuid: params.fleet_uuid,
         fleetConfig: {
           agentCount: params.agent_count,
-          devicesPerAgent: params.devices_per_agent,
-          totalDevices: params.agent_count * params.devices_per_agent,
+          agentsPerAgent: params.agents_per_agent,
+          totalDevices: params.agent_count * params.agents_per_agent,
           estimatedSimulatorsPerAgent: simulatorsPerAgent
         },
         perAgentResources: {

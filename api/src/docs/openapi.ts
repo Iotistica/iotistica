@@ -21,7 +21,7 @@ IoT device management, provisioning, and monitoring platform.
 ## Features
 
 - 🔐 **Authentication & Authorization** - JWT-based authentication with OAuth2 support
-- 📱 **Device Management** - Provision, monitor, and manage IoT devices
+- 📱 **Device Management** - Provision, monitor, and manage IoT agents
 - 🎯 **Digital Twin** - Real-time device state synchronization
 - 📊 **MQTT Monitoring** - Real-time MQTT message tracking and analytics
 - 🔄 **OTA Updates** - Over-the-air firmware and application updates
@@ -272,7 +272,7 @@ Get a token via POST /api/v1/auth/login or /api/v1/auth/register.
             type: 'string',
             description: 'Job identifier'
           },
-          device_uuid: {
+          agent_uuid: {
             type: 'string',
             format: 'uuid',
             description: 'Target device UUID'
@@ -303,7 +303,7 @@ Get a token via POST /api/v1/auth/login or /api/v1/auth/register.
             type: 'string',
             description: 'JWT license token'
           },
-          device_uuid: {
+          agent_uuid: {
             type: 'string',
             format: 'uuid'
           },

@@ -517,7 +517,7 @@ async function logAuditEvent(
 ): Promise<void> {
   try {
     await query(
-      `INSERT INTO audit_logs (event_type, device_uuid, user_id, ip_address, details, severity)
+      `INSERT INTO audit_logs (event_type, agent_uuid, user_id, ip_address, details, severity)
        VALUES ($1, NULL, $2, $3, $4, $5)`,
       [eventType, userId, ipAddress || null, JSON.stringify(details), 'info']
     );

@@ -178,9 +178,9 @@ export class IFCParserService {
         }
       }
 
-      // Extract edge devices (IFCDISTRIBUTIONCONTROLELEMENT)
+      // Extract edge agents (IFCDISTRIBUTIONCONTROLELEMENT)
       const edgeDevices = this.ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCDISTRIBUTIONCONTROLELEMENT);
-      logger.info(`Found ${edgeDevices.size()} edge devices`);
+      logger.info(`Found ${edgeDevices.size()} edge agents`);
       for (let i = 0; i < edgeDevices.size(); i++) {
         const deviceId = edgeDevices.get(i);
         const device = this.getElementDetails(modelID, deviceId, 'IfcDistributionControlElement');
@@ -228,7 +228,7 @@ export class IFCParserService {
       // Close model
       this.ifcApi.CloseModel(modelID);
 
-      logger.info(`Parsed IFC: ${hierarchy.floors.length} floors, ${hierarchy.spaces.length} spaces, ${hierarchy.edgeDevices.length} devices, ${hierarchy.sensors.length} sensors, ${hierarchy.equipment.length} equipment`);
+      logger.info(`Parsed IFC: ${hierarchy.floors.length} floors, ${hierarchy.spaces.length} spaces, ${hierarchy.edgeDevices.length} agents, ${hierarchy.sensors.length} sensors, ${hierarchy.equipment.length} equipment`);
       return hierarchy;
     } catch (error) {
       logger.error('Failed to parse IFC file:', error);
@@ -396,7 +396,7 @@ export class IFCParserService {
       const relAssigns = this.ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCRELASSIGNSTOACTOR);
       logger.info(`\n=== SENSOR ${sensorId} RELATIONSHIP SEARCH ===`);
       logger.info(`Found ${relAssigns.size()} IFCRELASSIGNSTOACTOR relationships`);
-      logger.info(`Available edge devices: ${edgeDevices.map(d => `${d.name} (${d.expressId})`).join(', ')}`);
+      logger.info(`Available edge agents: ${edgeDevices.map(d => `${d.name} (${d.expressId})`).join(', ')}`);
       
       for (let i = 0; i < relAssigns.size(); i++) {
         const relId = relAssigns.get(i);
@@ -469,7 +469,7 @@ export class IFCParserService {
                   logger.info(`      ✓ Found parent device: ${parentDevice.name}`);
                   return parentDevice;
                 } else {
-                  logger.warn(`      ✗ Actor ${actorId} not found in edge devices list:`, edgeDevices.map(d => d.expressId));
+                  logger.warn(`      ✗ Actor ${actorId} not found in edge agents list:`, edgeDevices.map(d => d.expressId));
                 }
               }
             }

@@ -161,11 +161,11 @@ export const paths = {
   // ============================================================================
   // Devices
   // ============================================================================
-  '/devices': {
+  '/agents': {
     get: {
       tags: ['Devices'],
-      summary: 'List all devices',
-      description: 'Get list of all registered devices with optional filtering',
+      summary: 'List all agents',
+      description: 'Get list of all registered agents with optional filtering',
       security: [{ bearerAuth: [] }],
       parameters: [
         {
@@ -189,14 +189,14 @@ export const paths = {
       ],
       responses: {
         200: {
-          description: 'List of devices',
+          description: 'List of agents',
           content: {
             'application/json': {
               schema: {
                 type: 'object',
                 properties: {
                   count: { type: 'number' },
-                  devices: {
+                  agents: {
                     type: 'array',
                     items: { $ref: '#/components/schemas/Device' }
                   }
@@ -211,7 +211,7 @@ export const paths = {
     }
   },
 
-  '/devices/{uuid}': {
+  '/agents/{uuid}': {
     get: {
       tags: ['Devices'],
       summary: 'Get device details',
@@ -319,7 +319,7 @@ export const paths = {
   // ============================================================================
   // Digital Twin
   // ============================================================================
-  '/devices/{uuid}/state/target': {
+  '/agents/{uuid}/state/target': {
     get: {
       tags: ['Digital Twin'],
       summary: 'Get device target state',
@@ -387,7 +387,7 @@ export const paths = {
     }
   },
 
-  '/devices/{uuid}/state/current': {
+  '/agents/{uuid}/state/current': {
     get: {
       tags: ['Digital Twin'],
       summary: 'Get device current state',
@@ -514,7 +514,7 @@ export const paths = {
   // ============================================================================
   // Jobs
   // ============================================================================
-  '/devices/{uuid}/jobs': {
+  '/agents/{uuid}/jobs': {
     post: {
       tags: ['Jobs'],
       summary: 'Create device job',

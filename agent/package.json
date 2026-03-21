@@ -42,6 +42,7 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
+    "@iotistic/types": "file:../packages/types",
     "@node-red/nodes": "^4.1.7",
     "@node-red/runtime": "^4.1.7",
     "@types/mqtt": "^0.0.34",

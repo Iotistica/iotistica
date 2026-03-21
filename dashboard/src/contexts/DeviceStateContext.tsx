@@ -54,6 +54,7 @@ interface DeviceConfig {
     enableCloudJobs?: boolean;
     enableMetricsExport?: boolean;
     enableAnomalyDetection?: boolean;
+    enableDeviceRemoteAccess?: boolean;
   };
   settings?: {
     metricsIntervalMs?: number;
@@ -171,7 +172,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}`), {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
@@ -545,7 +546,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
     
     try {
       // Save to API (device_target_state table) - sets needs_deployment = true
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/target-state`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/target-state`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -608,7 +609,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         configEndpoints: config?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled }))
       });
       
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/target-state`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/target-state`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apps, config })
@@ -656,7 +657,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
     }));
     
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/deploy`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/deploy`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deployedBy })
@@ -690,7 +691,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   // Cancel deployment - discard pending deployment
   const cancelDeployment = useCallback(async (deviceUuid: string) => {
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/deploy/cancel`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/deploy/cancel`), {
         method: 'POST'
       });
       

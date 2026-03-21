@@ -26,7 +26,7 @@ export interface Entity {
   name: string;
   description?: string;
   metadata: Record<string, any>;
-  device_uuid?: string;
+  agent_uuid?: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -73,7 +73,7 @@ export interface GraphNode {
   label: string;
   type: string;
   properties?: Record<string, any>;
-  device_uuid?: string;
+  agent_uuid?: string;
   status?: string;
 }
 
@@ -115,7 +115,7 @@ export interface CreateEntityRequest {
   name: string;
   description?: string;
   metadata?: Record<string, any>;
-  device_uuid?: string;
+  agent_uuid?: string;
 }
 
 export interface UpdateEntityRequest {
@@ -152,7 +152,7 @@ export interface EntityTreeResponse {
 export interface EntityFilter {
   entity_type?: string;
   name?: string;
-  device_uuid?: string;
+  agent_uuid?: string;
   metadata?: Record<string, any>;
   limit?: number;
   offset?: number;
@@ -172,8 +172,8 @@ export interface RelationshipFilter {
 export interface EntityAggregateMetrics {
   entity: Entity;
   device_count: number;
-  online_devices: number;
-  offline_devices: number;
+  online_agents: number;
+  offline_agents: number;
   avg_metrics?: {
     temperature?: number;
     humidity?: number;
@@ -213,7 +213,7 @@ export interface EntityHierarchyView {
   id: string;
   entity_type: string;
   name: string;
-  device_uuid?: string;
+  agent_uuid?: string;
   parent_id?: string;
   depth: number;
   path: string[];
@@ -222,7 +222,7 @@ export interface EntityHierarchyView {
 export interface DeviceLocationView {
   entity_id: string;
   device_name: string;
-  device_uuid: string;
+  agent_uuid: string;
   shadow_uuid?: string;
   reported_state?: any;
   building_name?: string;

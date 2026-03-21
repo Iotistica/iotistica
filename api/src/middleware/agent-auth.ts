@@ -1,7 +1,7 @@
 /**
  * Device Authentication Middleware
  * 
- * Authenticates devices using their API key stored during provisioning.
+ * Authenticates agents using their API key stored during provisioning.
  * Devices must send their API key in the X-Device-API-Key header.
  * 
  * Usage:
@@ -186,7 +186,7 @@ export async function deviceAuth(
     if (!device) {
       const result = await query(
         `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_uuid
-         FROM devices
+         FROM agents
          WHERE uuid = $1`,
         [deviceUuid]
       );
@@ -237,7 +237,7 @@ export async function deviceAuth(
     // Update last_seen timestamp (optional - can impact performance)
     // Uncomment if you want to track device activity on every request
     // await query(
-    //   'UPDATE devices SET last_seen = CURRENT_TIMESTAMP WHERE uuid = $1',
+    //   'UPDATE agents SET last_seen = CURRENT_TIMESTAMP WHERE uuid = $1',
     //   [deviceUuid]
     // );
 
@@ -340,7 +340,7 @@ export async function deviceAuthFromBody(
     // Rest of logic is same as deviceAuth
     const result = await query(
       `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_uuid
-       FROM devices
+       FROM agents
        WHERE uuid = $1`,
       [deviceUuid]
     );

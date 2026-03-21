@@ -1,0 +1,40 @@
+/**
+ * Bootstrap orchestrator.
+ *
+ * Runs all startup initializations in dependency order:
+ *   database → config → license → workers → redis → mqtt (non-blocking)
+ *
+ * Fatal failures (database, config, license) call process.exit(1).
+ * Non-fatal failures (workers, redis degradation) are logged and skipped.
+ * MQTT is fire-and-forget - never blocks startup.
+ */
+
+import logger from '../utils/logger';
+import { bootstrapDatabase } from './database';
+import { bootstrapConfig } from './config';
+import { bootstrapLicense } from './license';
+import { bootstrapWorkers } from './workers';
+import { bootstrapRedis } from './redis';
+import { bootstrapMqtt } from './mqtt';
+
+export async function bootstrap(): Promise<void> {
+  logger.info('Initializing Iotistica Unified API...');
+
+  await fatal('Database', bootstrapDatabase);
+  await fatal('System configuration', bootstrapConfig);
+  await fatal('License validator', bootstrapLicense);
+
+  await bootstrapWorkers(); // non-critical, handles own warnings
+  await bootstrapRedis();   // critical workers call process.exit internally
+
+  bootstrapMqtt();          // fire-and-forget, never blocks
+}
+
+async function fatal(name: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    logger.error(`${name} initialization failed`, { error });
+    process.exit(1);
+  }
+}

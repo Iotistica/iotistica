@@ -8,7 +8,7 @@
 import express, { Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import poolWrapper from '../db/connection';
-import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
+import deviceAuth, { deviceAuthFromBody } from '../middleware/agent-auth';
 import { getJobsHandler } from '../mqtt/jobs-handler';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { EventPublisher } from '../services/event-sourcing';
@@ -247,7 +247,7 @@ router.post('/jobs/execute', jwtAuth, async (req: Request, res: Response) => {
       job_document,
       template_id,
       target_type,
-      target_devices,
+      target_agents,
       target_filter,
       execution_type,
       schedule,
@@ -287,30 +287,30 @@ router.post('/jobs/execute', jwtAuth, async (req: Request, res: Response) => {
       finalJobDocument = templateResult.rows[0].job_document;
     }
 
-    // Get target devices
+    // Get target agents
     let deviceUuids: string[] = [];
     if (target_type === 'device') {
-      deviceUuids = target_devices || [];
+      deviceUuids = target_agents || [];
     } else if (target_type === 'all') {
-      const devicesResult = await pool.query(
-        'SELECT uuid FROM devices WHERE is_active = true'
+      const agentsResult = await pool.query(
+        'SELECT uuid FROM agents WHERE is_active = true'
       );
-      deviceUuids = devicesResult.rows.map((row: any) => row.uuid);
+      deviceUuids = agentsResult.rows.map((row: any) => row.uuid);
     } else if (target_type === 'group' && target_filter) {
       // Apply filter (e.g., { "device_type": "raspberry-pi" })
       const filterKeys = Object.keys(target_filter);
       const filterQuery = filterKeys.map((key, idx) => `${key} = $${idx + 1}`).join(' AND ');
       const filterValues = filterKeys.map(key => target_filter[key]);
 
-      const devicesResult = await pool.query(
-        `SELECT uuid FROM devices WHERE is_active = true AND ${filterQuery}`,
+      const agentsResult = await pool.query(
+        `SELECT uuid FROM agents WHERE is_active = true AND ${filterQuery}`,
         filterValues
       );
-      deviceUuids = devicesResult.rows.map((row: any) => row.uuid);
+      deviceUuids = agentsResult.rows.map((row: any) => row.uuid);
     }
 
     if (deviceUuids.length === 0) {
-      return res.status(400).json({ error: 'No target devices found' });
+      return res.status(400).json({ error: 'No target agents found' });
     }
 
     const jobId = randomUUID();
@@ -318,9 +318,9 @@ router.post('/jobs/execute', jwtAuth, async (req: Request, res: Response) => {
     // Create job execution
     const jobResult = await pool.query(
       `INSERT INTO job_executions (
-        job_id, template_id, job_name, job_document, target_type, target_devices,
+        job_id, template_id, job_name, job_document, target_type, target_agents,
         target_filter, execution_type, schedule, max_executions, timeout_minutes,
-        total_devices, created_by
+        total_agents, created_by
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING *`,
       [
@@ -343,10 +343,10 @@ router.post('/jobs/execute', jwtAuth, async (req: Request, res: Response) => {
     // Create device job status entries
     const deviceStatusValues = deviceUuids.map((uuid) => `('${jobId}', '${uuid}')`).join(', ');
     await pool.query(
-      `INSERT INTO device_job_status (job_id, device_uuid) VALUES ${deviceStatusValues}`
+      `INSERT INTO agent_job_status (job_id, agent_uuid) VALUES ${deviceStatusValues}`
     );
 
-    logger.info(`Created job ${jobId} for ${deviceUuids.length} devices`);
+    logger.info(`Created job ${jobId} for ${deviceUuids.length} agents`);
 
     // 🎉 EVENT SOURCING: Publish job.queued event for each device
     for (const deviceUuid of deviceUuids) {
@@ -386,7 +386,7 @@ router.post('/jobs/execute', jwtAuth, async (req: Request, res: Response) => {
       for (const deviceUuid of deviceUuids) {
         await jobsHandler.publishJobNotification(deviceUuid, jobId, finalJobDocument);
       }
-      logger.info(`Sent MQTT notifications to ${deviceUuids.length} devices`);
+      logger.info(`Sent MQTT notifications to ${deviceUuids.length} agents`);
     } catch (mqttError) {
       logger.error('Failed to send MQTT notifications (HTTP fallback will work):', mqttError);
     }
@@ -466,8 +466,8 @@ router.get('/jobs/executions/:jobId', jwtAuth, async (req: Request, res: Respons
         djs.*,
         d.device_name,
         d.ip_address
-       FROM device_job_status djs
-       LEFT JOIN devices d ON djs.device_uuid = d.uuid
+       FROM agent_job_status djs
+       LEFT JOIN agents d ON djs.agent_uuid = d.uuid
        WHERE djs.job_id = $1
        ORDER BY djs.updated_at DESC`,
       [jobId]
@@ -511,7 +511,7 @@ router.post('/jobs/executions/:jobId/cancel', jwtAuth, async (req: Request, res:
 
     // Update pending device job statuses
     await pool.query(
-      `UPDATE device_job_status
+      `UPDATE agent_job_status
        SET status = 'CANCELED', completed_at = CURRENT_TIMESTAMP
        WHERE job_id = $1 AND status IN ('QUEUED', 'IN_PROGRESS')`,
       [jobId]
@@ -531,10 +531,10 @@ router.post('/jobs/executions/:jobId/cancel', jwtAuth, async (req: Request, res:
 });
 
 /**
- * GET /api/v1/devices/:uuid/jobs
+ * GET /api/v1/agents/:uuid/jobs
  * Get jobs for a specific device
  */
-router.get('/devices/:uuid/jobs', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
+router.get('/agents/:uuid/jobs', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
     const { uuid } = req.params;
     const { status, limit = 20, offset = 0 } = req.query;
@@ -542,8 +542,8 @@ router.get('/devices/:uuid/jobs', jwtAuth, requireRole('admin'), async (req: Req
     // Count total jobs for this device
     let countQuery = `
       SELECT COUNT(*) as total
-      FROM device_job_status djs
-      WHERE djs.device_uuid = $1
+      FROM agent_job_status djs
+      WHERE djs.agent_uuid = $1
     `;
     const countParams: any[] = [uuid];
     
@@ -563,9 +563,9 @@ router.get('/devices/:uuid/jobs', jwtAuth, requireRole('admin'), async (req: Req
         je.job_document,
         je.execution_type,
         je.schedule
-      FROM device_job_status djs
+      FROM agent_job_status djs
       INNER JOIN job_executions je ON djs.job_id = je.job_id
-      WHERE djs.device_uuid = $1
+      WHERE djs.agent_uuid = $1
     `;
 
     const params: any[] = [uuid];
@@ -587,7 +587,7 @@ router.get('/devices/:uuid/jobs', jwtAuth, requireRole('admin'), async (req: Req
     const jobs = result.rows;
 
     return res.status(200).json({
-      device_uuid: uuid,
+      agent_uuid: uuid,
       jobs,
       total: totalCount,
       page: Math.floor(parseInt(offset as string) / parseInt(limit as string)) + 1,
@@ -604,11 +604,11 @@ router.get('/devices/:uuid/jobs', jwtAuth, requireRole('admin'), async (req: Req
 });
 
 /**
- * GET /api/v1/devices/:uuid/jobs/next
+ * GET /api/v1/agents/:uuid/jobs/next
  * Get next pending job for device (MQTT endpoint equivalent)
  * Requires device authentication
  */
-router.get('/devices/:uuid/jobs/next', deviceAuth, async (req: Request, res: Response) => {
+router.get('/agents/:uuid/jobs/next', deviceAuth, async (req: Request, res: Response) => {
   try {
     const { uuid } = req.params;
 
@@ -618,9 +618,9 @@ router.get('/devices/:uuid/jobs/next', deviceAuth, async (req: Request, res: Res
         je.job_name,
         je.job_document,
         je.schedule
-       FROM device_job_status djs
+       FROM agent_job_status djs
        INNER JOIN job_executions je ON djs.job_id = je.job_id
-       WHERE djs.device_uuid = $1 
+       WHERE djs.agent_uuid = $1 
          AND djs.status = 'QUEUED'
          AND (
            je.schedule IS NULL 
@@ -638,7 +638,7 @@ router.get('/devices/:uuid/jobs/next', deviceAuth, async (req: Request, res: Res
 
     // Update status to IN_PROGRESS
     await pool.query(
-      `UPDATE device_job_status
+      `UPDATE agent_job_status
        SET status = 'IN_PROGRESS', started_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
       [result.rows[0].id]
@@ -662,10 +662,10 @@ router.get('/devices/:uuid/jobs/next', deviceAuth, async (req: Request, res: Res
 });
 
 /**
- * PATCH /api/v1/devices/:uuid/jobs/:jobId/status
+ * PATCH /api/v1/agents/:uuid/jobs/:jobId/status
  * Update job status from device
  */
-router.patch('/devices/:uuid/jobs/:jobId/status', deviceAuth, async (req: Request, res: Response) => {
+router.patch('/agents/:uuid/jobs/:jobId/status', deviceAuth, async (req: Request, res: Response) => {
   try {
     const { uuid, jobId } = req.params;
     const {
@@ -684,7 +684,7 @@ router.patch('/devices/:uuid/jobs/:jobId/status', deviceAuth, async (req: Reques
     }
 
     const result = await pool.query(
-      `UPDATE device_job_status
+      `UPDATE agent_job_status
        SET 
         status = $1::VARCHAR,
         exit_code = $2,
@@ -699,7 +699,7 @@ router.patch('/devices/:uuid/jobs/:jobId/status', deviceAuth, async (req: Reques
                            THEN CURRENT_TIMESTAMP 
                            ELSE completed_at 
                       END
-       WHERE job_id = $9 AND device_uuid = $10
+       WHERE job_id = $9 AND agent_uuid = $10
        RETURNING *`,
       [
         status,
@@ -846,7 +846,7 @@ router.delete('/jobs/:jobId', jwtAuth, async (req: Request, res: Response) => {
 
       // Delete device job statuses first (foreign key constraint)
       await client.query(
-        'DELETE FROM device_job_status WHERE job_id = $1',
+        'DELETE FROM agent_job_status WHERE job_id = $1',
         [jobId]
       );
 
@@ -894,7 +894,7 @@ async function updateJobExecutionStats(jobId: string): Promise<void> {
         COUNT(*) FILTER (WHERE status = 'SUCCEEDED') as succeeded,
         COUNT(*) FILTER (WHERE status = 'FAILED') as failed,
         COUNT(*) FILTER (WHERE status = 'IN_PROGRESS') as in_progress
-       FROM device_job_status
+       FROM agent_job_status
        WHERE job_id = $1`,
       [jobId]
     );
@@ -910,9 +910,9 @@ async function updateJobExecutionStats(jobId: string): Promise<void> {
     await pool.query(
       `UPDATE job_executions
        SET 
-        succeeded_devices = $1,
-        failed_devices = $2,
-        in_progress_devices = $3,
+        succeeded_agents = $1,
+        failed_agents = $2,
+        in_progress_agents = $3,
         status = $4::VARCHAR,
         completed_at = CASE WHEN $4::VARCHAR IN ('SUCCEEDED', 'FAILED') THEN CURRENT_TIMESTAMP ELSE completed_at END
        WHERE job_id = $5`,

@@ -356,7 +356,7 @@ router.get('/events/chain/:correlationId', async (req, res) => {
 });
 
 /**
- * Get recent events across all devices
+ * Get recent events across all agents
  * GET /api/v1/events/recent
  * Query params:
  *   - limit: number of events to return (default 100, max 500)

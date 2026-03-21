@@ -3,18 +3,18 @@
  * Manages sensor device configurations (Modbus, CAN, OPC-UA, MQTT, etc.)
  * 
  * Pattern: Dual-write with sync service
- * - Config in device_target_state remains source of truth for agent
+ * - Config in agent_target_state remains source of truth for agent
  * - endpoints table for efficient querying/display
  * 
  * CRUD Endpoints:
- * - GET /api/v1/devices/:uuid/sensors - List all sensors
- * - POST /api/v1/devices/:uuid/sensors - Add new sensor
- * - PUT /api/v1/devices/:uuid/sensors/:name - Update sensor
- * - DELETE /api/v1/devices/:uuid/sensors/:name - Delete sensor
+ * - GET /api/v1/agents/:uuid/sensors - List all sensors
+ * - POST /api/v1/agents/:uuid/sensors - Add new sensor
+ * - PUT /api/v1/agents/:uuid/sensors/:name - Update sensor
+ * - DELETE /api/v1/agents/:uuid/sensors/:name - Delete sensor
  * 
  * Health & History Endpoints:
- * - GET /api/v1/devices/:uuid/device-health - Sensor overview and status
- * - GET /api/v1/devices/:uuid/protocol-adapters/:protocol/:deviceName/history - Protocol adapter history
+ * - GET /api/v1/agents/:uuid/device-health - Sensor overview and status
+ * - GET /api/v1/agents/:uuid/protocol-adapters/:protocol/:deviceName/history - Protocol adapter history
  */
 
 import express from 'express';
@@ -31,11 +31,11 @@ const virtualDeviceManager = new VirtualDeviceManager();
 
 /**
  * List all sensors for a device
- * GET /api/v1/devices/:uuid/sensors
+ * GET /api/v1/agents/:uuid/sensors
  * 
  * Reads from endpoints table (faster, allows filtering/sorting)
  */
-router.get('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
+router.get('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const { protocol } = req.query; // Optional filter by protocol
@@ -46,7 +46,7 @@ router.get('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
     );
 
     res.json({
-      devices: sensors, // Keep "devices" for backward compatibility
+      agents: sensors, // Keep "agents" for backward compatibility
       count: sensors.length
     });
   } catch (error: any) {
@@ -60,13 +60,13 @@ router.get('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
 
 /**
  * Add new sensor
- * POST /api/v1/devices/:uuid/sensors
+ * POST /api/v1/agents/:uuid/sensors
  * 
  * Query Parameters:
  * - validateOnly=true: Only validate config, don't persist (for draft mode)
  * - validateOnly=false (default): Validate and persist using dual-write
  */
-router.post('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
+router.post('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const sensorConfig = req.body;
@@ -183,13 +183,13 @@ router.post('/devices/:uuid/sensors', jwtAuth, async (req, res) => {
 
 /**
  * Update sensor
- * PUT /api/v1/devices/:uuid/sensors/:name
+ * PUT /api/v1/agents/:uuid/sensors/:name
  * 
  * Query Parameters:
  * - validateOnly=true: Only validate updates, don't persist (for draft mode)
  * - validateOnly=false (default): Validate and persist using dual-write
  */
-router.put('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
+router.put('/agents/:uuid/sensors/:name', jwtAuth, async (req, res) => {
   try {
     const { uuid, name } = req.params;
     const updates = req.body;
@@ -265,13 +265,13 @@ router.put('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
 
 /**
  * Delete sensor
- * DELETE /api/v1/devices/:uuid/sensors/:name
+ * DELETE /api/v1/agents/:uuid/sensors/:name
  * 
  * Query Parameters:
  * - hard=true: Hard delete immediately (remove from target state config + endpoints)
  * - hard=false (default): Soft delete (mark pending_deletion, wait for agent reconciliation)
  */
-router.delete('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
+router.delete('/agents/:uuid/sensors/:name', jwtAuth, async (req, res) => {
   try {
     const { uuid, name } = req.params;
     const hardDelete = req.query.hard === 'true';
@@ -313,9 +313,9 @@ router.delete('/devices/:uuid/sensors/:name', jwtAuth, async (req, res) => {
 /**
  * Get device sensor overview
  * Shows Configured Endpoints with protocol breakdown
- * GET /api/v1/devices/:uuid/device-health
+ * GET /api/v1/agents/:uuid/device-health
  */
-router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
+router.get('/agents/:uuid/device-health', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const { protocolType } = req.query;
@@ -353,7 +353,7 @@ router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
       params
     );
 
-    const devices = result.rows.map((row: any) => ({
+    const agents = result.rows.map((row: any) => ({
       name: row.name,
       protocol: row.protocol,
       status: row.health_status || (row.enabled ? 'configured' : 'disabled'),
@@ -373,9 +373,9 @@ router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
     }));
 
     const summary = {
-      total: devices.length,
-      enabled: devices.filter((d: any) => d.enabled).length,
-      disabled: devices.filter((d: any) => !d.enabled).length,
+      total: agents.length,
+      enabled: agents.filter((d: any) => d.enabled).length,
+      disabled: agents.filter((d: any) => !d.enabled).length,
       byProtocol: result.rows.reduce((acc: any, row: any) => {
         acc[row.protocol] = (acc[row.protocol] || 0) + 1;
         return acc;
@@ -385,7 +385,7 @@ router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
     res.json({
       deviceUuid: uuid,
       summary,
-      devices
+      agents
     });
   } catch (error: any) {
     logger.error('Error fetching device sensors:', error);
@@ -398,10 +398,10 @@ router.get('/devices/:uuid/device-health', jwtAuth, async (req, res) => {
 
 /**
  * Get protocol adapter health history for time-series charts
- * GET /api/v1/devices/:uuid/protocol-adapters/:protocol/:deviceName/history
+ * GET /api/v1/agents/:uuid/protocol-adapters/:protocol/:deviceName/history
  * Query params: ?hours=24 (default)
  */
-router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwtAuth, async (req, res) => {
+router.get('/agents/:uuid/protocol-adapters/:protocol/:deviceName/history', jwtAuth, async (req, res) => {
   try {
     const { uuid, protocol, deviceName } = req.params;
     const hours = parseInt(req.query.hours as string) || 24;
@@ -416,7 +416,7 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
         last_error,
         timestamp
       FROM protocol_adapter_health_history
-      WHERE device_uuid = $1 
+      WHERE agent_uuid = $1 
         AND protocol_type = $2
         AND device_name = $3
         AND timestamp > NOW() - INTERVAL '1 hour' * $4
@@ -426,7 +426,7 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
     );
 
     res.json({
-      device_uuid: uuid,
+      agent_uuid: uuid,
       protocol_type: protocol,
       device_name: deviceName,
       hours,
@@ -448,9 +448,9 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
 
 /**
  * Get sensor-publish configuration
- * GET /api/v1/devices/:uuid/sensor-config
+ * GET /api/v1/agents/:uuid/sensor-config
  */
-// router.get('/devices/:uuid/sensor-config', async (req, res) => {
+// router.get('/agents/:uuid/sensor-config', async (req, res) => {
 //   try {
 //     const { uuid } = req.params;
     
@@ -482,9 +482,9 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
 
 /**
  * Add sensor to sensor-publish configuration
- * POST /api/v1/devices/:uuid/sensor-config
+ * POST /api/v1/agents/:uuid/sensor-config
  */
-// router.post('/devices/:uuid/sensor-config', async (req, res) => {
+// router.post('/agents/:uuid/sensor-config', async (req, res) => {
 //   try {
 //     const { uuid } = req.params;
 //     const sensorConfig = req.body;
@@ -577,7 +577,7 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
 //         metadata: {
 //           ip_address: req.ip,
 //           user_agent: req.headers['user-agent'],
-//           endpoint: '/devices/:uuid/sensor-config'
+//           endpoint: '/agents/:uuid/sensor-config'
 //         }
 //       }
 //     );
@@ -599,9 +599,9 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
 
 /**
  * Update sensor configuration
- * PUT /api/v1/devices/:uuid/sensor-config/:sensorName
+ * PUT /api/v1/agents/:uuid/sensor-config/:sensorName
  */
-// router.put('/devices/:uuid/sensor-config/:sensorName', async (req, res) => {
+// router.put('/agents/:uuid/sensor-config/:sensorName', async (req, res) => {
 //   try {
 //     const { uuid, sensorName } = req.params;
 //     const updatedConfig = req.body;
@@ -663,7 +663,7 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
 //         metadata: {
 //           ip_address: req.ip,
 //           user_agent: req.headers['user-agent'],
-//           endpoint: '/devices/:uuid/sensor-config/:sensorName'
+//           endpoint: '/agents/:uuid/sensor-config/:sensorName'
 //         }
 //       }
 //     );
@@ -685,9 +685,9 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
 
 // /**
 //  * Delete sensor configuration
-//  * DELETE /api/v1/devices/:uuid/sensor-config/:sensorName
+//  * DELETE /api/v1/agents/:uuid/sensor-config/:sensorName
 //  */
-// router.delete('/devices/:uuid/sensor-config/:sensorName', async (req, res) => {
+// router.delete('/agents/:uuid/sensor-config/:sensorName', async (req, res) => {
 //   try {
 //     const { uuid, sensorName } = req.params;
 
@@ -748,7 +748,7 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
 //         metadata: {
 //           ip_address: req.ip,
 //           user_agent: req.headers['user-agent'],
-//           endpoint: '/devices/:uuid/sensor-config/:sensorName'
+//           endpoint: '/agents/:uuid/sensor-config/:sensorName'
 //         }
 //       }
 //     );
@@ -776,7 +776,7 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
 
 /**
  * Create virtual device (protocol simulator sidecar)
- * POST /api/v1/devices/:uuid/virtual-devices
+ * POST /api/v1/agents/:uuid/virtual-agents
  * 
  * Body: {
  *   name: "Virtual PLC 1",
@@ -793,7 +793,7 @@ router.get('/devices/:uuid/protocol-adapters/:protocol/:deviceName/history', jwt
  * 4. If parent is physical agent, agent will reconcile sidecar on next state sync
  * 5. Agent connects to virtual device at localhost:port like a normal physical device
  */
-router.post('/devices/:uuid/virtual-devices', jwtAuth, async (req, res) => {
+router.post('/agents/:uuid/virtual-agents', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const { name, protocol, profile, image, slaveCount } = req.body;
@@ -861,12 +861,12 @@ router.post('/devices/:uuid/virtual-devices', jwtAuth, async (req, res) => {
 });
 
 /**
- * List virtual devices for a device
- * GET /api/v1/devices/:uuid/virtual-devices
+ * List virtual agents for a device
+ * GET /api/v1/agents/:uuid/virtual-agents
  * 
  * Returns all virtual device sidecars configured for the agent
  */
-router.get('/devices/:uuid/virtual-devices', jwtAuth, async (req, res) => {
+router.get('/agents/:uuid/virtual-agents', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
@@ -885,9 +885,9 @@ router.get('/devices/:uuid/virtual-devices', jwtAuth, async (req, res) => {
       count: virtualDevices.length
     });
   } catch (error: any) {
-    logger.error('Error listing virtual devices:', error);
+    logger.error('Error listing virtual agents:', error);
     res.status(500).json({
-      error: 'Failed to list virtual devices',
+      error: 'Failed to list virtual agents',
       message: error.message
     });
   }
@@ -895,14 +895,14 @@ router.get('/devices/:uuid/virtual-devices', jwtAuth, async (req, res) => {
 
 /**
  * Delete virtual device
- * DELETE /api/v1/devices/:uuid/virtual-devices/:virtualDeviceUuid
+ * DELETE /api/v1/agents/:uuid/virtual-agents/:virtualDeviceUuid
  * 
  * Flow:
  * 1. Deletes record from endpoints table
  * 2. If parent is K8s virtual agent, patches Deployment to remove sidecar
  * 3. If parent is physical agent, agent will remove sidecar on next state sync
  */
-router.delete('/devices/:uuid/virtual-devices/:virtualDeviceUuid',jwtAuth, async (req, res) => {
+router.delete('/agents/:uuid/virtual-agents/:virtualDeviceUuid',jwtAuth, async (req, res) => {
   try {
     const { uuid, virtualDeviceUuid } = req.params;
 

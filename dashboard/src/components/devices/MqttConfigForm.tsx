@@ -78,7 +78,7 @@ export const MqttConfigForm: React.FC<MqttConfigFormProps> = ({
           <p className="font-mono text-sm bg-muted px-3 py-2 rounded-md break-all">{readOnlyTopic}</p>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Generated automatically as <span className="font-mono">iot/&lt;tenantId&gt;/device/&lt;deviceUuid&gt;/mqtt/&lt;endpointUuid&gt;</span> when the device is added.
+            Generated automatically as <span className="font-mono">iot/&lt;tenantId&gt;/agent/&lt;deviceUuid&gt;/mqtt/&lt;endpointUuid&gt;</span> when the device is added.
           </p>
         )}
       </div>

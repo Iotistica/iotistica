@@ -4,19 +4,19 @@
  * 
  * Separated from cloud.ts for better organization
  * 
- * Device-Side Endpoints (used by devices themselves):
+ * Device-Side Endpoints (used by agents themselves):
  * - GET  /api/v1/device/:uuid/state - Device polls for target state (ETag cached)
  * - POST /api/v1/device/:uuid/logs - Device uploads logs
  * - PATCH /api/v1/device/state - Device reports current state + metrics
  * 
  * Management API Endpoints (used by dashboard/admin):
- * - GET /api/v1/devices/:uuid/target-state - Get device target state
- * - POST /api/v1/devices/:uuid/target-state - Set device target state
- * - PUT /api/v1/devices/:uuid/target-state - Update device target state
- * - GET /api/v1/devices/:uuid/current-state - Get device current state
- * - DELETE /api/v1/devices/:uuid/target-state - Clear device target state
- * - GET /api/v1/devices/:uuid/logs - Get device logs
- * - GET /api/v1/devices/:uuid/metrics - Get device metrics
+ * - GET /api/v1/agents/:uuid/target-state - Get device target state
+ * - POST /api/v1/agents/:uuid/target-state - Set device target state
+ * - PUT /api/v1/agents/:uuid/target-state - Update device target state
+ * - GET /api/v1/agents/:uuid/current-state - Get device current state
+ * - DELETE /api/v1/agents/:uuid/target-state - Clear device target state
+ * - GET /api/v1/agents/:uuid/logs - Get device logs
+ * - GET /api/v1/agents/:uuid/metrics - Get device metrics
  */
 
 import express from 'express';
@@ -30,10 +30,8 @@ import {
 } from '../db/models';
 import { validateTargetStateConfigMiddleware } from '../validators/target-state-config.validator';
 import { EventPublisher, objectsAreEqual } from '../services/event-sourcing';
-import EventSourcingConfig from '../events/event-sourcing';
-import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
+import deviceAuth, { deviceAuthFromBody } from '../middleware/agent-auth';
 import { resolveAppsImages } from '../services/docker-registry';
-import { deviceSensorSync } from '../services/agent-devices';
 import { processAgentStateReport } from '../services/agent-state';
 import logger from '../utils/logger';
 
@@ -265,7 +263,7 @@ function normalizeAnomalyMetricNames(config: any, deviceUuid: string): any {
 }
 
 // ============================================================================
-// Device State Endpoints (Device-Side - Used by devices themselves)
+// Device State Endpoints (Device-Side - Used by agents themselves)
 // ============================================================================
 
 /**
@@ -433,9 +431,9 @@ router.patch('/device/state', deviceAuthFromBody, async (req, res) => {
 
 /**
  * Get device target state
- * GET /api/v1/devices/:uuid/target-state
+ * GET /api/v1/agents/:uuid/target-state
  */
-router.get('/devices/:uuid/target-state', deviceAuth, async (req, res) => {
+router.get('/agents/:uuid/target-state', deviceAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const targetState = await DeviceTargetStateModel.get(uuid);
@@ -468,13 +466,13 @@ router.get('/devices/:uuid/target-state', deviceAuth, async (req, res) => {
 
 /**
  * Set device target state
- * POST /api/v1/devices/:uuid/target-state
+ * POST /api/v1/agents/:uuid/target-state
  * 
  * Accepts apps as either:
  * - Array: [{ appId: 1, appName: "app1", ... }, ...]
  * - Object: { 1: { appId: 1, appName: "app1", ... }, ... }
  */
-router.post('/devices/:uuid/target-state', deviceAuth, validateTargetStateConfigMiddleware, async (req, res) => {
+router.post('/agents/:uuid/target-state', deviceAuth, validateTargetStateConfigMiddleware, async (req, res) => {
   try {
     const { uuid } = req.params;
     let { apps, config } = req.body;
@@ -539,7 +537,7 @@ router.post('/devices/:uuid/target-state', deviceAuth, validateTargetStateConfig
         metadata: {
           ip_address: req.ip,
           user_agent: req.headers['user-agent'],
-          endpoint: '/devices/:uuid/target-state'
+          endpoint: '/agents/:uuid/target-state'
         }
       }
     );
@@ -583,13 +581,13 @@ function normalizeAppsFormat(apps: any): Record<number, any> {
 
 /**
  * Update device target state (alias for POST - supports PUT)
- * PUT /api/v1/devices/:uuid/target-state
+ * PUT /api/v1/agents/:uuid/target-state
  * 
  * Accepts apps as either:
  * - Array: [{ appId: 1, appName: "app1", ... }, ...]
  * - Object: { 1: { appId: 1, appName: "app1", ... }, ... }
  */
-router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, async (req, res) => {
+router.put('/agents/:uuid/target-state', validateTargetStateConfigMiddleware, async (req, res) => {
   try {
     const { uuid } = req.params;
     let { apps, config } = req.body;
@@ -653,7 +651,7 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
         metadata: {
           ip_address: req.ip,
           user_agent: req.headers['user-agent'],
-          endpoint: '/devices/:uuid/target-state'
+          endpoint: '/agents/:uuid/target-state'
         }
       }
     );
@@ -681,9 +679,9 @@ router.put('/devices/:uuid/target-state', validateTargetStateConfigMiddleware, a
 
 /**
  * Get device current state
- * GET /api/v1/devices/:uuid/current-state
+ * GET /api/v1/agents/:uuid/current-state
  */
-router.get('/devices/:uuid/current-state', async (req, res) => {
+router.get('/agents/:uuid/current-state', async (req, res) => {
   try {
     const { uuid } = req.params;
     const currentState = await DeviceCurrentStateModel.get(uuid);
@@ -716,9 +714,9 @@ router.get('/devices/:uuid/current-state', async (req, res) => {
 
 /**
  * Clear device target state
- * DELETE /api/v1/devices/:uuid/target-state
+ * DELETE /api/v1/agents/:uuid/target-state
  */
-router.delete('/devices/:uuid/target-state', deviceAuth, async (req, res) => {
+router.delete('/agents/:uuid/target-state', deviceAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 

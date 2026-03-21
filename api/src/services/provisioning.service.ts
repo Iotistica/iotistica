@@ -182,7 +182,7 @@ export class ProvisioningService {
       // 2. Generate provisioning key server-side
       const provisioningKeyResult = await createProvisioningKey(
         virtualFleetUuid,
-        1, // max_devices: 1 (one-time use for this specific virtual agent)
+        1, // max_agents: 1 (one-time use for this specific virtual agent)
         1, // expires_in_days: 1 (short-lived for security)
         `Auto-generated for virtual agent: ${deviceName}`,
         'system' // created_by
@@ -540,7 +540,7 @@ export class ProvisioningService {
       if (fleetCheck.rows.length === 0) {
         // Fleet doesn't exist - this should not happen after migration 153
         logger.error('Provisioning key references non-existent fleet', {
-          device_uuid: uuid.substring(0, 8) + '...',
+          agent_uuid: uuid.substring(0, 8) + '...',
           fleet_uuid: keyRecord.fleet_uuid,
           provisioning_key_id: keyRecord.id
         });
@@ -551,13 +551,13 @@ export class ProvisioningService {
         logger.debug('Fleet validated for provisioning', {
           fleet_uuid: fleetUuid,
           fleet_name: fleetCheck.rows[0].fleet_name,
-          device_uuid: uuid.substring(0, 8) + '...'
+          agent_uuid: uuid.substring(0, 8) + '...'
         });
       }
     } catch (fleetError) {
       // Fleet validation failed - this is a critical error
       logger.error('Fleet validation failed during provisioning', {
-        device_uuid: uuid.substring(0, 8) + '...',
+        agent_uuid: uuid.substring(0, 8) + '...',
         error: fleetError instanceof Error ? fleetError.message : String(fleetError)
       });
       throw fleetError;
@@ -612,7 +612,7 @@ export class ProvisioningService {
 
     await this.createDefaultTargetState(uuid, agentVersion, keyRecord.id);
 
-    // Increment provisioning key usage for new physical devices
+    // Increment provisioning key usage for new physical agents
     if (!existingDevice || !existingDevice.provisioned_by_key_id) {
       await incrementProvisioningKeyUsage(keyRecord.id);
     }
@@ -896,7 +896,7 @@ export class ProvisioningService {
     let brokerUrl;
     
     if (brokerConfig && !isVirtual) {
-      // Use database broker config for physical/standalone devices
+      // Use database broker config for physical/standalone agents
       finalBrokerConfig = formatBrokerConfigForClient(brokerConfig, mqttCredentials);
       brokerUrl = buildBrokerUrl(brokerConfig);
       logger.info('Standalone agent: Configured with public MQTT broker', {

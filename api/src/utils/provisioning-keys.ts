@@ -15,8 +15,8 @@ export interface ProvisioningKey {
   key_hash: string;
   fleet_uuid: string; // UUID reference to fleets table
   description?: string;
-  max_devices: number;
-  devices_provisioned: number;
+  max_agents: number;
+  agents_provisioned: number;
   expires_at: Date;
   is_active: boolean;
   created_at: Date;
@@ -77,7 +77,7 @@ export async function validateProvisioningKey(
     }
 
     // Check device limit
-    if (record.devices_provisioned >= record.max_devices) {
+    if (record.agents_provisioned >= record.max_agents) {
       await logAuditEvent({
         eventType: AuditEventType.PROVISIONING_LIMIT_EXCEEDED,
         ipAddress,
@@ -85,8 +85,8 @@ export async function validateProvisioningKey(
         details: {
           keyId: record.id,
           fleetUuid: record.fleet_uuid,
-          limit: record.max_devices,
-          provisioned: record.devices_provisioned
+          limit: record.max_agents,
+          provisioned: record.agents_provisioned
         }
       });
       return { 
@@ -145,12 +145,12 @@ export async function validateProvisioningKey(
 }
 
 /**
- * Increment the devices_provisioned counter for a provisioning key
+ * Increment the agents_provisioned counter for a provisioning key
  */
 export async function incrementProvisioningKeyUsage(keyId: string): Promise<void> {
   await query(
     `UPDATE provisioning_keys 
-     SET devices_provisioned = devices_provisioned + 1 
+     SET agents_provisioned = agents_provisioned + 1 
      WHERE id = $1`,
     [keyId]
   );
@@ -175,7 +175,7 @@ export async function createProvisioningKey(
   expiresAt.setDate(expiresAt.getDate() + expiresInDays);
 
   const result = await query<{ id: string }>(
-    `INSERT INTO provisioning_keys (key_hash, key_hash_fast, fleet_uuid, description, max_devices, expires_at, created_by)
+    `INSERT INTO provisioning_keys (key_hash, key_hash_fast, fleet_uuid, description, max_agents, expires_at, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id`,
     [keyHash, keyHashFast, fleetUuid, description, maxDevices, expiresAt, createdBy]

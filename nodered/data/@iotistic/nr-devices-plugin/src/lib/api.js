@@ -7,6 +7,36 @@ const { getMqttManager, getMqttClient, MqttNode } = require('./comms/mqtt')
 let mqttInitialized = false
 
 function setupRoutes (RED) {
+    // Public agent list — must be registered BEFORE auth.setupRoutes() adds the
+    // catch-all RED.httpAdmin.use('/nr-tools/*', needsPermission) middleware.
+    // The NR process calls the API over the internal Docker network using the storage token.
+    RED.httpAdmin.get('/nr-tools/agents', async (request, response) => {
+        try {
+            const storageToken = process.env.IOTISTIC_STORAGE_TOKEN || ''
+            const data = await ffGet('/api/v1/nr/devices', storageToken)
+            response.send(data)
+        } catch (err) {
+            console.error('[nr-tools][agents] Failed to list agents:', err.message || err)
+            response.send({ devices: [] })
+        }
+    })
+
+    // Public endpoint device list for a specific agent — must be before auth.setupRoutes()
+    RED.httpAdmin.get('/nr-tools/endpoints', async (request, response) => {
+        const agentUuid = (request.query.agentUuid || '').trim()
+        if (!agentUuid) {
+            return response.status(400).send({ error: 'agentUuid query param is required' })
+        }
+        try {
+            const storageToken = process.env.IOTISTIC_STORAGE_TOKEN || ''
+            const data = await ffGet('/api/v1/nr/endpoints?agentUuid=' + encodeURIComponent(agentUuid), storageToken)
+            response.send(data)
+        } catch (err) {
+            console.error('[nr-tools][endpoints] Failed to list endpoints:', err.message || err)
+            response.send({ endpoints: [] })
+        }
+    })
+
     auth.setupRoutes(RED)
     comms.setupRoutes(RED)
 

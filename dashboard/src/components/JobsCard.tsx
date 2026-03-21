@@ -86,7 +86,7 @@ export const JobsCard: React.FC<JobsCardProps> = ({ deviceUuid, deviceStatus }) 
     
     try {
       const offset = (page - 1) * pageSize;
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/jobs?limit=${pageSize}&offset=${offset}`));
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/jobs?limit=${pageSize}&offset=${offset}`));
       
       if (!response.ok) {
         throw new Error('Failed to fetch jobs');

@@ -1,7 +1,7 @@
 /**
  * MQTT Manager for API
  * 
- * Handles incoming MQTT messages from devices:
+ * Handles incoming MQTT messages from agents:
  * - Sensor data (from sensor-publish feature)
  * - Device state updates (from cloud sync)
  * - Container logs (from cloud logging with MQTT backend)
@@ -177,7 +177,7 @@ export interface TopicMessageMap {
   metrics: MetricsData;
   status: { deviceUuid: string; status: any };
   anomaly: any;  // Anomaly events from edge detection
-  jobs: { topic: string; payload: Buffer };  // Job messages from devices
+  jobs: { topic: string; payload: Buffer };  // Job messages from agents
   unknown: UnknownMessage;
 }
 
@@ -709,7 +709,7 @@ export class MqttManager extends EventEmitter {
   /**
    * Subscribe to device topics
    * 
-   * @param deviceUuid - Device UUID or '*' for all devices
+   * @param deviceUuid - Device UUID or '*' for all agents
    * @param topics - Array of topic types: 'sensor', 'state', 'agent', 'logs', 'metrics', 'status'
    */
   async subscribe(deviceUuid: string, topics: string[]): Promise<void> {
@@ -782,7 +782,7 @@ export class MqttManager extends EventEmitter {
   }
 
   /**
-   * Subscribe to all devices
+   * Subscribe to all agents
    */
   async subscribeToAll(topics: string[]): Promise<void> {
     await this.subscribe('*', topics);

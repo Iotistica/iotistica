@@ -1,7 +1,7 @@
 /**
  * Device Sensor Sync Service
  * 
- * Purpose: Keep endpoints table in sync with device_target_state.config
+ * Purpose: Keep endpoints table in sync with agent_target_state.config
  * Pattern: Dual-write - config is source of truth, table for querying
  * 
  * Responsibilities:
@@ -181,8 +181,8 @@ export class DeviceSensorSyncService {
   /**
    * Mark endpoints as pending deployment
    * Called when user clicks Deploy button (POST /deploy)
-   * Transitions 'draft' → 'pending', updates already 'pending' devices
-   * Doesn't touch 'deployed' devices (those match actual agent state)
+   * Transitions 'draft' → 'pending', updates already 'pending' agents
+   * Doesn't touch 'deployed' agents (those match actual agent state)
    */
   async markEndpointsAsPending(
     deviceUuid: string,
@@ -205,7 +205,7 @@ export class DeviceSensorSyncService {
         return;
       }
 
-      // Set to 'pending' for draft devices, update config_version for already-pending
+      // Set to 'pending' for draft agents, update config_version for already-pending
       // Don't touch 'deployed' (those represent actual agent state)
       const result = await query(
         `UPDATE endpoints 
@@ -236,7 +236,7 @@ export class DeviceSensorSyncService {
   }
 
   /**
-   * Sync sensor devices from config to database table
+   * Sync sensor agents from config to database table
    * Called during deployment or reconciliation
    * 
    * Flow:
@@ -284,7 +284,7 @@ export class DeviceSensorSyncService {
             : (existing?.deployment_status || 'deployed');
           
           // CRITICAL: Preserve deployment metadata fields during reconciliation
-          // Virtual devices have metadata like {sidecar: true, profile: "...", image: "..."} 
+          // Virtual agents have metadata like {sidecar: true, profile: "...", image: "..."} 
           // that must not be overwritten by agent reconciliation (agents don't know about these fields)
           let mergedMetadata = enrichedEndpointMetadata;
           
@@ -462,7 +462,7 @@ export class DeviceSensorSyncService {
     try {
       // 1. Get current target state
       const stateResult = await query(
-        'SELECT apps, config, version FROM device_target_state WHERE device_uuid = $1',
+        'SELECT apps, config, version FROM agent_target_state WHERE agent_uuid = $1',
         [deviceUuid]
       );
 
@@ -476,10 +476,10 @@ export class DeviceSensorSyncService {
 
       // 2. Increment version (tells agent to pick up changes)
       const updateResult = await query(
-        `UPDATE device_target_state SET
+        `UPDATE agent_target_state SET
            version = version + 1,
            updated_at = NOW()
-         WHERE device_uuid = $1
+         WHERE agent_uuid = $1
          RETURNING version`,
         [deviceUuid]
       );
@@ -529,7 +529,7 @@ export class DeviceSensorSyncService {
   }
 
   /**
-   * Sync sensor devices from table to config
+   * Sync sensor agents from table to config
    * Called when sensor is added/updated via API
    */
   async syncTableToConfig(deviceUuid: string, userId?: string): Promise<any> {
@@ -577,7 +577,7 @@ export class DeviceSensorSyncService {
 
       // Get current target state
       const stateResult = await query(
-        'SELECT apps, config, version FROM device_target_state WHERE device_uuid = $1',
+        'SELECT apps, config, version FROM agent_target_state WHERE agent_uuid = $1',
         [deviceUuid]
       );
 
@@ -693,12 +693,12 @@ export class DeviceSensorSyncService {
 
       // Save updated target state
       const updateResult = await query(
-        `INSERT INTO device_target_state (device_uuid, apps, config, version, updated_at, needs_deployment)
+        `INSERT INTO agent_target_state (agent_uuid, apps, config, version, updated_at, needs_deployment)
          VALUES ($1, $2, $3, 1, NOW(), true)
-         ON CONFLICT (device_uuid) DO UPDATE SET
+         ON CONFLICT (agent_uuid) DO UPDATE SET
            apps = $2,
            config = $3,
-           version = device_target_state.version + 1,
+           version = agent_target_state.version + 1,
            updated_at = NOW(),
            needs_deployment = true
          RETURNING version`,
@@ -727,7 +727,7 @@ export class DeviceSensorSyncService {
    * Called when agent reports its actual running configuration
    * This closes the Event Sourcing loop: config → agent → current state → table
    * 
-  * CRITICAL: Also handles finalization of devices marked pending_deletion:
+  * CRITICAL: Also handles finalization of agents marked pending_deletion:
   * - If device is pending_deletion and NOT in agent's current state → remove the row from endpoints
    */
   async syncCurrentStateToTable(deviceUuid: string, currentState: any): Promise<void> {
@@ -771,7 +771,7 @@ export class DeviceSensorSyncService {
       // Sync table to match agent's reality (not desired state!)
       await this.syncConfigToTable(deviceUuid, runningEndpoints, currentVersion, 'agent-reconciliation');
 
-      // CRITICAL: Check for devices pending deletion that agent has stopped.
+      // CRITICAL: Check for agents pending deletion that agent has stopped.
       // Finalize delete when pending_deletion endpoint is missing from agent current state.
       const agentEndpointByName = new Map(runningEndpoints.map(e => [e.name, e]));
       
@@ -813,7 +813,7 @@ export class DeviceSensorSyncService {
    * 3. Remove parent from target state config
    * 4. Add all discovered slaves to target state config
    * 
-   * This ensures the target state reflects actual discovered devices, not just discovery targets
+   * This ensures the target state reflects actual discovered agents, not just discovery targets
    */
   private async updateTargetStateWithDiscoveredSlaves(
     deviceUuid: string,
@@ -836,7 +836,7 @@ export class DeviceSensorSyncService {
 
       // Get current target state
       const targetStateResult = await query(
-        'SELECT config, version FROM device_target_state WHERE device_uuid = $1',
+        'SELECT config, version FROM agent_target_state WHERE agent_uuid = $1',
         [deviceUuid]
       );
 
@@ -993,11 +993,11 @@ export class DeviceSensorSyncService {
         }
 
         await query(
-          `UPDATE device_target_state SET
+          `UPDATE agent_target_state SET
             config = $1,
             version = version + 1,
             updated_at = CURRENT_TIMESTAMP
-           WHERE device_uuid = $2`,
+           WHERE agent_uuid = $2`,
           [JSON.stringify(targetConfig), deviceUuid]
         );
 
@@ -1010,11 +1010,11 @@ export class DeviceSensorSyncService {
   }
 
   /**
-   * Get sensor devices from TABLE (deployed state for UI)
+   * Get sensor agents from TABLE (deployed state for UI)
    * Reads from endpoints table which represents agent's actual running state
    * Table is kept in sync via reconciliation when agent reports current state
    * 
-   * IMPORTANT: For 'enabled' field, we read from device_target_state.config.sensors
+   * IMPORTANT: For 'enabled' field, we read from agent_target_state.config.sensors
    * to show user's DESIRED state, not actual state (which is in health_connected)
    */
   async getEndpoints(deviceUuid: string, protocol?: string): Promise<any[]> {
@@ -1023,7 +1023,7 @@ export class DeviceSensorSyncService {
       const targetState = await DeviceTargetStateModel.get(deviceUuid);
       const targetSensors: any[] = (targetState?.config as any)?.endpoints || [];
       
-      logger.info(`[getEndpoints] Device ${deviceUuid.substring(0, 8)}: Found ${targetSensors.length} devices in target state`);
+      logger.info(`[getEndpoints] Device ${deviceUuid.substring(0, 8)}: Found ${targetSensors.length} agents in target state`);
       logger.info(`[getEndpoints] Target state config.endpoints:`, targetSensors.map((s: any) => ({ name: s.name, enabled: s.enabled })));
       
       const targetSensorsByName = new Map(
@@ -1031,7 +1031,7 @@ export class DeviceSensorSyncService {
       );
       
       // Read from TABLE (deployed/running state)
-      // Include ALL devices (regular + virtual/sidecar) - agent sees them all
+      // Include ALL agents (regular + virtual/sidecar) - agent sees them all
       let sql = `
         SELECT id, uuid, agent_uuid, name, protocol, enabled, poll_interval,
                connection, data_points, metadata, config_version, synced_to_config,
@@ -1044,7 +1044,7 @@ export class DeviceSensorSyncService {
       `;
       const params: any[] = [deviceUuid];
 
-      logger.debug(`[getEndpoints] Fetching all devices (including virtual/sidecar) for device ${deviceUuid.substring(0, 8)}`);
+      logger.debug(`[getEndpoints] Fetching all agents (including virtual/sidecar) for device ${deviceUuid.substring(0, 8)}`);
 
       // Filter by protocol if specified
       if (protocol) {
@@ -1103,7 +1103,7 @@ export class DeviceSensorSyncService {
         };
       });
     } catch (error) {
-      logger.error('Error getting devices from table:', error);
+      logger.error('Error getting agents from table:', error);
       throw error;
     }
   }
@@ -1263,7 +1263,7 @@ export class DeviceSensorSyncService {
 
       // 2. Get current target state
       const stateResult = await query(
-        'SELECT apps, config, version FROM device_target_state WHERE device_uuid = $1',
+        'SELECT apps, config, version FROM agent_target_state WHERE agent_uuid = $1',
         [deviceUuid]
       );
 
@@ -1320,13 +1320,13 @@ export class DeviceSensorSyncService {
 
       // 5. Save updated target state
       const updateResult = await query(
-        `UPDATE device_target_state SET
+        `UPDATE agent_target_state SET
            apps = $1,
            config = $2,
            version = version + 1,
            updated_at = NOW(),
            needs_deployment = true
-         WHERE device_uuid = $3
+         WHERE agent_uuid = $3
          RETURNING version`,
         [JSON.stringify(apps), JSON.stringify(config), deviceUuid]
       );
@@ -1410,7 +1410,7 @@ export class DeviceSensorSyncService {
 
       // 3. Remove endpoint from target state so agent removes it on next sync.
       const stateResult = await query(
-        'SELECT apps, config, version FROM device_target_state WHERE device_uuid = $1',
+        'SELECT apps, config, version FROM agent_target_state WHERE agent_uuid = $1',
         [deviceUuid]
       );
 
@@ -1445,13 +1445,13 @@ export class DeviceSensorSyncService {
       }
 
       const updateResult = await query(
-        `UPDATE device_target_state SET
+        `UPDATE agent_target_state SET
            apps = $1,
            config = $2,
            version = version + 1,
            updated_at = NOW(),
            needs_deployment = true
-         WHERE device_uuid = $3
+         WHERE agent_uuid = $3
          RETURNING version`,
         [JSON.stringify(apps), JSON.stringify(config), deviceUuid]
       );
@@ -1534,7 +1534,7 @@ export class DeviceSensorSyncService {
     try {
       // 1. Get current target state
       const stateResult = await query(
-        'SELECT apps, config, version FROM device_target_state WHERE device_uuid = $1',
+        'SELECT apps, config, version FROM agent_target_state WHERE agent_uuid = $1',
         [deviceUuid]
       );
 
@@ -1570,13 +1570,13 @@ export class DeviceSensorSyncService {
 
       // 4. Save updated target state
       const updateResult = await query(
-        `UPDATE device_target_state SET
+        `UPDATE agent_target_state SET
            apps = $1,
            config = $2,
            version = version + 1,
            updated_at = NOW(),
            needs_deployment = true
-         WHERE device_uuid = $3
+         WHERE agent_uuid = $3
          RETURNING version`,
         [JSON.stringify(apps), JSON.stringify(config), deviceUuid]
       );

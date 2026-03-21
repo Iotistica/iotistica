@@ -323,19 +323,19 @@ router.delete('/applications/:appId', async (req, res) => {
       });
     }
 
-    // Check if any devices are using this app
-    const devicesUsing = await query(
-      `SELECT device_uuid, apps 
-       FROM device_target_state 
+    // Check if any agents are using this app
+    const agentsUsing = await query(
+      `SELECT agent_uuid, apps 
+       FROM agent_target_state 
        WHERE apps::text LIKE $1`,
       [`%"appId":${appId}%`]
     );
 
-    if (devicesUsing.rows.length > 0) {
+    if (agentsUsing.rows.length > 0) {
       return res.status(409).json({
         error: 'Conflict',
-        message: `Cannot delete application: ${devicesUsing.rows.length} device(s) are using this app`,
-        devicesAffected: devicesUsing.rows.map(r => r.device_uuid)
+        message: `Cannot delete application: ${agentsUsing.rows.length} device(s) are using this app`,
+        agentsAffected: agentsUsing.rows.map(r => r.agent_uuid)
       });
     }
 

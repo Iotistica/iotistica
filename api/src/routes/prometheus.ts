@@ -10,9 +10,9 @@
  * - Uses hypertable indexes for efficient DISTINCT ON
  * 
  * Metrics exposed:
- * - endpoint_reading{device_uuid, device_name, metric_name, protocol, unit} - Latest endpoint value
- * - endpoint_reading_timestamp{device_uuid, metric_name, protocol} - Unix timestamp of last reading
- * - device_status{device_uuid, device_name} - Device online status (1=online, 0=offline)
+ * - endpoint_reading{agent_uuid, device_name, metric_name, protocol, unit} - Latest endpoint value
+ * - endpoint_reading_timestamp{agent_uuid, metric_name, protocol} - Unix timestamp of last reading
+ * - device_status{agent_uuid, device_name} - Device online status (1=online, 0=offline)
  */
 
 import express from 'express';
@@ -25,7 +25,7 @@ export const router = express.Router();
  * Prometheus metrics endpoint
  * GET /metrics
  * 
- * Returns latest sensor readings for all devices in Prometheus text format
+ * Returns latest sensor readings for all agents in Prometheus text format
  */
 router.get('/metrics', async (req, res) => {
   try {
@@ -71,7 +71,7 @@ router.get('/metrics', async (req, res) => {
           ELSE 0
         END as device_online
       FROM latest_hourly r
-      LEFT JOIN devices d ON d.uuid = r.agent_uuid
+      LEFT JOIN agents d ON d.uuid = r.agent_uuid
       LIMIT 10000
     `);
 
@@ -82,8 +82,8 @@ router.get('/metrics', async (req, res) => {
       sampleRow: readings[0]
     });
 
-    // Track devices we've seen for status metrics
-    const devicesStatus = new Map<string, { name: string; online: number }>();
+    // Track agents we've seen for status metrics
+    const agentsStatus = new Map<string, { name: string; online: number }>();
 
     // Generate metrics for each reading
     for (const reading of readings) {
@@ -112,17 +112,17 @@ router.get('/metrics', async (req, res) => {
 
       // Endpoint reading value
       lines.push(
-        `endpoint_reading{device_uuid="${sanitizedDeviceUuid}",device_name="${sanitizedDeviceName}",metric_name="${sanitizedMetricName}",protocol="${sanitizedProtocol}",unit="${sanitizedUnit}"} ${value}`
+        `endpoint_reading{agent_uuid="${sanitizedDeviceUuid}",device_name="${sanitizedDeviceName}",metric_name="${sanitizedMetricName}",protocol="${sanitizedProtocol}",unit="${sanitizedUnit}"} ${value}`
       );
 
       // Timestamp of reading
       lines.push(
-        `endpoint_reading_timestamp{device_uuid="${sanitizedDeviceUuid}",metric_name="${sanitizedMetricName}",protocol="${sanitizedProtocol}"} ${timestamp_unix}`
+        `endpoint_reading_timestamp{agent_uuid="${sanitizedDeviceUuid}",metric_name="${sanitizedMetricName}",protocol="${sanitizedProtocol}"} ${timestamp_unix}`
       );
 
       // Track device status
-      if (!devicesStatus.has(agent_uuid)) {
-        devicesStatus.set(agent_uuid, {
+      if (!agentsStatus.has(agent_uuid)) {
+        agentsStatus.set(agent_uuid, {
           name: sanitizedDeviceName,
           online: device_online
         });
@@ -131,10 +131,10 @@ router.get('/metrics', async (req, res) => {
 
     // Add device status metrics
     lines.push('');
-    for (const [uuid, status] of devicesStatus.entries()) {
+    for (const [uuid, status] of agentsStatus.entries()) {
       const sanitizedUuid = uuid.replace(/-/g, '_');
       lines.push(
-        `device_status{device_uuid="${sanitizedUuid}",device_name="${status.name}"} ${status.online}`
+        `device_status{agent_uuid="${sanitizedUuid}",device_name="${status.name}"} ${status.online}`
       );
     }
 
@@ -143,7 +143,7 @@ router.get('/metrics', async (req, res) => {
 
     logger.debug('Prometheus metrics exported', {
       readings: readings.length,
-      devices: devicesStatus.size
+      agents: agentsStatus.size
     });
 
   } catch (error: any) {

@@ -4,19 +4,19 @@
  * 
  * Separated from cloud.ts for better organization
  * 
- * Device-Side Endpoints (used by devices themselves):
+ * Device-Side Endpoints (used by agents themselves):
  * - GET  /api/v1/device/:uuid/state - Device polls for target state (ETag cached)
  * - POST /api/v1/device/:uuid/logs - Device uploads logs
  * - PATCH /api/v1/device/state - Device reports current state + metrics
  * 
  * Management API Endpoints (used by dashboard/admin):
- * - GET /api/v1/devices/:uuid/target-state - Get device target state
- * - POST /api/v1/devices/:uuid/target-state - Set device target state
- * - PUT /api/v1/devices/:uuid/target-state - Update device target state
- * - GET /api/v1/devices/:uuid/current-state - Get device current state
- * - DELETE /api/v1/devices/:uuid/target-state - Clear device target state
- * - GET /api/v1/devices/:uuid/logs - Get device logs
- * - GET /api/v1/devices/:uuid/metrics - Get device metrics
+ * - GET /api/v1/agents/:uuid/target-state - Get device target state
+ * - POST /api/v1/agents/:uuid/target-state - Set device target state
+ * - PUT /api/v1/agents/:uuid/target-state - Update device target state
+ * - GET /api/v1/agents/:uuid/current-state - Get device current state
+ * - DELETE /api/v1/agents/:uuid/target-state - Clear device target state
+ * - GET /api/v1/agents/:uuid/logs - Get device logs
+ * - GET /api/v1/agents/:uuid/metrics - Get device metrics
  */
 
 import express from 'express';
@@ -26,7 +26,7 @@ import {
   DeviceLogsModel,
 } from '../db/models';
 import { logger } from '../utils/logger';
-import deviceAuth, { deviceAuthFromBody } from '../middleware/device-auth';
+import deviceAuth, { deviceAuthFromBody } from '../middleware/agent-auth';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { redisLogQueue } from '../services/logs-queue/redis-log-queue';
 import { redisSensorQueue } from '../services/device-queue';
@@ -277,9 +277,9 @@ router.post('/device/:uuid/logs/dropped-summaries', deviceAuth, express.json(), 
 
 /**
  * Get device logs
- * GET /api/v1/devices/:uuid/logs
+ * GET /api/v1/agents/:uuid/logs
  */
-router.get('/devices/:uuid/logs', jwtAuth, async (req, res) => {
+router.get('/agents/:uuid/logs', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const serviceName = req.query.service as string | undefined;
@@ -328,14 +328,14 @@ router.get('/devices/:uuid/logs', jwtAuth, async (req, res) => {
 
 /**
  * Get list of services with logs for a device
- * GET /api/v1/devices/:uuid/logs/services
+ * GET /api/v1/agents/:uuid/logs/services
  */
-router.get('/devices/:uuid/logs/services', jwtAuth, async (req, res) => {
+router.get('/agents/:uuid/logs/services', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     
     const result = await query(
-      'SELECT DISTINCT service_name FROM device_logs WHERE device_uuid = $1 ORDER BY service_name ASC',
+      'SELECT DISTINCT service_name FROM agent_logs WHERE agent_uuid = $1 ORDER BY service_name ASC',
       [uuid]
     );
     

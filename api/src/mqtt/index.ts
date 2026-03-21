@@ -198,7 +198,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     }
 
     // Subscribe to all device topics
-    // Use '*' wildcard for all devices, or specific UUIDs for targeted subscriptions
+    // Use '*' wildcard for all agents, or specific UUIDs for targeted subscriptions
     const subscribeToAll = process.env.MQTT_SUBSCRIBE_ALL !== 'false';
     
     if (subscribeToAll) {

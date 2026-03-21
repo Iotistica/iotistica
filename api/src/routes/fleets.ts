@@ -1,6 +1,6 @@
 /**
  * Fleet Management Routes
- * Unified fleet management for virtual and physical devices
+ * Unified fleet management for virtual and physical agents
  */
 
 import express from 'express';
@@ -23,26 +23,26 @@ const resolveFleetByIdentifier = async (fleetIdentifier: string) => {
 // ============================================================================
 router.post('/fleets/virtual/estimate', async (req, res) => {
   try {
-    const { agent_count, devices_per_agent, billing_mode } = req.body;
+    const { agent_count, agents_per_agent, billing_mode } = req.body;
 
-    if (!agent_count || !devices_per_agent) {
+    if (!agent_count || !agents_per_agent) {
       return res.status(400).json({
         error: 'Missing required fields',
-        message: 'agent_count and devices_per_agent are required'
+        message: 'agent_count and agents_per_agent are required'
       });
     }
 
     // Calculate cost using database function
     const result = await query(
       'SELECT * FROM calculate_fleet_cost($1, $2)',
-      [agent_count, devices_per_agent]
+      [agent_count, agents_per_agent]
     );
 
     const estimate = result.rows[0];
 
     res.json({
       agent_count,
-      devices_per_agent,
+      agents_per_agent,
       billing_mode: billing_mode || 'hourly',
       ...estimate
     });
@@ -75,7 +75,7 @@ router.get('/fleets', jwtAuth, async (req, res) => {
         COUNT(d.uuid) as device_count,
         COUNT(d.uuid) FILTER (WHERE d.is_online = true) as online_count
       FROM fleets f
-      LEFT JOIN devices d ON d.fleet_uuid = f.fleet_uuid
+      LEFT JOIN agents d ON d.fleet_uuid = f.fleet_uuid
       WHERE f.status != 'deleted'
     `;
 
@@ -147,14 +147,14 @@ router.get('/fleets/:id', jwtAuth, async (req, res) => {
       [resolvedFleetUuid]
     );
 
-    // Get devices in fleet (prefer fleet_uuid)
-    const devices = await query(
+    // Get agents in fleet (prefer fleet_uuid)
+    const agents = await query(
       `SELECT 
         d.uuid, d.device_name, d.device_type, d.is_online,
         d.cpu_usage, d.memory_usage, d.memory_total,
         d.deployment_status, d.k8s_pod_name,
         (SELECT COUNT(*) FROM endpoints ds WHERE ds.agent_uuid = d.uuid) as endpoint_count
-      FROM devices d
+      FROM agents d
       WHERE d.fleet_uuid = $1
       ORDER BY d.device_name`,
       [resolvedFleetUuid]
@@ -163,7 +163,7 @@ router.get('/fleets/:id', jwtAuth, async (req, res) => {
     res.json({
       ...fleetInfo.rows[0],
       stats: result.rows[0],
-      devices: devices.rows
+      agents: agents.rows
     });
 
   } catch (error: any) {
@@ -191,7 +191,7 @@ router.post('/fleets', jwtAuth, async (req, res) => {
       billing_mode,
       budget_limit,
       agent_count,
-      devices_per_agent
+      agents_per_agent
     } = req.body;
     
     // Use default customer_id from request body or fallback to default UUID
@@ -213,10 +213,10 @@ router.post('/fleets', jwtAuth, async (req, res) => {
     }
 
     // Virtual fleet requires agent configuration
-    if (fleet_type === 'virtual' && (!agent_count || !devices_per_agent)) {
+    if (fleet_type === 'virtual' && (!agent_count || !agents_per_agent)) {
       return res.status(400).json({
-        error: 'Virtual fleets require agent_count and devices_per_agent',
-        required: ['agent_count', 'devices_per_agent']
+        error: 'Virtual fleets require agent_count and agents_per_agent',
+        required: ['agent_count', 'agents_per_agent']
       });
     }
 
@@ -227,8 +227,8 @@ router.post('/fleets', jwtAuth, async (req, res) => {
     // Prepare deployment config for virtual fleets
     const deployment_config = fleet_type === 'virtual' ? {
       agent_count,
-      devices_per_agent,
-      total_devices: agent_count * devices_per_agent,
+      agents_per_agent,
+      total_agents: agent_count * agents_per_agent,
       created_at: new Date().toISOString()
     } : {};
 
@@ -259,7 +259,7 @@ router.post('/fleets', jwtAuth, async (req, res) => {
         fleet_uuid, fleet_name, customer_id, fleet_type, description,
         environment, location, JSON.stringify(tags), billing_enabled,
         billing_mode, budget_limit, JSON.stringify(deployment_config),
-        k8s_namespace, fleet_type === 'virtual' ? agent_count * devices_per_agent : null
+        k8s_namespace, fleet_type === 'virtual' ? agent_count * agents_per_agent : null
       ]
     );
 
@@ -282,7 +282,7 @@ router.post('/fleets', jwtAuth, async (req, res) => {
           created_via: 'api', 
           fleet_type,
           agent_count: agent_count || null,
-          devices_per_agent: devices_per_agent || null,
+          agents_per_agent: agents_per_agent || null,
           k8s_namespace
         })
       ]
@@ -455,20 +455,20 @@ router.post('/fleets/:id/stop', jwtAuth, async (req, res) => {
     );
 
     // Get device count using fleet_uuid
-    const devices = await query(
-      'SELECT COUNT(*) as count FROM devices WHERE fleet_uuid = $1',
+    const agents = await query(
+      'SELECT COUNT(*) as count FROM agents WHERE fleet_uuid = $1',
       [fleet.fleet_uuid]
     );
 
     logger.info(`[FLEETS] Stopped fleet: ${fleet.fleet_uuid}`, {
-      device_count: devices.rows[0].count
+      device_count: agents.rows[0].count
     });
 
     res.json({
       fleet_uuid: fleet.fleet_uuid,
       status: 'stopped',
       stopped_at: new Date().toISOString(),
-      device_count: parseInt(devices.rows[0].count),
+      device_count: parseInt(agents.rows[0].count),
       message: `Fleet stopped. ${fleet.billing_enabled ? 'Billing paused.' : ''}`
     });
 
@@ -519,20 +519,20 @@ router.post('/fleets/:id/start', jwtAuth, async (req, res) => {
     );
 
     // Get device count using fleet_uuid
-    const devices = await query(
-      'SELECT COUNT(*) as count FROM devices WHERE fleet_uuid = $1',
+    const agents = await query(
+      'SELECT COUNT(*) as count FROM agents WHERE fleet_uuid = $1',
       [fleet.fleet_uuid]
     );
 
     logger.info(`[FLEETS] Started fleet: ${fleet.fleet_uuid}`, {
-      device_count: devices.rows[0].count
+      device_count: agents.rows[0].count
     });
 
     res.json({
       fleet_uuid: fleet.fleet_uuid,
       status: 'active',
       started_at: new Date().toISOString(),
-      device_count: parseInt(devices.rows[0].count),
+      device_count: parseInt(agents.rows[0].count),
       message: `Fleet started. ${fleet.billing_enabled ? 'Billing resumed.' : ''}`
     });
 
@@ -703,23 +703,23 @@ router.get('/fleets/:id/usage-events', jwtAuth, async (req, res) => {
 // ============================================================================
 router.post('/fleets/virtual/estimate', async (req, res) => {
   try {
-    const { agent_count, devices_per_agent, billing_mode = 'hourly' } = req.body;
+    const { agent_count, agents_per_agent, billing_mode = 'hourly' } = req.body;
 
-    if (!agent_count || !devices_per_agent) {
+    if (!agent_count || !agents_per_agent) {
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['agent_count', 'devices_per_agent']
+        required: ['agent_count', 'agents_per_agent']
       });
     }
 
     const result = await query(
       `SELECT * FROM calculate_fleet_cost($1, $2, $3)`,
-      [agent_count, devices_per_agent, billing_mode]
+      [agent_count, agents_per_agent, billing_mode]
     );
 
     res.json({
       agent_count,
-      devices_per_agent,
+      agents_per_agent,
       billing_mode,
       ...result.rows[0]
     });

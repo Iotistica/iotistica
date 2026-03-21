@@ -505,17 +505,17 @@ router.delete('/brokers/:id', jwtAuth, requireRole('admin'), async (req: Request
   try {
     const { id } = req.params;
 
-    // Check if any devices are using this broker
+    // Check if any agents are using this broker
     const deviceCheck = await pool.query(
-      'SELECT COUNT(*) as count FROM devices WHERE mqtt_broker_id = $1',
+      'SELECT COUNT(*) as count FROM agents WHERE mqtt_broker_id = $1',
       [id]
     );
 
     if (parseInt(deviceCheck.rows[0].count) > 0) {
       return res.status(409).json({
         success: false,
-        error: 'Cannot delete broker configuration that is in use by devices',
-        devices_count: deviceCheck.rows[0].count
+        error: 'Cannot delete broker configuration that is in use by agents',
+        agents_count: deviceCheck.rows[0].count
       });
     }
 

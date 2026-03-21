@@ -193,7 +193,7 @@ SELECT create_hypertable(
 CREATE INDEX IF NOT EXISTS idx_readings_device_time 
   ON readings (agent_uuid, time DESC);
 
--- Query by metric across devices
+-- Query by metric across agents
 CREATE INDEX IF NOT EXISTS idx_readings_metric_time 
   ON readings (metric_name, time DESC);
 
@@ -452,13 +452,12 @@ BEGIN;
 DO $$
 BEGIN
     -- Drop continuous aggregate views if they exist
-    DROP MATERIALIZED VIEW IF EXISTS device_metrics_5min CASCADE;
-    DROP MATERIALIZED VIEW IF EXISTS device_metrics_hourly CASCADE;
-    DROP MATERIALIZED VIEW IF EXISTS device_metrics_daily CASCADE;
+    DROP MATERIALIZED VIEW IF EXISTS agent_metrics_5min CASCADE;
+    DROP MATERIALIZED VIEW IF EXISTS agent_metrics_hourly CASCADE;
+    DROP MATERIALIZED VIEW IF EXISTS agent_metrics_daily CASCADE;
     
     -- Drop temp tables if they exist
-    DROP TABLE IF EXISTS device_metrics_ts CASCADE;
-    DROP TABLE IF EXISTS device_metrics_old CASCADE;
+    DROP TABLE IF EXISTS agent_metrics_ts CASCADE;
     
     RAISE NOTICE 'Device metrics cleanup complete';
 END $$;
@@ -469,24 +468,11 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
         RAISE EXCEPTION 'TimescaleDB extension not found. Install with: CREATE EXTENSION timescaledb;';
     END IF;
-    RAISE NOTICE 'TimescaleDB extension verified for device_metrics';
+    RAISE NOTICE 'TimescaleDB extension verified for agent_metrics';
 END $$;
 
--- Step 2: Archive old table (if exists)
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'device_metrics') THEN
-        -- Rename old table for potential recovery
-        ALTER TABLE device_metrics RENAME TO device_metrics_old;
-        RAISE NOTICE 'Old device_metrics table archived as device_metrics_old';
-        RAISE NOTICE 'You can drop it later with: DROP TABLE device_metrics_old CASCADE;';
-    ELSE
-        RAISE NOTICE 'No existing device_metrics table found';
-    END IF;
-END $$;
-
--- Step 3: Create new unpartitioned table with TimescaleDB-compatible schema
-CREATE TABLE IF NOT EXISTS device_metrics (
+-- Step 2: Create new unpartitioned table with TimescaleDB-compatible schema
+CREATE TABLE IF NOT EXISTS agent_metrics (
     id BIGSERIAL,
     device_uuid UUID NOT NULL,
     cpu_usage NUMERIC,
@@ -500,16 +486,16 @@ CREATE TABLE IF NOT EXISTS device_metrics (
     PRIMARY KEY (id, recorded_at)  -- Composite PK required by TimescaleDB
 );
 
-COMMENT ON TABLE device_metrics IS 'Agent/device system metrics: CPU, memory, storage, temperature (TimescaleDB hypertable)';
-COMMENT ON COLUMN device_metrics.device_uuid IS 'UUID of the agent/device';
-COMMENT ON COLUMN device_metrics.cpu_usage IS 'CPU usage percentage (0-100)';
-COMMENT ON COLUMN device_metrics.cpu_temp IS 'CPU temperature in Celsius';
-COMMENT ON COLUMN device_metrics.memory_usage IS 'Used memory in bytes';
-COMMENT ON COLUMN device_metrics.memory_total IS 'Total available memory in bytes';
-COMMENT ON COLUMN device_metrics.storage_usage IS 'Used storage in bytes';
-COMMENT ON COLUMN device_metrics.storage_total IS 'Total available storage in bytes';
-COMMENT ON COLUMN device_metrics.top_processes IS 'JSON array of top processes by CPU/memory';
-COMMENT ON COLUMN device_metrics.recorded_at IS 'Timestamp of metric collection';
+COMMENT ON TABLE agent_metrics IS 'Agent/device system metrics: CPU, memory, storage, temperature (TimescaleDB hypertable)';
+COMMENT ON COLUMN agent_metrics.device_uuid IS 'UUID of the agent/device';
+COMMENT ON COLUMN agent_metrics.cpu_usage IS 'CPU usage percentage (0-100)';
+COMMENT ON COLUMN agent_metrics.cpu_temp IS 'CPU temperature in Celsius';
+COMMENT ON COLUMN agent_metrics.memory_usage IS 'Used memory in bytes';
+COMMENT ON COLUMN agent_metrics.memory_total IS 'Total available memory in bytes';
+COMMENT ON COLUMN agent_metrics.storage_usage IS 'Used storage in bytes';
+COMMENT ON COLUMN agent_metrics.storage_total IS 'Total available storage in bytes';
+COMMENT ON COLUMN agent_metrics.top_processes IS 'JSON array of top processes by CPU/memory';
+COMMENT ON COLUMN agent_metrics.recorded_at IS 'Timestamp of metric collection';
 
 -- Step 4: Convert to TimescaleDB hypertable (idempotent)
 DO $$
@@ -517,18 +503,18 @@ BEGIN
     -- Only create hypertable if not already one
     IF NOT EXISTS (
         SELECT 1 FROM timescaledb_information.hypertables 
-        WHERE hypertable_name = 'device_metrics'
+        WHERE hypertable_name = 'agent_metrics'
     ) THEN
         PERFORM create_hypertable(
-            'device_metrics',
+            'agent_metrics',
             'recorded_at',
             chunk_time_interval => INTERVAL '7 days',
             migrate_data => TRUE,
             if_not_exists => TRUE
         );
-        RAISE NOTICE 'device_metrics: Hypertable created successfully with 7-day chunks';
+        RAISE NOTICE 'agent_metrics: Hypertable created successfully with 7-day chunks';
     ELSE
-        RAISE NOTICE 'device_metrics: Already a hypertable, skipping creation';
+        RAISE NOTICE 'agent_metrics: Already a hypertable, skipping creation';
     END IF;
 END $$;
 
@@ -538,23 +524,23 @@ BEGIN
     -- Only enable compression if not already enabled
     IF NOT EXISTS (
         SELECT 1 FROM timescaledb_information.hypertables 
-        WHERE hypertable_name = 'device_metrics' 
+        WHERE hypertable_name = 'agent_metrics' 
         AND compression_enabled = TRUE
     ) THEN
-        ALTER TABLE device_metrics SET (
+        ALTER TABLE agent_metrics SET (
             timescaledb.compress,
             timescaledb.compress_segmentby = 'device_uuid',
             timescaledb.compress_orderby = 'recorded_at DESC'
         );
-        RAISE NOTICE 'device_metrics: Compression enabled';
+        RAISE NOTICE 'agent_metrics: Compression enabled';
     ELSE
-        RAISE NOTICE 'device_metrics: Compression already enabled, skipping';
+        RAISE NOTICE 'agent_metrics: Compression already enabled, skipping';
     END IF;
 EXCEPTION
     WHEN insufficient_privilege THEN
-        RAISE NOTICE 'device_metrics: Insufficient privileges to enable compression, skipping';
+        RAISE NOTICE 'agent_metrics: Insufficient privileges to enable compression, skipping';
     WHEN OTHERS THEN
-        RAISE WARNING 'device_metrics: Could not enable compression: %, skipping', SQLERRM;
+        RAISE WARNING 'agent_metrics: Could not enable compression: %, skipping', SQLERRM;
 END $$;
 
 -- Step 6: Add compression policy (idempotent)
@@ -563,19 +549,19 @@ BEGIN
     -- Only add policy if it doesn't exist
     IF NOT EXISTS (
         SELECT 1 FROM timescaledb_information.jobs 
-        WHERE hypertable_name = 'device_metrics' 
+        WHERE hypertable_name = 'agent_metrics' 
         AND proc_name = 'policy_compression'
     ) THEN
-        PERFORM add_compression_policy('device_metrics', INTERVAL '7 days', if_not_exists => TRUE);
-        RAISE NOTICE 'device_metrics: Compression policy added';
+        PERFORM add_compression_policy('agent_metrics', INTERVAL '7 days', if_not_exists => TRUE);
+        RAISE NOTICE 'agent_metrics: Compression policy added';
     ELSE
-        RAISE NOTICE 'device_metrics: Compression policy already exists, skipping';
+        RAISE NOTICE 'agent_metrics: Compression policy already exists, skipping';
     END IF;
 EXCEPTION
     WHEN insufficient_privilege THEN
-        RAISE NOTICE 'device_metrics: Insufficient privileges to add compression policy, skipping';
+        RAISE NOTICE 'agent_metrics: Insufficient privileges to add compression policy, skipping';
     WHEN OTHERS THEN
-        RAISE WARNING 'device_metrics: Could not add compression policy: %, skipping', SQLERRM;
+        RAISE WARNING 'agent_metrics: Could not add compression policy: %, skipping', SQLERRM;
 END $$;
 
 -- Step 7: Add retention policy (idempotent)
@@ -584,33 +570,33 @@ BEGIN
     -- Only add policy if it doesn't exist
     IF NOT EXISTS (
         SELECT 1 FROM timescaledb_information.jobs 
-        WHERE hypertable_name = 'device_metrics' 
+        WHERE hypertable_name = 'agent_metrics' 
         AND proc_name = 'policy_retention'
     ) THEN
-        PERFORM add_retention_policy('device_metrics', INTERVAL '90 days', if_not_exists => TRUE);
-        RAISE NOTICE 'device_metrics: Retention policy added (90 days)';
+        PERFORM add_retention_policy('agent_metrics', INTERVAL '90 days', if_not_exists => TRUE);
+        RAISE NOTICE 'agent_metrics: Retention policy added (90 days)';
     ELSE
-        RAISE NOTICE 'device_metrics: Retention policy already exists, skipping';
+        RAISE NOTICE 'agent_metrics: Retention policy already exists, skipping';
     END IF;
 EXCEPTION
     WHEN insufficient_privilege THEN
-        RAISE NOTICE 'device_metrics: Insufficient privileges to add retention policy, skipping';
+        RAISE NOTICE 'agent_metrics: Insufficient privileges to add retention policy, skipping';
     WHEN OTHERS THEN
-        RAISE WARNING 'device_metrics: Could not add retention policy: %, skipping', SQLERRM;
+        RAISE WARNING 'agent_metrics: Could not add retention policy: %, skipping', SQLERRM;
 END $$;
 
 -- Step 8: Create indexes for query performance
 -- Index 1: Device + time range queries (most common pattern)
 CREATE INDEX IF NOT EXISTS idx_device_metrics_device_time 
-ON device_metrics (device_uuid, recorded_at DESC);
+ON agent_metrics (device_uuid, recorded_at DESC);
 
 -- Index 2: Time-series queries only
 CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_at 
-ON device_metrics (recorded_at DESC);
+ON agent_metrics (recorded_at DESC);
 
 -- Index 3: GIN index for top_processes JSONB queries
 CREATE INDEX IF NOT EXISTS idx_device_metrics_top_processes 
-ON device_metrics USING GIN (top_processes);
+ON agent_metrics USING GIN (top_processes);
 
 COMMIT;
 
@@ -621,7 +607,7 @@ COMMIT;
 -- Step 9: Create continuous aggregates for agent health dashboards
 
 -- 5-minute aggregates (real-time monitoring)
-CREATE MATERIALIZED VIEW IF NOT EXISTS device_metrics_5min
+CREATE MATERIALIZED VIEW IF NOT EXISTS agent_metrics_5min
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('5 minutes', recorded_at) AS bucket,
@@ -642,12 +628,12 @@ SELECT
     avg(storage_total) AS avg_storage_total,
     -- Row count
     count(*) AS sample_count
-FROM device_metrics
+FROM agent_metrics
 GROUP BY bucket, device_uuid
 WITH NO DATA;
 
 -- Hourly aggregates (medium-term trends)
-CREATE MATERIALIZED VIEW IF NOT EXISTS device_metrics_hourly
+CREATE MATERIALIZED VIEW IF NOT EXISTS agent_metrics_hourly
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 hour', recorded_at) AS bucket,
@@ -668,12 +654,12 @@ SELECT
     avg(storage_total) AS avg_storage_total,
     -- Row count
     count(*) AS sample_count
-FROM device_metrics
+FROM agent_metrics
 GROUP BY bucket, device_uuid
 WITH NO DATA;
 
 -- Daily aggregates (long-term analysis)
-CREATE MATERIALIZED VIEW IF NOT EXISTS device_metrics_daily
+CREATE MATERIALIZED VIEW IF NOT EXISTS agent_metrics_daily
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 day', recorded_at) AS bucket,
@@ -694,50 +680,50 @@ SELECT
     avg(storage_total) AS avg_storage_total,
     -- Row count
     count(*) AS sample_count
-FROM device_metrics
+FROM agent_metrics
 GROUP BY bucket, device_uuid
 WITH NO DATA;
 
--- Step 10: Add refresh policies for device_metrics continuous aggregates
+-- Step 10: Add refresh policies for agent_metrics continuous aggregates
 -- These keep the aggregates up-to-date automatically
 
 -- 5-minute view: Refresh every 5 minutes, covering last 3 hours
 DO $$
 BEGIN
-  PERFORM add_continuous_aggregate_policy('device_metrics_5min',
+  PERFORM add_continuous_aggregate_policy('agent_metrics_5min',
     start_offset => INTERVAL '3 hours',
     end_offset => INTERVAL '5 minutes',
     schedule_interval => INTERVAL '5 minutes',
     if_not_exists => TRUE);
 EXCEPTION
   WHEN OTHERS THEN
-    RAISE NOTICE 'Could not add refresh policy for device_metrics_5min: %', SQLERRM;
+    RAISE NOTICE 'Could not add refresh policy for agent_metrics_5min: %', SQLERRM;
 END $$;
 
 -- Hourly view: Refresh every hour, covering last 24 hours
 DO $$
 BEGIN
-  PERFORM add_continuous_aggregate_policy('device_metrics_hourly',
+  PERFORM add_continuous_aggregate_policy('agent_metrics_hourly',
     start_offset => INTERVAL '24 hours',
     end_offset => INTERVAL '1 hour',
     schedule_interval => INTERVAL '1 hour',
     if_not_exists => TRUE);
 EXCEPTION
   WHEN OTHERS THEN
-    RAISE NOTICE 'Could not add refresh policy for device_metrics_hourly: %', SQLERRM;
+    RAISE NOTICE 'Could not add refresh policy for agent_metrics_hourly: %', SQLERRM;
 END $$;
 
 -- Daily view: Refresh daily, covering last 7 days
 DO $$
 BEGIN
-  PERFORM add_continuous_aggregate_policy('device_metrics_daily',
+  PERFORM add_continuous_aggregate_policy('agent_metrics_daily',
     start_offset => INTERVAL '7 days',
     end_offset => INTERVAL '1 day',
     schedule_interval => INTERVAL '1 day',
     if_not_exists => TRUE);
 EXCEPTION
   WHEN OTHERS THEN
-    RAISE NOTICE 'Could not add refresh policy for device_metrics_daily: %', SQLERRM;
+    RAISE NOTICE 'Could not add refresh policy for agent_metrics_daily: %', SQLERRM;
 END $$;
 
 -- ============================================================================
@@ -759,17 +745,17 @@ BEGIN
     RAISE NOTICE 'Device logs cleanup complete';
 END $$;
 
--- Step 1: Verify device_logs table exists
+-- Step 1: Verify agent_logs table exists
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'device_logs') THEN
-        RAISE NOTICE 'device_logs table not found, skipping hypertable conversion';
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'agent_logs') THEN
+        RAISE NOTICE 'agent_logs table not found, skipping hypertable conversion';
         RETURN;
     END IF;
-    RAISE NOTICE 'device_logs table found, proceeding with hypertable conversion';
+    RAISE NOTICE 'agent_logs table found, proceeding with hypertable conversion';
 END $$;
 
--- Step 1b: If device_logs is inherited/partitioned, flatten it first
+-- Step 1b: If agent_logs is inherited/partitioned, flatten it first
 DO $$
 DECLARE
     child RECORD;
@@ -778,12 +764,12 @@ BEGIN
     SELECT EXISTS (
         SELECT 1
         FROM timescaledb_information.hypertables
-        WHERE hypertable_name = 'device_logs'
+        WHERE hypertable_name = 'agent_logs'
           AND hypertable_schema = 'public'
     ) INTO already_hypertable;
 
     IF already_hypertable THEN
-        RAISE NOTICE 'device_logs already registered as hypertable, skipping flattening prep';
+        RAISE NOTICE 'agent_logs already registered as hypertable, skipping flattening prep';
         RETURN;
     END IF;
 
@@ -794,7 +780,7 @@ BEGIN
         JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_class p ON p.oid = i.inhparent
         JOIN pg_namespace pn ON pn.oid = p.relnamespace
-        WHERE p.relname = 'device_logs'
+        WHERE p.relname = 'agent_logs'
           AND pn.nspname = 'public'
         ORDER BY c.relname
     LOOP
@@ -805,23 +791,23 @@ BEGIN
 END $$;
 
 -- Step 2: Convert to TimescaleDB hypertable (idempotent)
--- Note: device_logs uses 'timestamp' column for bucketing (when event occurred)
+-- Note: agent_logs uses 'timestamp' column for bucketing (when event occurred)
 DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM timescaledb_information.hypertables 
-        WHERE hypertable_name = 'device_logs'
+        WHERE hypertable_name = 'agent_logs'
     ) THEN
         PERFORM create_hypertable(
-            'device_logs',
+            'agent_logs',
             'timestamp',
             chunk_time_interval => INTERVAL '1 day',
             migrate_data => TRUE,
             if_not_exists => TRUE
         );
-        RAISE NOTICE 'device_logs: Hypertable created successfully with 1-day chunks';
+        RAISE NOTICE 'agent_logs: Hypertable created successfully with 1-day chunks';
     ELSE
-        RAISE NOTICE 'device_logs: Already a hypertable, skipping creation';
+        RAISE NOTICE 'agent_logs: Already a hypertable, skipping creation';
     END IF;
 END $$;
 
@@ -830,23 +816,23 @@ DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM timescaledb_information.hypertables 
-        WHERE hypertable_name = 'device_logs' 
+        WHERE hypertable_name = 'agent_logs' 
         AND compression_enabled = TRUE
     ) THEN
-        ALTER TABLE device_logs SET (
+        ALTER TABLE agent_logs SET (
             timescaledb.compress,
             timescaledb.compress_segmentby = 'device_uuid, service_name',
             timescaledb.compress_orderby = 'timestamp DESC'
         );
-        RAISE NOTICE 'device_logs: Compression enabled';
+        RAISE NOTICE 'agent_logs: Compression enabled';
     ELSE
-        RAISE NOTICE 'device_logs: Compression already enabled, skipping';
+        RAISE NOTICE 'agent_logs: Compression already enabled, skipping';
     END IF;
 EXCEPTION
     WHEN insufficient_privilege THEN
-        RAISE NOTICE 'device_logs: Insufficient privileges to enable compression, skipping';
+        RAISE NOTICE 'agent_logs: Insufficient privileges to enable compression, skipping';
     WHEN OTHERS THEN
-        RAISE WARNING 'device_logs: Could not enable compression: %, skipping', SQLERRM;
+        RAISE WARNING 'agent_logs: Could not enable compression: %, skipping', SQLERRM;
 END $$;
 
 -- Step 4: Add compression policy
@@ -854,19 +840,19 @@ DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM timescaledb_information.jobs 
-        WHERE hypertable_name = 'device_logs' 
+        WHERE hypertable_name = 'agent_logs' 
         AND proc_name = 'policy_compression'
     ) THEN
-        PERFORM add_compression_policy('device_logs', INTERVAL '7 days', if_not_exists => TRUE);
-        RAISE NOTICE 'device_logs: Compression policy added';
+        PERFORM add_compression_policy('agent_logs', INTERVAL '7 days', if_not_exists => TRUE);
+        RAISE NOTICE 'agent_logs: Compression policy added';
     ELSE
-        RAISE NOTICE 'device_logs: Compression policy already exists, skipping';
+        RAISE NOTICE 'agent_logs: Compression policy already exists, skipping';
     END IF;
 EXCEPTION
     WHEN insufficient_privilege THEN
-        RAISE NOTICE 'device_logs: Insufficient privileges to add compression policy, skipping';
+        RAISE NOTICE 'agent_logs: Insufficient privileges to add compression policy, skipping';
     WHEN OTHERS THEN
-        RAISE WARNING 'device_logs: Could not add compression policy: %, skipping', SQLERRM;
+        RAISE WARNING 'agent_logs: Could not add compression policy: %, skipping', SQLERRM;
 END $$;
 
 -- Step 5: Add retention policy (keep 90 days of logs)
@@ -874,30 +860,30 @@ DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM timescaledb_information.jobs 
-        WHERE hypertable_name = 'device_logs' 
+        WHERE hypertable_name = 'agent_logs' 
         AND proc_name = 'policy_retention'
     ) THEN
-        PERFORM add_retention_policy('device_logs', INTERVAL '90 days', if_not_exists => TRUE);
-        RAISE NOTICE 'device_logs: Retention policy added (90 days)';
+        PERFORM add_retention_policy('agent_logs', INTERVAL '90 days', if_not_exists => TRUE);
+        RAISE NOTICE 'agent_logs: Retention policy added (90 days)';
     ELSE
-        RAISE NOTICE 'device_logs: Retention policy already exists, skipping';
+        RAISE NOTICE 'agent_logs: Retention policy already exists, skipping';
     END IF;
 EXCEPTION
     WHEN insufficient_privilege THEN
-        RAISE NOTICE 'device_logs: Insufficient privileges to add retention policy, skipping';
+        RAISE NOTICE 'agent_logs: Insufficient privileges to add retention policy, skipping';
     WHEN OTHERS THEN
-        RAISE WARNING 'device_logs: Could not add retention policy: %, skipping', SQLERRM;
+        RAISE WARNING 'agent_logs: Could not add retention policy: %, skipping', SQLERRM;
 END $$;
 
 -- Step 6: Create indexes for query performance
 CREATE INDEX IF NOT EXISTS idx_device_logs_device_time 
-ON device_logs (device_uuid, timestamp DESC);
+ON agent_logs (device_uuid, timestamp DESC);
 
 CREATE INDEX IF NOT EXISTS idx_device_logs_service_time 
-ON device_logs (service_name, timestamp DESC);
+ON agent_logs (service_name, timestamp DESC);
 
 CREATE INDEX IF NOT EXISTS idx_device_logs_level 
-ON device_logs (level, timestamp DESC);
+ON agent_logs (level, timestamp DESC);
 
 COMMIT;
 
@@ -925,7 +911,7 @@ SELECT
     array_agg(DISTINCT message) FILTER (WHERE level = 'WARN') AS warning_samples,
     time_bucket('5 minutes', timestamp) AS bucket_start,
     time_bucket('5 minutes', timestamp) + INTERVAL '5 minutes' AS bucket_end
-FROM device_logs
+FROM agent_logs
 GROUP BY bucket, device_uuid, service_name
 WITH NO DATA;
 
@@ -947,11 +933,11 @@ SELECT
     array_agg(DISTINCT message) FILTER (WHERE level = 'WARN') AS warning_samples,
     time_bucket('1 hour', timestamp) AS bucket_start,
     time_bucket('1 hour', timestamp) + INTERVAL '1 hour' AS bucket_end
-FROM device_logs
+FROM agent_logs
 GROUP BY bucket, device_uuid, service_name
 WITH NO DATA;
 
--- Step 8: Add refresh policies for device_logs continuous aggregates
+-- Step 8: Add refresh policies for agent_logs continuous aggregates
 
 -- 5-minute view: Refresh every 5 minutes, covering last 3 hours
 DO $$
@@ -1500,8 +1486,8 @@ BEGIN
     RAISE NOTICE 'Migration 006 completed successfully!';
     RAISE NOTICE 'Five hypertables created:';
     RAISE NOTICE '  1. readings (sensor telemetry): readings_1m, readings_1h, readings_hourly, readings_daily';
-    RAISE NOTICE '  2. device_metrics (agent health): device_metrics_5min, device_metrics_hourly, device_metrics_daily';
-    RAISE NOTICE '  3. device_logs (application logs): device_logs_5min, device_logs_hourly';
+    RAISE NOTICE '  2. agent_metrics (agent health): agent_metrics_5min, agent_metrics_hourly, agent_metrics_daily';
+    RAISE NOTICE '  3. agent_logs (application logs): device_logs_5min, device_logs_hourly';
     RAISE NOTICE '  4. mqtt_broker_stats (broker monitoring): mqtt_broker_stats_5min, mqtt_broker_stats_hourly, mqtt_broker_stats_daily';
     RAISE NOTICE '  5. mqtt_topic_metrics (topic monitoring): mqtt_topic_metrics_5min, mqtt_topic_metrics_hourly, mqtt_topic_metrics_daily';
     RAISE NOTICE 'Total: 14 continuous aggregates with auto-refresh policies';

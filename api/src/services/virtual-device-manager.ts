@@ -2,7 +2,7 @@
  * Virtual Device Manager Service
  * 
  * Manages virtual device sidecars (protocol simulators) that run alongside agents.
- * Virtual devices are stored in endpoints table and deployed as sidecar containers.
+ * Virtual agents are stored in endpoints table and deployed as sidecar containers.
  * 
  * Key Features:
  * - Profile-based configuration (defines data points exposed by simulator)
@@ -28,7 +28,7 @@ export interface VirtualDeviceConfig {
 
 export interface VirtualDevice {
   uuid: string;
-  device_uuid: string;
+  agent_uuid: string;
   name: string;
   protocol: string;
   connection: {
@@ -99,9 +99,9 @@ export class VirtualDeviceManager {
    * 
    * Flow:
    * 1. Validate parent device exists
-   * 2. Check fleet device limit (devices_per_agent)
+   * 2. Check fleet device limit (agents_per_agent)
    * 3. Fetch profile data points
-   * 4. Auto-assign port based on existing virtual devices
+   * 4. Auto-assign port based on existing virtual agents
    * 5. Build container config and connection object
    * 6. Insert into endpoints table via standard addEndpoint flow
    * 7. If parent is K8s virtual agent, update ResourceQuota and patch Deployment
@@ -135,29 +135,29 @@ export class VirtualDeviceManager {
     // 2. Check fleet device limit (if agent belongs to a fleet)
     if (agent.k8s_namespace?.startsWith('fleet-')) {
       const fleetResult = await query(
-        'SELECT devices_per_agent FROM fleets WHERE k8s_namespace = $1',
+        'SELECT agents_per_agent FROM fleets WHERE k8s_namespace = $1',
         [agent.k8s_namespace]
       );
 
       if (fleetResult.rows.length > 0) {
-        const devicesPerAgent = fleetResult.rows[0].devices_per_agent;
+        const agentsPerAgent = fleetResult.rows[0].agents_per_agent;
         const existingDevices = await this.getVirtualDevices(config.deviceUuid);
 
         logger.info('[VirtualDeviceManager] Checking fleet device limit', {
           namespace: agent.k8s_namespace,
-          devicesPerAgent,
+          agentsPerAgent,
           existingCount: existingDevices.length,
-          wouldExceed: existingDevices.length >= devicesPerAgent
+          wouldExceed: existingDevices.length >= agentsPerAgent
         });
 
-        if (existingDevices.length >= devicesPerAgent) {
+        if (existingDevices.length >= agentsPerAgent) {
           logger.error('[VirtualDeviceManager] Fleet device limit exceeded', {
             namespace: agent.k8s_namespace,
-            limit: devicesPerAgent,
+            limit: agentsPerAgent,
             existingCount: existingDevices.length
           });
           throw new Error(
-            `Fleet device limit exceeded: ${existingDevices.length}/${devicesPerAgent} virtual devices already created for this agent`
+            `Fleet device limit exceeded: ${existingDevices.length}/${agentsPerAgent} virtual agents already created for this agent`
           );
         }
       }
@@ -192,13 +192,13 @@ export class VirtualDeviceManager {
       : profileResult.rows[0].data_points;
 
     // 4. Auto-assign port
-    logger.info('[VirtualDeviceManager] Checking existing virtual devices for port assignment', {
+    logger.info('[VirtualDeviceManager] Checking existing virtual agents for port assignment', {
       deviceUuid: config.deviceUuid
     });
 
     const existingDevices = await this.getVirtualDevices(config.deviceUuid);
     
-    logger.info('[VirtualDeviceManager] Found existing virtual devices', {
+    logger.info('[VirtualDeviceManager] Found existing virtual agents', {
       deviceUuid: config.deviceUuid,
       existingCount: existingDevices.length,
       existing: existingDevices.map(d => ({ uuid: d.uuid, protocol: d.protocol, connection: d.connection }))
@@ -270,7 +270,7 @@ export class VirtualDeviceManager {
     }
 
     // 7. Use standard addEndpoint flow (dual-write: table + config)
-    // This ensures virtual devices appear in target state like regular devices
+    // This ensures virtual agents appear in target state like regular agents
     
     // Base config with all data (for database)
     const sensorConfig = {
@@ -317,9 +317,9 @@ export class VirtualDeviceManager {
     });
 
     // 8. Query database to get complete record with all fields
-    // This ensures we return the same structure as regular devices
+    // This ensures we return the same structure as regular agents
     const dbResult = await query(
-      `SELECT uuid, agent_uuid AS device_uuid, name, protocol, enabled, poll_interval,
+      `SELECT uuid, agent_uuid AS agent_uuid, name, protocol, enabled, poll_interval,
               connection, data_points, metadata, created_at, updated_at,
               created_by, updated_by, deployment_status, config_version,
               synced_to_config
@@ -371,7 +371,7 @@ export class VirtualDeviceManager {
     // 9. Return complete database record
     return {
       uuid: dbRecord.uuid,
-      device_uuid: dbRecord.device_uuid,
+      agent_uuid: dbRecord.agent_uuid,
       name: dbRecord.name,
       protocol: dbRecord.protocol,
       connection: typeof dbRecord.connection === 'string'
@@ -387,11 +387,11 @@ export class VirtualDeviceManager {
   }
 
   /**
-   * Get all virtual devices for a parent agent
+   * Get all virtual agents for a parent agent
    */
   async getVirtualDevices(deviceUuid: string): Promise<VirtualDevice[]> {
     const result = await query(
-      `SELECT uuid, agent_uuid AS device_uuid, name, protocol, connection, data_points, metadata
+      `SELECT uuid, agent_uuid AS agent_uuid, name, protocol, connection, data_points, metadata
        FROM endpoints
        WHERE agent_uuid = $1 
        AND metadata->>'sidecar' = 'true'
@@ -401,7 +401,7 @@ export class VirtualDeviceManager {
 
     return result.rows.map(row => ({
       uuid: row.uuid,
-      device_uuid: row.device_uuid,
+      agent_uuid: row.agent_uuid,
       name: row.name,
       protocol: row.protocol,
       connection: typeof row.connection === 'string' ? JSON.parse(row.connection) : row.connection,
@@ -427,7 +427,7 @@ export class VirtualDeviceManager {
     logger.info('Virtual device marked for deletion', { uuid: sensorUuid, deviceUuid });
 
     // If parent is K8s virtual agent, patch Deployment immediately
-    // (virtual devices don't need agent reconciliation since they're sidecars)
+    // (virtual agents don't need agent reconciliation since they're sidecars)
     if (agent?.helm_release_name && agent?.k8s_namespace) {
       // Update ResourceQuota before patching deployment
       // Skip quota update - Helm pre-configures ResourceQuota with adequate limits
@@ -538,7 +538,7 @@ export class VirtualDeviceManager {
   /**
    * Patch K8s Deployment to sync sidecar containers with endpoints table
    * 
-   * This reads all virtual devices for the agent and rebuilds the sidecar container list.
+   * This reads all virtual agents for the agent and rebuilds the sidecar container list.
    */
   async patchVirtualAgentDeployment(deviceUuid: string, helm_release_name: string, k8s_namespace: string): Promise<void> {
     logger.info('[VirtualDeviceManager] patchVirtualAgentDeployment called', {
@@ -553,14 +553,14 @@ export class VirtualDeviceManager {
       return;
     }
 
-    // Get all virtual devices for this agent
-    logger.info('[VirtualDeviceManager] Fetching all virtual devices for deployment patch', {
+    // Get all virtual agents for this agent
+    logger.info('[VirtualDeviceManager] Fetching all virtual agents for deployment patch', {
       deviceUuid
     });
 
     const virtualDevices = await this.getVirtualDevices(deviceUuid);
 
-    logger.info('[VirtualDeviceManager] Virtual devices loaded for patching', {
+    logger.info('[VirtualDeviceManager] Virtual agents loaded for patching', {
       deviceUuid,
       virtualDeviceCount: virtualDevices.length,
       virtualDevices: virtualDevices.map(vd => ({

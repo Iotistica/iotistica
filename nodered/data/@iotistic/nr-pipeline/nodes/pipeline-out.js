@@ -12,7 +12,7 @@ module.exports = function (RED) {
         const node = this;
 
         if (!globalThis.__iotisticaPendingTransforms) {
-            node.status({ fill: 'grey', shape: 'ring', text: 'waiting for agent' });
+            node.status({ fill: 'grey', shape: 'ring', text: 'deploy to activate' });
         } else {
             node.status({ fill: 'green', shape: 'dot', text: 'connected' });
         }

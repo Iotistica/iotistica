@@ -110,7 +110,7 @@ const keyExchangeLimiter = rateLimit({
  * 
  * Body:
  * - fleetId: Fleet/application identifier (required)
- * - maxDevices: Maximum number of devices (default: 100)
+ * - maxDevices: Maximum number of agents (default: 100)
  * - expiresInDays: Expiration in days (default: 365)
  * - description: Key description (optional)
  * 
@@ -148,8 +148,8 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
       const license = licenseValidator.getLicense();
       const maxDevicesAllowed = license.features.maxDevices;
       
-      // Count current active devices
-      const deviceCountResult = await query('SELECT COUNT(*) as count FROM devices WHERE is_active = true');
+      // Count current active agents
+      const deviceCountResult = await query('SELECT COUNT(*) as count FROM agents WHERE is_active = true');
       const currentDeviceCount = parseInt(deviceCountResult.rows[0].count);
       
       if (currentDeviceCount >= maxDevicesAllowed) {
@@ -167,7 +167,7 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
 
         return res.status(403).json({
           error: 'Device limit exceeded',
-          message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} devices. You currently have ${currentDeviceCount} active devices. Please upgrade your plan to add more devices.`,
+          message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} agents. You currently have ${currentDeviceCount} active agents. Please upgrade your plan to add more agents.`,
           details: {
             currentDevices: currentDeviceCount,
             maxDevices: maxDevicesAllowed,
@@ -176,7 +176,7 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
         });
       }
 
-      logger.info(`License check passed: ${currentDeviceCount}/${maxDevicesAllowed} devices`);
+      logger.info(`License check passed: ${currentDeviceCount}/${maxDevicesAllowed} agents`);
     }
 
     logger.info(`🔑 Creating provisioning key for fleet: ${fleetId}`);
@@ -268,8 +268,8 @@ router.get('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res)
     const sanitizedKeys = keys.map(k => ({
       id: k.id,
       description: k.description,
-      max_devices: k.max_devices,
-      devices_provisioned: k.devices_provisioned,
+      max_agents: k.max_agents,
+      agents_provisioned: k.agents_provisioned,
       expires_at: k.expires_at,
       is_active: k.is_active,
       created_at: k.created_at,
@@ -335,7 +335,7 @@ router.delete('/provisioning-keys/:keyId', jwtAuth, requireRole('admin'), async 
  * Generate a single-device provisioning key
  * POST /api/v1/provisioning-keys/generate
  * 
- * Simplified endpoint for dashboard to generate provisioning keys for individual devices.
+ * Simplified endpoint for dashboard to generate provisioning keys for individual agents.
  * Automatically invalidates previous keys if newKey=true in request body.
  * 
  * Body:
@@ -384,13 +384,13 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
       const license = licenseValidator.getLicense();
       const maxDevicesAllowed = license.features.maxDevices;
       
-      const deviceCountResult = await query('SELECT COUNT(*) as count FROM devices WHERE is_active = true');
+      const deviceCountResult = await query('SELECT COUNT(*) as count FROM agents WHERE is_active = true');
       const currentDeviceCount = parseInt(deviceCountResult.rows[0].count);
       
       if (currentDeviceCount >= maxDevicesAllowed) {
         return res.status(403).json({
           error: 'Device limit exceeded',
-          message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} devices. Please upgrade to add more.`,
+          message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} agents. Please upgrade to add more.`,
           details: {
             currentDevices: currentDeviceCount,
             maxDevices: maxDevicesAllowed,

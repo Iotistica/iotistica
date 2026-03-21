@@ -46,7 +46,7 @@ router.get('/:deviceUuid', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Handle global dashboard (device_uuid = NULL)
+    // Handle global dashboard (agent_uuid = NULL)
     const isGlobal = deviceUuid === 'global';
     const deviceUuidValue = isGlobal ? null : deviceUuid;
 
@@ -54,7 +54,7 @@ router.get('/:deviceUuid', async (req: Request, res: Response) => {
     const defaultResult = await query(`
       SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
-      WHERE owner_key = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'} AND is_default = true
+      WHERE owner_key = $1 AND ${isGlobal ? 'agent_uuid IS NULL' : 'agent_uuid = $2'} AND is_default = true
       LIMIT 1
     `, isGlobal ? [ownerKey] : [ownerKey, deviceUuidValue]);
 
@@ -75,7 +75,7 @@ router.get('/:deviceUuid', async (req: Request, res: Response) => {
     const latestResult = await query(`
       SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
-      WHERE owner_key = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'}
+      WHERE owner_key = $1 AND ${isGlobal ? 'agent_uuid IS NULL' : 'agent_uuid = $2'}
       ORDER BY updated_at DESC
       LIMIT 1
     `, isGlobal ? [ownerKey] : [ownerKey, deviceUuidValue]);
@@ -120,7 +120,7 @@ router.get('/:deviceUuid/all', async (req: Request, res: Response) => {
     const result = await query(`
       SELECT id, layout_name, widgets, is_default, share_token, created_at, updated_at
       FROM dashboard_layouts
-      WHERE owner_key = $1 AND ${isGlobal ? 'device_uuid IS NULL' : 'device_uuid = $2'}
+      WHERE owner_key = $1 AND ${isGlobal ? 'agent_uuid IS NULL' : 'agent_uuid = $2'}
       ORDER BY is_default DESC, layout_name ASC
     `, isGlobal ? [ownerKey] : [ownerKey, deviceUuidValue]);
 
@@ -164,7 +164,7 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
 
     // Verify device exists (skip for global dashboards)
     if (!isGlobal) {
-      const deviceCheck = await query(`SELECT uuid FROM devices WHERE uuid = $1`, [deviceUuid]);
+      const deviceCheck = await query(`SELECT uuid FROM agents WHERE uuid = $1`, [deviceUuid]);
       if (deviceCheck.rows.length === 0) {
         return res.status(404).json({ error: 'Device not found' });
       }
@@ -176,13 +176,13 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
         await query(`
           UPDATE dashboard_layouts
           SET is_default = false
-          WHERE owner_key = $1 AND device_uuid IS NULL
+          WHERE owner_key = $1 AND agent_uuid IS NULL
         `, [ownerKey]);
       } else {
         await query(`
           UPDATE dashboard_layouts
           SET is_default = false
-          WHERE owner_key = $1 AND device_uuid = $2
+          WHERE owner_key = $1 AND agent_uuid = $2
         `, [ownerKey, deviceUuidValue]);
       }
     }
@@ -192,12 +192,12 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
     if (isGlobal) {
       existingResult = await query(`
         SELECT id FROM dashboard_layouts
-        WHERE owner_key = $1 AND device_uuid IS NULL AND layout_name = $2
+        WHERE owner_key = $1 AND agent_uuid IS NULL AND layout_name = $2
       `, [ownerKey, layoutName]);
     } else {
       existingResult = await query(`
         SELECT id FROM dashboard_layouts
-        WHERE owner_key = $1 AND device_uuid = $2 AND layout_name = $3
+        WHERE owner_key = $1 AND agent_uuid = $2 AND layout_name = $3
       `, [ownerKey, deviceUuidValue, layoutName]);
     }
 
@@ -215,7 +215,7 @@ router.post('/:deviceUuid', async (req: Request, res: Response) => {
     } else {
       // Create new layout
       const result = await query(`
-        INSERT INTO dashboard_layouts (owner_key, device_uuid, layout_name, widgets, is_default)
+        INSERT INTO dashboard_layouts (owner_key, agent_uuid, layout_name, widgets, is_default)
         VALUES ($1, $2, $3, $4, $5)
         RETURNING id, layout_name, widgets, is_default, created_at, updated_at
       `, [ownerKey, deviceUuidValue, layoutName, JSON.stringify(widgets), isDefault]);
@@ -336,7 +336,7 @@ router.put('/:layoutId', async (req: Request, res: Response) => {
 
     // Verify layout belongs to user
     const layoutResult = await query(`
-      SELECT id, device_uuid FROM dashboard_layouts
+      SELECT id, agent_uuid FROM dashboard_layouts
       WHERE id = $1 AND owner_key = $2
     `, [layoutId, ownerKey]);
 
@@ -351,8 +351,8 @@ router.put('/:layoutId', async (req: Request, res: Response) => {
       await query(`
         UPDATE dashboard_layouts
         SET is_default = false
-        WHERE owner_key = $1 AND device_uuid = $2 AND id != $3
-      `, [ownerKey, layout.device_uuid, layoutId]);
+        WHERE owner_key = $1 AND agent_uuid = $2 AND id != $3
+      `, [ownerKey, layout.agent_uuid, layoutId]);
     }
 
     // Build dynamic update query

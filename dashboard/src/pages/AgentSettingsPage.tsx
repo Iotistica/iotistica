@@ -149,7 +149,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
     // Fetch device info to check if it's a virtual agent
     const fetchDeviceInfo = async () => {
       try {
-        const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`), {
+        const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}`), {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -200,7 +200,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
     setShowRestartDialog(false);
     setRestarting(true);
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual/restart`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual/restart`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,

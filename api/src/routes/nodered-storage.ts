@@ -8,9 +8,58 @@
 import express from 'express';
 import { NodeRedStorageService } from '../services/nodered-storage.service';
 import { jwtAuth } from '../middleware/jwt-auth';
+import { query } from '../db/connection';
 import logger from '../utils/logger';
 
 export const router = express.Router();
+
+/**
+ * GET /api/v1/nr/agents
+ * Internal-network endpoint (no auth) used by the Node-RED plugin server to
+ * populate the agent picker dropdown inside pipeline-in / virtual-device nodes.
+ * Returns a minimal device list — never exposes credentials or secrets.
+ */
+router.get('/nr/agents', async (req, res) => {
+  try {
+    const result = await query<{ uuid: string; device_name: string; is_online: boolean; device_type: string }>(
+      `SELECT uuid, device_name, is_online, device_type
+       FROM agents
+       ORDER BY device_name ASC
+       LIMIT 500`
+    );
+    res.json({ agents: result.rows.map(r => ({ ...r, name: r.device_name })) });
+  } catch (error: any) {
+    logger.error('GET /nr/agents failed:', error);
+    res.status(500).json({ error: 'Failed to list agents', message: error.message });
+  }
+});
+
+/**
+ * GET /api/v1/nr/endpoints?agentUuid=<uuid>
+ * Internal-network endpoint (no auth) used by the Node-RED plugin server to
+ * populate the endpoint device list inside the device-filter node editor.
+ * Returns only uuid, name, and protocol — never exposes credentials or secrets.
+ */
+router.get('/nr/endpoints', async (req, res) => {
+  const agentUuid = (req.query['agentUuid'] as string | undefined)?.trim();
+  if (!agentUuid) {
+    return res.status(400).json({ error: 'agentUuid query param is required' });
+  }
+  try {
+    const result = await query<{ uuid: string; name: string; protocol: string }>(
+      `SELECT uuid, name, protocol
+       FROM endpoints
+       WHERE agent_uuid = $1 AND enabled = true
+       ORDER BY name ASC
+       LIMIT 500`,
+      [agentUuid]
+    );
+    res.json({ endpoints: result.rows });
+  } catch (error: any) {
+    logger.error('GET /nr/endpoints failed:', error);
+    res.status(500).json({ error: 'Failed to list endpoints', message: error.message });
+  }
+});
 
 // // JWT or bootstrap token authentication for Node-RED storage routes.
 // router.use('/nr/storage', async (req, res, next) => {

@@ -116,7 +116,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
         params.append('service', selectedService);
       }
       
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/logs?${params}`));
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/logs?${params}`));
       if (response.ok) {
         const data = await response.json();
         const normalizedLogs = (data.logs || []).map((log: any) => ({
@@ -136,7 +136,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
   useEffect(() => {
     const fetchServices = async () => {
       try {
-        const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/logs/services`));
+        const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/logs/services`));
         if (response.ok) {
           const data = await response.json();
           setServiceOptions(data.services || []);

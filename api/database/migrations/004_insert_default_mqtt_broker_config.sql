@@ -164,18 +164,18 @@ DO UPDATE SET
     updated_at = CURRENT_TIMESTAMP;
 
 -- ============================================================================
--- STEP 5: Link devices to broker configuration
+-- STEP 5: Link agents to broker configuration
 -- ============================================================================
 
--- Add mqtt_broker_id column to devices table if not exists
-ALTER TABLE devices 
+-- Add mqtt_broker_id column to agents table if not exists
+ALTER TABLE agents 
 ADD COLUMN IF NOT EXISTS mqtt_broker_id INTEGER REFERENCES mqtt_broker_config(id) ON DELETE SET NULL;
 
 -- Create index for faster lookups
-CREATE INDEX IF NOT EXISTS idx_devices_mqtt_broker_id ON devices(mqtt_broker_id);
+CREATE INDEX IF NOT EXISTS idx_agents_mqtt_broker_id ON agents(mqtt_broker_id);
 
 -- Add helpful comment
-COMMENT ON COLUMN devices.mqtt_broker_id IS 'MQTT broker configuration for this device (NULL = use default broker)';
+COMMENT ON COLUMN agents.mqtt_broker_id IS 'MQTT broker configuration for this agent (NULL = use default broker)';
 
 -- ============================================================================
 -- STEP 6: Create helpful views
@@ -200,7 +200,7 @@ SELECT
     COUNT(d.uuid) AS device_count,
     COUNT(CASE WHEN d.is_active = true THEN 1 END) AS active_device_count
 FROM mqtt_broker_config mbc
-LEFT JOIN devices d ON d.mqtt_broker_id = mbc.id
+LEFT JOIN agents d ON d.mqtt_broker_id = mbc.id
 GROUP BY mbc.id, mbc.name, mbc.description, mbc.protocol, mbc.host, mbc.port, 
          mbc.username, mbc.is_active, mbc.is_default, mbc.broker_type, 
          mbc.use_tls, mbc.last_connected_at, mbc.created_at;
@@ -215,7 +215,7 @@ COMMENT ON TABLE mqtt_broker_config IS 'MQTT broker connection configuration. En
 COMMENT ON COLUMN mqtt_broker_config.protocol IS 'Connection protocol: mqtt (plain), mqtts (TLS), ws (WebSocket), wss (WebSocket Secure)';
 COMMENT ON COLUMN mqtt_broker_config.port IS 'MQTT broker port. E2E/Docker: 5883, Production with TLS: 8883';
 COMMENT ON COLUMN mqtt_broker_config.use_tls IS 'Enable TLS/SSL encryption. Requires valid certificates in ca_cert, client_cert, client_key fields';
-COMMENT ON COLUMN mqtt_broker_config.is_default IS 'Default broker used for new device provisioning when device.mqtt_broker_id is NULL';
+COMMENT ON COLUMN mqtt_broker_config.is_default IS 'Default broker used for new agent provisioning when agent.mqtt_broker_id is NULL';
 COMMENT ON COLUMN mqtt_broker_config.broker_type IS 'Broker deployment type: local (on-premise), cloud (HiveMQ/AWS IoT), edge (cluster edge node), test (e2e testing)';
 
 -- ============================================================================
@@ -237,7 +237,7 @@ BEGIN
     RAISE NOTICE '';
     RAISE NOTICE '📝 Configuration Priority:';
     RAISE NOTICE '   1. Environment variables (MQTT_BROKER_HOST, MQTT_BROKER_PORT, MQTT_BROKER_PROTOCOL)';
-    RAISE NOTICE '   2. Device-specific broker (devices.mqtt_broker_id)';
+    RAISE NOTICE '   2. Agent-specific broker (agents.mqtt_broker_id)';
     RAISE NOTICE '   3. Default broker (mqtt_broker_config.is_default = true)';
     RAISE NOTICE '';
     RAISE NOTICE '🔧 For E2E testing: Set environment variables in docker-compose.e2e.yml';

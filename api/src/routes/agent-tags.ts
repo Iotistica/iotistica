@@ -1,6 +1,6 @@
 /**
  * Device Tags Routes
- * API endpoints for managing device tags and querying devices by tags
+ * API endpoints for managing device tags and querying agents by tags
  */
 
 import express from 'express';
@@ -19,16 +19,16 @@ const moduleLogger = logger.child({ module: 'device-tags' });
 export const router = express.Router();
 
 /**
- * GET /api/v1/devices/:uuid/tags
+ * GET /api/v1/agents/:uuid/tags
  * Get all tags for a device
  */
-router.get('/devices/:uuid/tags', async (req, res) => {
+router.get('/agents/:uuid/tags', async (req, res) => {
   try {
     const { uuid } = req.params;
 
     // Verify device exists
     const deviceResult = await query(
-      'SELECT uuid, device_name FROM devices WHERE uuid = $1',
+      'SELECT uuid, device_name FROM agents WHERE uuid = $1',
       [uuid]
     );
 
@@ -41,7 +41,7 @@ router.get('/devices/:uuid/tags', async (req, res) => {
 
     // Get all tags for the device
     const tagsResult = await query(
-      'SELECT key, value, created_at, created_by, updated_at FROM device_tags WHERE device_uuid = $1 ORDER BY key',
+      'SELECT key, value, created_at, created_by, updated_at FROM agent_tags WHERE agent_uuid = $1 ORDER BY key',
       [uuid]
     );
 
@@ -71,10 +71,10 @@ router.get('/devices/:uuid/tags', async (req, res) => {
 });
 
 /**
- * POST /api/v1/devices/:uuid/tags
+ * POST /api/v1/agents/:uuid/tags
  * Add or update a single tag on a device
  */
-router.post('/devices/:uuid/tags', async (req, res) => {
+router.post('/agents/:uuid/tags', async (req, res) => {
   try {
     const { uuid } = req.params;
     const { key, value } = req.body as TagOperationRequest;
@@ -88,7 +88,7 @@ router.post('/devices/:uuid/tags', async (req, res) => {
 
     // Verify device exists
     const deviceResult = await query(
-      'SELECT uuid FROM devices WHERE uuid = $1',
+      'SELECT uuid FROM agents WHERE uuid = $1',
       [uuid]
     );
 
@@ -101,9 +101,9 @@ router.post('/devices/:uuid/tags', async (req, res) => {
 
     // Insert or update tag (upsert)
     await query(
-      `INSERT INTO device_tags (device_uuid, key, value, created_at, updated_at)
+      `INSERT INTO agent_tags (agent_uuid, key, value, created_at, updated_at)
        VALUES ($1, $2, $3, NOW(), NOW())
-       ON CONFLICT (device_uuid, key)
+       ON CONFLICT (agent_uuid, key)
        DO UPDATE SET value = $3, updated_at = NOW()`,
       [uuid, key, value]
     );
@@ -134,10 +134,10 @@ router.post('/devices/:uuid/tags', async (req, res) => {
 });
 
 /**
- * PUT /api/v1/devices/:uuid/tags
+ * PUT /api/v1/agents/:uuid/tags
  * Replace all tags on a device (bulk update)
  */
-router.put('/devices/:uuid/tags', async (req, res) => {
+router.put('/agents/:uuid/tags', async (req, res) => {
   try {
     const { uuid } = req.params;
     const { tags } = req.body as { tags: Record<string, string> };
@@ -151,7 +151,7 @@ router.put('/devices/:uuid/tags', async (req, res) => {
 
     // Verify device exists
     const deviceResult = await query(
-      'SELECT uuid FROM devices WHERE uuid = $1',
+      'SELECT uuid FROM agents WHERE uuid = $1',
       [uuid]
     );
 
@@ -167,13 +167,13 @@ router.put('/devices/:uuid/tags', async (req, res) => {
 
     try {
       // Delete all existing tags for the device
-      await query('DELETE FROM device_tags WHERE device_uuid = $1', [uuid]);
+      await query('DELETE FROM agent_tags WHERE agent_uuid = $1', [uuid]);
 
       // Insert new tags
       const tagEntries = Object.entries(tags);
       for (const [key, value] of tagEntries) {
         await query(
-          `INSERT INTO device_tags (device_uuid, key, value, created_at, updated_at)
+          `INSERT INTO agent_tags (agent_uuid, key, value, created_at, updated_at)
            VALUES ($1, $2, $3, NOW(), NOW())`,
           [uuid, key, value]
         );
@@ -209,15 +209,15 @@ router.put('/devices/:uuid/tags', async (req, res) => {
 });
 
 /**
- * DELETE /api/v1/devices/:uuid/tags/:key
+ * DELETE /api/v1/agents/:uuid/tags/:key
  * Delete a specific tag from a device
  */
-router.delete('/devices/:uuid/tags/:key', async (req, res) => {
+router.delete('/agents/:uuid/tags/:key', async (req, res) => {
   try {
     const { uuid, key } = req.params;
 
     const result = await query(
-      'DELETE FROM device_tags WHERE device_uuid = $1 AND key = $2 RETURNING key',
+      'DELETE FROM agent_tags WHERE agent_uuid = $1 AND key = $2 RETURNING key',
       [uuid, key]
     );
 
@@ -253,10 +253,10 @@ router.delete('/devices/:uuid/tags/:key', async (req, res) => {
 });
 
 /**
- * POST /api/v1/devices/query
- * Query devices by tag selectors
+ * POST /api/v1/agents/query
+ * Query agents by tag selectors
  */
-router.post('/devices/query', async (req, res) => {
+router.post('/agents/query', async (req, res) => {
   try {
     const { tagSelectors } = req.body as DeviceQueryRequest;
 
@@ -267,35 +267,35 @@ router.post('/devices/query', async (req, res) => {
       });
     }
 
-    // Use the database function to find devices
+    // Use the database function to find agents
     const result = await query(
-      'SELECT * FROM find_devices_by_tags($1::jsonb)',
+      'SELECT * FROM find_agents_by_tags($1::jsonb)',
       [JSON.stringify(tagSelectors)]
     );
 
-    const deviceUuids = result.rows.map(row => row.device_uuid);
+    const deviceUuids = result.rows.map(row => row.agent_uuid);
 
-    // If no devices found, return empty result
+    // If no agents found, return empty result
     if (deviceUuids.length === 0) {
       const response: DeviceQueryResponse = {
         count: 0,
-        devices: []
+        agents: []
       };
       return res.json(response);
     }
 
     // Fetch device details and their tags
-    const devicesResult = await query(
+    const agentsResult = await query(
       `SELECT d.uuid, d.device_name, d.device_type, d.is_online,
               jsonb_object_agg(dt.key, dt.value) FILTER (WHERE dt.key IS NOT NULL) as tags
-       FROM devices d
-       LEFT JOIN device_tags dt ON d.uuid = dt.device_uuid
+       FROM agents d
+       LEFT JOIN agent_tags dt ON d.uuid = dt.agent_uuid
        WHERE d.uuid = ANY($1::uuid[])
        GROUP BY d.uuid, d.device_name, d.device_type, d.is_online`,
       [deviceUuids]
     );
 
-    const devices = devicesResult.rows.map(row => ({
+    const agents = agentsResult.rows.map(row => ({
       uuid: row.uuid,
       deviceName: row.device_name,
       deviceType: row.device_type,
@@ -304,34 +304,34 @@ router.post('/devices/query', async (req, res) => {
     }));
 
     const response: DeviceQueryResponse = {
-      count: devices.length,
-      devices
+      count: agents.length,
+      agents
     };
 
     moduleLogger.info('Device query executed', {
       tagSelectors,
-      matchCount: devices.length
+      matchCount: agents.length
     });
 
     res.json(response);
   } catch (error: any) {
-    moduleLogger.error('Error querying devices by tags', {
+    moduleLogger.error('Error querying agents by tags', {
       error: error.message,
       stack: error.stack,
       tagSelectors: req.body.tagSelectors
     });
     res.status(500).json({
-      error: 'Failed to query devices',
+      error: 'Failed to query agents',
       message: error.message
     });
   }
 });
 
 /**
- * POST /api/v1/devices/tags/bulk
- * Apply tags to multiple devices at once
+ * POST /api/v1/agents/tags/bulk
+ * Apply tags to multiple agents at once
  */
-router.post('/devices/tags/bulk', async (req, res) => {
+router.post('/agents/tags/bulk', async (req, res) => {
   try {
     const { deviceUuids, tags } = req.body as BulkTagOperationRequest;
 
@@ -349,13 +349,13 @@ router.post('/devices/tags/bulk', async (req, res) => {
       });
     }
 
-    // Verify all devices exist
-    const devicesResult = await query(
-      'SELECT uuid FROM devices WHERE uuid = ANY($1::uuid[])',
+    // Verify all agents exist
+    const agentsResult = await query(
+      'SELECT uuid FROM agents WHERE uuid = ANY($1::uuid[])',
       [deviceUuids]
     );
 
-    const existingUuids = devicesResult.rows.map(row => row.uuid);
+    const existingUuids = agentsResult.rows.map(row => row.uuid);
     const missingUuids = deviceUuids.filter(uuid => !existingUuids.includes(uuid));
 
     if (missingUuids.length > 0) {
@@ -375,9 +375,9 @@ router.post('/devices/tags/bulk', async (req, res) => {
       for (const deviceUuid of existingUuids) {
         for (const [key, value] of tagEntries) {
           await query(
-            `INSERT INTO device_tags (device_uuid, key, value, created_at, updated_at)
+            `INSERT INTO agent_tags (agent_uuid, key, value, created_at, updated_at)
              VALUES ($1, $2, $3, NOW(), NOW())
-             ON CONFLICT (device_uuid, key)
+             ON CONFLICT (agent_uuid, key)
              DO UPDATE SET value = $3, updated_at = NOW()`,
             [deviceUuid, key, value]
           );
@@ -395,8 +395,8 @@ router.post('/devices/tags/bulk', async (req, res) => {
 
       res.json({
         success: true,
-        message: 'Tags applied to all devices successfully',
-        devicesUpdated: existingUuids.length,
+        message: 'Tags applied to all agents successfully',
+        agentsUpdated: existingUuids.length,
         tagsApplied: tagEntries.length,
         totalOperations: totalTagsApplied
       });
@@ -594,7 +594,7 @@ router.delete('/tags/definitions/:key', async (req, res) => {
 
     // Check if tag is in use
     const usageCheck = await query(
-      'SELECT COUNT(*) as count FROM device_tags WHERE key = $1',
+      'SELECT COUNT(*) as count FROM agent_tags WHERE key = $1',
       [key]
     );
 
@@ -603,7 +603,7 @@ router.delete('/tags/definitions/:key', async (req, res) => {
       return res.status(409).json({
         error: 'Tag definition in use',
         message: `Cannot delete tag definition '${key}' as it is used by ${inUseCount} device(s)`,
-        devicesAffected: inUseCount
+        agentsAffected: inUseCount
       });
     }
 
@@ -649,7 +649,7 @@ router.get('/tags/keys', async (req, res) => {
   try {
     const result = await query(
       `SELECT DISTINCT key, COUNT(*) as device_count
-       FROM device_tags
+       FROM agent_tags
        GROUP BY key
        ORDER BY key`
     );
@@ -685,7 +685,7 @@ router.get('/tags/values/:key', async (req, res) => {
 
     const result = await query(
       `SELECT DISTINCT value, COUNT(*) as device_count
-       FROM device_tags
+       FROM agent_tags
        WHERE key = $1
        GROUP BY value
        ORDER BY value`,

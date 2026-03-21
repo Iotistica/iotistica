@@ -213,7 +213,7 @@ export async function handleAgentStatus(data: any): Promise<void> {
     const result = await query(
       `SELECT id, status, target_version 
        FROM agent_updates 
-       WHERE device_uuid = $1 
+       WHERE agent_uuid = $1 
        AND status IN ('pending', 'acknowledged', 'scheduled', 'in_progress')
        ORDER BY created_at DESC 
        LIMIT 1`,
@@ -291,10 +291,10 @@ export async function handleAgentStatus(data: any): Promise<void> {
           [updateId]
         );
         
-        // Update device agent_version in devices table
+        // Update device agent_version in agents table
         if (status.target_version) {
           await query(
-            `UPDATE devices 
+            `UPDATE agents 
              SET agent_version = $1, 
                  modified_at = NOW() 
              WHERE uuid = $2`,
@@ -340,7 +340,7 @@ export async function handleAgentStatus(data: any): Promise<void> {
 }
 
 /**
- * Handle anomaly events from edge devices
+ * Handle anomaly events from edge agents
  * Performs cloud-side correlation, deduplication, and alerting
  */
 export async function handleAnomalyEvent(event: AnomalyEvent): Promise<void> {
@@ -355,7 +355,7 @@ export async function handleAnomalyEvent(event: AnomalyEvent): Promise<void> {
 
 /**
  * Handle job-related MQTT messages
- * Processes job updates and start-next requests from devices
+ * Processes job updates and start-next requests from agents
  */
 export async function handleJobMessage(data: { topic: string; payload: Buffer }): Promise<void> {
   try {

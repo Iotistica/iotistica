@@ -21,7 +21,7 @@ router.get('/license', jwtAuth, requireRole('admin'), async (req, res) => {
   try {
     const license = LicenseValidator.getInstance();
     const licenseData = license.getLicense();
-    const devices = await DeviceModel.list({ isActive: true });
+    const agents = await DeviceModel.list({ isActive: true });
     
     res.json({
       customer: {
@@ -41,10 +41,10 @@ router.get('/license', jwtAuth, requireRole('admin'), async (req, res) => {
       features: licenseData.features,
       limits: licenseData.limits,
       usage: {
-        devices: {
-          current: devices.length,
+        agents: {
+          current: agents.length,
           max: licenseData.features.maxDevices,
-          percentUsed: Math.round((devices.length / licenseData.features.maxDevices) * 100),
+          percentUsed: Math.round((agents.length / licenseData.features.maxDevices) * 100),
         },
       },
       upgradeUrl: process.env.BILLING_UPGRADE_URL || 'https://iotistica.com/upgrade',

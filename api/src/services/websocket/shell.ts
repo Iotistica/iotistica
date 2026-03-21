@@ -709,7 +709,7 @@ export class ShellHandler {
       if (isEnter) {
         if (commandBuffer.trim().length > 0) {
           await query(
-            `INSERT INTO shell_audit_log (user_id, device_uuid, session_id, command)
+            `INSERT INTO shell_audit_log (user_id, agent_uuid, session_id, command)
              VALUES ($1, $2, $3, $4)`,
             [userId, deviceUuid, sessionId, commandBuffer],
           );

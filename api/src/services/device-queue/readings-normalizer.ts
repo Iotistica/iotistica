@@ -48,7 +48,7 @@ export function normalizeQuality(quality: any): string {
  * Extract identity fields from a reading or combined payload.
  * Canonical wire format from the agent:
  *   endpoint_uuid  (snake_case) — explicit endpoint UUID, optional
- *   device_uuid    (snake_case) — stable asset device UUID
+ *   agent_uuid    (snake_case) — stable asset device UUID
  *   deviceName     (camelCase)  — human-readable device name
  */
 export function extractDeviceIdentity(reading: any): DeviceIdentity {
@@ -62,10 +62,10 @@ export function extractDeviceIdentity(reading: any): DeviceIdentity {
   const deviceName = typeof reading?.deviceName === 'string' ? reading.deviceName.trim() || undefined : undefined;
 
   return {
-    // Adapters send the endpoint UUID as device_uuid (via enrichWithEndpointUuid).
-    // Fall back to device_uuid when endpoint_uuid is not explicitly present.
-    endpointUuid: pickUuid(reading?.endpoint_uuid) ?? pickUuid(reading?.device_uuid),
-    deviceUuid: pickUuid(reading?.device_uuid),
+    // Adapters send the endpoint UUID as agent_uuid (via enrichWithEndpointUuid).
+    // Fall back to agent_uuid when endpoint_uuid is not explicitly present.
+    endpointUuid: pickUuid(reading?.endpoint_uuid) ?? pickUuid(reading?.agent_uuid),
+    deviceUuid: pickUuid(reading?.agent_uuid),
     deviceName,
   };
 }
@@ -81,7 +81,7 @@ export function buildExtraPayload(
 
   const extra = {
     endpoint_uuid: endpointUuid ?? null,
-    device_uuid: deviceUuid ?? null,
+    agent_uuid: deviceUuid ?? null,
     device_name: deviceName ?? null,
     ingested_at: ingestedAt.toISOString(),
   };

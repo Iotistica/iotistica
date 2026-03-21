@@ -59,7 +59,7 @@ export async function flushTrafficStats(): Promise<void> {
       for (const stat of stats) {
         // Upsert: insert or update on conflict
         await client.query(`
-          INSERT INTO device_traffic_stats (
+          INSERT INTO agent_traffic_stats (
             device_id,
             endpoint,
             method,
@@ -73,19 +73,19 @@ export async function flushTrafficStats(): Promise<void> {
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
           ON CONFLICT (device_id, endpoint, method, time_bucket)
           DO UPDATE SET
-            request_count = device_traffic_stats.request_count + EXCLUDED.request_count,
-            total_bytes = device_traffic_stats.total_bytes + EXCLUDED.total_bytes,
-            total_time = device_traffic_stats.total_time + EXCLUDED.total_time,
-            success_count = device_traffic_stats.success_count + EXCLUDED.success_count,
-            failed_count = device_traffic_stats.failed_count + EXCLUDED.failed_count,
+            request_count = agent_traffic_stats.request_count + EXCLUDED.request_count,
+            total_bytes = agent_traffic_stats.total_bytes + EXCLUDED.total_bytes,
+            total_time = agent_traffic_stats.total_time + EXCLUDED.total_time,
+            success_count = agent_traffic_stats.success_count + EXCLUDED.success_count,
+            failed_count = agent_traffic_stats.failed_count + EXCLUDED.failed_count,
             status_codes = (
               SELECT jsonb_object_agg(
                 key,
-                COALESCE((device_traffic_stats.status_codes->>key)::int, 0) + 
+                COALESCE((agent_traffic_stats.status_codes->>key)::int, 0) + 
                 COALESCE((EXCLUDED.status_codes->>key)::int, 0)
               )
               FROM (
-                SELECT key FROM jsonb_object_keys(device_traffic_stats.status_codes) AS key
+                SELECT key FROM jsonb_object_keys(agent_traffic_stats.status_codes) AS key
                 UNION
                 SELECT key FROM jsonb_object_keys(EXCLUDED.status_codes) AS key
               ) AS all_keys

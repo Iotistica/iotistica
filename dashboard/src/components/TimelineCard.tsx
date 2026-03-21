@@ -97,7 +97,7 @@ export function TimelineCard({
       
       // Determine API endpoint based on whether deviceId is provided
       const endpoint = deviceId 
-        ? `/api/v1/events/device/${deviceId}?limit=${limit}`
+        ? `/api/v1/events/agent/${deviceId}?limit=${limit}`
         : `/api/v1/events/recent?limit=${limit}`; // Global view - all devices
       
       const response = await fetch(buildApiUrl(endpoint));

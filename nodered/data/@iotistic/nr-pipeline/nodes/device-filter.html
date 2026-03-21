@@ -1,0 +1,195 @@
+<script type="text/javascript">
+    RED.nodes.registerType('iotistica-device-filter', {
+        category:     'Iotistica',
+        color:        '#3FAED8',
+        defaults: {
+            name:    { value: '' },
+            mode:    { value: 'allow' },
+            devices: { value: '' },   // comma-separated UUIDs
+            topics:  { value: '' }    // newline-separated topic patterns
+        },
+        inputs:  1,
+        outputs: 2,
+        icon:    'font-awesome/fa-filter',
+        paletteLabel: 'device filter',
+        label: function () {
+            return this.name || ('filter · ' + (this.mode || 'allow'));
+        },
+        outputLabels: ['passed', 'filtered out'],
+        oneditprepare: function () {
+            var node = this;
+
+            // ── device multi-select ──────────────────────────────────────────
+            var $devList = $('#iotistica-filter-device-list');
+            var selected = (node.devices || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+
+            $devList.empty();
+
+            // Find the pipeline-in node on the same tab to get its agentUuid
+            var agentUuid = '';
+            RED.nodes.eachNode(function (n) {
+                if (n.type === 'iotistica-pipeline-in' && n.z === node.z) {
+                    agentUuid = n.agentUuid || '';
+                }
+            });
+
+            if (!agentUuid) {
+                $devList.append('<li style="font-style:italic;opacity:0.6">No agent assigned — add a pipeline-in node and select an agent first.</li>');
+            } else {
+                fetch('/nr-tools/endpoints?agentUuid=' + encodeURIComponent(agentUuid))
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        var endpoints = (data && Array.isArray(data.endpoints)) ? data.endpoints : [];
+                        if (endpoints.length === 0) {
+                            $devList.append('<li style="font-style:italic;opacity:0.6">No endpoint devices found for this agent.</li>');
+                            return;
+                        }
+                        endpoints.forEach(function (d) {
+                            var checked = selected.indexOf(d.uuid) !== -1 ? 'checked' : '';
+                            var proto = d.protocol ? '<span style="opacity:0.55;font-size:0.85em;flex-shrink:0">' + d.protocol + '</span>' : '';
+                            $devList.append(
+                                '<li style="margin:0">' +
+                                '<label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;padding:3px 8px;width:100%;box-sizing:border-box;overflow:hidden">' +
+                                '<input type="checkbox" value="' + d.uuid + '" ' + checked + ' style="flex-shrink:0">' +
+                                '<span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + d.name + '</span>' +
+                                proto +
+                                '</label></li>'
+                            );
+                        });
+                    })
+                    .catch(function (err) {
+                        console.warn('[device-filter] Failed to load endpoints:', err);
+                        $devList.append('<li style="color:var(--red-ui-notification-border-error,#c00)">Failed to load endpoints</li>');
+                    });
+            }
+
+            // ── topic list (editable rows) ───────────────────────────────────
+            var $topicList = $('#iotistica-filter-topic-list');
+            $topicList.empty();
+
+            var patterns = (node.topics || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+            if (patterns.length === 0) patterns = [''];
+
+            function addTopicRow(value) {
+                var $row = $('<div style="display:flex;gap:4px;margin-bottom:4px"></div>');
+                var $input = $('<input type="text" style="flex:1" placeholder="e.g. sensor/+/temperature or #">').val(value);
+                var $del = $('<button class="red-ui-button" style="padding:2px 8px" title="Remove">&#x2715;</button>');
+                $del.on('click', function () { $row.remove(); });
+                $row.append($input).append($del);
+                $topicList.append($row);
+            }
+
+            patterns.forEach(addTopicRow);
+
+            $('#iotistica-filter-topic-add').on('click', function () {
+                addTopicRow('');
+            });
+        },
+        oneditsave: function () {
+            // Collect checked device UUIDs
+            var uuids = [];
+            $('#iotistica-filter-device-list input[type=checkbox]:checked').each(function () {
+                uuids.push($(this).val());
+            });
+            this.devices = uuids.join(',');
+
+            // Collect topic patterns
+            var topics = [];
+            $('#iotistica-filter-topic-list input[type=text]').each(function () {
+                var v = $(this).val().trim();
+                if (v) topics.push(v);
+            });
+            this.topics = topics.join('\n');
+
+            // mode is bound to the select directly via node-input-mode
+        }
+    });
+</script>
+
+<script type="text/html" data-template-name="iotistica-device-filter">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="device filter">
+    </div>
+
+    <div class="form-row">
+        <label for="node-input-mode"><i class="fa fa-toggle-on"></i> Mode</label>
+        <select id="node-input-mode" style="width:70%">
+            <option value="allow">Allow matching messages (block rest)</option>
+            <option value="block">Block matching messages (pass rest)</option>
+        </select>
+    </div>
+
+    <div class="form-row">
+        <label style="vertical-align:top;margin-top:4px"><i class="fa fa-microchip"></i> Devices</label>
+        <div style="display:inline-block;width:70%;vertical-align:top">
+            <ul id="iotistica-filter-device-list"
+                style="list-style:none;margin:0;padding:2px 0;border:1px solid var(--red-ui-form-input-border-color, #ccc);border-radius:4px;max-height:140px;overflow-y:auto;background:var(--red-ui-form-input-background, transparent);width:100%;box-sizing:border-box">
+                <li style="font-style:italic;opacity:0.6">Loading endpoint devices...</li>
+            </ul>
+            <div style="font-size:11px;margin-top:3px;opacity:0.7">Leave all unchecked to match any device.</div>
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label style="vertical-align:top;margin-top:4px"><i class="fa fa-sitemap"></i> Topics</label>
+        <div style="display:inline-block;width:70%;vertical-align:top">
+            <div id="iotistica-filter-topic-list"></div>
+            <button id="iotistica-filter-topic-add" class="red-ui-button" style="margin-top:4px">
+                <i class="fa fa-plus"></i> Add pattern
+            </button>
+            <div style="font-size:11px;margin-top:3px;opacity:0.7">
+                Supports MQTT wildcards: <code>+</code> (one level) and <code>#</code> (multi-level).
+                Leave empty to match any topic.
+            </div>
+        </div>
+    </div>
+</script>
+
+<script type="text/html" data-help-name="iotistica-device-filter">
+    <p>
+        <b>Iotistica Device Filter</b> — route or drop pipeline messages based on
+        device UUID and MQTT topic patterns.
+    </p>
+
+    <h3>Outputs</h3>
+    <ol class="node-ports">
+        <li><b>Passed</b> — messages that matched the filter criteria.</li>
+        <li><b>Filtered out</b> — messages that did not match (wire to a debug node or pipeline out to discard).</li>
+    </ol>
+
+    <h3>Configuration</h3>
+    <dl class="message-properties">
+        <dt>Mode</dt>
+        <dd>
+            <b>Allow</b>: only messages matching the selected devices and/or topic patterns
+            are sent to output 1. Everything else goes to output 2.<br>
+            <b>Block</b>: matching messages go to output 2; everything else passes to output 1.
+        </dd>
+        <dt>Devices</dt>
+        <dd>
+            Check the endpoint devices (sensors) belonging to the agent selected in the
+            upstream <b>pipeline-in</b> node. Messages are matched against
+            <code>msg.deviceId</code>. Leave all unchecked to match any device.
+        </dd>
+        <dt>Topics</dt>
+        <dd>
+            One MQTT topic pattern per row. Use <code>+</code> to match a single
+            level (e.g. <code>sensor/+/temperature</code>) or <code>#</code> to
+            match the rest of the path (e.g. <code>sensor/#</code>).
+            Leave empty to match any topic.
+        </dd>
+    </dl>
+
+    <h3>Details</h3>
+    <p>
+        Both conditions (device AND topic) must be satisfied for a message to be
+        considered matched. If neither list is configured the node passes everything
+        to output 1.
+    </p>
+    <p>
+        Wire output 2 to a <b>pipeline out</b> node (with <code>msg.drop = true</code>
+        set upstream) to silently discard filtered messages, or leave it unwired to
+        ignore them.
+    </p>
+</script>

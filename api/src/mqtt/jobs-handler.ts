@@ -1,7 +1,7 @@
 /**
  * MQTT Jobs Handler
  * 
- * Listens for job status updates from devices via MQTT and saves them to the database.
+ * Listens for job status updates from agents via MQTT and saves them to the database.
  * Handles the server-side of the AWS IoT Jobs MQTT protocol.
  */
 
@@ -82,7 +82,7 @@ export class JobsHandler {
     const result = await pool.query(
       `SELECT id, job_document, created_at 
        FROM jobs 
-       WHERE device_uuid = $1 AND status = 'QUEUED' 
+       WHERE agent_uuid = $1 AND status = 'QUEUED' 
        ORDER BY created_at ASC 
        LIMIT 1`,
       [deviceUuid]
@@ -187,7 +187,7 @@ export class JobsHandler {
     try {
       // Check if record exists
       const existing = await pool.query(
-        'SELECT * FROM device_job_status WHERE job_id = $1 AND device_uuid = $2',
+        'SELECT * FROM agent_job_status WHERE job_id = $1 AND agent_uuid = $2',
         [jobId, deviceUuid]
       );
 
@@ -199,7 +199,7 @@ export class JobsHandler {
       if (existing.rows.length > 0) {
         // Update existing record
         let updateQuery = `
-          UPDATE device_job_status 
+          UPDATE agent_job_status 
           SET status = $1, 
               updated_at = $2,
               reason = COALESCE($3, reason)
@@ -235,7 +235,7 @@ export class JobsHandler {
           paramIndex++;
         }
 
-        updateQuery += ` WHERE job_id = $${paramIndex} AND device_uuid = $${paramIndex + 1}`;
+        updateQuery += ` WHERE job_id = $${paramIndex} AND agent_uuid = $${paramIndex + 1}`;
         params.push(jobId, deviceUuid);
 
         await pool.query(updateQuery, params);
@@ -249,8 +249,8 @@ export class JobsHandler {
         logger.warn(`[JobsHandler] Job status record not found, creating new one for ${jobId}`);
 
         await pool.query(
-          `INSERT INTO device_job_status 
-           (job_id, device_uuid, status, queued_at, started_at, completed_at, stdout, stderr, reason, updated_at)
+          `INSERT INTO agent_job_status 
+           (job_id, agent_uuid, status, queued_at, started_at, completed_at, stdout, stderr, reason, updated_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           [
             jobId,

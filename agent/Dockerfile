@@ -19,6 +19,9 @@ FROM base AS deps
 
 WORKDIR /app
 
+# Copy shared types package so the file: dependency resolves during npm ci
+COPY packages/types /packages/types
+
 # Copy package files
 COPY agent/package*.json ./
 
@@ -35,6 +38,9 @@ RUN --mount=type=cache,target=/root/.npm \
 FROM base AS builder
 
 WORKDIR /app
+
+# Copy shared types package so the file: dependency resolves during npm ci
+COPY packages/types /packages/types
 
 # Copy package files
 COPY agent/package*.json agent/tsconfig.json agent/tsconfig.build.json ./

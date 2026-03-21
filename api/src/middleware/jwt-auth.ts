@@ -7,7 +7,7 @@
  * 2. Auth0: RS256 tokens via JWKS validation (recommended)
  * 
  * Usage:
- *   router.get('/dashboard/devices', jwtAuth, async (req, res) => {
+ *   router.get('/dashboard/agents', jwtAuth, async (req, res) => {
  *     // req.user contains authenticated user info
  *   });
  */

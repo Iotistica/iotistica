@@ -1,7 +1,7 @@
 /**
  * Device UUID Immutability Middleware
  * 
- * Quick check to prevent re-registration attempts for already-registered devices.
+ * Quick check to prevent re-registration attempts for already-registered agents.
  * Fails fast before hitting the provisioning service layer.
  * 
  * Usage:

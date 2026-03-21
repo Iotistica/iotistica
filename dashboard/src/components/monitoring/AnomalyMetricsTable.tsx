@@ -279,7 +279,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
 
   const fetchDevices = async () => {
     try {
-      const response = await fetch(buildApiUrl('/api/v1/devices?limit=100'));
+      const response = await fetch(buildApiUrl('/api/v1/agents?limit=100'));
       const data = await response.json();
       if (data.devices) {
         // Filter online devices
@@ -331,7 +331,7 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
       await fetchDeviceState(deviceUuid);
 
       const accessToken = localStorage.getItem('accessToken') || localStorage.getItem('token');
-      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`), {
+      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}`), {
         headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       });
 

@@ -513,7 +513,7 @@ class RedisClient {
    * Used by WebSocket manager to forward real-time updates to dashboard
    * 
    * @param tenantId - Tenant identifier (customerId)
-   * @param deviceUuid - Device UUID or '*' for all devices (pattern subscription)
+   * @param deviceUuid - Device UUID or '*' for all agents (pattern subscription)
    * @param callback - Function to call when metrics received
    * @returns Promise<void>
    */
@@ -536,7 +536,7 @@ class RedisClient {
     const pattern = deviceUuid === '*' ? agentMetricsPattern(tenantId) : agentMetricsChannel(tenantId, deviceUuid);
     
     if (deviceUuid === '*') {
-      // Pattern subscription for all devices
+      // Pattern subscription for all agents
       
       // Register callback
       if (!this.patternCallbacks.has(pattern)) {
@@ -567,7 +567,7 @@ class RedisClient {
    * Unsubscribe from device metrics updates
    * 
    * @param tenantId - Tenant identifier (customerId)
-   * @param deviceUuid - Device UUID or '*' for all devices
+   * @param deviceUuid - Device UUID or '*' for all agents
    * @param callback - The callback to remove (optional - if not provided, removes all callbacks)
    */
   public async unsubscribeFromDeviceMetrics(

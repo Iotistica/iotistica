@@ -148,7 +148,7 @@ export class DeviceFlowExtractionService {
     try {
       // Check if device exists
       const deviceCheck = await query(
-        'SELECT uuid, device_name FROM devices WHERE uuid = $1',
+        'SELECT uuid, device_name FROM agents WHERE uuid = $1',
         [deviceSubflow.deviceUuid]
       );
 
@@ -164,7 +164,7 @@ export class DeviceFlowExtractionService {
 
       // Check if flow already exists with same hash (no changes)
       const existingFlow = await query(
-        'SELECT id, hash, version FROM device_flows WHERE device_uuid = $1 AND subflow_id = $2',
+        'SELECT id, hash, version FROM agent_flows WHERE agent_uuid = $1 AND subflow_id = $2',
         [deviceSubflow.deviceUuid, deviceSubflow.subflowId]
       );
 
@@ -182,9 +182,9 @@ export class DeviceFlowExtractionService {
 
         // Update existing flow (version incremented)
         await query(
-          `UPDATE device_flows 
+          `UPDATE agent_flows 
            SET flows = $1, hash = $2, subflow_name = $3, version = version + 1, updated_at = NOW()
-           WHERE device_uuid = $4 AND subflow_id = $5
+           WHERE agent_uuid = $4 AND subflow_id = $5
            RETURNING id, version`,
           [
             JSON.stringify(deviceSubflow.flows),
@@ -205,7 +205,7 @@ export class DeviceFlowExtractionService {
       } else {
         // Insert new flow
         await query(
-          `INSERT INTO device_flows (device_uuid, subflow_id, subflow_name, flows, hash, version)
+          `INSERT INTO agent_flows (agent_uuid, subflow_id, subflow_name, flows, hash, version)
            VALUES ($1, $2, $3, $4, $5, 1)
            RETURNING id`,
           [
@@ -277,7 +277,7 @@ export class DeviceFlowExtractionService {
 
       // Update deployed_at timestamp
       await query(
-        'UPDATE device_flows SET deployed_at = NOW() WHERE device_uuid = $1 AND subflow_id = $2',
+        'UPDATE agent_flows SET deployed_at = NOW() WHERE agent_uuid = $1 AND subflow_id = $2',
         [deviceSubflow.deviceUuid, deviceSubflow.subflowId]
       ).catch(err => {
         logger.error('Failed to update deployed_at', {
@@ -300,8 +300,8 @@ export class DeviceFlowExtractionService {
     const result = await query(
       `SELECT id, subflow_id, subflow_name, flows, settings, modules, hash, version, 
               is_active, created_at, updated_at, deployed_at
-       FROM device_flows
-       WHERE device_uuid = $1 AND is_active = true
+       FROM agent_flows
+       WHERE agent_uuid = $1 AND is_active = true
        ORDER BY updated_at DESC`,
       [deviceUuid]
     );
@@ -315,9 +315,9 @@ export class DeviceFlowExtractionService {
   static async redeployDeviceFlow(deviceUuid: string, subflowId: string): Promise<void> {
     const result = await query(
       `SELECT df.*, d.device_name
-       FROM device_flows df
-       JOIN devices d ON d.uuid = df.device_uuid
-       WHERE df.device_uuid = $1 AND df.subflow_id = $2 AND df.is_active = true`,
+       FROM agent_flows df
+       JOIN agents d ON d.uuid = df.agent_uuid
+       WHERE df.agent_uuid = $1 AND df.subflow_id = $2 AND df.is_active = true`,
       [deviceUuid, subflowId]
     );
 

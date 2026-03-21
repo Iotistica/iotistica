@@ -1,10 +1,10 @@
 /**
  * Heartbeat Monitor Service
- * Monitors device connectivity and marks devices offline when they stop communicating
+ * Monitors device connectivity and marks agents offline when they stop communicating
  * 
  * IMPORTANT: Handles API downtime gracefully
  * - Tracks last check time in database
- * - On restart, only marks devices offline if they were inactive BEFORE API stopped
+ * - On restart, only marks agents offline if they were inactive BEFORE API stopped
  * - Prevents false offline detections during API maintenance/crashes
  */
 
@@ -147,15 +147,15 @@ export class HeartbeatMonitor {
        logger.info(`   Last check: ${this.lastCheckTime.toISOString()}`);
        logger.info(`   API restarted: ${now.toISOString()}`);
       
-      // Calculate the cutoff time: devices must have been inactive BEFORE API stopped
+      // Calculate the cutoff time: agents must have been inactive BEFORE API stopped
       // to be marked offline now
       const safeOfflineThreshold = this.offlineThreshold + apiDowntimeMinutes;
       
        logger.info(`   Adjusted offline threshold: ${safeOfflineThreshold} minutes (includes downtime)`);
       
-      // Mark devices offline only if they were inactive before API went down
+      // Mark agents offline only if they were inactive before API went down
       const result = await query(`
-        UPDATE devices 
+        UPDATE agents 
         SET is_online = false,
             status = 'offline'
         WHERE is_online = true 
@@ -216,7 +216,7 @@ export class HeartbeatMonitor {
           });
         }
       } else {
-         logger.info('    No devices to mark offline (all were active during API downtime)');
+         logger.info('    No agents to mark offline (all were active during API downtime)');
       }
       
       await logAuditEvent({
@@ -226,7 +226,7 @@ export class HeartbeatMonitor {
           apiDowntimeMinutes,
           lastCheckTime: this.lastCheckTime.toISOString(),
           restartTime: now.toISOString(),
-          devicesMarkedOffline: result.rows.length
+          agentsMarkedOffline: result.rows.length
         }
       });
     } else {
@@ -235,13 +235,13 @@ export class HeartbeatMonitor {
   }
 
   /**
-   * Check all devices and mark offline those that haven't communicated
+   * Check all agents and mark offline those that haven't communicated
    */
   private async checkDevices(): Promise<void> {
     try {
-      // Update devices that haven't communicated within threshold
+      // Update agents that haven't communicated within threshold
       const result = await query(`
-        UPDATE devices 
+        UPDATE agents 
         SET is_online = false,
             status = 'offline'
         WHERE is_online = true 

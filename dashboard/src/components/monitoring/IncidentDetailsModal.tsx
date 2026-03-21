@@ -84,7 +84,7 @@ interface IncidentDetailsModalProps {
   onResolve: () => void;
 }
 
-// System metrics that use /api/v1/devices/{uuid}/metrics endpoint
+// System metrics that use /api/v1/agents/{uuid}/metrics endpoint
 const SYSTEM_METRICS = ['cpu_usage', 'memory_percent', 'disk_usage', 'network_rx', 'network_tx', 'cpu_temp'];
 
 export function IncidentDetailsModal({
@@ -125,13 +125,13 @@ export function IncidentDetailsModal({
       const token = localStorage.getItem('token') || localStorage.getItem('accessToken');
 
       if (isSystemMetric) {
-        // Fetch system metrics using /api/v1/devices/{uuid}/metrics endpoint
+        // Fetch system metrics using /api/v1/agents/{uuid}/metrics endpoint
         if (!incident.device_uuid) {
           throw new Error('Device UUID not available for system metrics');
         }
         const period = calculatePeriod();
         const response = await fetch(
-          buildApiUrl(`/api/v1/devices/${incident.device_uuid}/metrics?period=${period}`),
+          buildApiUrl(`/api/v1/agents/${incident.device_uuid}/metrics?period=${period}`),
           {
             headers: token ? { 'Authorization': `Bearer ${token}` } : {},
           }

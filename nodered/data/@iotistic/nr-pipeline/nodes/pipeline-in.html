@@ -3,14 +3,49 @@
         category:    'Iotistica',
         color:       '#3FAED8',
         defaults: {
-            name: { value: '' }
+            name:      { value: '' },
+            agentUuid: { value: '' },
+            agentName: { value: '' }
         },
         inputs:  0,
         outputs: 1,
         icon:    'arrow-in.svg',
         paletteLabel: 'pipeline in',
-        label: function () { return this.name || 'pipeline in'; },
-        outputLabels: ['transformed payload']
+        label: function () {
+            if (this.agentName) { return this.agentName + ' → pipeline in'; }
+            return this.name || 'pipeline in';
+        },
+        outputLabels: ['transformed payload'],
+        oneditprepare: function () {
+            const node = this;
+            const $sel = $('#node-input-agentUuid');
+
+            $sel.empty().append('<option value="">-- no agent assigned --</option>');
+
+            fetch('/nr-tools/agents')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    const devices = (data && Array.isArray(data.devices)) ? data.devices : [];
+                    devices.forEach(function (d) {
+                        const status = d.is_online ? 'online' : 'offline';
+                        $sel.append(
+                            $('<option></option>')
+                                .val(d.uuid)
+                                .text(d.name + ' (' + status + ')')
+                                .attr('data-name', d.name)
+                        );
+                    });
+                    if (node.agentUuid) { $sel.val(node.agentUuid); }
+                })
+                .catch(function (err) {
+                    console.warn('[pipeline-in] Failed to load agents:', err);
+                });
+        },
+        oneditsave: function () {
+            const opt = $('#node-input-agentUuid option:selected');
+            this.agentUuid = opt.val() || '';
+            this.agentName = opt.attr('data-name') || '';
+        }
     });
 </script>
 
@@ -18,6 +53,12 @@
     <div class="form-row">
         <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
         <input type="text" id="node-input-name" placeholder="pipeline in">
+    </div>
+    <div class="form-row">
+        <label for="node-input-agentUuid"><i class="fa fa-microchip"></i> Agent</label>
+        <select id="node-input-agentUuid" style="width:70%">
+            <option value="">Loading...</option>
+        </select>
     </div>
 </script>
 

@@ -55,7 +55,7 @@ export const useSensorHealth = (deviceUuid: string): UseSensorHealthResult => {
       setError(null);
 
       // Fetch device health (protocol adapters) for summary and devices
-      const healthResponse = await fetch(`/api/v1/devices/${deviceUuid}/device-health`);
+      const healthResponse = await fetch(`/api/v1/agents/${deviceUuid}/device-health`);
       
       if (!healthResponse.ok) {
         throw new Error(`HTTP ${healthResponse.status}: ${healthResponse.statusText}`);
@@ -64,7 +64,7 @@ export const useSensorHealth = (deviceUuid: string): UseSensorHealthResult => {
       const healthData = await healthResponse.json();
       
       // Fetch sensor pipeline data
-      const sensorsResponse = await fetch(`/api/v1/devices/${deviceUuid}/sensors`);
+      const sensorsResponse = await fetch(`/api/v1/agents/${deviceUuid}/sensors`);
       const sensorsData = sensorsResponse.ok ? await sensorsResponse.json() : { pipelines: [] };
       
       // Transform data to match expected format

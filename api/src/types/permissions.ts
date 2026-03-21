@@ -46,8 +46,8 @@ export const PERMISSIONS = {
 export const ROLES = {
   OWNER: 'owner',           // Full access + billing
   ADMIN: 'admin',           // Full access except billing
-  MANAGER: 'manager',       // Read all, write devices/users
-  OPERATOR: 'operator',     // Read all, control devices
+  MANAGER: 'manager',       // Read all, write agents/users
+  OPERATOR: 'operator',     // Read all, control agents
   VIEWER: 'viewer',         // Read-only access
 } as const;
 

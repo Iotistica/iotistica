@@ -4,12 +4,12 @@
 -- Creates:
 --  1. latest_readings (current value per metric per device)
 --  2. metric_catalog (available metrics with statistics)
---  3. endpoint_devices (discovered devices with metric inventory)
+--  3. endpoint_devices (discovered agents with metric inventory)
 --  4. recent_anomalies (recent anomaly events from anomaly_events table)
 --  5. Refresh functions for manual and scheduled updates
 --  6. Orchestrator function to refresh all views at once
 --
--- Dependencies: readings hypertable (006), anomaly_events table (110), devices table
+-- Dependencies: readings hypertable (006), anomaly_events table (110), agents table
 
 SET search_path = public;
 
@@ -39,12 +39,12 @@ SELECT DISTINCT ON (agent_uuid, extra->>'deviceName', metric_name)
     r.extra->>'ingested_at' as ingested_at,
     r.anomaly_score,
     r.anomaly_threshold,
-    -- Join with devices table to get agent info
+    -- Join with agents table to get agent info
     d.device_name as agent_name,
     d.uuid as agent_full_uuid,
     d.is_online as agent_is_online
 FROM readings r
-LEFT JOIN devices d ON r.agent_uuid = d.uuid
+LEFT JOIN agents d ON r.agent_uuid = d.uuid
 WHERE r.time > NOW() - INTERVAL '1 hour'  -- Only recent data for performance
 ORDER BY agent_uuid, extra->>'deviceName', metric_name, time DESC;
 
@@ -90,7 +90,7 @@ SELECT
     MAX(r.anomaly_score) as max_anomaly_score,
     COUNT(*) FILTER (WHERE r.anomaly_score > r.anomaly_threshold) as anomaly_count
 FROM readings r
-LEFT JOIN devices d ON r.agent_uuid = d.uuid
+LEFT JOIN agents d ON r.agent_uuid = d.uuid
 WHERE r.time > NOW() - INTERVAL '7 days'
   AND r.extra->>'deviceName' IS NOT NULL  -- Only include readings with device name
 GROUP BY 
@@ -119,9 +119,9 @@ COMMENT ON MATERIALIZED VIEW metric_catalog
 -- ============================================================================
 -- 3. ENDPOINT DEVICES VIEW
 -- ============================================================================
--- Distinct endpoint devices discovered from readings
+-- Distinct endpoint agents discovered from readings
 -- Used for device selector dropdowns and device inventory
--- ~150ms refresh per 1000 unique devices (with 7-day data window)
+-- ~150ms refresh per 1000 unique agents (with 7-day data window)
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS endpoint_devices AS
 SELECT DISTINCT
@@ -137,7 +137,7 @@ SELECT DISTINCT
     -- Quality summary
     (SUM(CASE WHEN r.quality = 'good' THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0) * 100) as overall_quality_percentage
 FROM readings r
-LEFT JOIN devices d ON r.agent_uuid = d.uuid
+LEFT JOIN agents d ON r.agent_uuid = d.uuid
 WHERE r.time > NOW() - INTERVAL '7 days'
   AND r.extra->>'deviceName' IS NOT NULL  -- Filter out readings without device name
 GROUP BY 
@@ -158,7 +158,7 @@ CREATE INDEX IF NOT EXISTS idx_endpoint_devices_last_seen
   ON endpoint_devices (last_seen DESC);
 
 COMMENT ON MATERIALIZED VIEW endpoint_devices 
-  IS 'List of actual endpoint devices (from extra.deviceName) with available metrics. Used for device discovery and widget selection.';
+  IS 'List of actual endpoint agents (from extra.deviceName) with available metrics. Used for device discovery and widget selection.';
 
 -- ============================================================================
 -- 4. RECENT ANOMALIES VIEW
@@ -184,12 +184,12 @@ SELECT
     ae.deviation,
     ae.consecutive_count,
     ae.event_count,
-    -- Join with devices table for agent info
+    -- Join with agents table for agent info
     d.device_name as agent_name,
     d.uuid as agent_uuid_full,
     d.is_online as agent_is_online
 FROM anomaly_events ae
-LEFT JOIN devices d ON ae.agent_uuid = d.uuid::text
+LEFT JOIN agents d ON ae.agent_uuid = d.uuid::text
 WHERE ae.timestamp_ms > EXTRACT(EPOCH FROM (NOW() - INTERVAL '24 hours'))::BIGINT * 1000
 ORDER BY ae.timestamp_ms DESC;
 
@@ -300,7 +300,7 @@ COMMIT;
 -- ============================================================================
 -- USAGE EXAMPLES
 -- ============================================================================
--- Get all devices with their available metrics:
+-- Get all agents with their available metrics:
 -- SELECT * FROM endpoint_devices ORDER BY last_seen DESC;
 --
 -- Get all metrics for a specific device:

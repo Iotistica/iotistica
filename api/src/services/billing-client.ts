@@ -113,11 +113,11 @@ export class BillingClient {
     await this.client.post('/api/usage/report', {
       customer_id: this.customerId,
       instance_id: process.env.INSTANCE_ID || 'default',
-      active_devices: activeDevices,
-      total_devices: totalDevices,
+      active_agents: activeDevices,
+      total_agents: totalDevices,
     });
 
-    console.log(`✅ Usage reported: ${activeDevices}/${totalDevices} devices`);
+    console.log(`✅ Usage reported: ${activeDevices}/${totalDevices} agents`);
   }
 
   /**

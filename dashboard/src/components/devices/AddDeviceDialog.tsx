@@ -77,7 +77,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
   const loadLocations = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl('/api/v1/devices/locations'), {
+      const response = await fetch(buildApiUrl('/api/v1/agents/locations'), {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {

@@ -7,7 +7,7 @@ interface TailscaleAuthKey {
   created: string;
   expires: string;
   capabilities: {
-    devices: {
+    agents: {
       create: {
         reusable: boolean;
         ephemeral: boolean;
@@ -36,7 +36,7 @@ interface TailscaleCredentials {
   tailnetName: string;
   expiresAt: string;
   shieldsUp: boolean;      // Block all inbound traffic by default (IoT security)
-  acceptRoutes: boolean;   // Accept subnet routes from other nodes (false for edge devices)
+  acceptRoutes: boolean;   // Accept subnet routes from other nodes (false for edge agents)
   acceptDNS: boolean;      // Use Tailscale DNS (false unless MagicDNS needed)
 }
 
@@ -106,7 +106,7 @@ export class TailscaleService {
     try {
       logger.info(`Creating Tailscale auth key for device: ${deviceUuid}`);
 
-      // Default options for IoT devices
+      // Default options for IoT agents
       const {
         reusable = false,        // One-time use (more secure)
         ephemeral = true,        // Ephemeral device (removed on disconnect)
@@ -134,7 +134,7 @@ export class TailscaleService {
           },
           body: JSON.stringify({
             capabilities: {
-              devices: {
+              agents: {
                 create: {
                   reusable,
                   ephemeral,
@@ -163,7 +163,7 @@ export class TailscaleService {
         tailnetName: this.tailnet,
         expiresAt: authKeyData.expires,
         shieldsUp: true,      // Block ALL inbound traffic (IoT security best practice)
-        acceptRoutes: false,  // NEVER accept routes for edge devices (only for routers/gateways)
+        acceptRoutes: false,  // NEVER accept routes for edge agents (only for routers/gateways)
         acceptDNS: false,     // Don't hijack DNS unless MagicDNS needed (can break embedded workloads)
       };
     } catch (error: any) {
@@ -173,7 +173,7 @@ export class TailscaleService {
   }
 
   /**
-   * List devices in Tailnet
+   * List agents in Tailnet
    */
   async listDevices(): Promise<TailscaleDevice[]> {
     if (!this.enabled) {
@@ -182,7 +182,7 @@ export class TailscaleService {
 
     try {
       const response = await fetch(
-        `${this.baseUrl}/tailnet/${this.tailnet}/devices`,
+        `${this.baseUrl}/tailnet/${this.tailnet}/agents`,
         {
           method: 'GET',
           headers: {
@@ -192,13 +192,13 @@ export class TailscaleService {
       );
 
       if (!response.ok) {
-        throw new Error(`Failed to list devices: ${response.statusText}`);
+        throw new Error(`Failed to list agents: ${response.statusText}`);
       }
 
-      const data = await response.json() as { devices: TailscaleDevice[] };
-      return data.devices || [];
+      const data = await response.json() as { agents: TailscaleDevice[] };
+      return data.agents || [];
     } catch (error: any) {
-      logger.error(`Failed to list Tailscale devices:`, error);
+      logger.error(`Failed to list Tailscale agents:`, error);
       throw error;
     }
   }

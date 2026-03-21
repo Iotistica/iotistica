@@ -1,7 +1,7 @@
 /**
  * API Key Rotation Routes
  * 
- * Endpoints for devices to manage their API keys
+ * Endpoints for agents to manage their API keys
  */
 
 import { Router, Request, Response } from 'express';
@@ -12,7 +12,7 @@ import {
   getDeviceRotationStatus,
   getDeviceRotationHistory
 } from '../services/api-key-rotation';
-import { deviceAuth } from '../middleware/device-auth';
+import { deviceAuth } from '../middleware/agent-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
 import { isAdminOrOwner } from '../middleware/permissions';
 import rateLimit from 'express-rate-limit';
@@ -116,7 +116,7 @@ router.get('/device/:uuid/key-status', deviceAuth, async (req: Request, res: Res
 
     res.json({
       data: {
-        device_uuid: status.uuid,
+        agent_uuid: status.uuid,
         device_name: status.device_name,
         rotation_enabled: status.api_key_rotation_enabled,
         rotation_days: status.api_key_rotation_days,
@@ -229,7 +229,7 @@ router.post('/admin/device/:uuid/emergency-revoke', jwtAuth, isAdminOrOwner(), a
     // Query database to get device's customer_id
     const { pool } = require('../db');
     const deviceResult = await pool.query(
-      'SELECT customer_id FROM devices WHERE uuid = $1 LIMIT 1',
+      'SELECT customer_id FROM agents WHERE uuid = $1 LIMIT 1',
       [validatedUuid]
     );
 
@@ -253,7 +253,7 @@ router.post('/admin/device/:uuid/emergency-revoke', jwtAuth, isAdminOrOwner(), a
         deviceUuid: validatedUuid 
       });
       return res.status(403).json({
-        error: 'Cannot revoke API key for devices outside your customer',
+        error: 'Cannot revoke API key for agents outside your customer',
         requestId
       });
     }
@@ -267,7 +267,7 @@ router.post('/admin/device/:uuid/emergency-revoke', jwtAuth, isAdminOrOwner(), a
     res.json({
       message: 'API key emergency revocation complete',
       data: {
-        device_uuid: validatedUuid,
+        agent_uuid: validatedUuid,
         revoked_at: new Date().toISOString()
       }
     });

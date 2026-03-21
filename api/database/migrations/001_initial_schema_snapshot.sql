@@ -57,10 +57,10 @@ $$;
 
 
 --
--- Name: archive_device_api_key(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: archive_agent_api_key(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.archive_device_api_key() RETURNS trigger
+CREATE FUNCTION public.archive_agent_api_key() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
@@ -69,7 +69,7 @@ BEGIN
     -- 2. Old key is NOT NULL (avoid constraint violation on first provisioning)
     IF OLD.device_api_key_hash IS DISTINCT FROM NEW.device_api_key_hash 
        AND OLD.device_api_key_hash IS NOT NULL THEN
-        INSERT INTO device_api_key_history (
+        INSERT INTO agent_api_key_history (
             device_uuid,
             key_hash,
             issued_at,
@@ -89,10 +89,10 @@ $$;
 
 
 --
--- Name: FUNCTION archive_device_api_key(); Type: COMMENT; Schema: public; Owner: -
+-- Name: FUNCTION archive_agent_api_key(); Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON FUNCTION public.archive_device_api_key() IS 'Archives old device API key when changed (skips if old key is NULL)';
+COMMENT ON FUNCTION public.archive_agent_api_key() IS 'Archives old device API key when changed (skips if old key is NULL)';
 
 
 --
@@ -107,7 +107,7 @@ DECLARE
     v_hourly_rate DECIMAL(10,4);
     v_monthly_rate DECIMAL(10,2);
 BEGIN
-    -- Determine resource tier based on devices per agent
+    -- Determine resource tier based on agents per agent
     v_tier := CASE 
         WHEN p_devices_per_agent <= 5 THEN 'small'
         WHEN p_devices_per_agent <= 15 THEN 'medium'
@@ -172,7 +172,7 @@ CREATE FUNCTION public.cleanup_old_traffic_stats(retention_days integer DEFAULT 
     DECLARE
       deleted_count INTEGER;
     BEGIN
-      DELETE FROM device_traffic_stats
+      DELETE FROM agent_traffic_stats
       WHERE time_bucket < NOW() - (retention_days || ' days')::INTERVAL;
       
       GET DIAGNOSTICS deleted_count = ROW_COUNT;
@@ -218,7 +218,7 @@ BEGIN
     INTO v_period_start, v_hours_running, v_device_count, v_total_cost, 
          v_billing_mode, v_budget_limit, v_billing_month
     FROM fleets f
-    LEFT JOIN devices d ON d.fleet_id = f.fleet_id
+    LEFT JOIN agents d ON d.fleet_id = f.fleet_id
     WHERE f.fleet_id = p_fleet_id
     GROUP BY f.fleet_id, f.started_at, f.total_running_hours, 
              f.current_cost, f.billing_mode, f.budget_limit;
@@ -285,11 +285,11 @@ DECLARE
 BEGIN
     -- Get apps from both versions
     SELECT apps INTO v_from_apps
-    FROM device_target_state_history
+    FROM agent_target_state_history
     WHERE device_uuid = p_device_uuid AND version = p_from_version;
     
     SELECT apps INTO v_to_apps
-    FROM device_target_state_history
+    FROM agent_target_state_history
     WHERE device_uuid = p_device_uuid AND version = p_to_version;
     
     -- Build comparison result
@@ -336,7 +336,7 @@ $$;
 -- Name: FUNCTION count_devices_by_tags(p_tag_selectors jsonb); Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON FUNCTION public.count_devices_by_tags(p_tag_selectors jsonb) IS 'Count devices matching tag selectors';
+COMMENT ON FUNCTION public.count_devices_by_tags(p_tag_selectors jsonb) IS 'Count agents matching tag selectors';
 
 
 --
@@ -353,8 +353,8 @@ BEGIN
         NEW.config IS DISTINCT FROM OLD.config OR
         NEW.version IS DISTINCT FROM OLD.version
     ) THEN
-        INSERT INTO public.device_current_state_history (
-            device_uuid,
+        INSERT INTO public.agent_current_state_history (
+            agent_uuid,
             version,
             apps,
             config,
@@ -362,7 +362,7 @@ BEGIN
             reported_at,
             metadata
         ) VALUES (
-            NEW.device_uuid,
+            NEW.agent_uuid,
             COALESCE(NEW.version, 0),
             COALESCE(NEW.apps, '{}'::jsonb),
             COALESCE(NEW.config, '{}'::jsonb),
@@ -370,7 +370,7 @@ BEGIN
             COALESCE(NEW.reported_at, now()),
             jsonb_build_object(
                 'trigger_op', TG_OP,
-                'captured_from', 'device_current_state'
+                'captured_from', 'agent_current_state'
             )
         );
     END IF;
@@ -393,8 +393,8 @@ BEGIN
        (TG_OP = 'INSERT' AND NEW.version > 1) THEN
         
         -- Insert snapshot into history
-        INSERT INTO device_target_state_history (
-            device_uuid,
+        INSERT INTO agent_target_state_history (
+            agent_uuid,
             version,
             apps,
             config,
@@ -403,7 +403,7 @@ BEGIN
             apps_count,
             services_count
         ) VALUES (
-            NEW.device_uuid,
+            NEW.agent_uuid,
             NEW.version,
             NEW.apps,
             NEW.config,
@@ -424,10 +424,10 @@ $$;
 
 
 --
--- Name: create_device_logs_partition(date); Type: FUNCTION; Schema: public; Owner: -
+-- Name: create_agent_logs_partition(date); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.create_device_logs_partition(partition_date date) RETURNS text
+CREATE FUNCTION public.create_agent_logs_partition(partition_date date) RETURNS text
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -451,7 +451,7 @@ BEGIN
     
     -- Create the partition
     EXECUTE format(
-        'CREATE TABLE %I PARTITION OF device_logs 
+        'CREATE TABLE %I PARTITION OF agent_logs 
          FOR VALUES FROM (%L) TO (%L)',
         partition_name,
         start_date,
@@ -464,10 +464,10 @@ $$;
 
 
 --
--- Name: create_device_logs_partitions_range(integer, integer); Type: FUNCTION; Schema: public; Owner: -
+-- Name: create_agent_logs_partitions_range(integer, integer); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.create_device_logs_partitions_range(start_months_ago integer, end_months_ahead integer) RETURNS TABLE(result text)
+CREATE FUNCTION public.create_agent_logs_partitions_range(start_months_ago integer, end_months_ahead integer) RETURNS TABLE(result text)
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -476,17 +476,17 @@ DECLARE
 BEGIN
     FOR i IN start_months_ago..end_months_ahead LOOP
         current_month := DATE_TRUNC('month', CURRENT_DATE + (i || ' months')::INTERVAL)::DATE;
-        RETURN QUERY SELECT create_device_logs_partition(current_month);
+        RETURN QUERY SELECT create_agent_logs_partition(current_month);
     END LOOP;
 END;
 $$;
 
 
 --
--- Name: create_device_metrics_partition(date); Type: FUNCTION; Schema: public; Owner: -
+-- Name: create_agent_metrics_partition(date); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.create_device_metrics_partition(partition_date date) RETURNS text
+CREATE FUNCTION public.create_agent_metrics_partition(partition_date date) RETURNS text
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -509,7 +509,7 @@ BEGIN
     
     -- Create the partition
     EXECUTE format(
-        'CREATE TABLE %I PARTITION OF device_metrics 
+        'CREATE TABLE %I PARTITION OF agent_metrics 
          FOR VALUES FROM (%L) TO (%L)',
         partition_name,
         start_date,
@@ -522,10 +522,10 @@ $$;
 
 
 --
--- Name: create_device_metrics_partitions_range(integer, integer); Type: FUNCTION; Schema: public; Owner: -
+-- Name: create_agent_metrics_partitions_range(integer, integer); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.create_device_metrics_partitions_range(start_days_ago integer, end_days_ahead integer) RETURNS TABLE(result text)
+CREATE FUNCTION public.create_agent_metrics_partitions_range(start_days_ago integer, end_days_ahead integer) RETURNS TABLE(result text)
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -534,7 +534,7 @@ DECLARE
 BEGIN
     FOR i IN start_days_ago..end_days_ahead LOOP
         current_day := CURRENT_DATE + (i || ' days')::INTERVAL;
-        RETURN QUERY SELECT create_device_metrics_partition(current_day);
+        RETURN QUERY SELECT create_agent_metrics_partition(current_day);
     END LOOP;
 END;
 $$;
@@ -772,7 +772,7 @@ CREATE FUNCTION public.ensure_device_logs_partitions() RETURNS TABLE(result text
     AS $$
 BEGIN
     -- Create partitions for current month + next 3 months
-    RETURN QUERY SELECT * FROM create_device_logs_partitions_range(0, 3);
+    RETURN QUERY SELECT * FROM create_agent_logs_partitions_range(0, 3);
 END;
 $$;
 
@@ -813,19 +813,19 @@ BEGIN
     FOR tag_key, tag_value IN SELECT * FROM jsonb_each_text(p_tag_selectors)
     LOOP
         conditions := conditions || format(
-            'EXISTS (SELECT 1 FROM device_tags WHERE device_uuid = d.uuid AND key = %L AND value = %L)',
+            'EXISTS (SELECT 1 FROM agent_tags WHERE device_uuid = d.uuid AND key = %L AND value = %L)',
             tag_key, tag_value
         );
     END LOOP;
     
-    -- If no selectors provided, return all devices
+    -- If no selectors provided, return all agents
     IF array_length(conditions, 1) IS NULL THEN
-        RETURN QUERY SELECT d.uuid FROM devices d;
+        RETURN QUERY SELECT d.uuid FROM agents d;
         RETURN;
     END IF;
     
     -- Build and execute dynamic query
-    query := format('SELECT d.uuid FROM devices d WHERE %s', array_to_string(conditions, ' AND '));
+    query := format('SELECT d.uuid FROM agents d WHERE %s', array_to_string(conditions, ' AND '));
     RETURN QUERY EXECUTE query;
 END;
 $$;
@@ -835,7 +835,7 @@ $$;
 -- Name: FUNCTION find_devices_by_tags(p_tag_selectors jsonb); Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON FUNCTION public.find_devices_by_tags(p_tag_selectors jsonb) IS 'Find devices matching all specified tags (AND logic)';
+COMMENT ON FUNCTION public.find_devices_by_tags(p_tag_selectors jsonb) IS 'Find agents matching all specified tags (AND logic)';
 
 
 --
@@ -880,7 +880,7 @@ BEGIN
         f.current_cost,
         f.created_at
     FROM fleets f
-    LEFT JOIN devices d ON d.fleet_id = f.fleet_id
+    LEFT JOIN agents d ON d.fleet_id = f.fleet_id
     WHERE f.customer_id = p_customer_id
       AND f.status != 'deleted'
     GROUP BY f.fleet_uuid, f.fleet_id, f.fleet_name, f.fleet_type, f.status, 
@@ -907,7 +907,7 @@ BEGIN
         h.services_count,
         h.is_rollback,
         h.changes_summary
-    FROM device_target_state_history h
+    FROM agent_target_state_history h
     WHERE h.device_uuid = p_device_uuid
     ORDER BY h.version DESC
     LIMIT p_limit;
@@ -930,13 +930,13 @@ BEGIN
             COUNT(*) FILTER (WHERE is_rollback = true) as rollbacks,
             COUNT(DISTINCT deployed_by) as deployers,
             MAX(deployed_by) as top_deployer
-        FROM device_target_state_history h
+        FROM agent_target_state_history h
         WHERE (p_device_uuid IS NULL OR h.device_uuid = p_device_uuid)
           AND h.deployed_at > NOW() - (p_days_back || ' days')::INTERVAL
     ),
     timing AS (
         SELECT AVG(deployed_at - LAG(deployed_at) OVER (PARTITION BY device_uuid ORDER BY version)) as avg_interval
-        FROM device_target_state_history h
+        FROM agent_target_state_history h
         WHERE (p_device_uuid IS NULL OR h.device_uuid = p_device_uuid)
           AND h.deployed_at > NOW() - (p_days_back || ' days')::INTERVAL
     )
@@ -965,7 +965,7 @@ BEGIN
         h.config,
         h.deployed_at,
         h.deployed_by
-    FROM device_target_state_history h
+    FROM agent_target_state_history h
     WHERE h.device_uuid = p_device_uuid
       AND h.version = p_version;
 END;
@@ -1065,7 +1065,7 @@ CREATE FUNCTION public.get_device_tags_json(p_device_uuid uuid) RETURNS jsonb
         jsonb_object_agg(key, value),
         '{}'::jsonb
     )
-    FROM device_tags
+    FROM agent_tags
     WHERE device_uuid = p_device_uuid;
 $$;
 
@@ -1168,7 +1168,7 @@ BEGIN
         COALESCE((
             SELECT COUNT(*) 
             FROM endpoints ds 
-                    WHERE ds.agent_uuid IN (SELECT d2.uuid FROM devices d2 WHERE d2.fleet_id = f.fleet_id)
+                    WHERE ds.agent_uuid IN (SELECT d2.uuid FROM agents d2 WHERE d2.fleet_id = f.fleet_id)
         ), 0) as total_endpoints,
         ROUND(COALESCE(AVG(d.cpu_usage), 0)::numeric, 2) as avg_cpu_usage,
         ROUND(COALESCE(AVG(
@@ -1185,7 +1185,7 @@ BEGIN
             ELSE NULL
         END as budget_remaining
     FROM fleets f
-    LEFT JOIN devices d ON d.fleet_id = f.fleet_id
+    LEFT JOIN agents d ON d.fleet_id = f.fleet_id
     WHERE f.fleet_id = p_fleet_identifier OR f.fleet_uuid::text = p_fleet_identifier
     GROUP BY f.fleet_uuid, f.fleet_name, f.fleet_type, f.status, f.billing_enabled, 
              f.current_cost, f.budget_limit, f.fleet_id;
@@ -1503,12 +1503,12 @@ BEGIN
     SELECT 
         COUNT(d.uuid),
         COUNT(d.uuid) FILTER (WHERE d.is_online = true),
-            (SELECT COUNT(*) FROM endpoints ds WHERE ds.agent_uuid IN (SELECT d2.uuid FROM devices d2 WHERE d2.fleet_id = p_fleet_id)),
+            (SELECT COUNT(*) FROM endpoints ds WHERE ds.agent_uuid IN (SELECT d2.uuid FROM agents d2 WHERE d2.fleet_id = p_fleet_id)),
         f.current_cost,
         f.total_running_hours
     INTO v_device_count, v_devices_online, v_total_endpoints, v_current_cost, v_total_hours
     FROM fleets f
-    LEFT JOIN devices d ON d.fleet_id = f.fleet_id
+    LEFT JOIN agents d ON d.fleet_id = f.fleet_id
     WHERE f.fleet_id = p_fleet_id
     GROUP BY f.fleet_id, f.current_cost, f.total_running_hours;
     
@@ -2352,10 +2352,10 @@ CREATE VIEW _timescaledb_internal._direct_view_67 AS
 
 
 --
--- Name: device_metrics; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_metrics; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_metrics (
+CREATE TABLE public.agent_metrics (
     id bigint NOT NULL,
     device_uuid uuid NOT NULL,
     cpu_usage numeric,
@@ -2370,73 +2370,73 @@ CREATE TABLE public.device_metrics (
 
 
 --
--- Name: TABLE device_metrics; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_metrics; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_metrics IS 'Agent/device system metrics: CPU, memory, storage, temperature (TimescaleDB hypertable)';
-
-
---
--- Name: COLUMN device_metrics.device_uuid; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_metrics.device_uuid IS 'UUID of the agent/device';
+COMMENT ON TABLE public.agent_metrics IS 'Agent/device system metrics: CPU, memory, storage, temperature (TimescaleDB hypertable)';
 
 
 --
--- Name: COLUMN device_metrics.cpu_usage; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_metrics.device_uuid; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_metrics.cpu_usage IS 'CPU usage percentage (0-100)';
-
-
---
--- Name: COLUMN device_metrics.cpu_temp; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_metrics.cpu_temp IS 'CPU temperature in Celsius';
+COMMENT ON COLUMN public.agent_metrics.device_uuid IS 'UUID of the agent/device';
 
 
 --
--- Name: COLUMN device_metrics.memory_usage; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_metrics.cpu_usage; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_metrics.memory_usage IS 'Used memory in bytes';
-
-
---
--- Name: COLUMN device_metrics.memory_total; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_metrics.memory_total IS 'Total available memory in bytes';
+COMMENT ON COLUMN public.agent_metrics.cpu_usage IS 'CPU usage percentage (0-100)';
 
 
 --
--- Name: COLUMN device_metrics.storage_usage; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_metrics.cpu_temp; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_metrics.storage_usage IS 'Used storage in bytes';
-
-
---
--- Name: COLUMN device_metrics.storage_total; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_metrics.storage_total IS 'Total available storage in bytes';
+COMMENT ON COLUMN public.agent_metrics.cpu_temp IS 'CPU temperature in Celsius';
 
 
 --
--- Name: COLUMN device_metrics.top_processes; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_metrics.memory_usage; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_metrics.top_processes IS 'JSON array of top processes by CPU/memory';
+COMMENT ON COLUMN public.agent_metrics.memory_usage IS 'Used memory in bytes';
 
 
 --
--- Name: COLUMN device_metrics.recorded_at; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_metrics.memory_total; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_metrics.recorded_at IS 'Timestamp of metric collection';
+COMMENT ON COLUMN public.agent_metrics.memory_total IS 'Total available memory in bytes';
+
+
+--
+-- Name: COLUMN agent_metrics.storage_usage; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_metrics.storage_usage IS 'Used storage in bytes';
+
+
+--
+-- Name: COLUMN agent_metrics.storage_total; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_metrics.storage_total IS 'Total available storage in bytes';
+
+
+--
+-- Name: COLUMN agent_metrics.top_processes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_metrics.top_processes IS 'JSON array of top processes by CPU/memory';
+
+
+--
+-- Name: COLUMN agent_metrics.recorded_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_metrics.recorded_at IS 'Timestamp of metric collection';
 
 
 --
@@ -2458,7 +2458,7 @@ CREATE VIEW _timescaledb_internal._direct_view_74 AS
     max(storage_usage) AS max_storage_usage,
     avg(storage_total) AS avg_storage_total,
     count(*) AS sample_count
-   FROM public.device_metrics
+   FROM public.agent_metrics
   GROUP BY (public.time_bucket('00:05:00'::interval, recorded_at)), device_uuid;
 
 
@@ -2481,7 +2481,7 @@ CREATE VIEW _timescaledb_internal._direct_view_75 AS
     max(storage_usage) AS max_storage_usage,
     avg(storage_total) AS avg_storage_total,
     count(*) AS sample_count
-   FROM public.device_metrics
+   FROM public.agent_metrics
   GROUP BY (public.time_bucket('01:00:00'::interval, recorded_at)), device_uuid;
 
 
@@ -2504,15 +2504,15 @@ CREATE VIEW _timescaledb_internal._direct_view_76 AS
     max(storage_usage) AS max_storage_usage,
     avg(storage_total) AS avg_storage_total,
     count(*) AS sample_count
-   FROM public.device_metrics
+   FROM public.agent_metrics
   GROUP BY (public.time_bucket('1 day'::interval, recorded_at)), device_uuid;
 
 
 --
--- Name: device_logs; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_logs; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_logs (
+CREATE TABLE public.agent_logs (
     id bigint NOT NULL,
     device_uuid uuid NOT NULL,
     service_name character varying(255),
@@ -2526,10 +2526,10 @@ CREATE TABLE public.device_logs (
 
 
 --
--- Name: TABLE device_logs; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_logs; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_logs IS 'Hypertable with compression enabled. Compresses chunks older than 1 day. Expected compression ratio: 98%+';
+COMMENT ON TABLE public.agent_logs IS 'Hypertable with compression enabled. Compresses chunks older than 1 day. Expected compression ratio: 98%+';
 
 
 --
@@ -2551,7 +2551,7 @@ CREATE VIEW _timescaledb_internal._direct_view_77 AS
     array_agg(DISTINCT message) FILTER (WHERE ((level)::text = 'WARN'::text)) AS warning_samples,
     public.time_bucket('00:05:00'::interval, "timestamp") AS bucket_start,
     (public.time_bucket('00:05:00'::interval, "timestamp") + '00:05:00'::interval) AS bucket_end
-   FROM public.device_logs
+   FROM public.agent_logs
   GROUP BY (public.time_bucket('00:05:00'::interval, "timestamp")), device_uuid, service_name;
 
 
@@ -2574,7 +2574,7 @@ CREATE VIEW _timescaledb_internal._direct_view_78 AS
     array_agg(DISTINCT message) FILTER (WHERE ((level)::text = 'WARN'::text)) AS warning_samples,
     public.time_bucket('01:00:00'::interval, "timestamp") AS bucket_start,
     (public.time_bucket('01:00:00'::interval, "timestamp") + '01:00:00'::interval) AS bucket_end
-   FROM public.device_logs
+   FROM public.agent_logs
   GROUP BY (public.time_bucket('01:00:00'::interval, "timestamp")), device_uuid, service_name;
 
 
@@ -2731,7 +2731,7 @@ CREATE TABLE public.anomaly_events (
 -- Name: TABLE anomaly_events; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.anomaly_events IS 'TimescaleDB hypertable: Raw anomaly events from edge devices (high-volume time-series). Partitioned by timestamp_ms with 1-day chunks, compressed after 14 days, retained for 90 days.';
+COMMENT ON TABLE public.anomaly_events IS 'TimescaleDB hypertable: Raw anomaly events from edge agents (high-volume time-series). Partitioned by timestamp_ms with 1-day chunks, compressed after 14 days, retained for 90 days.';
 
 
 --
@@ -2837,7 +2837,7 @@ INHERITS (public.readings);
 CREATE TABLE _timescaledb_internal._hyper_41_103_chunk (
     CONSTRAINT constraint_96 CHECK ((("timestamp" >= '2026-03-18 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-19 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2847,7 +2847,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_12_chunk (
     CONSTRAINT constraint_12 CHECK ((("timestamp" >= '2026-03-08 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-09 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2857,7 +2857,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_13_chunk (
     CONSTRAINT constraint_13 CHECK ((("timestamp" >= '2026-03-09 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-10 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2867,7 +2867,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_14_chunk (
     CONSTRAINT constraint_14 CHECK ((("timestamp" >= '2026-03-10 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-11 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2877,7 +2877,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_15_chunk (
     CONSTRAINT constraint_15 CHECK ((("timestamp" >= '2026-03-11 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-12 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2887,7 +2887,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_53_chunk (
     CONSTRAINT constraint_52 CHECK ((("timestamp" >= '2026-03-12 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-13 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2897,7 +2897,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_56_chunk (
     CONSTRAINT constraint_55 CHECK ((("timestamp" >= '2026-03-13 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-14 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2907,7 +2907,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_61_chunk (
     CONSTRAINT constraint_60 CHECK ((("timestamp" >= '2026-03-14 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-15 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2917,7 +2917,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_66_chunk (
     CONSTRAINT constraint_65 CHECK ((("timestamp" >= '2026-03-15 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-16 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2927,7 +2927,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_70_chunk (
     CONSTRAINT constraint_69 CHECK ((("timestamp" >= '2026-03-16 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-17 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -2937,7 +2937,7 @@ INHERITS (public.device_logs);
 CREATE TABLE _timescaledb_internal._hyper_41_76_chunk (
     CONSTRAINT constraint_72 CHECK ((("timestamp" >= '2026-03-17 00:00:00'::timestamp without time zone) AND ("timestamp" < '2026-03-18 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_logs);
+INHERITS (public.agent_logs);
 
 
 --
@@ -3400,7 +3400,7 @@ INHERITS (_timescaledb_internal._materialized_hypertable_67);
 CREATE TABLE _timescaledb_internal._hyper_72_42_chunk (
     CONSTRAINT constraint_41 CHECK (((recorded_at >= '2026-03-05 00:00:00'::timestamp without time zone) AND (recorded_at < '2026-03-12 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_metrics);
+INHERITS (public.agent_metrics);
 
 
 --
@@ -3410,7 +3410,7 @@ INHERITS (public.device_metrics);
 CREATE TABLE _timescaledb_internal._hyper_72_52_chunk (
     CONSTRAINT constraint_51 CHECK (((recorded_at >= '2026-03-12 00:00:00'::timestamp without time zone) AND (recorded_at < '2026-03-19 00:00:00'::timestamp without time zone)))
 )
-INHERITS (public.device_metrics);
+INHERITS (public.agent_metrics);
 
 
 --
@@ -3877,7 +3877,7 @@ CREATE VIEW _timescaledb_internal._partial_view_74 AS
     max(storage_usage) AS max_storage_usage,
     avg(storage_total) AS avg_storage_total,
     count(*) AS sample_count
-   FROM public.device_metrics
+   FROM public.agent_metrics
   GROUP BY (public.time_bucket('00:05:00'::interval, recorded_at)), device_uuid;
 
 
@@ -3900,7 +3900,7 @@ CREATE VIEW _timescaledb_internal._partial_view_75 AS
     max(storage_usage) AS max_storage_usage,
     avg(storage_total) AS avg_storage_total,
     count(*) AS sample_count
-   FROM public.device_metrics
+   FROM public.agent_metrics
   GROUP BY (public.time_bucket('01:00:00'::interval, recorded_at)), device_uuid;
 
 
@@ -3923,7 +3923,7 @@ CREATE VIEW _timescaledb_internal._partial_view_76 AS
     max(storage_usage) AS max_storage_usage,
     avg(storage_total) AS avg_storage_total,
     count(*) AS sample_count
-   FROM public.device_metrics
+   FROM public.agent_metrics
   GROUP BY (public.time_bucket('1 day'::interval, recorded_at)), device_uuid;
 
 
@@ -3946,7 +3946,7 @@ CREATE VIEW _timescaledb_internal._partial_view_77 AS
     array_agg(DISTINCT message) FILTER (WHERE ((level)::text = 'WARN'::text)) AS warning_samples,
     public.time_bucket('00:05:00'::interval, "timestamp") AS bucket_start,
     (public.time_bucket('00:05:00'::interval, "timestamp") + '00:05:00'::interval) AS bucket_end
-   FROM public.device_logs
+   FROM public.agent_logs
   GROUP BY (public.time_bucket('00:05:00'::interval, "timestamp")), device_uuid, service_name;
 
 
@@ -3969,7 +3969,7 @@ CREATE VIEW _timescaledb_internal._partial_view_78 AS
     array_agg(DISTINCT message) FILTER (WHERE ((level)::text = 'WARN'::text)) AS warning_samples,
     public.time_bucket('01:00:00'::interval, "timestamp") AS bucket_start,
     (public.time_bucket('01:00:00'::interval, "timestamp") + '01:00:00'::interval) AS bucket_end
-   FROM public.device_logs
+   FROM public.agent_logs
   GROUP BY (public.time_bucket('01:00:00'::interval, "timestamp")), device_uuid, service_name;
 
 
@@ -5244,7 +5244,7 @@ CREATE TABLE public.app_service_ids (
 -- Name: TABLE app_service_ids; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.app_service_ids IS 'Registry of all app and service IDs used across devices';
+COMMENT ON TABLE public.app_service_ids IS 'Registry of all app and service IDs used across agents';
 
 
 --
@@ -5316,7 +5316,7 @@ CREATE TABLE public.applications (
 -- Name: TABLE applications; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.applications IS 'Application catalog/library - stores docker-compose-like templates that can be deployed to devices with customization';
+COMMENT ON TABLE public.applications IS 'Application catalog/library - stores docker-compose-like templates that can be deployed to agents with customization';
 
 
 --
@@ -5517,10 +5517,10 @@ COMMENT ON VIEW public.device_anomaly_summary IS 'Real-time anomaly summary per 
 
 
 --
--- Name: device_api_key_history; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_api_key_history; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_api_key_history (
+CREATE TABLE public.agent_api_key_history (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     key_hash character varying(255) NOT NULL,
@@ -5534,17 +5534,17 @@ CREATE TABLE public.device_api_key_history (
 
 
 --
--- Name: TABLE device_api_key_history; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_api_key_history; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_api_key_history IS 'History of device API keys for rotation tracking and rollback';
+COMMENT ON TABLE public.agent_api_key_history IS 'History of device API keys for rotation tracking and rollback';
 
 
 --
--- Name: COLUMN device_api_key_history.is_active; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_api_key_history.is_active; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_api_key_history.is_active IS 'Whether this key is currently active (supports grace period)';
+COMMENT ON COLUMN public.agent_api_key_history.is_active IS 'Whether this key is currently active (supports grace period)';
 
 
 --
@@ -5564,14 +5564,14 @@ CREATE SEQUENCE public.device_api_key_history_id_seq
 -- Name: device_api_key_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_api_key_history_id_seq OWNED BY public.device_api_key_history.id;
+ALTER SEQUENCE public.device_api_key_history_id_seq OWNED BY public.agent_api_key_history.id;
 
 
 --
--- Name: device_api_keys; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_api_keys; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_api_keys (
+CREATE TABLE public.agent_api_keys (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     key_hash character varying(255) NOT NULL,
@@ -5585,10 +5585,10 @@ CREATE TABLE public.device_api_keys (
 
 
 --
--- Name: TABLE device_api_keys; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_api_keys; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_api_keys IS 'Device-specific API keys with rotation and revocation support';
+COMMENT ON TABLE public.agent_api_keys IS 'Device-specific API keys with rotation and revocation support';
 
 
 --
@@ -5608,14 +5608,14 @@ CREATE SEQUENCE public.device_api_keys_id_seq
 -- Name: device_api_keys_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_api_keys_id_seq OWNED BY public.device_api_keys.id;
+ALTER SEQUENCE public.device_api_keys_id_seq OWNED BY public.agent_api_keys.id;
 
 
 --
--- Name: device_current_state; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_current_state; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_current_state (
+CREATE TABLE public.agent_current_state (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     apps jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -5627,17 +5627,17 @@ CREATE TABLE public.device_current_state (
 
 
 --
--- Name: COLUMN device_current_state.version; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_current_state.version; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_current_state.version IS 'Version of target_state that device has applied';
+COMMENT ON COLUMN public.agent_current_state.version IS 'Version of target_state that device has applied';
 
 
 --
--- Name: device_current_state_history; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_current_state_history; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_current_state_history (
+CREATE TABLE public.agent_current_state_history (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     version integer DEFAULT 0 NOT NULL,
@@ -5651,24 +5651,24 @@ CREATE TABLE public.device_current_state_history (
 
 
 --
--- Name: TABLE device_current_state_history; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_current_state_history; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_current_state_history IS 'Historical snapshots of device current/runtime state for audit and troubleshooting';
-
-
---
--- Name: COLUMN device_current_state_history.version; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_current_state_history.version IS 'Version of target_state that the device reported as applied';
+COMMENT ON TABLE public.agent_current_state_history IS 'Historical snapshots of device current/runtime state for audit and troubleshooting';
 
 
 --
--- Name: COLUMN device_current_state_history.reported_at; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_current_state_history.version; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_current_state_history.reported_at IS 'Original reported_at from device_current_state row when snapshot was captured';
+COMMENT ON COLUMN public.agent_current_state_history.version IS 'Version of target_state that the device reported as applied';
+
+
+--
+-- Name: COLUMN agent_current_state_history.reported_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_current_state_history.reported_at IS 'Original reported_at from agent_current_state row when snapshot was captured';
 
 
 --
@@ -5688,7 +5688,7 @@ CREATE SEQUENCE public.device_current_state_history_id_seq
 -- Name: device_current_state_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_current_state_history_id_seq OWNED BY public.device_current_state_history.id;
+ALTER SEQUENCE public.device_current_state_history_id_seq OWNED BY public.agent_current_state_history.id;
 
 
 --
@@ -5708,14 +5708,14 @@ CREATE SEQUENCE public.device_current_state_id_seq
 -- Name: device_current_state_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_current_state_id_seq OWNED BY public.device_current_state.id;
+ALTER SEQUENCE public.device_current_state_id_seq OWNED BY public.agent_current_state.id;
 
 
 --
--- Name: device_environment_variable; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_environment_variable; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_environment_variable (
+CREATE TABLE public.agent_environment_variable (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     name character varying(255) NOT NULL,
@@ -5742,14 +5742,14 @@ CREATE SEQUENCE public.device_environment_variable_id_seq
 -- Name: device_environment_variable_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_environment_variable_id_seq OWNED BY public.device_environment_variable.id;
+ALTER SEQUENCE public.device_environment_variable_id_seq OWNED BY public.agent_environment_variable.id;
 
 
 --
--- Name: devices; Type: TABLE; Schema: public; Owner: -
+-- Name: agents; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.devices (
+CREATE TABLE public.agents (
     id integer NOT NULL,
     uuid uuid DEFAULT gen_random_uuid() NOT NULL,
     device_name character varying(255),
@@ -5817,199 +5817,199 @@ CREATE TABLE public.devices (
 
 
 --
--- Name: COLUMN devices.api_key_expires_at; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.api_key_expires_at; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.api_key_expires_at IS 'When the current API key expires (NULL = never expires)';
-
-
---
--- Name: COLUMN devices.api_key_last_rotated_at; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.api_key_last_rotated_at IS 'Timestamp of last successful key rotation';
+COMMENT ON COLUMN public.agents.api_key_expires_at IS 'When the current API key expires (NULL = never expires)';
 
 
 --
--- Name: COLUMN devices.api_key_rotation_enabled; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.api_key_last_rotated_at; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.api_key_rotation_enabled IS 'Whether automatic rotation is enabled for this device';
-
-
---
--- Name: COLUMN devices.api_key_rotation_days; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.api_key_rotation_days IS 'Number of days before key expires and rotation is needed';
+COMMENT ON COLUMN public.agents.api_key_last_rotated_at IS 'Timestamp of last successful key rotation';
 
 
 --
--- Name: COLUMN devices.top_processes; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.api_key_rotation_enabled; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.top_processes IS 'Latest snapshot of top 10 processes';
-
-
---
--- Name: COLUMN devices.mqtt_broker_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.mqtt_broker_id IS 'MQTT broker configuration for this device (NULL = use default broker)';
+COMMENT ON COLUMN public.agents.api_key_rotation_enabled IS 'Whether automatic rotation is enabled for this device';
 
 
 --
--- Name: COLUMN devices.network_interfaces; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.api_key_rotation_days; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.network_interfaces IS 'Network interface data reported by agent (name, IP, MAC, type, WiFi signal, etc.)';
-
-
---
--- Name: COLUMN devices.vpn_enabled; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.vpn_enabled IS 'Whether VPN is enabled for this device';
+COMMENT ON COLUMN public.agents.api_key_rotation_days IS 'Number of days before key expires and rotation is needed';
 
 
 --
--- Name: COLUMN devices.vpn_username; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.top_processes; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.vpn_username IS 'VPN username (typically device UUID)';
-
-
---
--- Name: COLUMN devices.vpn_password_hash; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.vpn_password_hash IS 'Bcrypt hash of VPN password';
+COMMENT ON COLUMN public.agents.top_processes IS 'Latest snapshot of top 10 processes';
 
 
 --
--- Name: COLUMN devices.vpn_last_connected_at; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.mqtt_broker_id; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.vpn_last_connected_at IS 'Last VPN connection timestamp';
-
-
---
--- Name: COLUMN devices.vpn_ip_address; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.vpn_ip_address IS 'Assigned VPN IP address (10.8.x.x)';
+COMMENT ON COLUMN public.agents.mqtt_broker_id IS 'MQTT broker configuration for this device (NULL = use default broker)';
 
 
 --
--- Name: COLUMN devices.vpn_bytes_sent; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.network_interfaces; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.vpn_bytes_sent IS 'Total bytes sent over VPN';
-
-
---
--- Name: COLUMN devices.vpn_bytes_received; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.vpn_bytes_received IS 'Total bytes received over VPN';
+COMMENT ON COLUMN public.agents.network_interfaces IS 'Network interface data reported by agent (name, IP, MAC, type, WiFi signal, etc.)';
 
 
 --
--- Name: COLUMN devices.vpn_config_id; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.vpn_enabled; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.vpn_config_id IS 'VPN configuration ID (maps to system_config key vpn.configs.<id>)';
-
-
---
--- Name: COLUMN devices.device_public_key; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.device_public_key IS 'Ed25519/P-256 public key for proof-of-possession (PEM format)';
+COMMENT ON COLUMN public.agents.vpn_enabled IS 'Whether VPN is enabled for this device';
 
 
 --
--- Name: COLUMN devices.pop_verified; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.vpn_username; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.pop_verified IS 'Whether device has completed proof-of-possession challenge';
-
-
---
--- Name: COLUMN devices.pop_verified_at; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.pop_verified_at IS 'Timestamp when PoP was verified';
+COMMENT ON COLUMN public.agents.vpn_username IS 'VPN username (typically device UUID)';
 
 
 --
--- Name: COLUMN devices.last_challenge; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.vpn_password_hash; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.last_challenge IS 'Current PoP challenge nonce (cleared after verification)';
-
-
---
--- Name: COLUMN devices.last_challenge_expires_at; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.last_challenge_expires_at IS 'Challenge expiration timestamp (5 min TTL)';
+COMMENT ON COLUMN public.agents.vpn_password_hash IS 'Bcrypt hash of VPN password';
 
 
 --
--- Name: COLUMN devices.last_auth_method; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.vpn_last_connected_at; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.last_auth_method IS 'Authentication method used in last successful key exchange: pop=asymmetric proof-of-possession, bcrypt=symmetric fallback';
-
-
---
--- Name: COLUMN devices.last_auth_at; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.last_auth_at IS 'Timestamp of last successful authentication attempt';
+COMMENT ON COLUMN public.agents.vpn_last_connected_at IS 'Last VPN connection timestamp';
 
 
 --
--- Name: COLUMN devices.deployment_status; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.vpn_ip_address; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.deployment_status IS 'Kubernetes deployment status for virtual agents: pending, deploying, running, failed, terminated';
-
-
---
--- Name: COLUMN devices.k8s_namespace; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.k8s_namespace IS 'Kubernetes namespace where the virtual agent pod is deployed';
+COMMENT ON COLUMN public.agents.vpn_ip_address IS 'Assigned VPN IP address (10.8.x.x)';
 
 
 --
--- Name: COLUMN devices.k8s_pod_name; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.vpn_bytes_sent; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.k8s_pod_name IS 'Name of the running Kubernetes pod for this virtual agent';
-
-
---
--- Name: COLUMN devices.helm_release_name; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.devices.helm_release_name IS 'Helm release name or Kubernetes deployment name for this virtual agent';
+COMMENT ON COLUMN public.agents.vpn_bytes_sent IS 'Total bytes sent over VPN';
 
 
 --
--- Name: COLUMN devices.location; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.vpn_bytes_received; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.location IS 'Physical or geographic location of the agent (e.g., "Building A, Floor 2, Room 201" or "Toronto Data Center")';
+COMMENT ON COLUMN public.agents.vpn_bytes_received IS 'Total bytes received over VPN';
 
 
 --
--- Name: COLUMN devices.fleet_uuid; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agents.vpn_config_id; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.devices.fleet_uuid IS 'UUID reference to fleets.fleet_uuid (preferred over fleet_id)';
+COMMENT ON COLUMN public.agents.vpn_config_id IS 'VPN configuration ID (maps to system_config key vpn.configs.<id>)';
+
+
+--
+-- Name: COLUMN agents.device_public_key; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.device_public_key IS 'Ed25519/P-256 public key for proof-of-possession (PEM format)';
+
+
+--
+-- Name: COLUMN agents.pop_verified; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.pop_verified IS 'Whether device has completed proof-of-possession challenge';
+
+
+--
+-- Name: COLUMN agents.pop_verified_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.pop_verified_at IS 'Timestamp when PoP was verified';
+
+
+--
+-- Name: COLUMN agents.last_challenge; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.last_challenge IS 'Current PoP challenge nonce (cleared after verification)';
+
+
+--
+-- Name: COLUMN agents.last_challenge_expires_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.last_challenge_expires_at IS 'Challenge expiration timestamp (5 min TTL)';
+
+
+--
+-- Name: COLUMN agents.last_auth_method; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.last_auth_method IS 'Authentication method used in last successful key exchange: pop=asymmetric proof-of-possession, bcrypt=symmetric fallback';
+
+
+--
+-- Name: COLUMN agents.last_auth_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.last_auth_at IS 'Timestamp of last successful authentication attempt';
+
+
+--
+-- Name: COLUMN agents.deployment_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.deployment_status IS 'Kubernetes deployment status for virtual agents: pending, deploying, running, failed, terminated';
+
+
+--
+-- Name: COLUMN agents.k8s_namespace; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.k8s_namespace IS 'Kubernetes namespace where the virtual agent pod is deployed';
+
+
+--
+-- Name: COLUMN agents.k8s_pod_name; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.k8s_pod_name IS 'Name of the running Kubernetes pod for this virtual agent';
+
+
+--
+-- Name: COLUMN agents.helm_release_name; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.helm_release_name IS 'Helm release name or Kubernetes deployment name for this virtual agent';
+
+
+--
+-- Name: COLUMN agents.location; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.location IS 'Physical or geographic location of the agent (e.g., "Building A, Floor 2, Room 201" or "Toronto Data Center")';
+
+
+--
+-- Name: COLUMN agents.fleet_uuid; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agents.fleet_uuid IS 'UUID reference to fleets.fleet_uuid (preferred over fleet_id)';
 
 
 --
@@ -6060,7 +6060,7 @@ CREATE TABLE public.fleets (
 -- Name: TABLE fleets; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.fleets IS 'Unified fleet management for virtual and physical devices. Phase 1: Core schema.';
+COMMENT ON TABLE public.fleets IS 'Unified fleet management for virtual and physical agents. Phase 1: Core schema.';
 
 
 --
@@ -6130,7 +6130,7 @@ COMMENT ON COLUMN public.fleets.agent_count IS 'Number of virtual agents deploye
 -- Name: COLUMN fleets.devices_per_agent; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.fleets.devices_per_agent IS 'Number of devices each agent can manage (used for capacity planning)';
+COMMENT ON COLUMN public.fleets.devices_per_agent IS 'Number of agents each agent can manage (used for capacity planning)';
 
 
 --
@@ -6152,7 +6152,7 @@ CREATE VIEW public.device_fleet_references AS
             WHEN ((d.fleet_uuid IS NOT NULL) AND (d.fleet_id IS NOT NULL) AND (f.fleet_uuid IS NOT NULL)) THEN 'valid'::text
             ELSE 'inconsistent'::text
         END AS reference_status
-   FROM (public.devices d
+   FROM (public.agents d
      LEFT JOIN public.fleets f ON ((d.fleet_uuid = f.fleet_uuid)))
   ORDER BY
         CASE
@@ -6172,10 +6172,10 @@ COMMENT ON VIEW public.device_fleet_references IS 'Debug view showing device Γ�
 
 
 --
--- Name: device_flows; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_flows; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_flows (
+CREATE TABLE public.agent_flows (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     subflow_id character varying(64) NOT NULL,
@@ -6193,73 +6193,73 @@ CREATE TABLE public.device_flows (
 
 
 --
--- Name: TABLE device_flows; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_flows; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_flows IS 'Device-specific Node-RED subflows extracted from main flows';
-
-
---
--- Name: COLUMN device_flows.device_uuid; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_flows.device_uuid IS 'Device this subflow is assigned to';
+COMMENT ON TABLE public.agent_flows IS 'Device-specific Node-RED subflows extracted from main flows';
 
 
 --
--- Name: COLUMN device_flows.subflow_id; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_flows.device_uuid; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_flows.subflow_id IS 'Node-RED subflow ID from main flows';
-
-
---
--- Name: COLUMN device_flows.subflow_name; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_flows.subflow_name IS 'Human-readable subflow name';
+COMMENT ON COLUMN public.agent_flows.device_uuid IS 'Device this subflow is assigned to';
 
 
 --
--- Name: COLUMN device_flows.flows; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_flows.subflow_id; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_flows.flows IS 'Array of subflow nodes (subflow + child nodes)';
-
-
---
--- Name: COLUMN device_flows.settings; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_flows.settings IS 'Device-specific settings and configuration';
+COMMENT ON COLUMN public.agent_flows.subflow_id IS 'Node-RED subflow ID from main flows';
 
 
 --
--- Name: COLUMN device_flows.modules; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_flows.subflow_name; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_flows.modules IS 'Required npm modules for this subflow';
-
-
---
--- Name: COLUMN device_flows.hash; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_flows.hash IS 'SHA-256 hash of flows for change detection';
+COMMENT ON COLUMN public.agent_flows.subflow_name IS 'Human-readable subflow name';
 
 
 --
--- Name: COLUMN device_flows.version; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_flows.flows; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_flows.version IS 'Incremented on each update';
+COMMENT ON COLUMN public.agent_flows.flows IS 'Array of subflow nodes (subflow + child nodes)';
 
 
 --
--- Name: COLUMN device_flows.deployed_at; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_flows.settings; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_flows.deployed_at IS 'Timestamp when last pushed to device via MQTT';
+COMMENT ON COLUMN public.agent_flows.settings IS 'Device-specific settings and configuration';
+
+
+--
+-- Name: COLUMN agent_flows.modules; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_flows.modules IS 'Required npm modules for this subflow';
+
+
+--
+-- Name: COLUMN agent_flows.hash; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_flows.hash IS 'SHA-256 hash of flows for change detection';
+
+
+--
+-- Name: COLUMN agent_flows.version; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_flows.version IS 'Incremented on each update';
+
+
+--
+-- Name: COLUMN agent_flows.deployed_at; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_flows.deployed_at IS 'Timestamp when last pushed to device via MQTT';
 
 
 --
@@ -6279,14 +6279,14 @@ CREATE SEQUENCE public.device_flows_id_seq
 -- Name: device_flows_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_flows_id_seq OWNED BY public.device_flows.id;
+ALTER SEQUENCE public.device_flows_id_seq OWNED BY public.agent_flows.id;
 
 
 --
--- Name: device_job_status; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_job_status; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_job_status (
+CREATE TABLE public.agent_job_status (
     id integer NOT NULL,
     job_id character varying(255) NOT NULL,
     device_uuid uuid NOT NULL,
@@ -6326,7 +6326,7 @@ CREATE SEQUENCE public.device_job_status_id_seq
 -- Name: device_job_status_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_job_status_id_seq OWNED BY public.device_job_status.id;
+ALTER SEQUENCE public.device_job_status_id_seq OWNED BY public.agent_job_status.id;
 
 
 --
@@ -6389,7 +6389,7 @@ CREATE SEQUENCE public.device_logs_id_seq
 -- Name: device_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_logs_id_seq OWNED BY public.device_logs.id;
+ALTER SEQUENCE public.device_logs_id_seq OWNED BY public.agent_logs.id;
 
 
 --
@@ -6474,14 +6474,14 @@ CREATE SEQUENCE public.device_metrics_id_seq
 -- Name: device_metrics_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_metrics_id_seq OWNED BY public.device_metrics.id;
+ALTER SEQUENCE public.device_metrics_id_seq OWNED BY public.agent_metrics.id;
 
 
 --
--- Name: device_rollout_status; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_rollout_status; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_rollout_status (
+CREATE TABLE public.agent_rollout_status (
     id integer NOT NULL,
     rollout_id character varying(255) NOT NULL,
     device_uuid uuid NOT NULL,
@@ -6511,10 +6511,10 @@ CREATE TABLE public.device_rollout_status (
 
 
 --
--- Name: TABLE device_rollout_status; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_rollout_status; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_rollout_status IS 'Per-device status for each rollout';
+COMMENT ON TABLE public.agent_rollout_status IS 'Per-device status for each rollout';
 
 
 --
@@ -6534,14 +6534,14 @@ CREATE SEQUENCE public.device_rollout_status_id_seq
 -- Name: device_rollout_status_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_rollout_status_id_seq OWNED BY public.device_rollout_status.id;
+ALTER SEQUENCE public.device_rollout_status_id_seq OWNED BY public.agent_rollout_status.id;
 
 
 --
--- Name: device_services; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_services; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_services (
+CREATE TABLE public.agent_services (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     service_name character varying(255) NOT NULL,
@@ -6570,14 +6570,14 @@ CREATE SEQUENCE public.device_services_id_seq
 -- Name: device_services_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_services_id_seq OWNED BY public.device_services.id;
+ALTER SEQUENCE public.device_services_id_seq OWNED BY public.agent_services.id;
 
 
 --
--- Name: device_shadow_history; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_shadow_history; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_shadow_history (
+CREATE TABLE public.agent_shadow_history (
     id bigint NOT NULL,
     device_uuid uuid NOT NULL,
     shadow_name character varying(255) DEFAULT 'device-state'::character varying NOT NULL,
@@ -6589,31 +6589,31 @@ CREATE TABLE public.device_shadow_history (
 
 
 --
--- Name: TABLE device_shadow_history; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_shadow_history; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_shadow_history IS 'Retention policy: Delete records older than 90 days via scheduled job';
-
-
---
--- Name: COLUMN device_shadow_history.shadow_name; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_shadow_history.shadow_name IS 'Shadow identifier (default: device-state)';
+COMMENT ON TABLE public.agent_shadow_history IS 'Retention policy: Delete records older than 90 days via scheduled job';
 
 
 --
--- Name: COLUMN device_shadow_history.reported_state; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_shadow_history.shadow_name; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_shadow_history.reported_state IS 'Complete shadow state at this point in time';
+COMMENT ON COLUMN public.agent_shadow_history.shadow_name IS 'Shadow identifier (default: device-state)';
 
 
 --
--- Name: COLUMN device_shadow_history."timestamp"; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_shadow_history.reported_state; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_shadow_history."timestamp" IS 'When this shadow state was recorded';
+COMMENT ON COLUMN public.agent_shadow_history.reported_state IS 'Complete shadow state at this point in time';
+
+
+--
+-- Name: COLUMN agent_shadow_history."timestamp"; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_shadow_history."timestamp" IS 'When this shadow state was recorded';
 
 
 --
@@ -6632,14 +6632,14 @@ CREATE SEQUENCE public.device_shadow_history_id_seq
 -- Name: device_shadow_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_shadow_history_id_seq OWNED BY public.device_shadow_history.id;
+ALTER SEQUENCE public.device_shadow_history_id_seq OWNED BY public.agent_shadow_history.id;
 
 
 --
--- Name: device_shadows; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_shadows; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_shadows (
+CREATE TABLE public.agent_shadows (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     reported jsonb DEFAULT '{}'::jsonb,
@@ -6651,31 +6651,31 @@ CREATE TABLE public.device_shadows (
 
 
 --
--- Name: TABLE device_shadows; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_shadows; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_shadows IS 'Device shadow state (AWS IoT pattern)';
-
-
---
--- Name: COLUMN device_shadows.reported; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_shadows.reported IS 'State reported by the device';
+COMMENT ON TABLE public.agent_shadows IS 'Device shadow state (AWS IoT pattern)';
 
 
 --
--- Name: COLUMN device_shadows.desired; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_shadows.reported; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_shadows.desired IS 'Desired state from cloud/admin';
+COMMENT ON COLUMN public.agent_shadows.reported IS 'State reported by the device';
 
 
 --
--- Name: COLUMN device_shadows.version; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_shadows.desired; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_shadows.version IS 'Version number for optimistic locking';
+COMMENT ON COLUMN public.agent_shadows.desired IS 'Desired state from cloud/admin';
+
+
+--
+-- Name: COLUMN agent_shadows.version; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_shadows.version IS 'Version number for optimistic locking';
 
 
 --
@@ -6695,14 +6695,14 @@ CREATE SEQUENCE public.device_shadows_id_seq
 -- Name: device_shadows_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_shadows_id_seq OWNED BY public.device_shadows.id;
+ALTER SEQUENCE public.device_shadows_id_seq OWNED BY public.agent_shadows.id;
 
 
 --
--- Name: device_tags; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_tags; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_tags (
+CREATE TABLE public.agent_tags (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     key character varying(100) NOT NULL,
@@ -6716,38 +6716,38 @@ CREATE TABLE public.device_tags (
 
 
 --
--- Name: TABLE device_tags; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_tags; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_tags IS 'Key-value tags for flexible device organization and querying';
-
-
---
--- Name: COLUMN device_tags.device_uuid; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_tags.device_uuid IS 'Device this tag belongs to';
+COMMENT ON TABLE public.agent_tags IS 'Key-value tags for flexible device organization and querying';
 
 
 --
--- Name: COLUMN device_tags.key; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_tags.device_uuid; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_tags.key IS 'Tag key (e.g., environment, location, hardware)';
-
-
---
--- Name: COLUMN device_tags.value; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_tags.value IS 'Tag value (e.g., production, us-east-1, pi4)';
+COMMENT ON COLUMN public.agent_tags.device_uuid IS 'Device this tag belongs to';
 
 
 --
--- Name: COLUMN device_tags.created_by; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_tags.key; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_tags.created_by IS 'User who created this tag';
+COMMENT ON COLUMN public.agent_tags.key IS 'Tag key (e.g., environment, location, hardware)';
+
+
+--
+-- Name: COLUMN agent_tags.value; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_tags.value IS 'Tag value (e.g., production, us-east-1, pi4)';
+
+
+--
+-- Name: COLUMN agent_tags.created_by; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_tags.created_by IS 'User who created this tag';
 
 
 --
@@ -6767,14 +6767,14 @@ CREATE SEQUENCE public.device_tags_id_seq
 -- Name: device_tags_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_tags_id_seq OWNED BY public.device_tags.id;
+ALTER SEQUENCE public.device_tags_id_seq OWNED BY public.agent_tags.id;
 
 
 --
--- Name: device_target_state; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_target_state; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_target_state (
+CREATE TABLE public.agent_target_state (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     apps jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -6789,31 +6789,31 @@ CREATE TABLE public.device_target_state (
 
 
 --
--- Name: COLUMN device_target_state.needs_deployment; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_target_state.needs_deployment; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_target_state.needs_deployment IS 'Flag indicating configuration has changed but not deployed to device yet';
-
-
---
--- Name: COLUMN device_target_state.last_deployed_at; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_target_state.last_deployed_at IS 'Timestamp of last deployment (version increment)';
+COMMENT ON COLUMN public.agent_target_state.needs_deployment IS 'Flag indicating configuration has changed but not deployed to device yet';
 
 
 --
--- Name: COLUMN device_target_state.deployed_by; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_target_state.last_deployed_at; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_target_state.deployed_by IS 'User/system that triggered the deployment (e.g., dashboard, api, automation)';
+COMMENT ON COLUMN public.agent_target_state.last_deployed_at IS 'Timestamp of last deployment (version increment)';
 
 
 --
--- Name: device_target_state_history; Type: TABLE; Schema: public; Owner: -
+-- Name: COLUMN agent_target_state.deployed_by; Type: COMMENT; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_target_state_history (
+COMMENT ON COLUMN public.agent_target_state.deployed_by IS 'User/system that triggered the deployment (e.g., dashboard, api, automation)';
+
+
+--
+-- Name: agent_target_state_history; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agent_target_state_history (
     id integer NOT NULL,
     device_uuid uuid NOT NULL,
     version integer NOT NULL,
@@ -6832,38 +6832,38 @@ CREATE TABLE public.device_target_state_history (
 
 
 --
--- Name: TABLE device_target_state_history; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_target_state_history; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_target_state_history IS 'Historical snapshots of device target state at each deployment for audit and rollback';
-
-
---
--- Name: COLUMN device_target_state_history.version; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_target_state_history.version IS 'Version number at time of deployment (matches device_target_state.version)';
+COMMENT ON TABLE public.agent_target_state_history IS 'Historical snapshots of device target state at each deployment for audit and rollback';
 
 
 --
--- Name: COLUMN device_target_state_history.apps; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_target_state_history.version; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_target_state_history.apps IS 'Complete apps configuration at this deployment';
-
-
---
--- Name: COLUMN device_target_state_history.is_rollback; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_target_state_history.is_rollback IS 'True if this deployment was a rollback to a previous version';
+COMMENT ON COLUMN public.agent_target_state_history.version IS 'Version number at time of deployment (matches agent_target_state.version)';
 
 
 --
--- Name: COLUMN device_target_state_history.rollback_from_version; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_target_state_history.apps; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_target_state_history.rollback_from_version IS 'If rollback, the version we rolled back from';
+COMMENT ON COLUMN public.agent_target_state_history.apps IS 'Complete apps configuration at this deployment';
+
+
+--
+-- Name: COLUMN agent_target_state_history.is_rollback; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_target_state_history.is_rollback IS 'True if this deployment was a rollback to a previous version';
+
+
+--
+-- Name: COLUMN agent_target_state_history.rollback_from_version; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_target_state_history.rollback_from_version IS 'If rollback, the version we rolled back from';
 
 
 --
@@ -6883,7 +6883,7 @@ CREATE SEQUENCE public.device_target_state_history_id_seq
 -- Name: device_target_state_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_target_state_history_id_seq OWNED BY public.device_target_state_history.id;
+ALTER SEQUENCE public.device_target_state_history_id_seq OWNED BY public.agent_target_state_history.id;
 
 
 --
@@ -6903,14 +6903,14 @@ CREATE SEQUENCE public.device_target_state_id_seq
 -- Name: device_target_state_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_target_state_id_seq OWNED BY public.device_target_state.id;
+ALTER SEQUENCE public.device_target_state_id_seq OWNED BY public.agent_target_state.id;
 
 
 --
--- Name: device_traffic_stats; Type: TABLE; Schema: public; Owner: -
+-- Name: agent_traffic_stats; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.device_traffic_stats (
+CREATE TABLE public.agent_traffic_stats (
     id integer NOT NULL,
     device_id uuid NOT NULL,
     endpoint character varying(500) NOT NULL,
@@ -6928,80 +6928,80 @@ CREATE TABLE public.device_traffic_stats (
 
 
 --
--- Name: TABLE device_traffic_stats; Type: COMMENT; Schema: public; Owner: -
+-- Name: TABLE agent_traffic_stats; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.device_traffic_stats IS 'Time-series storage for device API traffic metrics, aggregated by hour';
-
-
---
--- Name: COLUMN device_traffic_stats.device_id; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_traffic_stats.device_id IS 'UUID of the device making the requests';
+COMMENT ON TABLE public.agent_traffic_stats IS 'Time-series storage for device API traffic metrics, aggregated by hour';
 
 
 --
--- Name: COLUMN device_traffic_stats.endpoint; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_traffic_stats.device_id; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_traffic_stats.endpoint IS 'API endpoint path (e.g., /api/v1/devices/:uuid/state)';
-
-
---
--- Name: COLUMN device_traffic_stats.method; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_traffic_stats.method IS 'HTTP method (GET, POST, PUT, DELETE, PATCH)';
+COMMENT ON COLUMN public.agent_traffic_stats.device_id IS 'UUID of the device making the requests';
 
 
 --
--- Name: COLUMN device_traffic_stats.time_bucket; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_traffic_stats.endpoint; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_traffic_stats.time_bucket IS 'Hourly time bucket for aggregating metrics (truncated to hour)';
-
-
---
--- Name: COLUMN device_traffic_stats.request_count; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_traffic_stats.request_count IS 'Total number of requests in this time bucket';
+COMMENT ON COLUMN public.agent_traffic_stats.endpoint IS 'API endpoint path (e.g., /api/v1/agents/:uuid/state)';
 
 
 --
--- Name: COLUMN device_traffic_stats.total_bytes; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_traffic_stats.method; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_traffic_stats.total_bytes IS 'Total bytes transferred (response size)';
-
-
---
--- Name: COLUMN device_traffic_stats.total_time; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_traffic_stats.total_time IS 'Total response time in milliseconds';
+COMMENT ON COLUMN public.agent_traffic_stats.method IS 'HTTP method (GET, POST, PUT, DELETE, PATCH)';
 
 
 --
--- Name: COLUMN device_traffic_stats.success_count; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_traffic_stats.time_bucket; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_traffic_stats.success_count IS 'Number of successful requests (2xx status)';
-
-
---
--- Name: COLUMN device_traffic_stats.failed_count; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.device_traffic_stats.failed_count IS 'Number of failed requests (non-2xx status)';
+COMMENT ON COLUMN public.agent_traffic_stats.time_bucket IS 'Hourly time bucket for aggregating metrics (truncated to hour)';
 
 
 --
--- Name: COLUMN device_traffic_stats.status_codes; Type: COMMENT; Schema: public; Owner: -
+-- Name: COLUMN agent_traffic_stats.request_count; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.device_traffic_stats.status_codes IS 'JSON object mapping status codes to counts, e.g., {"200": 15, "304": 5}';
+COMMENT ON COLUMN public.agent_traffic_stats.request_count IS 'Total number of requests in this time bucket';
+
+
+--
+-- Name: COLUMN agent_traffic_stats.total_bytes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_traffic_stats.total_bytes IS 'Total bytes transferred (response size)';
+
+
+--
+-- Name: COLUMN agent_traffic_stats.total_time; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_traffic_stats.total_time IS 'Total response time in milliseconds';
+
+
+--
+-- Name: COLUMN agent_traffic_stats.success_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_traffic_stats.success_count IS 'Number of successful requests (2xx status)';
+
+
+--
+-- Name: COLUMN agent_traffic_stats.failed_count; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_traffic_stats.failed_count IS 'Number of failed requests (non-2xx status)';
+
+
+--
+-- Name: COLUMN agent_traffic_stats.status_codes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.agent_traffic_stats.status_codes IS 'JSON object mapping status codes to counts, e.g., {"200": 15, "304": 5}';
 
 
 --
@@ -7021,7 +7021,7 @@ CREATE SEQUENCE public.device_traffic_stats_id_seq
 -- Name: device_traffic_stats_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.device_traffic_stats_id_seq OWNED BY public.device_traffic_stats.id;
+ALTER SEQUENCE public.device_traffic_stats_id_seq OWNED BY public.agent_traffic_stats.id;
 
 
 --
@@ -7041,14 +7041,14 @@ CREATE SEQUENCE public.devices_id_seq
 -- Name: devices_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.devices_id_seq OWNED BY public.devices.id;
+ALTER SEQUENCE public.devices_id_seq OWNED BY public.agents.id;
 
 
 --
--- Name: devices_needing_rotation; Type: VIEW; Schema: public; Owner: -
+-- Name: agents_needing_rotation; Type: VIEW; Schema: public; Owner: -
 --
 
-CREATE VIEW public.devices_needing_rotation AS
+CREATE VIEW public.agents_needing_rotation AS
  SELECT id,
     uuid,
     device_name,
@@ -7056,16 +7056,16 @@ CREATE VIEW public.devices_needing_rotation AS
     api_key_last_rotated_at,
     api_key_rotation_days,
     EXTRACT(day FROM ((api_key_expires_at)::timestamp with time zone - now())) AS days_until_expiry
-   FROM public.devices d
+   FROM public.agents d
   WHERE ((is_active = true) AND (api_key_rotation_enabled = true) AND (api_key_expires_at IS NOT NULL) AND (api_key_expires_at <= (now() + '7 days'::interval)))
   ORDER BY api_key_expires_at;
 
 
 --
--- Name: VIEW devices_needing_rotation; Type: COMMENT; Schema: public; Owner: -
+-- Name: VIEW agents_needing_rotation; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON VIEW public.devices_needing_rotation IS 'Devices with API keys that need rotation soon (within 7 days)';
+COMMENT ON VIEW public.agents_needing_rotation IS 'Agents with API keys that need rotation soon (within 7 days)';
 
 
 --
@@ -7575,7 +7575,7 @@ COMMENT ON COLUMN public.dictionary_metadata.total_metrics_promoted IS 'Count of
 -- Name: COLUMN dictionary_metadata.total_devices_promoted; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.dictionary_metadata.total_devices_promoted IS 'Count of devices promoted to enums across all protocols';
+COMMENT ON COLUMN public.dictionary_metadata.total_devices_promoted IS 'Count of agents promoted to enums across all protocols';
 
 
 --
@@ -7708,7 +7708,7 @@ CREATE MATERIALIZED VIEW public.endpoint_devices AS
             ELSE 0
         END))::double precision / (NULLIF(count(*), 0))::double precision) * (100)::double precision) AS overall_quality_percentage
    FROM (public.readings r
-     LEFT JOIN public.devices d ON ((r.agent_uuid = d.uuid)))
+     LEFT JOIN public.agents d ON ((r.agent_uuid = d.uuid)))
   WHERE ((r."time" > (now() - '7 days'::interval)) AND ((r.extra ->> 'device_name'::text) IS NOT NULL))
   GROUP BY r.agent_uuid, d.device_name, d.is_online, (r.extra ->> 'device_name'::text), (r.extra ->> 'device_uuid'::text), (r.extra ->> 'endpoint_uuid'::text), r.protocol
   WITH NO DATA;
@@ -7718,7 +7718,7 @@ CREATE MATERIALIZED VIEW public.endpoint_devices AS
 -- Name: MATERIALIZED VIEW endpoint_devices; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON MATERIALIZED VIEW public.endpoint_devices IS 'List of actual endpoint devices (from extra.device_name). agent_uuid=gateway, device_uuid=per-device uuid5, endpoint_uuid=protocol connection point.';
+COMMENT ON MATERIALIZED VIEW public.endpoint_devices IS 'List of actual endpoint agents (from extra.device_name). agent_uuid=gateway, device_uuid=per-device uuid5, endpoint_uuid=protocol connection point.';
 
 
 --
@@ -7763,21 +7763,21 @@ CREATE TABLE public.endpoints (
 -- Name: TABLE endpoints; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.endpoints IS 'Relational storage of sensor device configurations. Config field in device_target_state remains source of truth for agent deployment.';
+COMMENT ON TABLE public.endpoints IS 'Relational storage of sensor device configurations. Config field in agent_target_state remains source of truth for agent deployment.';
 
 
 --
 -- Name: COLUMN endpoints.data_points; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.endpoints.data_points IS 'JSONB array of data point definitions. Can be empty for OPC UA devices using auto-discovery.';
+COMMENT ON COLUMN public.endpoints.data_points IS 'JSONB array of data point definitions. Can be empty for OPC UA agents using auto-discovery.';
 
 
 --
 -- Name: COLUMN endpoints.synced_to_config; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.endpoints.synced_to_config IS 'Tracks whether this record is in sync with device_target_state.config';
+COMMENT ON COLUMN public.endpoints.synced_to_config IS 'Tracks whether this record is in sync with agent_target_state.config';
 
 
 --
@@ -9941,10 +9941,10 @@ CREATE VIEW public.fleet_billing_summary AS
     ( SELECT count(*) AS count
            FROM public.endpoints ds
           WHERE (ds.agent_uuid IN ( SELECT d2.uuid
-                   FROM public.devices d2
+                   FROM public.agents d2
                   WHERE ((d2.fleet_id)::text = (f.fleet_id)::text)))) AS total_endpoints
    FROM (public.fleets f
-     LEFT JOIN public.devices d ON (((d.fleet_id)::text = (f.fleet_id)::text)))
+     LEFT JOIN public.agents d ON (((d.fleet_id)::text = (f.fleet_id)::text)))
   WHERE ((f.billing_enabled = true) AND ((f.status)::text = ANY (ARRAY[('active'::character varying)::text, ('stopped'::character varying)::text])))
   GROUP BY f.fleet_uuid, f.fleet_id, f.fleet_name, f.customer_id, f.fleet_type, f.billing_mode, f.cost_per_hour, f.cost_per_month, f.total_running_hours, f.current_cost, f.budget_limit, f.budget_alert_threshold, f.last_metered_at, f.started_at, f.status;
 
@@ -10026,7 +10026,7 @@ COMMENT ON COLUMN public.fleet_namespaces.max_agents IS 'Maximum number of virtu
 -- Name: COLUMN fleet_namespaces.max_devices; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.fleet_namespaces.max_devices IS 'Maximum number of devices that can be managed in this namespace (max_agents ├ù devices_per_agent). From namespace label iotistica.com/max-devices.';
+COMMENT ON COLUMN public.fleet_namespaces.max_devices IS 'Maximum number of agents that can be managed in this namespace (max_agents ├ù devices_per_agent). From namespace label iotistica.com/max-agents.';
 
 
 --
@@ -10040,7 +10040,7 @@ COMMENT ON COLUMN public.fleet_namespaces.current_agents IS 'Current number of v
 -- Name: COLUMN fleet_namespaces.current_devices; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.fleet_namespaces.current_devices IS 'Current number of devices managed in this namespace. Calculated from SUM(devices_per_agent) for fleets in this namespace.';
+COMMENT ON COLUMN public.fleet_namespaces.current_devices IS 'Current number of agents managed in this namespace. Calculated from SUM(devices_per_agent) for fleets in this namespace.';
 
 
 --
@@ -10112,10 +10112,10 @@ CREATE VIEW public.fleet_summary AS
     ( SELECT count(*) AS count
            FROM public.endpoints ds
           WHERE (ds.agent_uuid IN ( SELECT d2.uuid
-                   FROM public.devices d2
+                   FROM public.agents d2
                   WHERE ((d2.fleet_id)::text = (f.fleet_id)::text)))) AS total_endpoints
    FROM (public.fleets f
-     LEFT JOIN public.devices d ON (((d.fleet_id)::text = (f.fleet_id)::text)))
+     LEFT JOIN public.agents d ON (((d.fleet_id)::text = (f.fleet_id)::text)))
   GROUP BY f.id, f.fleet_uuid, f.fleet_id, f.fleet_name, f.customer_id, f.fleet_type, f.status, f.billing_enabled, f.current_cost, f.budget_limit, f.environment, f.location, f.created_at, f.updated_at;
 
 
@@ -10402,7 +10402,7 @@ COMMENT ON TABLE public.image_rollouts IS 'Tracks image update rollouts across f
 -- Name: COLUMN image_rollouts.failure_rate; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.image_rollouts.failure_rate IS 'Fraction of devices that failed (0.0000 to 1.0000)';
+COMMENT ON COLUMN public.image_rollouts.failure_rate IS 'Fraction of agents that failed (0.0000 to 1.0000)';
 
 
 --
@@ -10507,7 +10507,7 @@ CREATE TABLE public.image_update_policies (
     maintenance_window_start time without time zone,
     maintenance_window_end time without time zone,
     fleet_id character varying(255),
-    device_tags jsonb,
+    agent_tags jsonb,
     device_uuids text[],
     enabled boolean DEFAULT true,
     priority integer DEFAULT 100,
@@ -10785,7 +10785,7 @@ CREATE MATERIALIZED VIEW public.latest_readings AS
     d.device_name AS agent_name,
     d.is_online AS agent_is_online
    FROM (public.readings r
-     LEFT JOIN public.devices d ON ((r.agent_uuid = d.uuid)))
+     LEFT JOIN public.agents d ON ((r.agent_uuid = d.uuid)))
   WHERE (r."time" > (now() - '01:00:00'::interval))
   ORDER BY r.agent_uuid, (r.extra ->> 'device_name'::text), r.metric_name, r."time" DESC
   WITH NO DATA;
@@ -10835,7 +10835,7 @@ COMMENT ON TABLE public.log_alert_rules IS 'Alert rules for monitoring device lo
 -- Name: COLUMN log_alert_rules.device_uuid; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.log_alert_rules.device_uuid IS 'Device scope (NULL = global rule applies to all devices)';
+COMMENT ON COLUMN public.log_alert_rules.device_uuid IS 'Device scope (NULL = global rule applies to all agents)';
 
 
 --
@@ -10941,7 +10941,7 @@ COMMENT ON TABLE public.log_alerts IS 'Alert instances triggered by log_alert_ru
 -- Name: COLUMN log_alerts.matched_log_ids; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.log_alerts.matched_log_ids IS 'Array of device_logs.id entries that triggered this alert';
+COMMENT ON COLUMN public.log_alerts.matched_log_ids IS 'Array of agent_logs.id entries that triggered this alert';
 
 
 --
@@ -11020,7 +11020,7 @@ CREATE MATERIALIZED VIEW public.metric_catalog AS
     max(r.anomaly_score) AS max_anomaly_score,
     count(*) FILTER (WHERE (r.anomaly_score > r.anomaly_threshold)) AS anomaly_count
    FROM (public.readings r
-     LEFT JOIN public.devices d ON ((r.agent_uuid = d.uuid)))
+     LEFT JOIN public.agents d ON ((r.agent_uuid = d.uuid)))
   WHERE ((r."time" > (now() - '7 days'::interval)) AND ((r.extra ->> 'device_name'::text) IS NOT NULL))
   GROUP BY r.agent_uuid, d.device_name, (r.extra ->> 'device_name'::text), (r.extra ->> 'device_uuid'::text), (r.extra ->> 'endpoint_uuid'::text), r.protocol, r.metric_name, r.unit
   WITH NO DATA;
@@ -11330,7 +11330,7 @@ CREATE VIEW public.mqtt_broker_summary AS
             ELSE NULL::integer
         END) AS active_device_count
    FROM (public.mqtt_broker_config mbc
-     LEFT JOIN public.devices d ON ((d.mqtt_broker_id = mbc.id)))
+     LEFT JOIN public.agents d ON ((d.mqtt_broker_id = mbc.id)))
   GROUP BY mbc.id, mbc.name, mbc.description, mbc.protocol, mbc.host, mbc.port, mbc.username, mbc.is_active, mbc.is_default, mbc.broker_type, mbc.use_tls, mbc.last_connected_at, mbc.created_at;
 
 
@@ -12014,7 +12014,7 @@ CREATE MATERIALIZED VIEW public.recent_anomalies AS
     d.uuid AS agent_uuid,
     d.is_online AS agent_is_online
    FROM (public.anomaly_events ae
-     LEFT JOIN public.devices d ON ((ae.agent_uuid = (d.uuid)::text)))
+     LEFT JOIN public.agents d ON ((ae.agent_uuid = (d.uuid)::text)))
   WHERE (ae.timestamp_ms > ((EXTRACT(epoch FROM (now() - '24:00:00'::interval)))::bigint * 1000))
   ORDER BY ae.timestamp_ms DESC
   WITH NO DATA;
@@ -12499,7 +12499,7 @@ COMMENT ON COLUMN public.tag_definitions.allowed_values IS 'Suggested values sho
 -- Name: COLUMN tag_definitions.is_required; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.tag_definitions.is_required IS 'Whether this tag must exist on all devices';
+COMMENT ON COLUMN public.tag_definitions.is_required IS 'Whether this tag must exist on all agents';
 
 
 --
@@ -12627,7 +12627,7 @@ COMMENT ON COLUMN public.users.password_last_changed_at IS 'Timestamp when passw
 -- Name: CONSTRAINT valid_role ON users; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON CONSTRAINT valid_role ON public.users IS 'Valid roles: owner (full access + billing), admin (full access), manager (read all + write devices/users), operator (read all + control devices), viewer (read-only)';
+COMMENT ON CONSTRAINT valid_role ON public.users IS 'Valid roles: owner (full access + billing), admin (full access), manager (read all + write agents/users), operator (read all + control agents), viewer (read-only)';
 
 
 --
@@ -16099,129 +16099,129 @@ ALTER TABLE ONLY public.dashboard_layouts ALTER COLUMN id SET DEFAULT nextval('p
 
 
 --
--- Name: device_api_key_history id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_api_key_history id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_api_key_history ALTER COLUMN id SET DEFAULT nextval('public.device_api_key_history_id_seq'::regclass);
-
-
---
--- Name: device_api_keys id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_api_keys ALTER COLUMN id SET DEFAULT nextval('public.device_api_keys_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_api_key_history ALTER COLUMN id SET DEFAULT nextval('public.device_api_key_history_id_seq'::regclass);
 
 
 --
--- Name: device_current_state id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_api_keys id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_current_state ALTER COLUMN id SET DEFAULT nextval('public.device_current_state_id_seq'::regclass);
-
-
---
--- Name: device_current_state_history id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_current_state_history ALTER COLUMN id SET DEFAULT nextval('public.device_current_state_history_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_api_keys ALTER COLUMN id SET DEFAULT nextval('public.device_api_keys_id_seq'::regclass);
 
 
 --
--- Name: device_environment_variable id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_current_state id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_environment_variable ALTER COLUMN id SET DEFAULT nextval('public.device_environment_variable_id_seq'::regclass);
-
-
---
--- Name: device_flows id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_flows ALTER COLUMN id SET DEFAULT nextval('public.device_flows_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_current_state ALTER COLUMN id SET DEFAULT nextval('public.device_current_state_id_seq'::regclass);
 
 
 --
--- Name: device_job_status id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_current_state_history id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_job_status ALTER COLUMN id SET DEFAULT nextval('public.device_job_status_id_seq'::regclass);
-
-
---
--- Name: device_logs id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_logs ALTER COLUMN id SET DEFAULT nextval('public.device_logs_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_current_state_history ALTER COLUMN id SET DEFAULT nextval('public.device_current_state_history_id_seq'::regclass);
 
 
 --
--- Name: device_metrics id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_environment_variable id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_metrics ALTER COLUMN id SET DEFAULT nextval('public.device_metrics_id_seq'::regclass);
-
-
---
--- Name: device_rollout_status id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_rollout_status ALTER COLUMN id SET DEFAULT nextval('public.device_rollout_status_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_environment_variable ALTER COLUMN id SET DEFAULT nextval('public.device_environment_variable_id_seq'::regclass);
 
 
 --
--- Name: device_services id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_flows id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_services ALTER COLUMN id SET DEFAULT nextval('public.device_services_id_seq'::regclass);
-
-
---
--- Name: device_shadow_history id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_shadow_history ALTER COLUMN id SET DEFAULT nextval('public.device_shadow_history_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_flows ALTER COLUMN id SET DEFAULT nextval('public.device_flows_id_seq'::regclass);
 
 
 --
--- Name: device_shadows id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_job_status id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_shadows ALTER COLUMN id SET DEFAULT nextval('public.device_shadows_id_seq'::regclass);
-
-
---
--- Name: device_tags id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_tags ALTER COLUMN id SET DEFAULT nextval('public.device_tags_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_job_status ALTER COLUMN id SET DEFAULT nextval('public.device_job_status_id_seq'::regclass);
 
 
 --
--- Name: device_target_state id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_logs id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_target_state ALTER COLUMN id SET DEFAULT nextval('public.device_target_state_id_seq'::regclass);
-
-
---
--- Name: device_target_state_history id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_target_state_history ALTER COLUMN id SET DEFAULT nextval('public.device_target_state_history_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_logs ALTER COLUMN id SET DEFAULT nextval('public.device_logs_id_seq'::regclass);
 
 
 --
--- Name: device_traffic_stats id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_metrics id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_traffic_stats ALTER COLUMN id SET DEFAULT nextval('public.device_traffic_stats_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_metrics ALTER COLUMN id SET DEFAULT nextval('public.device_metrics_id_seq'::regclass);
 
 
 --
--- Name: devices id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: agent_rollout_status id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.devices ALTER COLUMN id SET DEFAULT nextval('public.devices_id_seq'::regclass);
+ALTER TABLE ONLY public.agent_rollout_status ALTER COLUMN id SET DEFAULT nextval('public.device_rollout_status_id_seq'::regclass);
+
+
+--
+-- Name: agent_services id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_services ALTER COLUMN id SET DEFAULT nextval('public.device_services_id_seq'::regclass);
+
+
+--
+-- Name: agent_shadow_history id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_shadow_history ALTER COLUMN id SET DEFAULT nextval('public.device_shadow_history_id_seq'::regclass);
+
+
+--
+-- Name: agent_shadows id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_shadows ALTER COLUMN id SET DEFAULT nextval('public.device_shadows_id_seq'::regclass);
+
+
+--
+-- Name: agent_tags id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_tags ALTER COLUMN id SET DEFAULT nextval('public.device_tags_id_seq'::regclass);
+
+
+--
+-- Name: agent_target_state id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_target_state ALTER COLUMN id SET DEFAULT nextval('public.device_target_state_id_seq'::regclass);
+
+
+--
+-- Name: agent_target_state_history id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_target_state_history ALTER COLUMN id SET DEFAULT nextval('public.device_target_state_history_id_seq'::regclass);
+
+
+--
+-- Name: agent_traffic_stats id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_traffic_stats ALTER COLUMN id SET DEFAULT nextval('public.device_traffic_stats_id_seq'::regclass);
+
+
+--
+-- Name: agents id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agents ALTER COLUMN id SET DEFAULT nextval('public.devices_id_seq'::regclass);
 
 
 --
@@ -16834,50 +16834,50 @@ ALTER TABLE ONLY public.dashboard_layouts
 
 
 --
--- Name: device_api_key_history device_api_key_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_api_key_history device_api_key_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_api_key_history
+ALTER TABLE ONLY public.agent_api_key_history
     ADD CONSTRAINT device_api_key_history_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_api_keys device_api_keys_device_uuid_key_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_api_keys device_api_keys_device_uuid_key_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_api_keys
+ALTER TABLE ONLY public.agent_api_keys
     ADD CONSTRAINT device_api_keys_device_uuid_key_hash_key UNIQUE (device_uuid, key_hash);
 
 
 --
--- Name: device_api_keys device_api_keys_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_api_keys device_api_keys_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_api_keys
+ALTER TABLE ONLY public.agent_api_keys
     ADD CONSTRAINT device_api_keys_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_current_state device_current_state_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_current_state device_current_state_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_current_state
+ALTER TABLE ONLY public.agent_current_state
     ADD CONSTRAINT device_current_state_device_uuid_key UNIQUE (device_uuid);
 
 
 --
--- Name: device_current_state_history device_current_state_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_current_state_history device_current_state_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_current_state_history
+ALTER TABLE ONLY public.agent_current_state_history
     ADD CONSTRAINT device_current_state_history_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_current_state device_current_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_current_state device_current_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_current_state
+ALTER TABLE ONLY public.agent_current_state
     ADD CONSTRAINT device_current_state_pkey PRIMARY KEY (id);
 
 
@@ -16906,178 +16906,178 @@ ALTER TABLE ONLY public.dictionary_metadata
 
 
 --
--- Name: device_environment_variable device_environment_variable_device_uuid_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_environment_variable device_environment_variable_device_uuid_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_environment_variable
+ALTER TABLE ONLY public.agent_environment_variable
     ADD CONSTRAINT device_environment_variable_device_uuid_name_key UNIQUE (device_uuid, name);
 
 
 --
--- Name: device_environment_variable device_environment_variable_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_environment_variable device_environment_variable_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_environment_variable
+ALTER TABLE ONLY public.agent_environment_variable
     ADD CONSTRAINT device_environment_variable_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_flows device_flows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_flows device_flows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_flows
+ALTER TABLE ONLY public.agent_flows
     ADD CONSTRAINT device_flows_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_job_status device_job_status_job_id_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_job_status device_job_status_job_id_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_job_status
+ALTER TABLE ONLY public.agent_job_status
     ADD CONSTRAINT device_job_status_job_id_device_uuid_key UNIQUE (job_id, device_uuid);
 
 
 --
--- Name: device_job_status device_job_status_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_job_status device_job_status_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_job_status
+ALTER TABLE ONLY public.agent_job_status
     ADD CONSTRAINT device_job_status_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_logs device_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_logs device_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_logs
+ALTER TABLE ONLY public.agent_logs
     ADD CONSTRAINT device_logs_pkey PRIMARY KEY (id, "timestamp");
 
 
 --
--- Name: device_metrics device_metrics_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_metrics device_metrics_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_metrics
+ALTER TABLE ONLY public.agent_metrics
     ADD CONSTRAINT device_metrics_pkey PRIMARY KEY (id, recorded_at);
 
 
 --
--- Name: device_rollout_status device_rollout_status_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_rollout_status device_rollout_status_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_rollout_status
+ALTER TABLE ONLY public.agent_rollout_status
     ADD CONSTRAINT device_rollout_status_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_rollout_status device_rollout_status_rollout_id_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_rollout_status device_rollout_status_rollout_id_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_rollout_status
+ALTER TABLE ONLY public.agent_rollout_status
     ADD CONSTRAINT device_rollout_status_rollout_id_device_uuid_key UNIQUE (rollout_id, device_uuid);
 
 
 --
--- Name: device_services device_services_device_uuid_service_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_services device_services_device_uuid_service_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_services
+ALTER TABLE ONLY public.agent_services
     ADD CONSTRAINT device_services_device_uuid_service_name_key UNIQUE (device_uuid, service_name);
 
 
 --
--- Name: device_services device_services_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_services device_services_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_services
+ALTER TABLE ONLY public.agent_services
     ADD CONSTRAINT device_services_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_shadow_history device_shadow_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_shadow_history device_shadow_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_shadow_history
+ALTER TABLE ONLY public.agent_shadow_history
     ADD CONSTRAINT device_shadow_history_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_shadows device_shadows_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_shadows device_shadows_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_shadows
+ALTER TABLE ONLY public.agent_shadows
     ADD CONSTRAINT device_shadows_device_uuid_key UNIQUE (device_uuid);
 
 
 --
--- Name: device_shadows device_shadows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_shadows device_shadows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_shadows
+ALTER TABLE ONLY public.agent_shadows
     ADD CONSTRAINT device_shadows_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_tags device_tags_device_uuid_key_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_tags device_tags_device_uuid_key_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_tags
+ALTER TABLE ONLY public.agent_tags
     ADD CONSTRAINT device_tags_device_uuid_key_key UNIQUE (device_uuid, key);
 
 
 --
--- Name: device_tags device_tags_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_tags device_tags_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_tags
+ALTER TABLE ONLY public.agent_tags
     ADD CONSTRAINT device_tags_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_target_state device_target_state_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_target_state device_target_state_device_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_target_state
+ALTER TABLE ONLY public.agent_target_state
     ADD CONSTRAINT device_target_state_device_uuid_key UNIQUE (device_uuid);
 
 
 --
--- Name: device_target_state_history device_target_state_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_target_state_history device_target_state_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_target_state_history
+ALTER TABLE ONLY public.agent_target_state_history
     ADD CONSTRAINT device_target_state_history_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_target_state device_target_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_target_state device_target_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_target_state
+ALTER TABLE ONLY public.agent_target_state
     ADD CONSTRAINT device_target_state_pkey PRIMARY KEY (id);
 
 
 --
--- Name: device_traffic_stats device_traffic_stats_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_traffic_stats device_traffic_stats_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_traffic_stats
+ALTER TABLE ONLY public.agent_traffic_stats
     ADD CONSTRAINT device_traffic_stats_pkey PRIMARY KEY (id);
 
 
 --
--- Name: devices devices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agents devices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.devices
+ALTER TABLE ONLY public.agents
     ADD CONSTRAINT devices_pkey PRIMARY KEY (id);
 
 
 --
--- Name: devices devices_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agents devices_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.devices
+ALTER TABLE ONLY public.agents
     ADD CONSTRAINT devices_uuid_key UNIQUE (uuid);
 
 
@@ -18810,18 +18810,18 @@ ALTER TABLE ONLY public.tag_definitions
 
 
 --
--- Name: device_flows unique_device_subflow; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_flows unique_device_subflow; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_flows
+ALTER TABLE ONLY public.agent_flows
     ADD CONSTRAINT unique_device_subflow UNIQUE (device_uuid, subflow_id);
 
 
 --
--- Name: device_target_state_history unique_device_version; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_target_state_history unique_device_version; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_target_state_history
+ALTER TABLE ONLY public.agent_target_state_history
     ADD CONSTRAINT unique_device_version UNIQUE (device_uuid, version);
 
 
@@ -18842,10 +18842,10 @@ ALTER TABLE ONLY public.mqtt_schema_history
 
 
 --
--- Name: device_traffic_stats unique_traffic_entry; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_traffic_stats unique_traffic_entry; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_traffic_stats
+ALTER TABLE ONLY public.agent_traffic_stats
     ADD CONSTRAINT unique_traffic_entry UNIQUE (device_id, endpoint, method, time_bucket);
 
 
@@ -21169,14 +21169,14 @@ CREATE INDEX anomaly_events_timestamp_ms_idx ON public.anomaly_events USING btre
 -- Name: device_logs_timestamp_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX device_logs_timestamp_idx ON public.device_logs USING btree ("timestamp" DESC);
+CREATE INDEX device_logs_timestamp_idx ON public.agent_logs USING btree ("timestamp" DESC);
 
 
 --
 -- Name: device_metrics_recorded_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX device_metrics_recorded_at_idx ON public.device_metrics USING btree (recorded_at DESC);
+CREATE INDEX device_metrics_recorded_at_idx ON public.agent_metrics USING btree (recorded_at DESC);
 
 
 --
@@ -25488,14 +25488,14 @@ CREATE INDEX idx_audit_logs_user_id ON public.audit_logs USING btree (user_id);
 -- Name: idx_current_history_device_reported_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_current_history_device_reported_at ON public.device_current_state_history USING btree (device_uuid, reported_at DESC);
+CREATE INDEX idx_current_history_device_reported_at ON public.agent_current_state_history USING btree (device_uuid, reported_at DESC);
 
 
 --
 -- Name: idx_current_history_device_version; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_current_history_device_version ON public.device_current_state_history USING btree (device_uuid, version DESC);
+CREATE INDEX idx_current_history_device_version ON public.agent_current_state_history USING btree (device_uuid, version DESC);
 
 
 --
@@ -25558,420 +25558,420 @@ CREATE INDEX idx_dashboard_layouts_widgets ON public.dashboard_layouts USING gin
 -- Name: idx_device_api_keys_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_api_keys_device_uuid ON public.device_api_keys USING btree (device_uuid);
+CREATE INDEX idx_device_api_keys_device_uuid ON public.agent_api_keys USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_api_keys_expires_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_api_keys_expires_at ON public.device_api_keys USING btree (expires_at);
+CREATE INDEX idx_device_api_keys_expires_at ON public.agent_api_keys USING btree (expires_at);
 
 
 --
 -- Name: idx_device_api_keys_revoked; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_api_keys_revoked ON public.device_api_keys USING btree (revoked);
+CREATE INDEX idx_device_api_keys_revoked ON public.agent_api_keys USING btree (revoked);
 
 
 --
 -- Name: idx_device_batch; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_batch ON public.device_rollout_status USING btree (batch_number);
+CREATE INDEX idx_device_batch ON public.agent_rollout_status USING btree (batch_number);
 
 
 --
 -- Name: idx_device_current_state_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_current_state_device_uuid ON public.device_current_state USING btree (device_uuid);
+CREATE INDEX idx_device_current_state_device_uuid ON public.agent_current_state USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_current_state_version; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_current_state_version ON public.device_current_state USING btree (version);
+CREATE INDEX idx_device_current_state_version ON public.agent_current_state USING btree (version);
 
 
 --
 -- Name: idx_device_flows_active; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_flows_active ON public.device_flows USING btree (is_active);
+CREATE INDEX idx_device_flows_active ON public.agent_flows USING btree (is_active);
 
 
 --
 -- Name: idx_device_flows_deployed_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_flows_deployed_at ON public.device_flows USING btree (deployed_at);
+CREATE INDEX idx_device_flows_deployed_at ON public.agent_flows USING btree (deployed_at);
 
 
 --
 -- Name: idx_device_flows_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_flows_device_uuid ON public.device_flows USING btree (device_uuid);
+CREATE INDEX idx_device_flows_device_uuid ON public.agent_flows USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_flows_hash; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_flows_hash ON public.device_flows USING btree (hash);
+CREATE INDEX idx_device_flows_hash ON public.agent_flows USING btree (hash);
 
 
 --
 -- Name: idx_device_flows_subflow_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_flows_subflow_id ON public.device_flows USING btree (subflow_id);
+CREATE INDEX idx_device_flows_subflow_id ON public.agent_flows USING btree (subflow_id);
 
 
 --
 -- Name: idx_device_job_status_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_job_status_device_uuid ON public.device_job_status USING btree (device_uuid);
+CREATE INDEX idx_device_job_status_device_uuid ON public.agent_job_status USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_job_status_job_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_job_status_job_id ON public.device_job_status USING btree (job_id);
+CREATE INDEX idx_device_job_status_job_id ON public.agent_job_status USING btree (job_id);
 
 
 --
 -- Name: idx_device_job_status_status; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_job_status_status ON public.device_job_status USING btree (status);
+CREATE INDEX idx_device_job_status_status ON public.agent_job_status USING btree (status);
 
 
 --
 -- Name: idx_device_key_history_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_key_history_device_uuid ON public.device_api_key_history USING btree (device_uuid);
+CREATE INDEX idx_device_key_history_device_uuid ON public.agent_api_key_history USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_key_history_is_active; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_key_history_is_active ON public.device_api_key_history USING btree (is_active);
+CREATE INDEX idx_device_key_history_is_active ON public.agent_api_key_history USING btree (is_active);
 
 
 --
 -- Name: idx_device_key_history_issued_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_key_history_issued_at ON public.device_api_key_history USING btree (issued_at DESC);
+CREATE INDEX idx_device_key_history_issued_at ON public.agent_api_key_history USING btree (issued_at DESC);
 
 
 --
 -- Name: idx_device_logs_device_time; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_logs_device_time ON public.device_logs USING btree (device_uuid, "timestamp" DESC);
+CREATE INDEX idx_device_logs_device_time ON public.agent_logs USING btree (device_uuid, "timestamp" DESC);
 
 
 --
 -- Name: idx_device_logs_device_timestamp; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_logs_device_timestamp ON public.device_logs USING btree (device_uuid, "timestamp" DESC);
+CREATE INDEX idx_device_logs_device_timestamp ON public.agent_logs USING btree (device_uuid, "timestamp" DESC);
 
 
 --
 -- Name: idx_device_logs_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_logs_device_uuid ON public.device_logs USING btree (device_uuid);
+CREATE INDEX idx_device_logs_device_uuid ON public.agent_logs USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_logs_error_logs; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_logs_error_logs ON public.device_logs USING btree (device_uuid, is_stderr) WHERE (is_stderr = true);
+CREATE INDEX idx_device_logs_error_logs ON public.agent_logs USING btree (device_uuid, is_stderr) WHERE (is_stderr = true);
 
 
 --
 -- Name: idx_device_logs_level; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_logs_level ON public.device_logs USING btree (level);
+CREATE INDEX idx_device_logs_level ON public.agent_logs USING btree (level);
 
 
 --
 -- Name: idx_device_logs_service; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_logs_service ON public.device_logs USING btree (device_uuid, service_name, "timestamp" DESC);
+CREATE INDEX idx_device_logs_service ON public.agent_logs USING btree (device_uuid, service_name, "timestamp" DESC);
 
 
 --
 -- Name: idx_device_logs_service_time; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_logs_service_time ON public.device_logs USING btree (service_name, "timestamp" DESC);
+CREATE INDEX idx_device_logs_service_time ON public.agent_logs USING btree (service_name, "timestamp" DESC);
 
 
 --
 -- Name: idx_device_logs_timestamp; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_logs_timestamp ON public.device_logs USING btree ("timestamp" DESC);
+CREATE INDEX idx_device_logs_timestamp ON public.agent_logs USING btree ("timestamp" DESC);
 
 
 --
 -- Name: idx_device_metrics_device_time; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_metrics_device_time ON public.device_metrics USING btree (device_uuid, recorded_at DESC);
+CREATE INDEX idx_device_metrics_device_time ON public.agent_metrics USING btree (device_uuid, recorded_at DESC);
 
 
 --
 -- Name: idx_device_metrics_recorded_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_metrics_recorded_at ON public.device_metrics USING btree (recorded_at DESC);
+CREATE INDEX idx_device_metrics_recorded_at ON public.agent_metrics USING btree (recorded_at DESC);
 
 
 --
 -- Name: idx_device_rollout; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_rollout ON public.device_rollout_status USING btree (rollout_id, device_uuid);
+CREATE INDEX idx_device_rollout ON public.agent_rollout_status USING btree (rollout_id, device_uuid);
 
 
 --
 -- Name: idx_device_services_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_services_device_uuid ON public.device_services USING btree (device_uuid);
+CREATE INDEX idx_device_services_device_uuid ON public.agent_services USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_shadows_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_shadows_device_uuid ON public.device_shadows USING btree (device_uuid);
+CREATE INDEX idx_device_shadows_device_uuid ON public.agent_shadows USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_shadows_updated_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_shadows_updated_at ON public.device_shadows USING btree (updated_at DESC);
+CREATE INDEX idx_device_shadows_updated_at ON public.agent_shadows USING btree (updated_at DESC);
 
 
 --
 -- Name: idx_device_status; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_status ON public.device_rollout_status USING btree (status);
+CREATE INDEX idx_device_status ON public.agent_rollout_status USING btree (status);
 
 
 --
 -- Name: idx_device_tags_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_tags_device_uuid ON public.device_tags USING btree (device_uuid);
+CREATE INDEX idx_device_tags_device_uuid ON public.agent_tags USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_tags_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_tags_key ON public.device_tags USING btree (key);
+CREATE INDEX idx_device_tags_key ON public.agent_tags USING btree (key);
 
 
 --
 -- Name: idx_device_tags_key_value; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_tags_key_value ON public.device_tags USING btree (key, value);
+CREATE INDEX idx_device_tags_key_value ON public.agent_tags USING btree (key, value);
 
 
 --
 -- Name: idx_device_target_state_deployed_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_target_state_deployed_at ON public.device_target_state USING btree (last_deployed_at DESC);
+CREATE INDEX idx_device_target_state_deployed_at ON public.agent_target_state USING btree (last_deployed_at DESC);
 
 
 --
 -- Name: idx_device_target_state_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_target_state_device_uuid ON public.device_target_state USING btree (device_uuid);
+CREATE INDEX idx_device_target_state_device_uuid ON public.agent_target_state USING btree (device_uuid);
 
 
 --
 -- Name: idx_device_target_state_needs_deployment; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_device_target_state_needs_deployment ON public.device_target_state USING btree (needs_deployment) WHERE (needs_deployment = true);
+CREATE INDEX idx_device_target_state_needs_deployment ON public.agent_target_state USING btree (needs_deployment) WHERE (needs_deployment = true);
 
 
 --
 -- Name: idx_devices_api_key_expires_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_api_key_expires_at ON public.devices USING btree (api_key_expires_at) WHERE ((api_key_expires_at IS NOT NULL) AND (is_active = true));
+CREATE INDEX idx_devices_api_key_expires_at ON public.agents USING btree (api_key_expires_at) WHERE ((api_key_expires_at IS NOT NULL) AND (is_active = true));
 
 
 --
 -- Name: idx_devices_challenge_expires; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_challenge_expires ON public.devices USING btree (last_challenge_expires_at) WHERE (last_challenge_expires_at IS NOT NULL);
+CREATE INDEX idx_devices_challenge_expires ON public.agents USING btree (last_challenge_expires_at) WHERE (last_challenge_expires_at IS NOT NULL);
 
 
 --
 -- Name: idx_devices_fleet_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_fleet_id ON public.devices USING btree (fleet_id);
+CREATE INDEX idx_devices_fleet_id ON public.agents USING btree (fleet_id);
 
 
 --
 -- Name: idx_devices_fleet_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_fleet_uuid ON public.devices USING btree (fleet_uuid);
+CREATE INDEX idx_devices_fleet_uuid ON public.agents USING btree (fleet_uuid);
 
 
 --
 -- Name: idx_devices_fleet_uuid_status; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_fleet_uuid_status ON public.devices USING btree (fleet_uuid, is_online, is_active) WHERE (fleet_uuid IS NOT NULL);
+CREATE INDEX idx_devices_fleet_uuid_status ON public.agents USING btree (fleet_uuid, is_online, is_active) WHERE (fleet_uuid IS NOT NULL);
 
 
 --
 -- Name: idx_devices_is_active; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_is_active ON public.devices USING btree (is_active);
+CREATE INDEX idx_devices_is_active ON public.agents USING btree (is_active);
 
 
 --
 -- Name: idx_devices_is_online; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_is_online ON public.devices USING btree (is_online);
+CREATE INDEX idx_devices_is_online ON public.agents USING btree (is_online);
 
 
 --
 -- Name: idx_devices_k8s_namespace; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_k8s_namespace ON public.devices USING btree (k8s_namespace) WHERE (k8s_namespace IS NOT NULL);
+CREATE INDEX idx_devices_k8s_namespace ON public.agents USING btree (k8s_namespace) WHERE (k8s_namespace IS NOT NULL);
 
 
 --
 -- Name: idx_devices_last_auth_method; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_last_auth_method ON public.devices USING btree (last_auth_method) WHERE (((last_auth_method)::text = 'bcrypt'::text) AND (is_active = true));
+CREATE INDEX idx_devices_last_auth_method ON public.agents USING btree (last_auth_method) WHERE (((last_auth_method)::text = 'bcrypt'::text) AND (is_active = true));
 
 
 --
 -- Name: idx_devices_last_auth_pop; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_last_auth_pop ON public.devices USING btree (last_auth_method, last_auth_at) WHERE (((last_auth_method)::text = 'pop'::text) AND (is_active = true));
+CREATE INDEX idx_devices_last_auth_pop ON public.agents USING btree (last_auth_method, last_auth_at) WHERE (((last_auth_method)::text = 'pop'::text) AND (is_active = true));
 
 
 --
 -- Name: idx_devices_location; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_location ON public.devices USING btree (location) WHERE (location IS NOT NULL);
+CREATE INDEX idx_devices_location ON public.agents USING btree (location) WHERE (location IS NOT NULL);
 
 
 --
 -- Name: idx_devices_mqtt_broker_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_mqtt_broker_id ON public.devices USING btree (mqtt_broker_id);
+CREATE INDEX idx_devices_mqtt_broker_id ON public.agents USING btree (mqtt_broker_id);
 
 
 --
 -- Name: idx_devices_mqtt_username; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_mqtt_username ON public.devices USING btree (mqtt_username);
+CREATE INDEX idx_devices_mqtt_username ON public.agents USING btree (mqtt_username);
 
 
 --
 -- Name: idx_devices_network_interfaces; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_network_interfaces ON public.devices USING gin (network_interfaces);
+CREATE INDEX idx_devices_network_interfaces ON public.agents USING gin (network_interfaces);
 
 
 --
 -- Name: idx_devices_pop_verified; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_pop_verified ON public.devices USING btree (pop_verified) WHERE (pop_verified = false);
+CREATE INDEX idx_devices_pop_verified ON public.agents USING btree (pop_verified) WHERE (pop_verified = false);
 
 
 --
 -- Name: idx_devices_top_processes; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_top_processes ON public.devices USING gin (top_processes);
+CREATE INDEX idx_devices_top_processes ON public.agents USING gin (top_processes);
 
 
 --
 -- Name: idx_devices_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_uuid ON public.devices USING btree (uuid);
+CREATE INDEX idx_devices_uuid ON public.agents USING btree (uuid);
 
 
 --
 -- Name: idx_devices_virtual_deployment; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_virtual_deployment ON public.devices USING btree (device_type, deployment_status) WHERE ((device_type)::text = 'virtual'::text);
+CREATE INDEX idx_devices_virtual_deployment ON public.agents USING btree (device_type, deployment_status) WHERE ((device_type)::text = 'virtual'::text);
 
 
 --
 -- Name: idx_devices_virtual_status; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_virtual_status ON public.devices USING btree (device_type, deployment_status, status) WHERE ((device_type)::text = 'virtual'::text);
+CREATE INDEX idx_devices_virtual_status ON public.agents USING btree (device_type, deployment_status, status) WHERE ((device_type)::text = 'virtual'::text);
 
 
 --
 -- Name: idx_devices_vpn_config; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_vpn_config ON public.devices USING btree (vpn_config_id);
+CREATE INDEX idx_devices_vpn_config ON public.agents USING btree (vpn_config_id);
 
 
 --
 -- Name: idx_devices_vpn_enabled; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_vpn_enabled ON public.devices USING btree (vpn_enabled) WHERE (vpn_enabled = true);
+CREATE INDEX idx_devices_vpn_enabled ON public.agents USING btree (vpn_enabled) WHERE (vpn_enabled = true);
 
 
 --
 -- Name: idx_devices_vpn_username; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_devices_vpn_username ON public.devices USING btree (vpn_username) WHERE (vpn_username IS NOT NULL);
+CREATE INDEX idx_devices_vpn_username ON public.agents USING btree (vpn_username) WHERE (vpn_username IS NOT NULL);
 
 
 --
@@ -27098,42 +27098,42 @@ CREATE INDEX idx_scheduled_jobs_schedule_id ON public.scheduled_jobs USING btree
 -- Name: idx_shadow_history_device_time; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_shadow_history_device_time ON public.device_shadow_history USING btree (device_uuid, "timestamp" DESC);
+CREATE INDEX idx_shadow_history_device_time ON public.agent_shadow_history USING btree (device_uuid, "timestamp" DESC);
 
 
 --
 -- Name: idx_shadow_history_device_uuid; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_shadow_history_device_uuid ON public.device_shadow_history USING btree (device_uuid);
+CREATE INDEX idx_shadow_history_device_uuid ON public.agent_shadow_history USING btree (device_uuid);
 
 
 --
 -- Name: idx_shadow_history_query; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_shadow_history_query ON public.device_shadow_history USING btree (device_uuid, shadow_name, "timestamp" DESC);
+CREATE INDEX idx_shadow_history_query ON public.agent_shadow_history USING btree (device_uuid, shadow_name, "timestamp" DESC);
 
 
 --
 -- Name: idx_shadow_history_shadow_name; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_shadow_history_shadow_name ON public.device_shadow_history USING btree (shadow_name);
+CREATE INDEX idx_shadow_history_shadow_name ON public.agent_shadow_history USING btree (shadow_name);
 
 
 --
 -- Name: idx_shadow_history_state; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_shadow_history_state ON public.device_shadow_history USING gin (reported_state);
+CREATE INDEX idx_shadow_history_state ON public.agent_shadow_history USING gin (reported_state);
 
 
 --
 -- Name: idx_shadow_history_timestamp; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_shadow_history_timestamp ON public.device_shadow_history USING btree ("timestamp" DESC);
+CREATE INDEX idx_shadow_history_timestamp ON public.agent_shadow_history USING btree ("timestamp" DESC);
 
 
 --
@@ -27259,56 +27259,56 @@ CREATE INDEX idx_tag_definitions_key ON public.tag_definitions USING btree (key)
 -- Name: idx_target_history_deployed_at; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_target_history_deployed_at ON public.device_target_state_history USING btree (device_uuid, deployed_at DESC);
+CREATE INDEX idx_target_history_deployed_at ON public.agent_target_state_history USING btree (device_uuid, deployed_at DESC);
 
 
 --
 -- Name: idx_target_history_deployed_by; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_target_history_deployed_by ON public.device_target_state_history USING btree (deployed_by);
+CREATE INDEX idx_target_history_deployed_by ON public.agent_target_state_history USING btree (deployed_by);
 
 
 --
 -- Name: idx_target_history_device_version; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_target_history_device_version ON public.device_target_state_history USING btree (device_uuid, version DESC);
+CREATE INDEX idx_target_history_device_version ON public.agent_target_state_history USING btree (device_uuid, version DESC);
 
 
 --
 -- Name: idx_target_history_rollback; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_target_history_rollback ON public.device_target_state_history USING btree (device_uuid, is_rollback) WHERE (is_rollback = true);
+CREATE INDEX idx_target_history_rollback ON public.agent_target_state_history USING btree (device_uuid, is_rollback) WHERE (is_rollback = true);
 
 
 --
 -- Name: idx_traffic_device_endpoint; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_traffic_device_endpoint ON public.device_traffic_stats USING btree (device_id, endpoint);
+CREATE INDEX idx_traffic_device_endpoint ON public.agent_traffic_stats USING btree (device_id, endpoint);
 
 
 --
 -- Name: idx_traffic_device_time; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_traffic_device_time ON public.device_traffic_stats USING btree (device_id, time_bucket DESC);
+CREATE INDEX idx_traffic_device_time ON public.agent_traffic_stats USING btree (device_id, time_bucket DESC);
 
 
 --
 -- Name: idx_traffic_status_codes; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_traffic_status_codes ON public.device_traffic_stats USING gin (status_codes);
+CREATE INDEX idx_traffic_status_codes ON public.agent_traffic_stats USING gin (status_codes);
 
 
 --
 -- Name: idx_traffic_time; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_traffic_time ON public.device_traffic_stats USING btree (time_bucket DESC);
+CREATE INDEX idx_traffic_time ON public.agent_traffic_stats USING btree (time_bucket DESC);
 
 
 --
@@ -32338,7 +32338,7 @@ CREATE OR REPLACE VIEW public.active_rollouts AS
     count(DISTINCT d.device_uuid) FILTER (WHERE ((d.status)::text = ANY (ARRAY[('pending'::character varying)::text, ('scheduled'::character varying)::text]))) AS devices_pending
    FROM ((public.image_rollouts r
      LEFT JOIN public.image_update_policies p ON ((r.policy_id = p.id)))
-     LEFT JOIN public.device_rollout_status d ON (((r.rollout_id)::text = (d.rollout_id)::text)))
+     LEFT JOIN public.agent_rollout_status d ON (((r.rollout_id)::text = (d.rollout_id)::text)))
   WHERE ((r.status)::text = ANY (ARRAY[('pending'::character varying)::text, ('scheduled'::character varying)::text, ('in_progress'::character varying)::text, ('paused'::character varying)::text]))
   GROUP BY r.id, p.id;
 
@@ -32351,10 +32351,10 @@ CREATE TRIGGER dashboard_layouts_updated_at BEFORE UPDATE ON public.dashboard_la
 
 
 --
--- Name: device_job_status device_job_status_updated_at; Type: TRIGGER; Schema: public; Owner: -
+-- Name: agent_job_status device_job_status_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER device_job_status_updated_at BEFORE UPDATE ON public.device_job_status FOR EACH ROW EXECUTE FUNCTION public.update_job_updated_at();
+CREATE TRIGGER device_job_status_updated_at BEFORE UPDATE ON public.agent_job_status FOR EACH ROW EXECUTE FUNCTION public.update_job_updated_at();
 
 
 --
@@ -32393,10 +32393,10 @@ CREATE TRIGGER scheduled_jobs_updated_at BEFORE UPDATE ON public.scheduled_jobs 
 
 
 --
--- Name: device_traffic_stats traffic_stats_updated_at; Type: TRIGGER; Schema: public; Owner: -
+-- Name: agent_traffic_stats traffic_stats_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER traffic_stats_updated_at BEFORE UPDATE ON public.device_traffic_stats FOR EACH ROW EXECUTE FUNCTION public.update_traffic_stats_updated_at();
+CREATE TRIGGER traffic_stats_updated_at BEFORE UPDATE ON public.agent_traffic_stats FOR EACH ROW EXECUTE FUNCTION public.update_traffic_stats_updated_at();
 
 
 --
@@ -32414,45 +32414,45 @@ CREATE TRIGGER trg_update_endpoint_timestamp BEFORE UPDATE ON public.endpoints F
 
 
 --
--- Name: devices trigger_archive_device_api_key; Type: TRIGGER; Schema: public; Owner: -
+-- Name: agents trigger_archive_agent_api_key; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trigger_archive_device_api_key BEFORE UPDATE OF device_api_key_hash ON public.devices FOR EACH ROW WHEN (((old.device_api_key_hash)::text IS DISTINCT FROM (new.device_api_key_hash)::text)) EXECUTE FUNCTION public.archive_device_api_key();
-
-
---
--- Name: device_current_state trigger_current_state_history; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trigger_current_state_history AFTER INSERT OR UPDATE ON public.device_current_state FOR EACH ROW EXECUTE FUNCTION public.create_current_state_history_snapshot();
+CREATE TRIGGER trigger_archive_agent_api_key BEFORE UPDATE OF device_api_key_hash ON public.agents FOR EACH ROW WHEN (((old.device_api_key_hash)::text IS DISTINCT FROM (new.device_api_key_hash)::text)) EXECUTE FUNCTION public.archive_agent_api_key();
 
 
 --
--- Name: device_target_state trigger_deployment_history; Type: TRIGGER; Schema: public; Owner: -
+-- Name: agent_current_state trigger_current_state_history; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trigger_deployment_history AFTER INSERT OR UPDATE ON public.device_target_state FOR EACH ROW EXECUTE FUNCTION public.create_deployment_history_snapshot();
-
-
---
--- Name: device_flows trigger_device_flows_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trigger_device_flows_updated_at BEFORE UPDATE ON public.device_flows FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+CREATE TRIGGER trigger_current_state_history AFTER INSERT OR UPDATE ON public.agent_current_state FOR EACH ROW EXECUTE FUNCTION public.create_current_state_history_snapshot();
 
 
 --
--- Name: TRIGGER trigger_device_flows_updated_at ON device_flows; Type: COMMENT; Schema: public; Owner: -
+-- Name: agent_target_state trigger_deployment_history; Type: TRIGGER; Schema: public; Owner: -
 --
 
-COMMENT ON TRIGGER trigger_device_flows_updated_at ON public.device_flows IS 'Automatically updates updated_at timestamp on row modification';
+CREATE TRIGGER trigger_deployment_history AFTER INSERT OR UPDATE ON public.agent_target_state FOR EACH ROW EXECUTE FUNCTION public.create_deployment_history_snapshot();
 
 
 --
--- Name: device_tags trigger_device_tags_updated_at; Type: TRIGGER; Schema: public; Owner: -
+-- Name: agent_flows trigger_device_flows_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trigger_device_tags_updated_at BEFORE UPDATE ON public.device_tags FOR EACH ROW EXECUTE FUNCTION public.update_device_tags_timestamp();
+CREATE TRIGGER trigger_device_flows_updated_at BEFORE UPDATE ON public.agent_flows FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: TRIGGER trigger_device_flows_updated_at ON agent_flows; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TRIGGER trigger_device_flows_updated_at ON public.agent_flows IS 'Automatically updates updated_at timestamp on row modification';
+
+
+--
+-- Name: agent_tags trigger_device_tags_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_device_tags_updated_at BEFORE UPDATE ON public.agent_tags FOR EACH ROW EXECUTE FUNCTION public.update_device_tags_timestamp();
 
 
 --
@@ -32547,31 +32547,31 @@ CREATE TRIGGER update_applications_modified_at BEFORE UPDATE ON public.applicati
 
 
 --
--- Name: device_environment_variable update_device_environment_variable_modified_at; Type: TRIGGER; Schema: public; Owner: -
+-- Name: agent_environment_variable update_device_environment_variable_modified_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER update_device_environment_variable_modified_at BEFORE UPDATE ON public.device_environment_variable FOR EACH ROW EXECUTE FUNCTION public.update_modified_at_column();
-
-
---
--- Name: device_rollout_status update_device_rollout_status_updated_at; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER update_device_rollout_status_updated_at BEFORE UPDATE ON public.device_rollout_status FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+CREATE TRIGGER update_device_environment_variable_modified_at BEFORE UPDATE ON public.agent_environment_variable FOR EACH ROW EXECUTE FUNCTION public.update_modified_at_column();
 
 
 --
--- Name: device_services update_device_services_modified_at; Type: TRIGGER; Schema: public; Owner: -
+-- Name: agent_rollout_status update_device_rollout_status_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER update_device_services_modified_at BEFORE UPDATE ON public.device_services FOR EACH ROW EXECUTE FUNCTION public.update_modified_at_column();
+CREATE TRIGGER update_device_rollout_status_updated_at BEFORE UPDATE ON public.agent_rollout_status FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 
 --
--- Name: devices update_devices_modified_at; Type: TRIGGER; Schema: public; Owner: -
+-- Name: agent_services update_device_services_modified_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER update_devices_modified_at BEFORE UPDATE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.update_modified_at_column();
+CREATE TRIGGER update_device_services_modified_at BEFORE UPDATE ON public.agent_services FOR EACH ROW EXECUTE FUNCTION public.update_modified_at_column();
+
+
+--
+-- Name: agents update_devices_modified_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER update_devices_modified_at BEFORE UPDATE ON public.agents FOR EACH ROW EXECUTE FUNCTION public.update_modified_at_column();
 
 
 --
@@ -32614,7 +32614,7 @@ CREATE TRIGGER update_releases_modified_at BEFORE UPDATE ON public.releases FOR 
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_103_chunk
-    ADD CONSTRAINT "103_42_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "103_42_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32622,7 +32622,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_103_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_12_chunk
-    ADD CONSTRAINT "12_11_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "12_11_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32630,7 +32630,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_12_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_13_chunk
-    ADD CONSTRAINT "13_13_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "13_13_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32638,7 +32638,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_13_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_14_chunk
-    ADD CONSTRAINT "14_15_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "14_15_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32646,7 +32646,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_14_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_15_chunk
-    ADD CONSTRAINT "15_17_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "15_17_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32654,7 +32654,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_15_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_53_chunk
-    ADD CONSTRAINT "53_25_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "53_25_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32662,7 +32662,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_53_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_56_chunk
-    ADD CONSTRAINT "56_27_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "56_27_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32670,7 +32670,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_56_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_61_chunk
-    ADD CONSTRAINT "61_29_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "61_29_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32678,7 +32678,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_61_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_66_chunk
-    ADD CONSTRAINT "66_33_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "66_33_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32686,7 +32686,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_66_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_70_chunk
-    ADD CONSTRAINT "70_36_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "70_36_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32694,7 +32694,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_70_chunk
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_41_76_chunk
-    ADD CONSTRAINT "76_38_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT "76_38_fk_device_logs_device" FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32702,7 +32702,7 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_41_76_chunk
 --
 
 ALTER TABLE ONLY public.agent_updates
-    ADD CONSTRAINT agent_updates_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT agent_updates_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32718,7 +32718,7 @@ ALTER TABLE ONLY public.anomaly_alerts
 --
 
 ALTER TABLE ONLY public.audit_logs
-    ADD CONSTRAINT audit_logs_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE SET NULL;
+    ADD CONSTRAINT audit_logs_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE SET NULL;
 
 
 --
@@ -32726,31 +32726,31 @@ ALTER TABLE ONLY public.audit_logs
 --
 
 ALTER TABLE ONLY public.dashboard_layouts
-    ADD CONSTRAINT dashboard_layouts_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT dashboard_layouts_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_api_key_history device_api_key_history_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_api_key_history device_api_key_history_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_api_key_history
-    ADD CONSTRAINT device_api_key_history_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
-
-
---
--- Name: device_api_keys device_api_keys_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_api_keys
-    ADD CONSTRAINT device_api_keys_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_api_key_history
+    ADD CONSTRAINT device_api_key_history_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_current_state device_current_state_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_api_keys device_api_keys_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_current_state
-    ADD CONSTRAINT device_current_state_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_api_keys
+    ADD CONSTRAINT device_api_keys_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
+
+
+--
+-- Name: agent_current_state device_current_state_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_current_state
+    ADD CONSTRAINT device_current_state_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32758,7 +32758,7 @@ ALTER TABLE ONLY public.device_current_state
 --
 
 ALTER TABLE ONLY public.dictionary_entries
-    ADD CONSTRAINT device_dictionary_entries_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT device_dictionary_entries_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32766,118 +32766,118 @@ ALTER TABLE ONLY public.dictionary_entries
 --
 
 ALTER TABLE ONLY public.dictionary_metadata
-    ADD CONSTRAINT device_dictionary_metadata_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT device_dictionary_metadata_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_environment_variable device_environment_variable_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_environment_variable device_environment_variable_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_environment_variable
-    ADD CONSTRAINT device_environment_variable_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
-
-
---
--- Name: device_flows device_flows_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_flows
-    ADD CONSTRAINT device_flows_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_environment_variable
+    ADD CONSTRAINT device_environment_variable_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_job_status device_job_status_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_flows device_flows_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_job_status
-    ADD CONSTRAINT device_job_status_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_flows
+    ADD CONSTRAINT device_flows_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_job_status device_job_status_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_job_status device_job_status_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_job_status
+ALTER TABLE ONLY public.agent_job_status
+    ADD CONSTRAINT device_job_status_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
+
+
+--
+-- Name: agent_job_status device_job_status_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_job_status
     ADD CONSTRAINT device_job_status_job_id_fkey FOREIGN KEY (job_id) REFERENCES public.job_executions(job_id) ON DELETE CASCADE;
 
 
 --
--- Name: device_rollout_status device_rollout_status_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_rollout_status device_rollout_status_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_rollout_status
-    ADD CONSTRAINT device_rollout_status_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_rollout_status
+    ADD CONSTRAINT device_rollout_status_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_rollout_status device_rollout_status_rollout_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_rollout_status device_rollout_status_rollout_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_rollout_status
+ALTER TABLE ONLY public.agent_rollout_status
     ADD CONSTRAINT device_rollout_status_rollout_id_fkey FOREIGN KEY (rollout_id) REFERENCES public.image_rollouts(rollout_id) ON DELETE CASCADE;
 
 
 --
--- Name: device_services device_services_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_services device_services_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_services
-    ADD CONSTRAINT device_services_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
-
-
---
--- Name: device_shadow_history device_shadow_history_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_shadow_history
-    ADD CONSTRAINT device_shadow_history_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_services
+    ADD CONSTRAINT device_services_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_shadows device_shadows_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_shadow_history device_shadow_history_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_shadows
-    ADD CONSTRAINT device_shadows_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_shadow_history
+    ADD CONSTRAINT device_shadow_history_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_tags device_tags_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_shadows device_shadows_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_tags
+ALTER TABLE ONLY public.agent_shadows
+    ADD CONSTRAINT device_shadows_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
+
+
+--
+-- Name: agent_tags device_tags_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_tags
     ADD CONSTRAINT device_tags_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
 
 
 --
--- Name: device_tags device_tags_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_tags device_tags_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_tags
-    ADD CONSTRAINT device_tags_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
-
-
---
--- Name: device_target_state device_target_state_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.device_target_state
-    ADD CONSTRAINT device_target_state_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_tags
+    ADD CONSTRAINT device_tags_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_target_state_history device_target_state_history_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_target_state device_target_state_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_target_state_history
-    ADD CONSTRAINT device_target_state_history_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_target_state
+    ADD CONSTRAINT device_target_state_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: devices devices_provisioned_by_key_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_target_state_history device_target_state_history_device_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.devices
+ALTER TABLE ONLY public.agent_target_state_history
+    ADD CONSTRAINT device_target_state_history_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
+
+
+--
+-- Name: agents devices_provisioned_by_key_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agents
     ADD CONSTRAINT devices_provisioned_by_key_id_fkey FOREIGN KEY (provisioned_by_key_id) REFERENCES public.provisioning_keys(id) ON DELETE SET NULL;
 
 
@@ -32886,7 +32886,7 @@ ALTER TABLE ONLY public.devices
 --
 
 ALTER TABLE ONLY public.dictionary_enum_devices
-    ADD CONSTRAINT dictionary_enum_devices_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT dictionary_enum_devices_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32894,7 +32894,7 @@ ALTER TABLE ONLY public.dictionary_enum_devices
 --
 
 ALTER TABLE ONLY public.dictionary_enum_metrics
-    ADD CONSTRAINT dictionary_enum_metrics_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT dictionary_enum_metrics_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32902,7 +32902,7 @@ ALTER TABLE ONLY public.dictionary_enum_metrics
 --
 
 ALTER TABLE ONLY public.dictionary_enum_observations
-    ADD CONSTRAINT dictionary_enum_observations_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT dictionary_enum_observations_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32910,7 +32910,7 @@ ALTER TABLE ONLY public.dictionary_enum_observations
 --
 
 ALTER TABLE ONLY public.dictionary_enum_quality_codes
-    ADD CONSTRAINT dictionary_enum_quality_codes_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT dictionary_enum_quality_codes_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32918,7 +32918,7 @@ ALTER TABLE ONLY public.dictionary_enum_quality_codes
 --
 
 ALTER TABLE ONLY public.dictionary_enum_units
-    ADD CONSTRAINT dictionary_enum_units_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT dictionary_enum_units_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32926,15 +32926,15 @@ ALTER TABLE ONLY public.dictionary_enum_units
 --
 
 ALTER TABLE ONLY public.endpoints
-    ADD CONSTRAINT endpoints_agent_uuid_fkey FOREIGN KEY (agent_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT endpoints_agent_uuid_fkey FOREIGN KEY (agent_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
--- Name: device_logs fk_device_logs_device; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: agent_logs fk_device_logs_device; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.device_logs
-    ADD CONSTRAINT fk_device_logs_device FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+ALTER TABLE ONLY public.agent_logs
+    ADD CONSTRAINT fk_device_logs_device FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32942,7 +32942,7 @@ ALTER TABLE ONLY public.device_logs
 --
 
 ALTER TABLE ONLY public.shell_sessions
-    ADD CONSTRAINT fk_shell_sessions_device FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_shell_sessions_device FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32982,7 +32982,7 @@ ALTER TABLE ONLY public.job_executions
 --
 
 ALTER TABLE ONLY public.log_alert_rules
-    ADD CONSTRAINT log_alert_rules_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT log_alert_rules_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -32990,7 +32990,7 @@ ALTER TABLE ONLY public.log_alert_rules
 --
 
 ALTER TABLE ONLY public.log_alerts
-    ADD CONSTRAINT log_alerts_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT log_alerts_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -33038,7 +33038,7 @@ ALTER TABLE ONLY public.shell_audit_log
 --
 
 ALTER TABLE ONLY public.state_changes
-    ADD CONSTRAINT state_changes_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT state_changes_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --
@@ -33054,7 +33054,7 @@ ALTER TABLE ONLY public.state_changes
 --
 
 ALTER TABLE ONLY public.state_snapshots
-    ADD CONSTRAINT state_snapshots_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.devices(uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT state_snapshots_device_uuid_fkey FOREIGN KEY (device_uuid) REFERENCES public.agents(uuid) ON DELETE CASCADE;
 
 
 --

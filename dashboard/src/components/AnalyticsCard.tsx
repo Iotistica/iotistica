@@ -120,7 +120,7 @@ export function AnalyticsCard({ deviceName = "Device 1", deviceId, processes = [
         const hours = hoursMap[timePeriod];
         
         const response = await fetch(
-          buildApiUrl(`/api/v1/devices/${deviceId}/processes/history?hours=${hours}&limit=50`)
+          buildApiUrl(`/api/v1/agents/${deviceId}/processes/history?hours=${hours}&limit=50`)
         );
         const data = await response.json();
         

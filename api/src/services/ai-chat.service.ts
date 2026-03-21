@@ -1,7 +1,7 @@
 /**
  * AI Chat Service
  * 
- * Handles natural language queries about IoT devices using either Ollama (local) or
+ * Handles natural language queries about IoT agents using either Ollama (local) or
  * OpenAI GPT models, depending on environment configuration.
  *
  * Ollama setup:
@@ -170,7 +170,7 @@ export async function processAIChat(request: ChatRequest): Promise<string> {
   try {
     // For Ollama, fetch device data upfront and include in context
     // For OpenAI, use tool calling
-    let systemPrompt = `You are an IoT device assistant. You help users monitor and manage their IoT devices.
+    let systemPrompt = `You are an IoT device assistant. You help users monitor and manage their IoT agents.
 Current device UUID: ${deviceUuid}
 
 Be concise and helpful. When showing metrics:
@@ -187,7 +187,7 @@ If asked to perform actions like restarting containers, explain that you can pro
       console.log('[AI Service] Fetching device data for Ollama context');
       try {
         const deviceInfo = await executeTool('get_device_info', { deviceUuid });
-        const deviceMetrics = await executeTool('get_device_metrics', {
+        const deviceMetrics = await executeTool('get_agent_metrics', {
           deviceUuid,
           limit: 10,
         });

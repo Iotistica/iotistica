@@ -38,7 +38,7 @@ param(
     #[string]$ApiUrl = "https://api.iotistica.com",
     [string]$ApiUrl = "https://localhost:3443",
     #[string]$ApiUrl = "https://api-client-b07708418f4e.iotistica.com",
-    [string]$FleetUuid = "da493082-9ca1-494c-bf97-6594620e5255",
+    [string]$FleetUuid = "b9f49527-daa8-45e0-8d90-2fd4ff392273",
     [bool]$UseDirectDb = $true,
     [string]$DbHost = "localhost",
     [int]$DbPort = 5432,
@@ -325,7 +325,7 @@ ALTER TABLE provisioning_keys ADD COLUMN IF NOT EXISTS fleet_uuid UUID;
         $escapedCreatedBy = "script" -replace "'", "''"
         $escapedFleetUuid = $FleetUuid -replace "'", "''"
 
-        $columns = @('key_hash', 'description', 'max_devices', 'expires_at', 'created_by')
+        $columns = @('key_hash', 'description', 'max_agents', 'expires_at', 'created_by')
         $values = @(
             "crypt('$escapedKey', gen_salt('bf', 10))",
             "'$escapedDescription'",

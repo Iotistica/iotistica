@@ -10,8 +10,12 @@
     "node-red": {
         "version": ">=3.0.0",
         "nodes": {
-            "pipeline-in":  "nodes/pipeline-in.js",
-            "pipeline-out": "nodes/pipeline-out.js"
+            "pipeline-in":     "nodes/pipeline-in.js",
+            "pipeline-out":    "nodes/pipeline-out.js",
+            "device-filter":   "nodes/device-filter.js"
         }
+    },
+    "devDependencies": {
+        "@iotistic/types": "file:../../../../packages/types"
     }
 }

@@ -66,7 +66,7 @@ export interface Device {
 
 export interface DeviceTargetState {
   id: number;
-  device_uuid: string;
+  agent_uuid: string;
   apps: any;
   config: {
     agent?: {
@@ -93,7 +93,7 @@ export interface DeviceTargetState {
 
 export interface DeviceCurrentState {
   id: number;
-  device_uuid: string;
+  agent_uuid: string;
   apps: any;
   config: any;
   system_info: any;
@@ -102,7 +102,7 @@ export interface DeviceCurrentState {
 }
 
 export interface DeviceMetrics {
-  device_uuid: string;
+  agent_uuid: string;
   cpu_usage?: number;
   cpu_temp?: number;
   memory_usage?: number;
@@ -156,7 +156,7 @@ export class DeviceModel {
     
     // Mark existing device as online
     const result = await query<Device>(
-      `UPDATE devices SET
+      `UPDATE agents SET
          is_online = true,
          last_connectivity_event = CURRENT_TIMESTAMP
        WHERE uuid = $1
@@ -227,20 +227,20 @@ export class DeviceModel {
    */
   static async getByUuid(uuid: string): Promise<Device | null> {
     const result = await query<Device>(
-      'SELECT * FROM devices WHERE uuid = $1',
+      'SELECT * FROM agents WHERE uuid = $1',
       [uuid]
     );
     return result.rows[0] || null;
   }
 
   /**
-   * List all devices
+   * List all agents
    */
   static async list(filters: {
     isOnline?: boolean;
     isActive?: boolean;
   } = {}): Promise<Device[]> {
-    let sql = 'SELECT * FROM devices WHERE 1=1';
+    let sql = 'SELECT * FROM agents WHERE 1=1';
     const params: any[] = [];
 
     if (filters.isOnline !== undefined) {
@@ -278,7 +278,7 @@ export class DeviceModel {
     values.push(uuid);
 
     const result = await query<Device>(
-      `UPDATE devices SET ${fields.join(', ')} WHERE uuid = $${paramIndex} RETURNING *`,
+      `UPDATE agents SET ${fields.join(', ')} WHERE uuid = $${paramIndex} RETURNING *`,
       values
     );
 
@@ -317,7 +317,7 @@ export class DeviceModel {
     });
 
     const result = await query<Device>(
-      `INSERT INTO devices (${insertFields.join(', ')})
+      `INSERT INTO agents (${insertFields.join(', ')})
        VALUES (${insertPlaceholders.join(', ')})
        ON CONFLICT (uuid) DO UPDATE SET
          ${updateFields.join(', ')}
@@ -342,7 +342,7 @@ export class DeviceModel {
    */
   static async markOffline(uuid: string): Promise<void> {
     await query(
-      'UPDATE devices SET is_online = false WHERE uuid = $1',
+      'UPDATE agents SET is_online = false WHERE uuid = $1',
       [uuid]
     );
   }
@@ -351,7 +351,7 @@ export class DeviceModel {
    * Delete device
    */
   static async delete(uuid: string): Promise<void> {
-    await query('DELETE FROM devices WHERE uuid = $1', [uuid]);
+    await query('DELETE FROM agents WHERE uuid = $1', [uuid]);
   }
 
   /**
@@ -362,7 +362,7 @@ export class DeviceModel {
    */
   static async storeChallenge(uuid: string, challenge: string, expiresAt: Date): Promise<void> {
     await query(
-      `UPDATE devices 
+      `UPDATE agents 
        SET last_challenge = $1, last_challenge_expires_at = $2 
        WHERE uuid = $3`,
       [challenge, expiresAt, uuid]
@@ -375,7 +375,7 @@ export class DeviceModel {
    */
   static async markPopVerified(uuid: string): Promise<void> {
     await query(
-      `UPDATE devices 
+      `UPDATE agents 
        SET pop_verified = true, 
            pop_verified_at = CURRENT_TIMESTAMP,
            last_challenge = NULL,
@@ -394,7 +394,7 @@ export class DeviceModel {
    */
   static async recordAuthMethod(uuid: string, method: 'pop' | 'bcrypt'): Promise<void> {
     await query(
-      `UPDATE devices 
+      `UPDATE agents 
        SET last_auth_method = $1,
            last_auth_at = CURRENT_TIMESTAMP
        WHERE uuid = $2`,
@@ -407,7 +407,7 @@ export class DeviceModel {
    */
   static async getPublicKey(uuid: string): Promise<string | null> {
     const result = await query<{ device_public_key: string }>(
-      'SELECT device_public_key FROM devices WHERE uuid = $1',
+      'SELECT device_public_key FROM agents WHERE uuid = $1',
       [uuid]
     );
     return result.rows[0]?.device_public_key || null;
@@ -418,7 +418,7 @@ export class DeviceModel {
    */
   static async setPublicKey(uuid: string, publicKey: string): Promise<void> {
     const result = await query(
-      `UPDATE devices 
+      `UPDATE agents 
        SET device_public_key = $1 
        WHERE uuid = $2 AND device_public_key IS NULL`,
       [publicKey, uuid]
@@ -439,7 +439,7 @@ export class DeviceTargetStateModel {
    */
   static async get(deviceUuid: string): Promise<DeviceTargetState | null> {
     const result = await query<DeviceTargetState>(
-      'SELECT * FROM device_target_state WHERE device_uuid = $1',
+      'SELECT * FROM agent_target_state WHERE agent_uuid = $1',
       [deviceUuid]
     );
     return result.rows[0] || null;
@@ -462,9 +462,9 @@ export class DeviceTargetStateModel {
     }
 
     const result = await query<DeviceTargetState>(
-      `INSERT INTO device_target_state (device_uuid, apps, config, version, needs_deployment, updated_at)
+      `INSERT INTO agent_target_state (agent_uuid, apps, config, version, needs_deployment, updated_at)
        VALUES ($1, $2, $3, 1, $4, CURRENT_TIMESTAMP)
-       ON CONFLICT (device_uuid) DO UPDATE SET
+       ON CONFLICT (agent_uuid) DO UPDATE SET
          apps = $2,
          config = $3,
          needs_deployment = $4,
@@ -486,13 +486,13 @@ export class DeviceTargetStateModel {
     deployedBy: string = 'system'
   ): Promise<DeviceTargetState> {
     const result = await query<DeviceTargetState>(
-      `UPDATE device_target_state SET
+      `UPDATE agent_target_state SET
          version = version + 1,
          needs_deployment = false,
          last_deployed_at = CURRENT_TIMESTAMP,
          deployed_by = $2,
          updated_at = CURRENT_TIMESTAMP
-       WHERE device_uuid = $1
+       WHERE agent_uuid = $1
        RETURNING *`,
       [deviceUuid, deployedBy]
     );
@@ -541,8 +541,8 @@ export class DeviceTargetStateModel {
    */
   static async clear(deviceUuid: string): Promise<void> {
     await query(
-      `UPDATE device_target_state SET apps = '{}', config = '{}', updated_at = CURRENT_TIMESTAMP
-       WHERE device_uuid = $1`,
+      `UPDATE agent_target_state SET apps = '{}', config = '{}', updated_at = CURRENT_TIMESTAMP
+       WHERE agent_uuid = $1`,
       [deviceUuid]
     );
   }
@@ -572,7 +572,7 @@ export class DeviceCurrentStateModel {
    */
   static async get(deviceUuid: string): Promise<DeviceCurrentState | null> {
     const result = await query<DeviceCurrentState>(
-      'SELECT * FROM device_current_state WHERE device_uuid = $1',
+      'SELECT * FROM agent_current_state WHERE agent_uuid = $1',
       [deviceUuid]
     );
     return result.rows[0] || null;
@@ -597,11 +597,11 @@ export class DeviceCurrentStateModel {
     const configJson = config !== undefined && config !== null ? JSON.stringify(config) : null;
 
     const result = await query<DeviceCurrentState>(
-      `INSERT INTO device_current_state (device_uuid, apps, config, system_info, version, reported_at)
+      `INSERT INTO agent_current_state (agent_uuid, apps, config, system_info, version, reported_at)
        VALUES ($1, $2, COALESCE($3::jsonb, '{}'::jsonb), $4, $5, CURRENT_TIMESTAMP)
-       ON CONFLICT (device_uuid) DO UPDATE SET
+       ON CONFLICT (agent_uuid) DO UPDATE SET
          apps = $2,
-         config = CASE WHEN $3 IS NOT NULL THEN $3::jsonb ELSE device_current_state.config END,
+         config = CASE WHEN $3 IS NOT NULL THEN $3::jsonb ELSE agent_current_state.config END,
          system_info = $4,
          version = $5,
          reported_at = CURRENT_TIMESTAMP
@@ -622,8 +622,8 @@ export class DeviceMetricsModel {
    */
   static async record(deviceUuid: string, metrics: Partial<DeviceMetrics>): Promise<void> {
     await query(
-      `INSERT INTO device_metrics (
-        device_uuid, cpu_usage, cpu_temp, memory_usage, memory_total,
+      `INSERT INTO agent_metrics (
+        agent_uuid, cpu_usage, cpu_temp, memory_usage, memory_total,
         storage_usage, storage_total, top_processes, recorded_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
       [
@@ -654,8 +654,8 @@ export class DeviceMetricsModel {
    */
   static async getRecent(deviceUuid: string, limit: number = 100): Promise<DeviceMetrics[]> {
     const result = await query<DeviceMetrics>(
-      `SELECT * FROM device_metrics 
-       WHERE device_uuid = $1 
+      `SELECT * FROM agent_metrics 
+       WHERE agent_uuid = $1 
        ORDER BY recorded_at DESC 
        LIMIT $2`,
       [deviceUuid, limit]
@@ -668,8 +668,8 @@ export class DeviceMetricsModel {
    */
   static async getRecentByTime(deviceUuid: string, sinceTimestamp: string): Promise<DeviceMetrics[]> {
     const result = await query<DeviceMetrics>(
-      `SELECT * FROM device_metrics 
-       WHERE device_uuid = $1 
+      `SELECT * FROM agent_metrics 
+       WHERE agent_uuid = $1 
        AND recorded_at >= $2
        ORDER BY recorded_at ASC`,
       [deviceUuid, sinceTimestamp]
@@ -680,9 +680,9 @@ export class DeviceMetricsModel {
   /**
    * Get metrics by time range with optional sampling
    * Uses TimescaleDB continuous aggregates for better performance at scale:
-   * - 30min: raw device_metrics (real-time)
-   * - 6h: device_metrics_5min (5-minute aggregates)
-   * - 12h/24h: device_metrics_hourly (hourly aggregates)
+   * - 30min: raw agent_metrics (real-time)
+   * - 6h: agent_metrics_5min (5-minute aggregates)
+   * - 12h/24h: agent_metrics_hourly (hourly aggregates)
    */
   static async getByTimeRangeMinutes(
     deviceUuid: string,
@@ -698,21 +698,21 @@ export class DeviceMetricsModel {
     let cpuTempColumn: string;
     
     if (minutes <= 30) {
-      tableName = 'device_metrics';
+      tableName = 'agent_metrics';
       timeColumn = 'recorded_at';
       cpuUsageColumn = 'cpu_usage';
       memoryUsageColumn = 'memory_usage';
       storageUsageColumn = 'storage_usage';
       cpuTempColumn = 'cpu_temp';
     } else if (minutes <= 360) {
-      tableName = 'device_metrics_5min';
+      tableName = 'agent_metrics_5min';
       timeColumn = 'bucket';
       cpuUsageColumn = 'avg_cpu_usage';
       memoryUsageColumn = 'avg_memory_usage';
       storageUsageColumn = 'avg_storage_usage';
       cpuTempColumn = 'avg_cpu_temp';
     } else {
-      tableName = 'device_metrics_hourly';
+      tableName = 'agent_metrics_hourly';
       timeColumn = 'bucket';
       cpuUsageColumn = 'avg_cpu_usage';
       memoryUsageColumn = 'avg_memory_usage';
@@ -725,7 +725,7 @@ export class DeviceMetricsModel {
     // For 5min aggregates, downsample to fit maxPoints
     // For raw data, downsample to fit maxPoints
     let interval: number;
-    if (tableName === 'device_metrics_hourly') {
+    if (tableName === 'agent_metrics_hourly') {
       interval = 1; // Show all hourly data (max 24 points for 24h period)
     } else {
       interval = Math.max(1, Math.ceil(minutes / maxPoints));
@@ -734,7 +734,7 @@ export class DeviceMetricsModel {
     const result = await query<DeviceMetrics>(
       `WITH numbered AS (
         SELECT 
-          device_uuid,
+          agent_uuid,
           ${timeColumn} as recorded_at,
           ${cpuUsageColumn} as cpu_usage,
           ${memoryUsageColumn} as memory_usage,
@@ -742,12 +742,12 @@ export class DeviceMetricsModel {
           ${cpuTempColumn} as cpu_temperature,
           ROW_NUMBER() OVER (ORDER BY ${timeColumn}) as rn
         FROM ${tableName}
-        WHERE device_uuid = $1 
+        WHERE agent_uuid = $1 
           AND ${timeColumn} >= NOW() - INTERVAL '1 minute' * $2
           AND ${timeColumn} <= NOW()
       )
       SELECT 
-        device_uuid,
+        agent_uuid,
         recorded_at,
         ROUND(cpu_usage::numeric, 1) as cpu_usage,
         ROUND(memory_usage::numeric, 0) as memory_usage,
@@ -766,9 +766,9 @@ export class DeviceMetricsModel {
    * Get metrics for a specific time range (legacy method, uses Date objects)
    * 
    * Uses TimescaleDB continuous aggregates for better performance at scale:
-   * - 30min: raw device_metrics (real-time)
-   * - 6h: device_metrics_5min (5-minute aggregates)
-   * - 12h/24h: device_metrics_hourly (hourly aggregates)
+   * - 30min: raw agent_metrics (real-time)
+   * - 6h: agent_metrics_5min (5-minute aggregates)
+   * - 12h/24h: agent_metrics_hourly (hourly aggregates)
    */
   static async getByTimeRange(
     deviceUuid: string, 
@@ -790,7 +790,7 @@ export class DeviceMetricsModel {
     
     if (totalMinutes <= 30) {
       // 30 minutes or less: use raw table for real-time data
-      tableName = 'device_metrics';
+      tableName = 'agent_metrics';
       timeColumn = 'recorded_at';
       cpuUsageColumn = 'cpu_usage';
       memoryUsageColumn = 'memory_usage';
@@ -798,7 +798,7 @@ export class DeviceMetricsModel {
       cpuTempColumn = 'cpu_temp';
     } else if (totalMinutes <= 360) {
       // 6 hours or less: use 5-minute continuous aggregate
-      tableName = 'device_metrics_5min';
+      tableName = 'agent_metrics_5min';
       timeColumn = 'bucket';
       cpuUsageColumn = 'avg_cpu_usage';
       memoryUsageColumn = 'avg_memory_usage';
@@ -806,7 +806,7 @@ export class DeviceMetricsModel {
       cpuTempColumn = 'avg_cpu_temp';
     } else {
       // 12 hours or more: use hourly continuous aggregate
-      tableName = 'device_metrics_hourly';
+      tableName = 'agent_metrics_hourly';
       timeColumn = 'bucket';
       cpuUsageColumn = 'avg_cpu_usage';
       memoryUsageColumn = 'avg_memory_usage';
@@ -817,7 +817,7 @@ export class DeviceMetricsModel {
     const result = await query<DeviceMetrics>(
       `WITH numbered AS (
         SELECT 
-          device_uuid,
+          agent_uuid,
           ${timeColumn} as recorded_at,
           ${cpuUsageColumn} as cpu_usage,
           ${memoryUsageColumn} as memory_usage,
@@ -825,12 +825,12 @@ export class DeviceMetricsModel {
           ${cpuTempColumn} as cpu_temperature,
           ROW_NUMBER() OVER (ORDER BY ${timeColumn}) as rn
         FROM ${tableName}
-        WHERE device_uuid = $1 
+        WHERE agent_uuid = $1 
           AND ${timeColumn} >= ($2::timestamptz AT TIME ZONE 'UTC')::timestamp
           AND ${timeColumn} <= ($3::timestamptz AT TIME ZONE 'UTC')::timestamp
       )
       SELECT 
-        device_uuid,
+        agent_uuid,
         recorded_at,
         cpu_usage,
         memory_usage,
@@ -850,7 +850,7 @@ export class DeviceMetricsModel {
    */
   static async cleanup(daysToKeep: number = 30): Promise<number> {
     const result = await query(
-      `DELETE FROM device_metrics 
+      `DELETE FROM agent_metrics 
        WHERE recorded_at < NOW() - INTERVAL '${daysToKeep} days'`
     );
     return result.rowCount || 0;
@@ -917,7 +917,7 @@ export class DeviceLogsModel {
         });
 
         await query(
-          `INSERT INTO device_logs (device_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta)
+          `INSERT INTO agent_logs (agent_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta)
            VALUES ${placeholders.join(', ')}`,
           values
         );
@@ -937,7 +937,7 @@ export class DeviceLogsModel {
       since?: Date;
     } = {}
   ): Promise<any[]> {
-    let sql = 'SELECT * FROM device_logs WHERE device_uuid = $1';
+    let sql = 'SELECT * FROM agent_logs WHERE agent_uuid = $1';
     const params: any[] = [deviceUuid];
     let paramIndex = 2;
 
@@ -975,7 +975,7 @@ export class DeviceLogsModel {
    */
   static async cleanup(daysToKeep: number = 7): Promise<number> {
     const result = await query(
-      `DELETE FROM device_logs 
+      `DELETE FROM agent_logs 
        WHERE created_at < NOW() - INTERVAL '${daysToKeep} days'`
     );
     return result.rowCount || 0;

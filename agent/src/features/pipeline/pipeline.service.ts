@@ -39,6 +39,7 @@ import type {
   PipelineTransformInput,
   PipelineTransformResult,
 } from './types.js';
+import { PIPELINE_ALLOWED_NODE_TYPES } from './types.js';
 
 //  Internal event bus and pending-promise map 
 // Exposed on globalThis so the CJS nr-nodes loaded by Node-RED can reach them.
@@ -81,6 +82,7 @@ export class PipelineService {
     fs.mkdirSync(this.userDir, { recursive: true });
 
     const flows    = this._resolveFlows();
+    this._sanitizeFlows(flows);
     const augmented = this._augmentFlows(flows);
     const flowsFile = path.join(this.userDir, 'flows.json');
     fs.writeFileSync(flowsFile, JSON.stringify(augmented, null, 2), 'utf8');
@@ -158,6 +160,89 @@ export class PipelineService {
   }
 
   //  Private helpers 
+
+  /**
+   * Validate the flow structure and reject any node types that could be used
+   * to escape the sandbox, exfiltrate data, or cause side-effects outside the
+   * transform pipeline.
+   *
+   * Allowlisted node types cover the standard NR function/logic nodes that
+   * are useful for payload transformation.  Add to ALLOWED_TYPES if you need
+   * a specific contrib node that is safe.
+   */
+  private _sanitizeFlows(flows: PipelineFlow): void {
+    if (!Array.isArray(flows)) {
+      throw new Error('Pipeline flows must be a JSON array');
+    }
+    if (flows.length === 0) {
+      throw new Error('Pipeline flows array is empty');
+    }
+    if (flows.length > 100) {
+      throw new Error(`Pipeline flows too large: ${flows.length} nodes (max 100)`);
+    }
+
+    // Node types that are safe for payload transformation.
+    // The canonical list lives in @iotistic/types — add new Iotistica nodes there.
+    const ALLOWED_TYPES = new Set<string>(PIPELINE_ALLOWED_NODE_TYPES);
+
+    const seenIds = new Set<string>();
+
+    for (const node of flows) {
+      // Structural checks
+      if (typeof node !== 'object' || node === null) {
+        throw new Error('Pipeline flow contains a non-object node');
+      }
+      if (typeof node.id !== 'string' || !node.id.trim()) {
+        throw new Error('Pipeline flow node is missing a valid id');
+      }
+      if (typeof node.type !== 'string' || !node.type.trim()) {
+        throw new Error(`Pipeline flow node '${node.id}' is missing a valid type`);
+      }
+
+      // Duplicate id check
+      if (seenIds.has(node.id)) {
+        throw new Error(`Pipeline flow contains duplicate node id: '${node.id}'`);
+      }
+      seenIds.add(node.id);
+
+      // Allowlist check
+      if (!ALLOWED_TYPES.has(node.type)) {
+        throw new Error(
+          `Pipeline flow contains disallowed node type: '${node.type}'. ` +
+          `Only transform-safe node types are permitted.`
+        );
+      }
+
+      // Agent UUID ownership check — every pipeline-in node must declare
+      // the UUID of this agent.  A mismatch means the flow was built for a
+      // different agent and must not run here.
+      if (node.type === 'iotistica-pipeline-in') {
+        const declaredUuid = typeof node.agentUuid === 'string' ? node.agentUuid.trim() : '';
+        if (!declaredUuid) {
+          throw new Error(
+            `Pipeline flow node '${node.id}' (pipeline-in) has no agentUuid. ` +
+            `Open the node in the editor, select an agent, and redeploy.`
+          );
+        }
+        if (declaredUuid !== this.options.agentUuid) {
+          throw new Error(
+            `Pipeline flow node '${node.id}' is assigned to agent '${declaredUuid}' ` +
+            `but this agent is '${this.options.agentUuid}'. Flow ownership mismatch.`
+          );
+        }
+      }
+
+      // Wires must be an array (if present)
+      if (node.wires !== undefined && !Array.isArray(node.wires)) {
+        throw new Error(`Pipeline flow node '${node.id}' has invalid wires (must be array)`);
+      }
+
+      // Guard against excessively large function bodies (> 64 KB)
+      if (node.type === 'function' && typeof node.func === 'string' && node.func.length > 65536) {
+        throw new Error(`Pipeline function node '${node.id}' func body exceeds 64 KB limit`);
+      }
+    }
+  }
 
   private _resolveFlows(): PipelineFlow {
     const { flows } = this.options;

@@ -1,14 +1,14 @@
 // ...existing code...
 /**
  * Update device details (name, type, IP, MAC)
- * PATCH /api/v1/devices/:uuid
+ * PATCH /api/v1/agents/:uuid
  * Body: { deviceName, deviceType, ipAddress, macAddress }
  */
 
 
 /**
  * Device Management Routes
- * Endpoints for managing individual devices and their deployed applications
+ * Endpoints for managing individual agents and their deployed applications
  */
 
 import express from 'express';
@@ -27,14 +27,13 @@ import {
 import { EventPublisher } from '../services/event-sourcing';
 import logger from '../utils/logger';
 import { SystemConfig } from '../config/system-config';
-import deviceAuth from '../middleware/device-auth';
+import deviceAuth from '../middleware/agent-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
 import { virtualAgentDeployer } from '../services/virtual-agent-deployer';
 import { provisioningService } from '../services/provisioning.service';
 import { mqttDeviceTopic } from '../mqtt/topics';
 import { getTenantId } from '../redis/tenant-keys';
 
-console.log('[DEVICES-ROUTES] jwtAuth imported:', typeof jwtAuth, jwtAuth.name);
 
 export const router = express.Router();
 
@@ -45,7 +44,7 @@ const ipAddressSchema = z.string().ip({ version: 'v4' }).or(z.string().ip({ vers
 const macAddressSchema = z.string().regex(/^([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]{2})$/, 'Invalid MAC address format (use XX:XX:XX:XX:XX:XX)');
 const locationSchema = z.string().max(255).regex(/^[a-zA-Z0-9\-_\s.,()]+$/, 'Location contains invalid characters') .nullable();
 
-router.patch('/devices/:uuid', jwtAuth, async (req, res) => {
+router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const { deviceName, deviceType, ipAddress, macAddress, location } = req.body;
@@ -172,7 +171,7 @@ router.patch('/devices/:uuid', jwtAuth, async (req, res) => {
 
 /**
  * Update device details (name, type, IP, MAC)
- * PATCH /api/v1/devices/:uuid
+ * PATCH /api/v1/agents/:uuid
  * Body: { deviceName, deviceType, ipAddress, macAddress }
  * 
  * NOTE: This is consolidated with the authenticated route defined above.
@@ -186,16 +185,16 @@ const eventPublisher = new EventPublisher();
 // ============================================================================
 
 /**
- * Get distinct locations from devices and endpoint devices
- * GET /api/v1/devices/locations
+ * Get distinct locations from agents and endpoint agents
+ * GET /api/v1/agents/locations
  */
-router.get('/devices/locations', jwtAuth, async (req, res) => {
+router.get('/agents/locations', jwtAuth, async (req, res) => {
   try {
-    // Get distinct locations from both agents and endpoint devices
+    // Get distinct locations from both agents and endpoint agents
     const result = await query(`
       SELECT DISTINCT location
       FROM (
-        SELECT location FROM devices WHERE location IS NOT NULL AND location != ''
+        SELECT location FROM agents WHERE location IS NOT NULL AND location != ''
         UNION
         SELECT extra->>'location' as location FROM readings 
         WHERE extra->>'location' IS NOT NULL AND extra->>'location' != ''
@@ -217,10 +216,10 @@ router.get('/devices/locations', jwtAuth, async (req, res) => {
 });
 
 /**
- * List all devices
- * GET /api/v1/devices
+ * List all agents
+ * GET /api/v1/agents
  */
-router.get('/devices', jwtAuth, async (req, res) => {
+router.get('/agents', jwtAuth, async (req, res) => {
   try {
     const isOnline = req.query.online === 'true' ? true : 
                      req.query.online === 'false' ? false : 
@@ -232,14 +231,14 @@ router.get('/devices', jwtAuth, async (req, res) => {
     const filter = (req.query.filter as string)?.toLowerCase() || 'all';
     const includeTags = req.query.includeTags === 'true';
 
-    const devices = await DeviceModel.list({ isOnline });
+    const agents = await DeviceModel.list({ isOnline });
 
     // Apply filter based on provisioning_state or is_online
-    let filteredDevices = devices;
+    let filteredDevices = agents;
     if (filter === 'active') {
-      filteredDevices = devices.filter(d => d.is_online === true);
+      filteredDevices = agents.filter(d => d.is_online === true);
     } else if (filter === 'inactive') {
-      filteredDevices = devices.filter(d => d.is_online === false);
+      filteredDevices = agents.filter(d => d.is_online === false);
     }
 
     // Calculate pagination
@@ -302,31 +301,31 @@ router.get('/devices', jwtAuth, async (req, res) => {
       })
     );
 
-    let devicesWithTags = enhancedDevices;
+    let agentsWithTags = enhancedDevices;
     if (includeTags && enhancedDevices.length > 0) {
       const deviceUuids = enhancedDevices.map(device => device.uuid);
       const tagsResult = await query(
-        'SELECT device_uuid, key, value FROM device_tags WHERE device_uuid = ANY($1::uuid[])',
+        'SELECT agent_uuid, key, value FROM agent_tags WHERE agent_uuid = ANY($1::uuid[])',
         [deviceUuids]
       );
 
       const tagsByDevice: Record<string, Record<string, string>> = {};
       tagsResult.rows.forEach(row => {
-        if (!tagsByDevice[row.device_uuid]) {
-          tagsByDevice[row.device_uuid] = {};
+        if (!tagsByDevice[row.agent_uuid]) {
+          tagsByDevice[row.agent_uuid] = {};
         }
-        tagsByDevice[row.device_uuid][row.key] = row.value;
+        tagsByDevice[row.agent_uuid][row.key] = row.value;
       });
 
-      devicesWithTags = enhancedDevices.map(device => ({
+      agentsWithTags = enhancedDevices.map(device => ({
         ...device,
         tags: tagsByDevice[device.uuid] || {}
       }));
     }
 
     res.json({
-      count: devicesWithTags.length,
-      devices: devicesWithTags,
+      count: agentsWithTags.length,
+      agents: agentsWithTags,
       pagination: {
         page,
         limit,
@@ -335,12 +334,12 @@ router.get('/devices', jwtAuth, async (req, res) => {
       }
     });
   } catch (error: any) {
-    logger.error('Error listing devices', {
+    logger.error('Error listing agents', {
       error: error.message,
       stack: error.stack
     });
     res.status(500).json({
-      error: 'Failed to list devices',
+      error: 'Failed to list agents',
       message: error.message
     });
   }
@@ -348,9 +347,9 @@ router.get('/devices', jwtAuth, async (req, res) => {
 
 /**
  * Get specific device
- * GET /api/v1/devices/:uuid
+ * GET /api/v1/agents/:uuid
  */
-router.get('/devices/:uuid', async (req, res) => {
+router.get('/agents/:uuid', async (req, res) => {
   try {
     const { uuid } = req.params;
 
@@ -399,23 +398,23 @@ router.get('/devices/:uuid', async (req, res) => {
 
 /**
  * Enable/disable device (set is_active flag)
- * PATCH /api/v1/devices/:uuid/active
+ * PATCH /api/v1/agents/:uuid/active
  * 
  * Body: { is_active: true/false }
  * 
  * This is an administrative control - does NOT affect connectivity.
  * Use cases:
- * - Decommissioning devices
+ * - Decommissioning agents
  * - Maintenance mode
- * - Quarantine compromised devices
- * - Disable test devices
+ * - Quarantine compromised agents
+ * - Disable test agents
  */
 
 /**
  * Register a new device (physical or virtual)
- * POST /api/v1/devices
+ * POST /api/v1/agents
  * 
- * Body for physical devices:
+ * Body for physical agents:
  * - deviceName: Device name (required)
  * - deviceType: Device type (gateway, edge-device, etc.)
  * - ipAddress: IP address (optional)
@@ -429,7 +428,7 @@ router.get('/devices/:uuid', async (req, res) => {
  * - namespace: K8s namespace (optional, default: 'virtual-agents')
  * - tags: Array of {key, value} tags (optional)
  */
-router.post('/devices', jwtAuth, async (req, res) => {
+router.post('/agents', jwtAuth, async (req, res) => {
   try {
     const { deviceName, deviceType, ipAddress, macAddress, namespace, fleet_uuid, tags, metadata, endpoints } = req.body;
 
@@ -514,9 +513,9 @@ router.post('/devices', jwtAuth, async (req, res) => {
       if (tags && Array.isArray(tags) && tags.length > 0) {
         for (const tag of tags) {
           await query(
-            `INSERT INTO device_tags (device_uuid, tag_key, tag_value)
+            `INSERT INTO agent_tags (agent_uuid, tag_key, tag_value)
              VALUES ($1, $2, $3)
-             ON CONFLICT (device_uuid, tag_key) DO UPDATE SET tag_value = EXCLUDED.tag_value`,
+             ON CONFLICT (agent_uuid, tag_key) DO UPDATE SET tag_value = EXCLUDED.tag_value`,
             [deviceUuid, tag.key, tag.value]
           );
         }
@@ -537,7 +536,7 @@ router.post('/devices', jwtAuth, async (req, res) => {
     // ===== PHYSICAL DEVICE PATH =====
     // Create device record in database with is_active=false, provisioning_state='pending'
     const result = await query(
-      `INSERT INTO devices (
+      `INSERT INTO agents (
         uuid, 
         device_name, 
         device_type, 
@@ -568,8 +567,8 @@ router.post('/devices', jwtAuth, async (req, res) => {
 
     // Create empty target state for the device
     await query(
-      `INSERT INTO device_target_state (
-        device_uuid, 
+      `INSERT INTO agent_target_state (
+        agent_uuid, 
         apps, 
         config, 
         version, 
@@ -643,9 +642,9 @@ router.post('/devices', jwtAuth, async (req, res) => {
 
 /**
  * Activate/deactivate device
- * PATCH /api/v1/devices/:uuid/active
+ * PATCH /api/v1/agents/:uuid/active
  */
-router.patch('/devices/:uuid/active', async (req, res) => {
+router.patch('/agents/:uuid/active', async (req, res) => {
   try {
     const { uuid } = req.params;
     const { is_active } = req.body;
@@ -691,7 +690,7 @@ router.patch('/devices/:uuid/active', async (req, res) => {
         metadata: {
           request: {
             method: 'PATCH',
-            path: '/devices/:uuid/active',
+            path: '/agents/:uuid/active',
             user_agent: req.headers['user-agent']
           }
         },
@@ -743,10 +742,10 @@ router.patch('/devices/:uuid/active', async (req, res) => {
 
 /**
  * Delete device (deprovision/factory reset)
- * DELETE /api/v1/devices/:uuid
+ * DELETE /api/v1/agents/:uuid
  * Requires device authentication - device must send its API key
  */
-router.delete('/devices/:uuid', deviceAuth, async (req, res) => {
+router.delete('/agents/:uuid', deviceAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
@@ -788,7 +787,7 @@ router.delete('/devices/:uuid', deviceAuth, async (req, res) => {
 
 /**
  * Deploy application to device (from template)
- * POST /api/v1/devices/:uuid/apps
+ * POST /api/v1/agents/:uuid/apps
  * 
  * Body: {
  *   appId: number,
@@ -806,7 +805,7 @@ router.delete('/devices/:uuid', deviceAuth, async (req, res) => {
  * 
  * This copies the app template and deploys with device-specific configuration
  */
-router.post('/devices/:uuid/apps', async (req, res) => {
+router.post('/agents/:uuid/apps', async (req, res) => {
   try {
     const { uuid } = req.params;
     const { appId, appName, services } = req.body;
@@ -943,11 +942,11 @@ router.post('/devices/:uuid/apps', async (req, res) => {
 
 /**
  * Update deployed app on device
- * PATCH /api/v1/devices/:uuid/apps/:appId
+ * PATCH /api/v1/agents/:uuid/apps/:appId
  * 
  * Body: { services: [...] } - replaces services for this app
  */
-router.patch('/devices/:uuid/apps/:appId', async (req, res) => {
+router.patch('/agents/:uuid/apps/:appId', async (req, res) => {
   try {
     const { uuid, appId: appIdStr } = req.params;
     const { appName, services } = req.body;
@@ -1062,9 +1061,9 @@ router.patch('/devices/:uuid/apps/:appId', async (req, res) => {
 
 /**
  * Remove app from device
- * DELETE /api/v1/devices/:uuid/apps/:appId
+ * DELETE /api/v1/agents/:uuid/apps/:appId
  */
-router.delete('/devices/:uuid/apps/:appId', async (req, res) => {
+router.delete('/agents/:uuid/apps/:appId', async (req, res) => {
   try {
     const { uuid, appId: appIdStr } = req.params;
 
@@ -1132,11 +1131,11 @@ router.delete('/devices/:uuid/apps/:appId', async (req, res) => {
 
 /**
  * Deploy specific app to device
- * POST /api/v1/devices/:uuid/apps/:appId/deploy
+ * POST /api/v1/agents/:uuid/apps/:appId/deploy
  * 
  * Deploys a specific app by incrementing version
  */
-router.post('/devices/:uuid/apps/:appId/deploy', async (req, res) => {
+router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
   try {
     const { uuid, appId: appIdStr } = req.params;
     const deployedBy = req.body.deployedBy || 'dashboard';
@@ -1232,11 +1231,11 @@ router.post('/devices/:uuid/apps/:appId/deploy', async (req, res) => {
 
 /**
  * Deploy target state to device
- * POST /api/v1/devices/:uuid/deploy
+ * POST /api/v1/agents/:uuid/deploy
  * 
  * Increments version so device will pick up changes
  */
-router.post('/devices/:uuid/deploy', async (req, res) => {
+router.post('/agents/:uuid/deploy', async (req, res) => {
   try {
     const { uuid } = req.params;
     const deployedBy = req.body.deployedBy || 'dashboard';
@@ -1319,12 +1318,12 @@ router.post('/devices/:uuid/deploy', async (req, res) => {
 
 /**
  * Cancel pending deployment
- * POST /api/v1/devices/:uuid/deploy/cancel
+ * POST /api/v1/agents/:uuid/deploy/cancel
  * 
  * Resets needs_deployment flag without changing version
  * Discards pending changes and reverts to last deployed state
  */
-router.post('/devices/:uuid/deploy/cancel', async (req, res) => {
+router.post('/agents/:uuid/deploy/cancel', async (req, res) => {
   try {
     const { uuid } = req.params;
 
@@ -1359,8 +1358,8 @@ router.post('/devices/:uuid/deploy/cancel', async (req, res) => {
     // Get last deployed state from history
     const history = await query(
       `SELECT apps, config, version 
-       FROM device_target_state_history 
-       WHERE device_uuid = $1 
+       FROM agent_target_state_history 
+       WHERE agent_uuid = $1 
        ORDER BY deployed_at DESC 
        LIMIT 1`,
       [uuid]
@@ -1369,20 +1368,20 @@ router.post('/devices/:uuid/deploy/cancel', async (req, res) => {
     if (history.rows.length === 0) {
       // No history, just reset the flag
       await query(
-        `UPDATE device_target_state 
+        `UPDATE agent_target_state 
          SET needs_deployment = false 
-         WHERE device_uuid = $1`,
+         WHERE agent_uuid = $1`,
         [uuid]
       );
     } else {
       // Restore from history
       const lastDeployed = history.rows[0];
       await query(
-        `UPDATE device_target_state 
+        `UPDATE agent_target_state 
          SET apps = $1, 
              config = $2, 
              needs_deployment = false 
-         WHERE device_uuid = $3`,
+         WHERE agent_uuid = $3`,
         [lastDeployed.apps, lastDeployed.config, uuid]
       );
     }
@@ -1429,11 +1428,11 @@ router.post('/devices/:uuid/deploy/cancel', async (req, res) => {
 
 /**
  * Assign device to a new MQTT broker
- * PUT /api/v1/devices/:uuid/broker
+ * PUT /api/v1/agents/:uuid/broker
  * 
  * Notifies device via shadow delta to reconnect to new broker
  */
-router.put('/devices/:uuid/broker', async (req, res) => {
+router.put('/agents/:uuid/broker', async (req, res) => {
   try {
     const { uuid } = req.params;
     const { brokerId } = req.body;
@@ -1472,7 +1471,7 @@ router.put('/devices/:uuid/broker', async (req, res) => {
 
     // 3. Update device broker assignment in database
     await query(
-  `UPDATE devices 
+  `UPDATE agents 
    SET mqtt_broker_id = $1, modified_at = CURRENT_TIMESTAMP 
    WHERE uuid = $2`,
       [brokerId, uuid]
@@ -1504,16 +1503,16 @@ router.put('/devices/:uuid/broker', async (req, res) => {
 
     // 5. Update device shadow with new broker configuration
     const shadowResult = await query(
-      `INSERT INTO device_shadows (device_uuid, desired, version)
+      `INSERT INTO agent_shadows (agent_uuid, desired, version)
        VALUES ($1, jsonb_build_object('mqtt', $2::jsonb), 1)
-       ON CONFLICT (device_uuid) 
+       ON CONFLICT (agent_uuid) 
        DO UPDATE SET 
          desired = jsonb_set(
-           COALESCE(device_shadows.desired, '{}'::jsonb),
+           COALESCE(agent_shadows.desired, '{}'::jsonb),
            '{mqtt}',
            $2::jsonb
          ),
-         version = device_shadows.version + 1,
+         version = agent_shadows.version + 1,
          updated_at = CURRENT_TIMESTAMP
        RETURNING version`,
       [uuid, JSON.stringify(brokerConfig)]
@@ -1631,10 +1630,10 @@ router.put('/devices/:uuid/broker', async (req, res) => {
 
 /**
  * Trigger agent update via MQTT
- * POST /api/v1/devices/:uuid/update-agent
+ * POST /api/v1/agents/:uuid/update-agent
  * Body: { version, scheduled_time?, force? }
  */
-router.post('/devices/:uuid/update-agent', async (req, res) => {
+router.post('/agents/:uuid/update-agent', async (req, res) => {
   try {
     const { uuid } = req.params;
     const { version, scheduled_time, force = false } = req.body;
@@ -1812,10 +1811,10 @@ router.post('/devices/:uuid/update-agent', async (req, res) => {
 
 /**
  * Create and deploy a virtual agent
- * POST /api/v1/devices/virtual
+ * POST /api/v1/agents/virtual
  * Body: { deviceName, fleetId?, namespace?, description?, tags? }
  */
-router.post('/devices/virtual', jwtAuth, async (req, res) => {
+router.post('/agents/virtual', jwtAuth, async (req, res) => {
   try {
     const { deviceName, fleetId, namespace, description, tags } = req.body;
 
@@ -1889,9 +1888,9 @@ router.post('/devices/virtual', jwtAuth, async (req, res) => {
     if (tags && Array.isArray(tags) && tags.length > 0) {
       for (const tag of tags) {
         await query(
-          `INSERT INTO device_tags (device_uuid, tag_key, tag_value)
+          `INSERT INTO agent_tags (agent_uuid, tag_key, tag_value)
            VALUES ($1, $2, $3)
-           ON CONFLICT (device_uuid, tag_key) DO UPDATE SET tag_value = EXCLUDED.tag_value`,
+           ON CONFLICT (agent_uuid, tag_key) DO UPDATE SET tag_value = EXCLUDED.tag_value`,
           [deviceUuid, tag.key, tag.value]
         );
       }
@@ -1933,9 +1932,9 @@ router.post('/devices/virtual', jwtAuth, async (req, res) => {
 
 /**
  * Get virtual agent deployment status
- * GET /api/v1/devices/:uuid/deployment-status
+ * GET /api/v1/agents/:uuid/deployment-status
  */
-router.get('/devices/:uuid/deployment-status', jwtAuth, async (req, res) => {
+router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
@@ -1986,9 +1985,9 @@ router.get('/devices/:uuid/deployment-status', jwtAuth, async (req, res) => {
 
 /**
  * Destroy a virtual agent (delete pod and secret)
- * DELETE /api/v1/devices/:uuid/virtual
+ * DELETE /api/v1/agents/:uuid/virtual
  */
-router.delete('/devices/:uuid/virtual', jwtAuth, async (req, res) => {
+router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
@@ -2070,9 +2069,9 @@ router.delete('/devices/:uuid/virtual', jwtAuth, async (req, res) => {
 
 /**
  * Restart a virtual agent (delete pod, let Deployment recreate it)
- * POST /api/v1/devices/:uuid/virtual/restart
+ * POST /api/v1/agents/:uuid/virtual/restart
  */
-router.post('/devices/:uuid/virtual/restart', jwtAuth, async (req, res) => {
+router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 

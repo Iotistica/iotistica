@@ -23,17 +23,17 @@ router.get("/traffic-stats", async (req, res) => {
 
 /**
  * Get aggregated traffic statistics per device (summary)
- * GET /api/v1/traffic-stats/devices
+ * GET /api/v1/traffic-stats/agents
  */
-router.get("/traffic-stats/devices", async (req, res) => {
+router.get("/traffic-stats/agents", async (req, res) => {
   res.json(getAggregatedDeviceStats());
 });
 
 /**
  * Get traffic statistics for a specific device
- * GET /api/v1/traffic-stats/devices/:uuid
+ * GET /api/v1/traffic-stats/agents/:uuid
  */
-router.get("/traffic-stats/devices/:uuid", async (req, res) => {
+router.get("/traffic-stats/agents/:uuid", async (req, res) => {
   const deviceUuid = req.params.uuid;
   const stats = getDeviceTrafficStats(deviceUuid);
   

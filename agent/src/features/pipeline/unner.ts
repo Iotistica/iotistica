@@ -89,6 +89,7 @@ async function main() {
 
   const svc = new PipelineService({
     flows: FLOWS_FILE,
+    agentUuid: process.env['DEVICE_UUID'] ?? 'dev-runner',
     timeoutMs: 8000,
     logger,
   });

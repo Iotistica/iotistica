@@ -234,7 +234,7 @@ export interface MQTTConnection {
 export interface MQTTProtocolConfig {
   enabled: boolean;
   connection: MQTTConnection;
-  discoveryRoots?: string[];   // REQUIRED: Explicit topic roots (e.g., ['edge/+', 'devices/+/telemetry'])
+  discoveryRoots?: string[];   // REQUIRED: Explicit topic roots (e.g., ['edge/+', 'agents/+/telemetry'])
   monitorDurationMs?: number;  // How long to listen for topics during discovery (default: 30000)
   qos?: 0 | 1 | 2;             // QoS for discovery subscription (default: 0)
   bufferCapacity?: number;     // Buffer size in bytes for MQTT messages

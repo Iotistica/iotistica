@@ -269,7 +269,7 @@ export class RedisQueueConsumer {
       totalReadings: entries.length,
       compressedEntries: compressedCount,
       legacyEntries: entries.length - compressedCount,
-      devices: new Set(allData.map(d => d.deviceUuid)).size,
+      agents: new Set(allData.map(d => d.deviceUuid)).size,
       sensors: new Set(allData.map(d => `${d.deviceUuid}/${d.sensorName}`)).size,
       durationMs: duration,
       readingsPerSecond: Math.round((entries.length / duration) * 1000),

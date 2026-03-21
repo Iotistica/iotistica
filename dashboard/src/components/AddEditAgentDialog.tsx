@@ -186,7 +186,7 @@ export function AddEditDeviceDialog({
   const loadLocations = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl('/api/v1/devices/locations'), {
+      const response = await fetch(buildApiUrl('/api/v1/agents/locations'), {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
@@ -231,7 +231,7 @@ export function AddEditDeviceDialog({
       // Fetch tags from API for this device
       const fetchDeviceTags = async () => {
         try {
-          const response = await fetch(buildApiUrl(`/api/v1/devices/${device.deviceUuid}/tags`));
+          const response = await fetch(buildApiUrl(`/api/v1/agents/${device.deviceUuid}/tags`));
           if (response.ok) {
             const data = await response.json();
             setTags(data.tags || {});
@@ -363,7 +363,7 @@ export function AddEditDeviceDialog({
     setIsDeleting(true);
 
     try {
-      const url = buildApiUrl(`/api/v1/devices/${device.deviceUuid}/virtual`);
+      const url = buildApiUrl(`/api/v1/agents/${device.deviceUuid}/virtual`);
       const response = await fetch(url, {
         method: 'DELETE',
         headers: {

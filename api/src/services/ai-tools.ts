@@ -21,7 +21,7 @@ export const aiTools = [
   {
     type: 'function',
     function: {
-      name: 'get_device_metrics',
+      name: 'get_agent_metrics',
       description: 'Get device metrics like CPU, memory, storage usage',
       parameters: {
         type: 'object',
@@ -42,7 +42,7 @@ export const aiTools = [
   {
     type: 'function',
     function: {
-      name: 'get_device_logs',
+      name: 'get_agent_logs',
       description: 'Get recent logs from device containers',
       parameters: {
         type: 'object',
@@ -81,7 +81,7 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         });
       }
 
-      case 'get_device_metrics': {
+      case 'get_agent_metrics': {
         const hours = args.hours || 24;
         const metrics = await DeviceMetricsModel.getRecent(args.deviceUuid, hours);
         if (!metrics || metrics.length === 0) {
@@ -102,7 +102,7 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         });
       }
 
-      case 'get_device_logs': {
+      case 'get_agent_logs': {
         const limit = args.limit || 50;
         const logs = await DeviceLogsModel.get(args.deviceUuid, {
           serviceName: args.serviceName,

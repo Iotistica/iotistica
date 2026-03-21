@@ -17,7 +17,7 @@ const router = Router();
 
 /**
  * GET /api/anomaly/summary
- * Get anomaly summary for devices
+ * Get anomaly summary for agents
  * 
  * Query params:
  * - edgeUuid: Filter by edge gateway UUID

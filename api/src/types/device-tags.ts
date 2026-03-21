@@ -49,7 +49,7 @@ export interface DeviceQueryRequest {
 
 export interface DeviceQueryResponse {
   count: number;
-  devices: Array<{
+  agents: Array<{
     uuid: string;
     deviceName?: string;
     deviceType?: string;

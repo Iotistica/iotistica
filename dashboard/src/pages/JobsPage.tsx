@@ -37,7 +37,7 @@ export function JobsPage({ device }: JobsPageProps) {
       
       setLoading(true);
       try {
-        const response = await fetch(buildApiUrl(`/api/v1/devices/${device.deviceUuid}/jobs?limit=100`));
+        const response = await fetch(buildApiUrl(`/api/v1/agents/${device.deviceUuid}/jobs?limit=100`));
         if (response.ok) {
           const data = await response.json();
           setJobs(data.jobs || []);

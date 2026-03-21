@@ -83,7 +83,7 @@ export class SessionManager {
           params.push(userId);
         }
         const result = await query(
-          `SELECT session_id FROM shell_sessions WHERE device_uuid = $1 AND status = 'detached'${userClause} ORDER BY last_activity ASC LIMIT 1`,
+          `SELECT session_id FROM shell_sessions WHERE agent_uuid = $1 AND status = 'detached'${userClause} ORDER BY last_activity ASC LIMIT 1`,
           params
         );
 
@@ -115,7 +115,7 @@ export class SessionManager {
 
     // Save to database
     await query(
-      `INSERT INTO shell_sessions (session_id, device_uuid, user_id, status, created_at, last_activity)
+      `INSERT INTO shell_sessions (session_id, agent_uuid, user_id, status, created_at, last_activity)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [sessionId, deviceUuid, userId, sessionInfo.status, sessionInfo.createdAt, sessionInfo.lastActivity]
     );
@@ -514,7 +514,7 @@ export class SessionManager {
 
     if (deviceUuid) {
       params.push(deviceUuid);
-      sqlQuery += ` AND device_uuid = $${params.length}`;
+      sqlQuery += ` AND agent_uuid = $${params.length}`;
     }
 
     // Exclude terminated sessions by default (for audit, they stay in DB)
@@ -532,7 +532,7 @@ export class SessionManager {
       logger.info(`🐚 [SESSION] 🗑️   - ${row.session_id.substring(0, 8)}... status=${row.status} terminated_at=${row.terminated_at}`);
       return {
         sessionId: row.session_id,
-        deviceUuid: row.device_uuid,
+        deviceUuid: row.agent_uuid,
         userId: row.user_id,
         status: row.status,
         createdAt: row.created_at,
@@ -674,7 +674,7 @@ export class SessionManager {
     const row = result.rows[0];
     const sessionInfo: SessionInfo = {
       sessionId: row.session_id,
-      deviceUuid: row.device_uuid,
+      deviceUuid: row.agent_uuid,
       userId: row.user_id,
       status: row.status,
       createdAt: row.created_at,
