@@ -53,9 +53,24 @@ import jwtAuth from '../middleware/jwt-auth';
 export const API_VERSION = process.env.API_VERSION || 'v1';
 export const API_BASE = `/api/${API_VERSION}`;
 
+// Fixed paths used in multiple places — centralised to avoid typos
+const PATHS = {
+  root:           '/',
+  health:         '/health',
+  metrics:        '/metrics',
+  mosquittoAuth:  '/mosquitto-auth',
+  // Sub-router relative paths (mounted under API_BASE)
+  auth:               '/auth',
+  users:              '/users',
+  admin:              '/admin',
+  profiles:           '/profiles',
+  dashboardLayouts:   '/dashboard-layouts',
+  metricsCatalog:     '/metrics',
+} as const;
+
 export function mountRoutes(app: express.Application): void {
   // Root info endpoint
-  app.get('/', (req, res) => {
+  app.get(PATHS.root, (req, res) => {
     res.json({
       status: 'ok',
       service: 'Iotistica API',
@@ -67,7 +82,7 @@ export function mountRoutes(app: express.Application): void {
   });
 
   // Health check (Kubernetes liveness/readiness probes)
-  app.get('/health', (req, res) => {
+  app.get(PATHS.health, (req, res) => {
     res.status(200).json({
       status: 'healthy',
       timestamp: new Date().toISOString(),
@@ -82,34 +97,33 @@ export function mountRoutes(app: express.Application): void {
   app.use(prometheusRoutes);
 
   // Mosquitto HTTP auth backend (no versioning - called directly by mosquitto-go-auth)
-  app.use('/mosquitto-auth', mosquittoAuthRoutes);
+  app.use(PATHS.mosquittoAuth, mosquittoAuthRoutes);
 
   // ============================================================================
-  // Rate Limiting - applied at API_BASE before all versioned routes
+  // Versioned API sub-router — all routes below are relative to API_BASE
   // ============================================================================
-  app.use(API_BASE, globalApiRateLimit);
+  const api = express.Router();
 
-  // ============================================================================
-  // API Routes
-  // ============================================================================
+  // Rate Limiting - applied first so it covers all versioned routes
+  api.use(globalApiRateLimit);
 
   // Auth - strict rate limit (brute-force protection)
-  app.use(`${API_BASE}/auth`, authRateLimit, authRoutes);
+  api.use(PATHS.auth, authRateLimit, authRoutes);
 
   // CRITICAL: agentsRoutes BEFORE usersRoutes to prevent /:id matching /agents
-  app.use(API_BASE, agentsRoutes);
+  api.use(agentsRoutes);
 
   // User / admin management - JWT required
-  app.use(`${API_BASE}/users`, jwtAuth, adminRateLimit, usersRoutes);
-  app.use(`${API_BASE}/admin`, jwtAuth, adminRateLimit, adminRoutes);
+  api.use(PATHS.users, jwtAuth, adminRateLimit, usersRoutes);
+  api.use(PATHS.admin, jwtAuth, adminRateLimit, adminRoutes);
 
   // Invites: accept is public (handled internally), other ops require jwtAuth
-  app.use(API_BASE, invitesRoutes);
+  api.use(invitesRoutes);
 
   // Device data ingestion - high rate limits (supports 16Hz sensor data)
-  app.use(API_BASE, deviceDataRateLimit, deviceLogsRoutes);
-  app.use(API_BASE, deviceDataRateLimit, deviceMetricsRoutes);
-  app.use(API_BASE, deviceDataRateLimit, deviceSensorsRoutes);
+  api.use(deviceDataRateLimit, deviceLogsRoutes);
+  api.use(deviceDataRateLimit, deviceMetricsRoutes);
+  api.use(deviceDataRateLimit, deviceSensorsRoutes);
 
   // Standard API routes - global rate limit already applied above
   // ORDERING NOTE:
@@ -136,10 +150,13 @@ export function mountRoutes(app: express.Application): void {
     deviceTagsRoutes,
     aiChatRoutes,
   ];
-  standardRoutes.forEach(r => app.use(API_BASE, r));
+  standardRoutes.forEach(r => api.use(r));
 
   // Fixed sub-path prefix routes (cannot use the forEach pattern above)
-  app.use(`${API_BASE}/profiles`, profileRoutes);
-  app.use(`${API_BASE}/dashboard-layouts`, dashboardLayoutsRoutes);
-  app.use(`${API_BASE}/metrics`, metricsCatalogRoutes);
+  api.use(PATHS.profiles, profileRoutes);
+  api.use(PATHS.dashboardLayouts, dashboardLayoutsRoutes);
+  api.use(PATHS.metricsCatalog, metricsCatalogRoutes);
+
+  // Mount the versioned sub-router once
+  app.use(API_BASE, api);
 }

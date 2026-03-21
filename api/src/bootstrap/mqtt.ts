@@ -22,11 +22,7 @@ export function bootstrapMqtt(): void {
     try {
       const mqttManager = await initializeMqtt();
       if (mqttManager) {
-        const { getMqttManager } = await import('../mqtt');
-        const manager = getMqttManager();
-        if (manager) {
-          websocketManager.setMqttManager(manager);
-        }
+        websocketManager.setMqttManager(mqttManager);
       }
     } catch (error) {
       logger.warn('[WARNING] MQTT service initialization failed - will retry in background', {
@@ -39,10 +35,9 @@ export function bootstrapMqtt(): void {
 }
 
 async function retryMqttInitialization(intervalMs = 15000): Promise<void> {
-  const { initializeMqtt: retry, getMqttManager } = await import('../mqtt');
   const interval = setInterval(async () => {
     try {
-      const manager = await retry();
+      const manager = await initializeMqtt();
       if (manager && manager.isConnected()) {
         logger.info('MQTT reconnected successfully');
         clearInterval(interval);

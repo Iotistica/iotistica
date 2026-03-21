@@ -3,10 +3,11 @@
  */
 
 import logger from '../utils/logger';
+import { testConnection } from '../db/connection';
+import { getMigrationStatus, runMigrations } from '../db/migrations';
+import { initializeMqttAdmin, initializeNodeRedMqttCredentials } from '../mqtt/bootstrap';
 
 export async function bootstrapDatabase(): Promise<void> {
-  const db = await import('../db/connection');
-
   logger.info('Attempting PostgreSQL connection:', {
     host: process.env.DB_HOST || 'localhost',
     port: process.env.DB_PORT || '5432',
@@ -14,13 +15,12 @@ export async function bootstrapDatabase(): Promise<void> {
     user: process.env.DB_USER || 'postgres',
   });
 
-  const connected = await db.testConnection();
+  const connected = await testConnection();
   if (!connected) {
     throw new Error('Failed to connect to PostgreSQL database - check connection settings above');
   }
 
   if (process.env.DB_SKIP_MIGRATIONS !== 'true') {
-    const { getMigrationStatus, runMigrations } = await import('../db/migrations');
     const migrationStatus = await getMigrationStatus();
 
     if (migrationStatus.pending.length > 0) {
@@ -39,8 +39,6 @@ export async function bootstrapDatabase(): Promise<void> {
   }
 
   // Seed MQTT admin user and Node-RED credentials (replaces K8s postgres-init-job)
-  const { initializeMqttAdmin, initializeNodeRedMqttCredentials } =
-    await import('../mqtt/bootstrap');
   await initializeMqttAdmin();
 
   const nodeRedCreds = await initializeNodeRedMqttCredentials();

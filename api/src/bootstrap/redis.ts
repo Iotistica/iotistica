@@ -6,11 +6,14 @@
  */
 
 import logger from '../utils/logger';
+import { redisClient } from '../redis/client';
+import { startMetricsBatchWorker } from '../workers/metrics-batch-worker';
+import { redisLogQueue } from '../services/logs-queue/redis-log-queue';
+import { redisSensorQueue } from '../services/device-queue';
 
 export async function bootstrapRedis(): Promise<void> {
   // Redis client - non-fatal, degrades to PostgreSQL-only mode
   try {
-    const { redisClient } = await import('../redis/client');
     await redisClient.connect();
     logger.info('[OK] Redis client connected successfully');
   } catch (error) {
@@ -22,7 +25,6 @@ export async function bootstrapRedis(): Promise<void> {
 
   // Metrics batch worker - non-fatal
   try {
-    const { startMetricsBatchWorker } = await import('../workers/metrics-batch-worker');
     await startMetricsBatchWorker();
     logger.info('Metrics batch worker started');
   } catch (error) {
@@ -31,7 +33,6 @@ export async function bootstrapRedis(): Promise<void> {
 
   // Log queue worker - CRITICAL: logs won't be persisted without it
   try {
-    const { redisLogQueue } = await import('../services/logs-queue/redis-log-queue');
     await redisLogQueue.startWorker();
     logger.info('Redis log queue worker started');
   } catch (error) {
@@ -41,7 +42,6 @@ export async function bootstrapRedis(): Promise<void> {
 
   // Sensor queue worker - CRITICAL: sensor data won't be persisted without it
   try {
-    const { redisSensorQueue } = await import('../services/device-queue');
     await redisSensorQueue.startWorker();
     logger.info('Redis sensor queue worker started');
   } catch (error) {

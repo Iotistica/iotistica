@@ -5,11 +5,11 @@
 
 import logger from '../utils/logger';
 import { startTrafficFlushService } from '../services/traffic-flush.service';
+import heartbeatMonitor from '../services/heartbeat-monitor';
 
 export async function bootstrapWorkers(): Promise<void> {
   try {
-    const heartbeatMonitor = await import('../services/heartbeat-monitor');
-    heartbeatMonitor.default.start();
+    heartbeatMonitor.start();
     logger.info('Heartbeat monitor started');
   } catch (error) {
     logger.warn('Failed to start heartbeat monitor', { error });
