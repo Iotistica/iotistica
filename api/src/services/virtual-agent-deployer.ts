@@ -618,7 +618,7 @@ export class VirtualAgentDeployer {
                   { name: 'FLEET_UUID', value: config.fleetUuid || 'unassigned' },
                   { name: 'REQUIRE_PROVISIONING', value: 'true' },
                   { name: 'IS_VIRTUAL_AGENT', value: 'true' },
-                  { name: 'CLOUD_API_ENDPOINT', value: cloudApiUrl },
+                  { name: 'IOTISTICA_API', value: cloudApiUrl },
                   { name: 'MQTT_BROKER_URL', value: this.mqttBrokerUrl },
                   { name: 'FIREWALL_ENABLED', value: 'false' },
                   {

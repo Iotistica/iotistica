@@ -70,7 +70,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 
 	let deviceInfo = ctx.deviceManager.getDeviceInfo();
 	const provisioningApiKey = process.env.PROVISIONING_KEY;
-	const cloudEndpoint = process.env.CLOUD_API_ENDPOINT || ctx.configManager!.getCloudApiEndpoint();
+	const cloudEndpoint = process.env.IOTISTICA_API || ctx.configManager!.getCloudApiEndpoint();
 
 	if (!deviceInfo.provisioned && provisioningApiKey && cloudEndpoint) {
 		try {
@@ -113,7 +113,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 	} else if (deviceInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
 		ctx.agentLogger?.infoSync('Switching to local mode (no cloud connection)', {
 			component: LogComponents.agent,
-			note: 'Device was previously provisioned but CLOUD_API_ENDPOINT is not set',
+			note: 'Device was previously provisioned but IOTISTICA_API is not set',
 		});
 		await ctx.deviceManager.markAsLocalMode();
 		deviceInfo = ctx.deviceManager.getDeviceInfo();

@@ -92,7 +92,7 @@ SERVICE
 # Iotistic Agent Configuration
 NODE_ENV=production
 LOG_LEVEL=info
-CLOUD_API_ENDPOINT=https://api.iotistic.ca
+IOTISTICA_API=https://api.iotistic.ca
 IOTISTIC_DEVICE_PORT=48484
 ORCHESTRATOR_INTERVAL=30000
 POLL_INTERVAL_MS=30000

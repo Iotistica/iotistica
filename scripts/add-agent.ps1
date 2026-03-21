@@ -116,7 +116,7 @@ $template = @"
                 - agent-{AGENT_NUMBER}-data:/app/data
             environment:
                 - DEVICE_API_PORT=4848{AGENT_NUMBER}
-                - CLOUD_API_ENDPOINT=http://host.docker.internal:4002
+                - IOTISTICA_API=http://host.docker.internal:4002
                 - NODE_ENV=development
                 - MQTT_PERSIST_TO_DB=true
                 - MQTT_DB_SYNC_INTERVAL=70000

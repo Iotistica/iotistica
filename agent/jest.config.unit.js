@@ -26,6 +26,7 @@ module.exports = {
   ],
   coverageDirectory: 'coverage/unit',
   verbose: true,
+  forceExit: true,
   displayName: 'Unit Tests',
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {

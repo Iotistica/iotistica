@@ -102,7 +102,7 @@ export function AddEditDeviceDialog({
   }, [open, isEditMode, formData.type]);
 
   // Install command
-  const installCommand = `curl -sfL https://iotistica.com/agent/install | sh`;
+  const installCommand = `curl -sfL https://get.iotistica.com/agent/install | sh`;
 
   // Load tag definitions
   const loadTagDefinitions = async () => {

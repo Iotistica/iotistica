@@ -9,7 +9,7 @@ set -e
 # Environment Variables (CI/Non-interactive mode):
 #   IOTISTIC_AGENT_VERSION        - Agent version to install (default: latest)
 #   IOTISTIC_DEVICE_PORT          - Device API port (default: 48484)
-#   IOTISTIC_CLOUD_API_ENDPOINT   - Cloud API endpoint (e.g., https://api.iotistic.ca)
+#   IOTISTIC_IOTISTICA_API   - Cloud API endpoint (e.g., https://api.iotistic.ca)
 #   IOTISTIC_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
 
 SCRIPT_VERSION="AGENT_VERSION_PLACEHOLDER"
@@ -120,11 +120,11 @@ if [ -n "$CI" ]; then
     PROVISIONING_KEY="${IOTISTIC_PROVISIONING_KEY:-}"
     DEVICE_API_PORT="${IOTISTIC_DEVICE_PORT:-48484}"
     AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-latest}"
-    CLOUD_API_ENDPOINT="${IOTISTIC_CLOUD_API_ENDPOINT:-}"
+    IOTISTICA_API="${IOTISTIC_IOTISTICA_API:-}"
 elif [ ! -t 0 ] && [ -z "$FORCE_INTERACTIVE" ]; then
     echo "Running in non-interactive mode (stdin is not a terminal)"
     echo "Set FORCE_INTERACTIVE=1 to enable prompts, or set these environment variables:"
-    echo "  - IOTISTIC_CLOUD_API_ENDPOINT"
+    echo "  - IOTISTIC_IOTISTICA_API"
     echo "  - IOTISTIC_PROVISIONING_KEY"
     echo "  - IOTISTIC_DEVICE_PORT (default: 48484)"
     echo "  - IOTISTIC_AGENT_VERSION (default: latest)"
@@ -132,11 +132,11 @@ elif [ ! -t 0 ] && [ -z "$FORCE_INTERACTIVE" ]; then
     PROVISIONING_KEY="${IOTISTIC_PROVISIONING_KEY:-}"
     DEVICE_API_PORT="${IOTISTIC_DEVICE_PORT:-48484}"
     AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-latest}"
-    CLOUD_API_ENDPOINT="${IOTISTIC_CLOUD_API_ENDPOINT:-}"
+    IOTISTICA_API="${IOTISTIC_IOTISTICA_API:-}"
 else
     # Interactive mode - prompt user
     # Cloud API endpoint
-    read -p "Enter cloud API endpoint (leave empty for local mode): " CLOUD_API_ENDPOINT
+    read -p "Enter cloud API endpoint (leave empty for local mode): " IOTISTICA_API
     
     # Provisioning key (optional)
     read -p "Enter provisioning API key (leave empty for local mode): " PROVISIONING_KEY
@@ -185,9 +185,9 @@ if [ -n "$PROVISIONING_KEY" ]; then
     ENV_VARS="$ENV_VARS -e PROVISIONING_API_KEY=${PROVISIONING_KEY}"
 fi
 
-# Add CLOUD_API_ENDPOINT if provided
-if [ -n "$CLOUD_API_ENDPOINT" ]; then
-    ENV_VARS="$ENV_VARS -e CLOUD_API_ENDPOINT=${CLOUD_API_ENDPOINT}"
+# Add IOTISTICA_API if provided
+if [ -n "$IOTISTICA_API" ]; then
+    ENV_VARS="$ENV_VARS -e IOTISTICA_API=${IOTISTICA_API}"
 fi
 
 docker run -d \

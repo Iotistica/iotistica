@@ -132,7 +132,7 @@ if ($vpnInterface -and $gatewayTest -and $vpnServerTest -and $mqttTest -and $api
     Write-Host "   ✅ All Docker services are reachable" -ForegroundColor Green
     Write-Host "`n   Ready to run agent with:" -ForegroundColor White
     Write-Host "      `$env:MQTT_BROKER = 'mqtt://172.25.0.12:1883'" -ForegroundColor Cyan
-    Write-Host "      `$env:CLOUD_API_ENDPOINT = 'http://172.25.0.13:3002'" -ForegroundColor Cyan
+    Write-Host "      `$env:IOTISTICA_API = 'http://172.25.0.13:3002'" -ForegroundColor Cyan
 } else {
     Write-Host "   ⚠️  Some connectivity issues detected" -ForegroundColor Yellow
     Write-Host "`n   Troubleshooting:" -ForegroundColor White

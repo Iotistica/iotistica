@@ -142,7 +142,7 @@ Write-Host "      `$env:DEVICE_UUID = '$DeviceUuid'" -ForegroundColor Gray
 Write-Host "      `$env:MQTT_BROKER = 'mqtt://172.25.0.12:1883'" -ForegroundColor Gray
 Write-Host "      `$env:MQTT_USERNAME = '$($deviceResponse.mqtt.username)'" -ForegroundColor Gray
 Write-Host "      `$env:MQTT_PASSWORD = '$($deviceResponse.mqtt.password)'" -ForegroundColor Gray
-Write-Host "      `$env:CLOUD_API_ENDPOINT = 'http://172.25.0.13:3002'" -ForegroundColor Gray
+Write-Host "      `$env:IOTISTICA_API = 'http://172.25.0.13:3002'" -ForegroundColor Gray
 Write-Host ""
 Write-Host "   5. Run agent:" -ForegroundColor White
 Write-Host "      cd agent && npm start" -ForegroundColor Gray

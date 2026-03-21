@@ -62,9 +62,9 @@ param(
     
     # Agent Configuration
     [string]$NodeEnv = "development",
-    #[string]$CLOUD_API_ENDPOINT = "https://api.iotistica.com",
-    [string]$CLOUD_API_ENDPOINT = "https://api:3443",
-    #[string]$CLOUD_API_ENDPOINT = "https://api-client-b07708418f4e.iotistica.com",
+    #[string]$IOTISTICA_API = "https://api.iotistica.com",
+    [string]$IOTISTICA_API = "https://api:3443",
+    #[string]$IOTISTICA_API = "https://api-client-b07708418f4e.iotistica.com",
     [int]$ReportInterval = 20000,
     [int]$MetricsInterval = 30000,
     [string]$LogCompression = "true",
@@ -467,13 +467,13 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $volumeName = "$agentName-data"
     $simConfig = Get-SimulationConfig -Index $i -SimulationEnabled $EnableSimulation.IsPresent
     
-    # Adjust CLOUD_API_ENDPOINT based on network mode
+    # Adjust IOTISTICA_API based on network mode
     # Host mode: use localhost (shares host network stack)
     # Bridge mode: use service name (container networking)
     $cloudApiEndpoint = if ($UseHostNetwork) {
-        $CLOUD_API_ENDPOINT -replace "api:", "localhost:"
+        $IOTISTICA_API -replace "api:", "localhost:"
     } else {
-        $CLOUD_API_ENDPOINT
+        $IOTISTICA_API
     }
     
     # Build configuration: use build context if -BuildFromSource, otherwise use image
@@ -519,7 +519,7 @@ $networkConfig
       - ./certs/ca.crt:/app/certs/ca.crt:ro
     environment:
       - DEVICE_API_PORT=$port
-      - CLOUD_API_ENDPOINT=$cloudApiEndpoint
+      - IOTISTICA_API=$cloudApiEndpoint
       - NODE_ENV=$NodeEnv
       - MQTT_BROKER_URL=$MqttBrokerUrl
       - MQTT_USERNAME=$MqttUsername

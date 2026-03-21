@@ -36,7 +36,7 @@ export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
 			'Cloud API endpoint not configured - running in standalone mode',
 			{
 				component: LogComponents.agent,
-				note: 'Set CLOUD_API_ENDPOINT env var to enable cloud features',
+				note: 'Set IOTISTICA_API env var to enable cloud features',
 			}
 		);
 		return;

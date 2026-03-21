@@ -76,7 +76,7 @@ spec:
               echo "Request payload: $PAYLOAD"
               
               # Generate new key via API (use -k to accept self-signed certificates)
-              RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" -X POST "$CLOUD_API_ENDPOINT/api/v1/provisioning-keys/generate" \
+              RESPONSE=$(curl -k -s -w "\nHTTP_CODE:%{http_code}" -X POST "$IOTISTICA_API/api/v1/provisioning-keys/generate" \
                 -H "Content-Type: application/json" \
                 -d "$PAYLOAD")
               
@@ -106,7 +106,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: CLOUD_API_ENDPOINT
+            - name: IOTISTICA_API
               value: {{ .Values.fleet.cloudApiEndpoint | quote }}
             - name: FLEET_UUID
               value: {{ .Values.fleet.fleetUuid | quote }}
@@ -142,7 +142,7 @@ spec:
           # For external access, use kubectl port-forward
           env:
             # API_PORT set dynamically in command based on pod index
-            - name: CLOUD_API_ENDPOINT
+            - name: IOTISTICA_API
               value: {{ .Values.fleet.cloudApiEndpoint | quote }}
             - name: FLEET_ID
               value: {{ .Values.fleet.fleetId | quote }}

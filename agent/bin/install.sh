@@ -7,11 +7,11 @@ set -e
 # Usage: curl -sfL https://get.iotistica.com/agent | sh
 #
 # Environment Variables (CI/Non-interactive mode):
-#   IOTISTIC_AGENT_VERSION        - Agent version to install (default: latest for Docker, dev for Systemd)
-#   IOTISTIC_DEVICE_PORT          - Device API port (default: 48484)
-#   IOTISTIC_CLOUD_API_ENDPOINT   - Cloud API endpoint (e.g., https://api.iotistica.com)
-#   IOTISTIC_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
-#   IOTISTIC_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
+#   IOTISTICA_AGENT_VERSION        - Agent version to install (default: latest for Docker, dev for Systemd)
+#   IOTISTICA_DEVICE_PORT          - Device API port (default: 48484)
+#   IOTISTICA_API   - Cloud API endpoint (e.g., https://api.iotistica.com)
+#   IOTISTICA_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
+#   IOTISTICA_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
 #   FORCE_INSTALL                 - Legacy opt-in flag; set to 1 to allow automatic Docker installation
 
 # Note: This script is POSIX-compliant and works with both sh and bash
@@ -62,6 +62,9 @@ esac
 
 echo "Detected OS: $OS $OS_VERSION ($ARCH_NAME)"
 
+# Systemd service name - single source of truth
+SERVICE_NAME="iotistica-agent"
+
 # This installer currently relies on apt-get/dpkg for package setup.
 # Detect Debian family explicitly so unsupported distros fail fast with a clear error.
 is_debian_family() {
@@ -97,7 +100,7 @@ install_docker_if_needed() {
         SHOULD_INSTALL="yes"
     fi
 
-    if [ "$IOTISTIC_INSTALL_DOCKER" = "yes" ] || [ "$IOTISTIC_INSTALL_DOCKER" = "true" ] || [ "$IOTISTIC_INSTALL_DOCKER" = "1" ]; then
+    if [ "$IOTISTICA_INSTALL_DOCKER" = "yes" ] || [ "$IOTISTICA_INSTALL_DOCKER" = "true" ] || [ "$IOTISTICA_INSTALL_DOCKER" = "1" ]; then
         SHOULD_INSTALL="yes"
     fi
 
@@ -128,7 +131,7 @@ install_docker_if_needed() {
         echo ""
         echo "Option 1: Install Docker manually, then rerun this script."
         echo "Option 2: Explicitly allow installer-managed Docker installation by setting:"
-        echo "  IOTISTIC_INSTALL_DOCKER=yes"
+        echo "  IOTISTICA_INSTALL_DOCKER=yes"
         echo "  (or FORCE_INSTALL=1)"
         return 1
     fi
@@ -282,22 +285,22 @@ echo ""
     
     # Function to normalize API endpoint URL
     normalize_api_endpoint() {
-        if [ -n "$CLOUD_API_ENDPOINT" ] && ! echo "$CLOUD_API_ENDPOINT" | grep -qE '^https?://'; then
-            CLOUD_API_ENDPOINT="http://${CLOUD_API_ENDPOINT}"
-            echo "Auto-prepended http:// to API endpoint: $CLOUD_API_ENDPOINT"
+        if [ -n "$IOTISTICA_API" ] && ! echo "$IOTISTICA_API" | grep -qE '^https?://'; then
+            IOTISTICA_API="http://${IOTISTICA_API}"
+            echo "Auto-prepended http:// to API endpoint: $IOTISTICA_API"
         fi
     }
     
     # Check if running interactively
     # Interactive if: NOT in CI mode AND (has terminal OR stdin is from terminal)
     # When piped (curl | sh), stdin is not a tty, but we can still prompt if we redirect from /dev/tty
-    if [ -z "$CI" ] && [ -z "$IOTISTIC_AGENT_VERSION" ] && [ -z "$IOTISTIC_DEVICE_PORT" ]; then
+    if [ -z "$CI" ] && [ -z "$IOTISTICA_AGENT_VERSION" ] && [ -z "$IOTISTICA_DEVICE_PORT" ]; then
         # No CI and no env vars set = assume interactive mode
         echo "Running in interactive mode"
         
         # Prompt for configuration (read directly from /dev/tty to work when piped)
         echo -n "Enter cloud API endpoint (leave empty for local mode): " >/dev/tty
-        read CLOUD_API_ENDPOINT < /dev/tty
+        read IOTISTICA_API < /dev/tty
         echo -n "Enter provisioning API key (leave empty for local mode): " >/dev/tty
         read PROVISIONING_KEY < /dev/tty
         echo -n "Enter device API port [48484]: " >/dev/tty
@@ -310,9 +313,9 @@ echo ""
         if [ -n "$PROVISIONING_KEY" ]; then
             echo "[DEBUG] PROVISIONING_KEY found in environment (redacted)"
         fi
-        DEVICE_API_PORT="${IOTISTIC_DEVICE_PORT:-48484}"
-        AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-dev}"
-        CLOUD_API_ENDPOINT="${CLOUD_API_ENDPOINT:-}"
+        DEVICE_API_PORT="${IOTISTICA_DEVICE_PORT:-48484}"
+        AGENT_VERSION="${IOTISTICA_AGENT_VERSION:-dev}"
+        IOTISTICA_API="${IOTISTICA_API:-}"
     fi
     
     # Normalize API endpoint - add http:// if protocol missing
@@ -374,9 +377,9 @@ echo ""
         esac
         
         # Determine download URL
-        if [ -n "$IOTISTIC_DOWNLOAD_URL" ]; then
+        if [ -n "$IOTISTICA_DOWNLOAD_URL" ]; then
             # Custom URL provided
-            DOWNLOAD_URL="$IOTISTIC_DOWNLOAD_URL"
+            DOWNLOAD_URL="$IOTISTICA_DOWNLOAD_URL"
         elif [ "$AGENT_VERSION" = "dev" ] || [ "$AGENT_VERSION" = "latest" ]; then
             # Use latest version with architecture suffix
             DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/agent-latest${TARBALL_SUFFIX}.tar.gz"
@@ -554,8 +557,8 @@ EOF
         echo "[DEBUG] PROVISIONING_KEY is empty, not writing to agent.env"
     fi
 
-    if [ -n "$CLOUD_API_ENDPOINT" ]; then
-        echo "CLOUD_API_ENDPOINT=${CLOUD_API_ENDPOINT}" >> /etc/iotistic/agent.env
+    if [ -n "$IOTISTICA_API" ]; then
+        echo "IOTISTICA_API=${IOTISTICA_API}" >> /etc/iotistic/agent.env
     fi
 
     # Add MQTT broker configuration if provided
@@ -616,7 +619,7 @@ EOF
         STARTUP_TIMEOUT="60"
     fi
     
-    cat > /etc/systemd/system/iotistic-agent.service << EOFSVC
+    cat > /etc/systemd/system/${SERVICE_NAME}.service << EOFSVC
 [Unit]
 Description=Iotistic Agent - IoT Device Management Service
 Documentation=https://github.com/Iotistica/iotistic
@@ -650,7 +653,7 @@ TimeoutStopSec=20
 
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=iotistic-agent
+SyslogIdentifier=${SERVICE_NAME}
 
 # Security hardening (production recommended)
 NoNewPrivileges=true
@@ -711,7 +714,7 @@ EOFJOURNALD
     echo ""
     echo "[DEBUG] Systemd service file contents:"
     echo "========================================"
-    cat /etc/systemd/system/iotistic-agent.service
+    cat /etc/systemd/system/${SERVICE_NAME}.service
     echo "========================================"
     
     # Debug: Verify dist directory exists
@@ -737,37 +740,37 @@ EOFJOURNALD
     systemctl daemon-reload
     echo ""
     echo "Starting agent service..."
-    systemctl enable iotistic-agent
-    systemctl start iotistic-agent
+    systemctl enable "${SERVICE_NAME}"
+    systemctl start "${SERVICE_NAME}"
 
     sleep 10
 
-    if systemctl is-active --quiet iotistic-agent; then
+    if systemctl is-active --quiet "${SERVICE_NAME}"; then
         echo ""
         echo "✓ Agent service is running"
         
         echo ""
         echo "Recent logs:"
-        journalctl -u iotistic-agent -n 50 --no-pager
+        journalctl -u "${SERVICE_NAME}" -n 50 --no-pager
         
         echo ""
         echo "====================================="
         echo "Installation complete!"
         echo "====================================="
         echo ""
-        echo "Agent is running as systemd service 'iotistic-agent'"
+        echo "Agent is running as systemd service '${SERVICE_NAME}'"
         echo "Device API: http://localhost:${DEVICE_API_PORT}"
         echo ""
         echo "Useful commands:"
-        echo "  systemctl status iotistic-agent        # Check status"
-        echo "  journalctl -u iotistic-agent -f        # View logs"
-        echo "  systemctl restart iotistic-agent       # Restart agent"
-        echo "  systemctl stop iotistic-agent          # Stop agent"
+        echo "  systemctl status ${SERVICE_NAME}        # Check status"
+        echo "  journalctl -u ${SERVICE_NAME} -f        # View logs"
+        echo "  systemctl restart ${SERVICE_NAME}       # Restart agent"
+        echo "  systemctl stop ${SERVICE_NAME}          # Stop agent"
         echo ""
     else
         echo ""
         echo "✗ Error: Agent service failed to start"
-        systemctl status iotistic-agent --no-pager
-        journalctl -u iotistic-agent -n 50 --no-pager
+        systemctl status "${SERVICE_NAME}" --no-pager
+        journalctl -u "${SERVICE_NAME}" -n 50 --no-pager
         exit 1
     fi

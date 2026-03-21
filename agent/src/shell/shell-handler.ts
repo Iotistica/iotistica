@@ -417,8 +417,8 @@ export class ShellHandler {
       if (process.env.DEVICE_API_URL) {
         safeEnv.DEVICE_API_URL = process.env.DEVICE_API_URL;
       }
-      if (process.env.CLOUD_API_ENDPOINT) {
-        safeEnv.CLOUD_API_ENDPOINT = process.env.CLOUD_API_ENDPOINT;
+      if (process.env.IOTISTICA_API) {
+        safeEnv.IOTISTICA_API = process.env.IOTISTICA_API;
       }
 
       const spawnOptions: any = {

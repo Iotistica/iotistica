@@ -9,7 +9,7 @@ set -e
 # Environment Variables (CI/Non-interactive mode):
 #   IOTISTIC_AGENT_VERSION        - Agent version to install (default: latest for Docker, dev for Systemd)
 #   IOTISTIC_DEVICE_PORT          - Device API port (default: 48484)
-#   IOTISTIC_CLOUD_API_ENDPOINT   - Cloud API endpoint (e.g., https://api.iotistica.com)
+#   IOTISTIC_IOTISTICA_API   - Cloud API endpoint (e.g., https://api.iotistica.com)
 #   IOTISTIC_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
 #   IOTISTIC_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
 #   FORCE_INSTALL                 - Legacy opt-in flag; set to 1 to allow automatic Docker installation
@@ -282,9 +282,9 @@ echo ""
     
     # Function to normalize API endpoint URL
     normalize_api_endpoint() {
-        if [ -n "$CLOUD_API_ENDPOINT" ] && ! echo "$CLOUD_API_ENDPOINT" | grep -qE '^https?://'; then
-            CLOUD_API_ENDPOINT="http://${CLOUD_API_ENDPOINT}"
-            echo "Auto-prepended http:// to API endpoint: $CLOUD_API_ENDPOINT"
+        if [ -n "$IOTISTICA_API" ] && ! echo "$IOTISTICA_API" | grep -qE '^https?://'; then
+            IOTISTICA_API="http://${IOTISTICA_API}"
+            echo "Auto-prepended http:// to API endpoint: $IOTISTICA_API"
         fi
     }
     
@@ -297,7 +297,7 @@ echo ""
         
         # Prompt for configuration (read directly from /dev/tty to work when piped)
         echo -n "Enter cloud API endpoint (leave empty for local mode): " >/dev/tty
-        read CLOUD_API_ENDPOINT < /dev/tty
+        read IOTISTICA_API < /dev/tty
         echo -n "Enter provisioning API key (leave empty for local mode): " >/dev/tty
         read PROVISIONING_KEY < /dev/tty
         echo -n "Enter device API port [48484]: " >/dev/tty
@@ -312,7 +312,7 @@ echo ""
         fi
         DEVICE_API_PORT="${IOTISTIC_DEVICE_PORT:-48484}"
         AGENT_VERSION="${IOTISTIC_AGENT_VERSION:-dev}"
-        CLOUD_API_ENDPOINT="${CLOUD_API_ENDPOINT:-}"
+        IOTISTICA_API="${IOTISTICA_API:-}"
     fi
     
     # Normalize API endpoint - add http:// if protocol missing
@@ -554,8 +554,8 @@ EOF
         echo "[DEBUG] PROVISIONING_KEY is empty, not writing to agent.env"
     fi
 
-    if [ -n "$CLOUD_API_ENDPOINT" ]; then
-        echo "CLOUD_API_ENDPOINT=${CLOUD_API_ENDPOINT}" >> /etc/iotistic/agent.env
+    if [ -n "$IOTISTICA_API" ]; then
+        echo "IOTISTICA_API=${IOTISTICA_API}" >> /etc/iotistic/agent.env
     fi
 
     # Add MQTT broker configuration if provided

@@ -279,7 +279,7 @@ systemctl start docker
         -e IOTISTIC_INSTALL_METHOD=systemd `
         -e IOTISTIC_AGENT_VERSION=$resolvedAgentVersion `
         -e IOTISTIC_DEVICE_PORT=$DeviceApiPort `
-        -e CLOUD_API_ENDPOINT=$effectiveCloudApiEndpoint `
+        -e IOTISTICA_API=$effectiveCloudApiEndpoint `
         -e PROVISIONING_KEY=$ProvisioningKey `
         $ContainerName bash -lc "cd /workspace && ${installScriptBootstrap}chmod +x $installScriptContainerPath && $installScriptContainerPath"
 

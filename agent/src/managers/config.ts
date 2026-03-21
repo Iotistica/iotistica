@@ -517,7 +517,7 @@ export class ConfigManager extends EventEmitter {
 	 * Get cloud API endpoint
 	 */
 	public getCloudApiEndpoint(): string {
-		const env = process.env.CLOUD_API_ENDPOINT;
+		const env = process.env.IOTISTICA_API;
 		return env ?? 'http://localhost:4002';
 	}
 

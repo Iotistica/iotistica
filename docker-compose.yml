@@ -161,7 +161,7 @@ services:
             - AGENT_IMAGE=${AGENT_IMAGE:-iotistic/agent:latest}
             # Use host.docker.internal for K8s pods to reach Docker Compose services
             - CLOUD_API_URL=${CLOUD_API_URL:-http://host.docker.internal:4002}
-            # Note: Agent expects CLOUD_API_ENDPOINT, but deployer reads CLOUD_API_URL and passes as CLOUD_API_ENDPOINT
+            # Note: Agent expects IOTISTICA_API, but deployer reads CLOUD_API_URL and passes as IOTISTICA_API
             - MQTT_BROKER_URL_VIRTUAL=${MQTT_BROKER_URL_VIRTUAL:-mqtt://host.docker.internal:5883}
         ports:
             - "${API_PORT_EXT:-4002}:3002"

@@ -68,7 +68,7 @@ Write-Host "      - Or command line: openvpn --config iotistic-test.ovpn" -Foreg
 Write-Host ""
 Write-Host "   4. After VPN connection, configure agent:" -ForegroundColor White
 Write-Host "      `$env:MQTT_BROKER = 'mqtt://172.25.0.12:1883'" -ForegroundColor Gray
-Write-Host "      `$env:CLOUD_API_ENDPOINT = 'http://172.25.0.13:3002'" -ForegroundColor Gray
+Write-Host "      `$env:IOTISTICA_API = 'http://172.25.0.13:3002'" -ForegroundColor Gray
 Write-Host ""
 Write-Host "   5. Run agent:" -ForegroundColor White
 Write-Host "      cd agent && npm start" -ForegroundColor Gray
