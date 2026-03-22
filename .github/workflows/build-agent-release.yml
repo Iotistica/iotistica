@@ -12,10 +12,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-
   version:
     name: Bump Version
-    needs: [test]
     runs-on: [arc-runner-set-iotistica-v2]
     outputs:
       package_version: ${{ steps.bump.outputs.package_version }}
