@@ -53,19 +53,25 @@ export class OnePasswordService {
     this.simulateMode = process.env.SIMULATE_ONEPASSWORD === 'true';
     console.log('[OnePasswordService] simulateMode calculated as:', this.simulateMode);
     
-    const serviceAccountToken = config?.serviceAccountToken || 
-      process.env.ONEPASSWORD_CONNECT_TOKEN || 
-      process.env.ONEPASSWORD_SERVICE_ACCOUNT_TOKEN || 
-      '';
-    
+    const tokenFromConnectEnv = process.env.ONEPASSWORD_CONNECT_TOKEN;
+    const tokenFromSAEnv = process.env.ONEPASSWORD_SERVICE_ACCOUNT_TOKEN;
+    const serviceAccountToken = config?.serviceAccountToken || tokenFromConnectEnv || tokenFromSAEnv || '';
+
     this.vaultId = config?.vaultId || process.env.ONEPASSWORD_VAULT_ID || 'iotistica';
 
     // Skip initialization and validation if in simulation mode
     if (this.simulateMode) {
-      console.log('[OnePasswordService] ⚠️  SIMULATION MODE ENABLED - Skipping 1Password client initialization');
-      // Don't create clientPromise in simulation mode
+      console.log('[OnePasswordService] SIMULATION MODE ENABLED - Skipping 1Password client initialization');
       return;
     }
+
+    // Diagnostic: log which token source and vault are in use (never log token value)
+    const tokenSource = config?.serviceAccountToken ? 'config'
+      : tokenFromConnectEnv ? 'ONEPASSWORD_CONNECT_TOKEN'
+      : tokenFromSAEnv ? 'ONEPASSWORD_SERVICE_ACCOUNT_TOKEN'
+      : 'none';
+    console.log(`[OnePasswordService] Token source: ${tokenSource}, token present: ${!!serviceAccountToken}, token prefix: ${serviceAccountToken ? serviceAccountToken.substring(0, 8) + '...' : 'n/a'}`);
+    console.log(`[OnePasswordService] Vault ID: "${this.vaultId}" (from ${config?.vaultId ? 'config' : process.env.ONEPASSWORD_VAULT_ID ? 'ONEPASSWORD_VAULT_ID env' : 'default fallback'})`);
 
     if (!serviceAccountToken) {
       throw new OnePasswordError('1Password service account token is required');
