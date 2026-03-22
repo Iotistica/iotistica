@@ -78,13 +78,25 @@ jobs:
         with:
           platforms: linux/arm64
 
-      - name: Build agent in ${{ matrix.arch }} container
+      - name: Install dependencies and build
+        working-directory: ./agent
+        run: npm ci --legacy-peer-deps && npm run build
+
+      - name: Rebuild arm64 native modules (no bind mount)
+        if: matrix.arch == 'arm64'
+        working-directory: ./agent
         run: |
-          docker run --rm --platform ${{ matrix.platform }} \
-            -v "$PWD/agent:/workspace" \
-            -w /workspace \
-            node:20-slim \
-            bash -c "npm ci --legacy-peer-deps && npm run build"
+          # Pipe node_modules + package files into arm64 container via stdin tar.
+          # Avoids Docker socket bind-mount path issues on K8s ARC runners.
+          tar -cz node_modules/ package.json package-lock.json | \
+            docker run --rm --platform linux/arm64 -i node:20-slim bash -c '
+              set -e
+              mkdir /work && cd /work
+              tar -xz
+              apt-get update -qq && apt-get install -y -qq build-essential python3 libsqlite3-dev
+              npm rebuild sqlite3 --build-from-source
+              tar -cz node_modules/sqlite3/
+            ' | tar -xz
 
       - name: Package and checksum tarball
         run: |
