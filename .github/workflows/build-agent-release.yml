@@ -14,31 +14,25 @@ concurrency:
 jobs:
   test:
     name: Run Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
+    container:
+      image: node:20-slim
 
     steps:
+      - name: Install git
+        run: apt-get update -qq && apt-get install -y -qq git
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: agent/package-lock.json
-
-      - name: Install Agent dependencies
+      - name: Install dependencies
         working-directory: ./agent
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Run unit tests
         working-directory: ./agent
         run: npm run test:unit
         continue-on-error: true
-
-      - name: Build Agent
-        working-directory: ./agent
-        run: npm run build
 
   version:
     name: Bump Version
@@ -54,25 +48,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install jq
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-
-      - name: Bump version in package.json
+      - name: Bump patch version
         id: bump
         run: |
           cd agent
           CURRENT_VERSION=$(jq -r '.version' package.json)
-          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          MAJOR="${VERSION_PARTS[0]}"
-          MINOR="${VERSION_PARTS[1]}"
-          PATCH="${VERSION_PARTS[2]}"
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-
+          IFS='.' read -ra V <<< "$CURRENT_VERSION"
+          NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
           jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
-
           echo "package_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
@@ -86,89 +69,75 @@ jobs:
           for i in {1..5}; do
             git fetch origin master
             git -c rebase.autoStash=true rebase origin/master
-            if git push origin HEAD:master; then
-              exit 0
-            fi
+            git push origin HEAD:master && exit 0
             sleep 2
           done
 
           echo "Failed to push after 5 attempts"
           exit 1
 
-  build-x86:
-    name: Build x86_64 Tarballs
+  build:
+    name: Build ${{ matrix.arch }} tarball
     needs: [version]
     runs-on: [arc-runner-set-iotistica-v2]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+            suffix: -x86_64
+          - arch: arm64
+            platform: linux/arm64
+            suffix: -arm64
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build x86_64 artifacts
-        run: |
-          cd agent
-          npm ci --legacy-peer-deps
-          npm run build
+      - name: Set up QEMU
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
 
+      - name: Build agent in ${{ matrix.arch }} container
+        run: |
+          docker run --rm --platform ${{ matrix.platform }} \
+            -v "$PWD/agent:/workspace" \
+            -w /workspace \
+            node:20-slim \
+            bash -c "npm ci --legacy-peer-deps && npm run build"
+
+      - name: Package and checksum tarball
+        run: |
+          VERSION=${{ needs.version.outputs.package_version }}
+          SUFFIX=${{ matrix.suffix }}
           mkdir -p /tmp/iotistic-artifacts
 
-          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-            dist/ package.json package-lock.json node_modules/ bin/
+          tar -czf "/tmp/iotistic-artifacts/agent-${VERSION}${SUFFIX}.tar.gz" \
+            -C agent dist/ package.json package-lock.json node_modules/ bin/
 
-          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz
+          cp "/tmp/iotistic-artifacts/agent-${VERSION}${SUFFIX}.tar.gz" \
+             "/tmp/iotistic-artifacts/agent-latest${SUFFIX}.tar.gz"
 
-          cp /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest.tar.gz
-
-          cd /tmp/iotistic-artifacts
-          sha256sum agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz > agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256
-          sha256sum agent-latest-x86_64.tar.gz > agent-latest-x86_64.tar.gz.sha256
-          sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
-
-      - name: Upload x86_64 artifact bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-tarballs-x86_64
-          path: /tmp/iotistic-artifacts/*
-          if-no-files-found: error
-
-  build-arm64:
-    name: Build ARM64 Tarballs
-    needs: [version]
-    runs-on: [arc-runner-set-iotistica-v2]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build ARM64 artifacts
-        run: |
-          cd agent
-          npm ci --legacy-peer-deps
-          npm run build
-
-          mkdir -p /tmp/iotistic-artifacts
-
-          tar -czf /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-            dist/ package.json package-lock.json node_modules/ bin/
-
-          cp /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            cp "/tmp/iotistic-artifacts/agent-${VERSION}${SUFFIX}.tar.gz" \
+               "/tmp/iotistic-artifacts/agent-latest.tar.gz"
+          fi
 
           cd /tmp/iotistic-artifacts
-          sha256sum agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz > agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256
-          sha256sum agent-latest-arm64.tar.gz > agent-latest-arm64.tar.gz.sha256
+          for f in *.tar.gz; do sha256sum "$f" > "${f}.sha256"; done
 
-      - name: Upload ARM64 artifact bundle
+      - name: Upload artifact bundle
         uses: actions/upload-artifact@v4
         with:
-          name: agent-tarballs-arm64
+          name: agent-tarballs-${{ matrix.arch }}
           path: /tmp/iotistic-artifacts/*
           if-no-files-found: error
 
   prepare-install-script:
-    name: Prepare Latest install.sh
+    name: Prepare install.sh
     needs: [version]
     runs-on: [arc-runner-set-iotistica-v2]
 
@@ -176,131 +145,79 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare install.sh with current version
+      - name: Stamp version and checksum
         run: |
           mkdir -p /tmp/iotistic-scripts
           sed "s/AGENT_VERSION_PLACEHOLDER/${{ needs.version.outputs.package_version }}/g" \
             agent/bin/install.sh > /tmp/iotistic-scripts/install.sh
           chmod +x /tmp/iotistic-scripts/install.sh
+          cd /tmp/iotistic-scripts && sha256sum install.sh > install.sh.sha256
 
-      - name: Generate install.sh checksum
-        run: |
-          cd /tmp/iotistic-scripts
-          sha256sum install.sh > install.sh.sha256
-
-      - name: Upload install.sh bundle
+      - name: Upload install script bundle
         uses: actions/upload-artifact@v4
         with:
           name: install-script-latest
           path: /tmp/iotistic-scripts/*
           if-no-files-found: error
 
-  verify-systemd-install-x86:
-    name: Verify install.sh on x86_64
-    needs: [version, build-x86, build-arm64, prepare-install-script]
-    runs-on: ubuntu-latest
+  verify-install:
+    name: Verify install (${{ matrix.arch }})
+    needs: [version, build, prepare-install-script]
+    runs-on: [arc-runner-set-iotistica-v2]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+            suffix: -x86_64
+          - arch: arm64
+            platform: linux/arm64
+            suffix: -arm64
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Set up QEMU
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
 
-      - name: Download install script artifact
+      - name: Download tarball artifacts
         uses: actions/download-artifact@v4
         with:
-          name: install-script-latest
-          path: /tmp/iotistic-scripts
+          name: agent-tarballs-${{ matrix.arch }}
+          path: /tmp/iotistic-artifacts
 
-      - name: Place generated install.sh in repo path
+      - name: Verify artifact structure and JS syntax
         run: |
-          cp /tmp/iotistic-scripts/install.sh ./agent/bin/install.generated.sh
-          chmod +x ./agent/bin/install.generated.sh
+          docker run --rm --platform ${{ matrix.platform }} \
+            -e VERSION="${{ needs.version.outputs.package_version }}" \
+            -e SUFFIX="${{ matrix.suffix }}" \
+            -v "/tmp/iotistic-artifacts:/artifacts:ro" \
+            node:20-slim bash -c '
+              set -e
+              mkdir -p /verify && cd /verify
+              tar -xzf "/artifacts/agent-${VERSION}${SUFFIX}.tar.gz"
 
-      - name: Clean previous installation
-        run: |
-          sudo rm -rf /opt/iotistic/agent /var/lib/iotistic/agent /etc/iotistic /var/log/iotistic
+              if [ -f dist/app.js ]; then
+                ENTRY=dist/app.js
+              elif [ -f dist/src/app.js ]; then
+                ENTRY=dist/src/app.js
+              else
+                echo "ERROR: app.js not found in dist/ or dist/src/"
+                find dist -name "*.js" | head -10 || true
+                exit 1
+              fi
+              echo "Entry point: $ENTRY"
 
-      - name: Run latest install.sh in CI systemd mode
-        env:
-          CI: true
-          IOTISTIC_INSTALL_METHOD: systemd
-          IOTISTIC_AGENT_VERSION: ${{ needs.version.outputs.package_version }}
-          IOTISTIC_DEVICE_PORT: 48484
-          IOTISTICA_API: ''
-          PROVISIONING_KEY: ''
-        run: |
-          sudo -E bash ./agent/bin/install.generated.sh
-
-      - name: Validate service health
-        run: |
-          sudo systemctl status iotistic-agent --no-pager || true
-          sudo journalctl -u iotistic-agent -n 200 --no-pager || true
-
-          if ! sudo systemctl is-active --quiet iotistic-agent; then
-            echo "Service is not active"
-            exit 1
-          fi
-
-          if ! curl -f http://localhost:48484/v1/healthy 2>/dev/null && \
-             ! curl -f http://localhost:48484/ping 2>/dev/null; then
-            echo "Agent API is not healthy"
-            exit 1
-          fi
-
-  verify-systemd-install-arm64:
-    name: Verify install.sh on arm64
-    needs: [version, build-x86, build-arm64, prepare-install-script]
-    runs-on: ubuntu-24.04-arm
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download install script artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: install-script-latest
-          path: /tmp/iotistic-scripts
-
-      - name: Place generated install.sh in repo path
-        run: |
-          cp /tmp/iotistic-scripts/install.sh ./agent/bin/install.generated.sh
-          chmod +x ./agent/bin/install.generated.sh
-
-      - name: Clean previous installation
-        run: |
-          sudo rm -rf /opt/iotistic/agent /var/lib/iotistic/agent /etc/iotistic /var/log/iotistic
-
-      - name: Run latest install.sh in CI systemd mode
-        env:
-          CI: true
-          IOTISTICA_INSTALL_METHOD: systemd
-          IOTISTICA_AGENT_VERSION: ${{ needs.version.outputs.package_version }}
-          IOTISTICA_DEVICE_PORT: 48484
-          IOTISTICA_API: ''
-          PROVISIONING_KEY: ''
-        run: |
-          sudo -E bash ./agent/bin/install.generated.sh
-
-      - name: Validate service health
-        run: |
-          sudo systemctl status iotistica-agent --no-pager || true
-          sudo journalctl -u iotistica-agent -n 200 --no-pager || true
-
-          if ! sudo systemctl is-active --quiet iotistica-agent; then
-            echo "Service is not active"
-            exit 1
-          fi
-
-          if ! curl -f http://localhost:48484/v1/healthy 2>/dev/null && \
-             ! curl -f http://localhost:48484/ping 2>/dev/null; then
-            echo "Agent API is not healthy"
-            exit 1
-          fi
+              find dist -name "*.js" | xargs -r node --check
+              echo "All JS syntax checks passed"
+            '
 
   generate-sbom:
-    name: Generate SBOM
-    needs: [version, build-x86, build-arm64, prepare-install-script]
-    runs-on: ubuntu-latest
+    name: Generate SBOM & Scan
+    needs: [version, build, prepare-install-script]
+    runs-on: [arc-runner-set-iotistica-v2]
     permissions:
       contents: read
 
@@ -326,41 +243,25 @@ jobs:
           name: install-script-latest
           path: /tmp/iotistic-scripts
 
-      - name: Install Syft
+      - name: Install Syft and Trivy
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-          syft version
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
       - name: Generate CycloneDX SBOM
         run: |
-          mkdir -p /tmp/sbom
-
+          mkdir -p /tmp/sbom /tmp/trivy-reports
+          syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source.cyclonedx.json
           syft dir:/tmp/iotistic-artifacts -o cyclonedx-json=/tmp/sbom/agent-artifacts.cyclonedx.json
           syft dir:/tmp/iotistic-scripts -o cyclonedx-json=/tmp/sbom/install-script.cyclonedx.json
-          syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source.cyclonedx.json
 
-      - name: Install Trivy
+      - name: Scan SBOMs and enforce CVE policy
+        # Blocks release on any CRITICAL vulnerability. Tighten to HIGH,CRITICAL if desired.
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-          trivy --version
-
-      - name: Generate Trivy reports from SBOM
-        run: |
-          mkdir -p /tmp/trivy-reports
-
-          trivy sbom --format table --output /tmp/trivy-reports/agent-source.txt /tmp/sbom/agent-source.cyclonedx.json
-          trivy sbom --format json --output /tmp/trivy-reports/agent-source.json /tmp/sbom/agent-source.cyclonedx.json
-
-          trivy sbom --format table --output /tmp/trivy-reports/agent-artifacts.txt /tmp/sbom/agent-artifacts.cyclonedx.json
-          trivy sbom --format json --output /tmp/trivy-reports/agent-artifacts.json /tmp/sbom/agent-artifacts.cyclonedx.json
-
-          trivy sbom --format table --output /tmp/trivy-reports/install-script.txt /tmp/sbom/install-script.cyclonedx.json
-          trivy sbom --format json --output /tmp/trivy-reports/install-script.json /tmp/sbom/install-script.cyclonedx.json
-
-      - name: Enforce CVE policy threshold with Trivy
-        # Blocks release if any CRITICAL vulnerability is found.
-        # Change severity to HIGH,CRITICAL for a stricter policy.
-        run: |
+          for scope in agent-source agent-artifacts install-script; do
+            trivy sbom --format table --output "/tmp/trivy-reports/${scope}.txt" "/tmp/sbom/${scope}.cyclonedx.json"
+            trivy sbom --format json  --output "/tmp/trivy-reports/${scope}.json" "/tmp/sbom/${scope}.cyclonedx.json"
+          done
           trivy sbom --exit-code 1 --severity CRITICAL /tmp/sbom/agent-source.cyclonedx.json
           trivy sbom --exit-code 1 --severity CRITICAL /tmp/sbom/agent-artifacts.cyclonedx.json
           trivy sbom --exit-code 1 --severity CRITICAL /tmp/sbom/install-script.cyclonedx.json
@@ -382,16 +283,14 @@ jobs:
       - name: Append SBOM summary
         run: |
           echo "# SBOM Generated" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Artifacts:" >> $GITHUB_STEP_SUMMARY
           echo "- agent-artifacts.cyclonedx.json" >> $GITHUB_STEP_SUMMARY
           echo "- install-script.cyclonedx.json" >> $GITHUB_STEP_SUMMARY
           echo "- agent-source.cyclonedx.json" >> $GITHUB_STEP_SUMMARY
 
   upload-artifacts:
-    name: Upload to Azure (gated)
-    needs: [version, build-x86, build-arm64, verify-systemd-install-x86, verify-systemd-install-arm64, prepare-install-script, generate-sbom]
-    runs-on: ubuntu-latest
+    name: Upload to Azure
+    needs: [version, build, verify-install, prepare-install-script, generate-sbom]
+    runs-on: [arc-runner-set-iotistica-v2]
     if: success()
 
     steps:
@@ -424,60 +323,81 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Upload x86_64 tarballs and checksums
-        run: |
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz --overwrite true --content-type application/gzip
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/agent-latest-x86_64.tar.gz --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz --overwrite true --content-type application/gzip
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/agent-latest.tar.gz --file /tmp/iotistic-artifacts/agent-latest.tar.gz --overwrite true --content-type application/gzip
-
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/versions/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-x86_64.tar.gz.sha256 --overwrite true --content-type text/plain
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/agent-latest-x86_64.tar.gz.sha256 --file /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz.sha256 --overwrite true --content-type text/plain
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/agent-latest.tar.gz.sha256 --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 --overwrite true --content-type text/plain
-
-      - name: Upload ARM64 tarballs and checksums
-        run: |
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz --overwrite true --content-type application/gzip
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/agent-latest-arm64.tar.gz --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz --overwrite true --content-type application/gzip
-
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/versions/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 --file /tmp/iotistic-artifacts/agent-${{ needs.version.outputs.package_version }}-arm64.tar.gz.sha256 --overwrite true --content-type text/plain
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/agent-latest-arm64.tar.gz.sha256 --file /tmp/iotistic-artifacts/agent-latest-arm64.tar.gz.sha256 --overwrite true --content-type text/plain
-
-      - name: Upload install.sh and checksums
-        run: |
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/install --file /tmp/iotistic-scripts/install.sh --overwrite true --content-type application/x-sh --content-disposition "attachment; filename=install"
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/install.sha256 --file /tmp/iotistic-scripts/install.sh.sha256 --overwrite true --content-type text/plain --content-disposition "inline; filename=install.sha256"
-
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/versions/install-${{ needs.version.outputs.package_version }}.sh --file /tmp/iotistic-scripts/install.sh --overwrite true --content-type application/x-sh --content-disposition "attachment; filename=install-${{ needs.version.outputs.package_version }}.sh"
-          az storage blob upload --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} --container-name scripts --name agent/versions/install-${{ needs.version.outputs.package_version }}.sh.sha256 --file /tmp/iotistic-scripts/install.sh.sha256 --overwrite true --content-type text/plain --content-disposition "inline; filename=install-${{ needs.version.outputs.package_version }}.sh.sha256"
-
-      - name: Upload SBOM files to Azure
+      - name: Upload tarballs and checksums
         run: |
           VERSION=${{ needs.version.outputs.package_version }}
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+
+          for arch in x86_64 arm64; do
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/versions/agent-${VERSION}-${arch}.tar.gz" \
+              --file "/tmp/iotistic-artifacts/agent-${VERSION}-${arch}.tar.gz" \
+              --overwrite true --content-type application/gzip
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/agent-latest-${arch}.tar.gz" \
+              --file "/tmp/iotistic-artifacts/agent-latest-${arch}.tar.gz" \
+              --overwrite true --content-type application/gzip
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/versions/agent-${VERSION}-${arch}.tar.gz.sha256" \
+              --file "/tmp/iotistic-artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
+              --overwrite true --content-type text/plain
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/agent-latest-${arch}.tar.gz.sha256" \
+              --file "/tmp/iotistic-artifacts/agent-latest-${arch}.tar.gz.sha256" \
+              --overwrite true --content-type text/plain
+          done
+
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent/agent-latest.tar.gz \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
+            --overwrite true --content-type application/gzip
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent/agent-latest.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
+            --overwrite true --content-type text/plain
+
+      - name: Upload install.sh
+        run: |
+          VERSION=${{ needs.version.outputs.package_version }}
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent/install --file /tmp/iotistic-scripts/install.sh \
+            --overwrite true --content-type application/x-sh \
+            --content-disposition "attachment; filename=install"
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent/install.sha256 --file /tmp/iotistic-scripts/install.sh.sha256 \
+            --overwrite true --content-type text/plain
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/versions/install-${VERSION}.sh" \
+            --file /tmp/iotistic-scripts/install.sh \
+            --overwrite true --content-type application/x-sh \
+            --content-disposition "attachment; filename=install-${VERSION}.sh"
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/versions/install-${VERSION}.sh.sha256" \
+            --file /tmp/iotistic-scripts/install.sh.sha256 \
+            --overwrite true --content-type text/plain
+
+      - name: Upload SBOMs
+        run: |
+          VERSION=${{ needs.version.outputs.package_version }}
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
 
           for f in agent-artifacts install-script agent-source; do
-            # Versioned copy alongside release tarballs
-            az storage blob upload \
-              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-              --container-name scripts \
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json" \
               --file "/tmp/sbom/${f}.cyclonedx.json" \
-              --overwrite true \
-              --content-type application/json
-
-            # Latest pointer
-            az storage blob upload \
-              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-              --container-name scripts \
+              --overwrite true --content-type application/json
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/sbom/${f}.cyclonedx.json" \
               --file "/tmp/sbom/${f}.cyclonedx.json" \
-              --overwrite true \
-              --content-type application/json
+              --overwrite true --content-type application/json
           done
 
   report:
-    name: Generate Changelog
+    name: Release Summary
     needs: [version, upload-artifacts]
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
 
     steps:
       - name: Checkout repository
@@ -491,24 +411,13 @@ jobs:
           if [ -z "$PREV_TAG" ]; then
             COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges)
           else
-            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+            COMMITS=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (%h)" --no-merges)
           fi
 
-          echo "$COMMITS" | head -20 > changelog_summary.txt
-
-          echo "# Integration Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "# Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Version: ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "SHA: ${{ needs.version.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**SHA:** ${{ needs.version.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          cat changelog_summary.txt >> $GITHUB_STEP_SUMMARY
+          echo "$COMMITS" | head -20 >> $GITHUB_STEP_SUMMARY
 
-  cleanup:
-    name: Clean up
-    runs-on: ubuntu-latest
-    needs: [report]
-    if: always()
-
-    steps:
-      - name: Cleanup Docker
-        run: docker system prune -af

@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - master
-    tags:
-      - 'v*'
     paths:
       - 'agent/**' 
       - '.github/workflows/build-agent-ci.yml'
@@ -32,10 +30,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: agent/package-lock.json
+
+      - name: Cache node_modules
+        id: node-modules-cache
+        uses: actions/cache@v4
+        with:
+          path: agent/node_modules
+          key: ${{ runner.os }}-node-modules-x86_64-${{ hashFiles('agent/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-x86_64-
 
       - name: Install Agent dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
         working-directory: ./agent
         run: npm ci --prefer-offline --no-audit
 
@@ -80,8 +86,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: agent/package-lock.json
 
       - name: Set up QEMU (ARM64 only)
         if: matrix.arch == 'arm64'
@@ -89,94 +93,66 @@ jobs:
         with:
           platforms: linux/arm64
 
-      - name: Gate (skip arm64 on non-tag builds)
-        id: gate
+      - name: Cache node_modules
+        id: node-modules-cache
+        uses: actions/cache@v4
+        with:
+          path: agent/node_modules
+          key: ${{ runner.os }}-node-modules-${{ matrix.arch }}-${{ hashFiles('agent/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-${{ matrix.arch }}-
+
+      - name: Install dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        working-directory: ./agent
+        run: npm ci --prefer-offline --no-audit --legacy-peer-deps
+
+      - name: Rebuild sqlite3 for ARM64
+        if: matrix.arch == 'arm64' && steps.node-modules-cache.outputs.cache-hit != 'true'
         run: |
-          if [ "${{ matrix.arch }}" = "arm64" ] && [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "false" ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-          fi
+          docker run --rm -v "${{ github.workspace }}/agent":/app -w /app --platform linux/arm64 \
+            node:20-slim bash -c "
+              apt-get update -qq && apt-get install -y -qq build-essential python3 libsqlite3-dev
+              npm rebuild sqlite3 --build-from-source
+            "
 
       - name: Build tarball (${{ matrix.arch }})
-        if: steps.gate.outputs.skip != 'true'
         run: |
-          VERSION="${{ needs.build.outputs.agent_version }}"
           ARCH="${{ matrix.arch }}"
 
           cd agent
-          npm ci --prefer-offline --no-audit --legacy-peer-deps
           npm run build
-
-          if [ "$ARCH" = "arm64" ]; then
-            echo "Rebuilding sqlite3 for ARM64..."
-            docker run --rm -v "$(pwd)":/app -w /app --platform linux/arm64 \
-              node:20-slim bash -c "
-                apt-get update && apt-get install -y build-essential python3 libsqlite3-dev
-                npm rebuild sqlite3 --build-from-source
-              "
-          fi
 
           mkdir -p /tmp/iotistic-artifacts
 
-          tar -czf /tmp/iotistic-artifacts/agent-${VERSION}-${ARCH}.tar.gz \
+          tar -czf /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz \
             dist/ \
             package.json \
             package-lock.json \
             node_modules/ \
             bin/
 
-          cp /tmp/iotistic-artifacts/agent-${VERSION}-${ARCH}.tar.gz \
-             /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz
-
           if [ "$ARCH" = "x86_64" ]; then
             cp /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz /tmp/iotistic-artifacts/agent-latest.tar.gz
           fi
 
       - name: Azure login
-        if: steps.gate.outputs.skip != 'true'
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Generate checksums (${{ matrix.arch }})
-        if: steps.gate.outputs.skip != 'true'
         run: |
-          VERSION="${{ needs.build.outputs.agent_version }}"
           ARCH="${{ matrix.arch }}"
 
           cd /tmp/iotistic-artifacts
-          sha256sum agent-${VERSION}-${ARCH}.tar.gz > agent-${VERSION}-${ARCH}.tar.gz.sha256
           sha256sum agent-latest-${ARCH}.tar.gz > agent-latest-${ARCH}.tar.gz.sha256
 
           if [ "$ARCH" = "x86_64" ]; then
             sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
           fi
 
-      - name: Upload versioned tarball and checksum (${{ matrix.arch }})
-        if: steps.gate.outputs.skip != 'true'
-        run: |
-          VERSION="${{ needs.build.outputs.agent_version }}"
-          ARCH="${{ matrix.arch }}"
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${VERSION}-${ARCH}.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-${VERSION}-${ARCH}.tar.gz \
-            --overwrite true \
-            --content-type application/gzip
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/versions/agent-${VERSION}-${ARCH}.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-${VERSION}-${ARCH}.tar.gz.sha256 \
-            --overwrite true \
-            --content-type text/plain
-
       - name: Upload latest tarball and checksum (${{ matrix.arch }})
-        if: steps.gate.outputs.skip != 'true'
         run: |
           ARCH="${{ matrix.arch }}"
 
@@ -252,7 +228,6 @@ jobs:
           cache-from: type=registry,ref=iotistic/agent:buildcache
           cache-to: type=registry,ref=iotistic/agent:buildcache,mode=max
           tags: |
-            iotistic/agent:${{ needs.build.outputs.agent_version }}
             iotistic/agent:${{ needs.build.outputs.sha_short }}
             iotistic/agent:latest
           build-args: |
@@ -261,7 +236,7 @@ jobs:
       - name: Scan Agent image with Trivy
         uses: ./.github/actions/trivy-scan
         with:
-          image-ref: 'iotistic/agent:${{ needs.build.outputs.agent_version }}'
+          image-ref: 'iotistic/agent:${{ needs.build.outputs.sha_short }}'
           output-file: 'trivy-results.sarif'
           fail-on-critical: 'true'
           ignore-file: 'agent/.trivyignore'
@@ -277,13 +252,10 @@ jobs:
           echo "### Docker Images:" >> $GITHUB_STEP_SUMMARY
           echo "- [\`iotistic/agent:latest\`](https://hub.docker.com/r/iotistic/agent/tags?name=latest)" >> $GITHUB_STEP_SUMMARY
           echo "- [\`iotistic/agent:${{ needs.build.outputs.sha_short }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.build.outputs.sha_short }})" >> $GITHUB_STEP_SUMMARY
-          echo "- [\`iotistic/agent:${{ needs.build.outputs.agent_version }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.build.outputs.agent_version }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Installation Scripts:" >> $GITHUB_STEP_SUMMARY
           echo "- [install-docker.sh](https://apps.iotistic.ca/agent/install-docker.sh) ([checksum](https://apps.iotistic.ca/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
           echo "- [install-systemd.sh](https://apps.iotistic.ca/agent/install-systemd.sh) ([checksum](https://apps.iotistic.ca/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-docker-${{ needs.build.outputs.agent_version }}.sh](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.build.outputs.agent_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-docker-${{ needs.build.outputs.agent_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-systemd-${{ needs.build.outputs.agent_version }}.sh](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.build.outputs.agent_version }}.sh) ([checksum](https://apps.iotistic.ca/agent/versions/install-systemd-${{ needs.build.outputs.agent_version }}.sh.sha256))" >> $GITHUB_STEP_SUMMARY
 
   # trigger-integration-tests:
   #   name: Trigger Integration Tests
