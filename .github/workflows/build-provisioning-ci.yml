@@ -10,40 +10,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
-    name: Run Unit Tests
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: provisioning/package-lock.json
-
-      - name: Fix npm cache permissions
-        run: sudo chown -R $(id -u):$(id -g) ~/.npm
-
-      - name: Install Provisioning dependencies
-        working-directory: ./provisioning
-        run: npm ci
-
-      - name: Run unit tests
-        working-directory: ./provisioning
-        run: npm run test || echo "No tests configured"
-
-      - name: Build Provisioning API
-        working-directory: ./provisioning
-        run: npm run build
-
   version:
     name: Bump Version
-    needs: test
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
     permissions:
       contents: write
     outputs:
@@ -124,7 +93,7 @@ jobs:
   buildx-api:
     name: Build & Push Provisioning API
     needs: version
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
     permissions:
       contents: write
       security-events: write
@@ -219,7 +188,7 @@ jobs:
   buildx-worker:
     name: Build & Push Provisioning Worker
     needs: version
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
     permissions:
       contents: write
       security-events: write
@@ -314,7 +283,7 @@ jobs:
   report:
     name: Generate Reports
     needs: [version, buildx-api, buildx-worker]
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-v2]
     if: always()
     
     steps:

@@ -58,7 +58,7 @@ export class OnePasswordService {
       process.env.ONEPASSWORD_SERVICE_ACCOUNT_TOKEN || 
       '';
     
-    this.vaultId = config?.vaultId || process.env.ONEPASSWORD_VAULT_ID || 'IOT-CLIENTS';
+    this.vaultId = config?.vaultId || process.env.ONEPASSWORD_VAULT_ID || 'iotistica';
 
     // Skip initialization and validation if in simulation mode
     if (this.simulateMode) {
