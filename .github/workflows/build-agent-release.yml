@@ -3,6 +3,9 @@ name: Agent Build & Release
 on:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 permissions:
   contents: write
   actions: read
@@ -72,31 +75,45 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Set up QEMU
         if: matrix.arch == 'arm64'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: linux/arm64
 
-      - name: Install dependencies and build
-        working-directory: ./agent
-        run: npm ci --legacy-peer-deps && npm run build
+      - name: Cache node_modules
+        id: node-modules-cache
+        uses: actions/cache@v4
+        with:
+          path: agent/node_modules
+          key: ${{ runner.os }}-node-modules-${{ matrix.arch }}-${{ hashFiles('agent/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-${{ matrix.arch }}-
 
-      - name: Rebuild arm64 native modules (no bind mount)
-        if: matrix.arch == 'arm64'
+      - name: Install dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        working-directory: ./agent
+        run: npm ci --legacy-peer-deps
+
+      - name: Build
+        working-directory: ./agent
+        run: npm run build
+
+      - name: Rebuild arm64 native modules
+        if: matrix.arch == 'arm64' && steps.node-modules-cache.outputs.cache-hit != 'true'
         working-directory: ./agent
         run: |
-          # Pipe node_modules + package files into arm64 container via stdin tar.
-          # Avoids Docker socket bind-mount path issues on K8s ARC runners.
-          tar -cz node_modules/ package.json package-lock.json | \
-            docker run --rm --platform linux/arm64 -i node:20-slim bash -c '
-              set -e
-              mkdir /work && cd /work
-              tar -xz
-              apt-get update -qq && apt-get install -y -qq build-essential python3 libsqlite3-dev
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD:/work" -w /work \
+            node:20 bash -c '
+              apt-get update -qq && apt-get install -y -qq libsqlite3-dev
               npm rebuild sqlite3 --build-from-source
-              tar -cz node_modules/sqlite3/
-            ' | tar -xz
+            '
 
       - name: Package and checksum tarball
         run: |

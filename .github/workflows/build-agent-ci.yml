@@ -9,6 +9,9 @@ on:
       - '.github/workflows/build-agent-ci.yml'
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 concurrency:
   group: agent-ci
   cancel-in-progress: true
