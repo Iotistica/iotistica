@@ -106,12 +106,19 @@ jobs:
           cd /tmp/iotistic-artifacts
           for f in *.tar.gz; do sha256sum "$f" > "${f}.sha256"; done
 
-      - name: Upload artifact bundle
-        uses: actions/upload-artifact@v4
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          name: agent-tarballs-${{ matrix.arch }}
-          path: /tmp/iotistic-artifacts/*
-          if-no-files-found: error
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Stage tarballs to Azure
+        run: |
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          PREFIX="agent/staging/run-${{ github.run_id }}/tarballs"
+          for f in /tmp/iotistic-artifacts/*; do
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "${PREFIX}/$(basename "$f")" --file "$f" --overwrite true
+          done
 
   prepare-install-script:
     name: Prepare install.sh
@@ -130,12 +137,19 @@ jobs:
           chmod +x /tmp/iotistic-scripts/install.sh
           cd /tmp/iotistic-scripts && sha256sum install.sh > install.sh.sha256
 
-      - name: Upload install script bundle
-        uses: actions/upload-artifact@v4
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          name: install-script-latest
-          path: /tmp/iotistic-scripts/*
-          if-no-files-found: error
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Stage install script to Azure
+        run: |
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          PREFIX="agent/staging/run-${{ github.run_id }}/scripts"
+          for f in /tmp/iotistic-scripts/*; do
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "${PREFIX}/$(basename "$f")" --file "$f" --overwrite true
+          done
 
   verify-install:
     name: Verify install (${{ matrix.arch }})
@@ -159,11 +173,20 @@ jobs:
         with:
           platforms: linux/arm64
 
-      - name: Download tarball artifacts
-        uses: actions/download-artifact@v4
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          name: agent-tarballs-${{ matrix.arch }}
-          path: /tmp/iotistic-artifacts
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Download tarballs from Azure staging
+        run: |
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          VERSION=${{ needs.version.outputs.package_version }}
+          SUFFIX=${{ matrix.suffix }}
+          mkdir -p /tmp/iotistic-artifacts
+          az storage blob download --account-name "$ACCT" --container-name scripts \
+            --name "agent/staging/run-${{ github.run_id }}/tarballs/agent-${VERSION}${SUFFIX}.tar.gz" \
+            --file "/tmp/iotistic-artifacts/agent-${VERSION}${SUFFIX}.tar.gz"
 
       - name: Verify artifact structure and JS syntax
         run: |
@@ -202,23 +225,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download x86_64 artifacts
-        uses: actions/download-artifact@v4
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          name: agent-tarballs-x86_64
-          path: /tmp/iotistic-artifacts
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Download ARM64 artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-tarballs-arm64
-          path: /tmp/iotistic-artifacts
+      - name: Download staged artifacts from Azure
+        run: |
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          RUN_PREFIX="agent/staging/run-${{ github.run_id }}"
+          mkdir -p /tmp/iotistic-artifacts /tmp/iotistic-scripts /tmp/dl
 
-      - name: Download install script bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: install-script-latest
-          path: /tmp/iotistic-scripts
+          az storage blob download-batch --account-name "$ACCT" --source scripts \
+            --destination /tmp/dl --pattern "${RUN_PREFIX}/tarballs/*" --no-progress
+          find /tmp/dl -type f -exec mv {} /tmp/iotistic-artifacts/ \;
+
+          az storage blob download-batch --account-name "$ACCT" --source scripts \
+            --destination /tmp/dl --pattern "${RUN_PREFIX}/scripts/*" --no-progress
+          find /tmp/dl -type f -exec mv {} /tmp/iotistic-scripts/ \;
 
       - name: Install Syft and Trivy
         run: |
@@ -243,19 +267,18 @@ jobs:
           trivy sbom --exit-code 1 --severity CRITICAL /tmp/sbom/agent-artifacts.cyclonedx.json
           trivy sbom --exit-code 1 --severity CRITICAL /tmp/sbom/install-script.cyclonedx.json
 
-      - name: Upload Trivy report bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-sbom-reports
-          path: /tmp/trivy-reports/*
-          if-no-files-found: error
-
-      - name: Upload SBOM bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-sbom
-          path: /tmp/sbom/*
-          if-no-files-found: error
+      - name: Stage SBOMs and Trivy reports to Azure
+        run: |
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          RUN_PREFIX="agent/staging/run-${{ github.run_id }}"
+          for f in /tmp/sbom/*; do
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "${RUN_PREFIX}/sbom/$(basename "$f")" --file "$f" --overwrite true
+          done
+          for f in /tmp/trivy-reports/*; do
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "${RUN_PREFIX}/trivy/$(basename "$f")" --file "$f" --overwrite true
+          done
 
       - name: Append SBOM summary
         run: |
@@ -271,34 +294,28 @@ jobs:
     if: success()
 
     steps:
-      - name: Download x86_64 artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-tarballs-x86_64
-          path: /tmp/iotistic-artifacts
-
-      - name: Download ARM64 artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-tarballs-arm64
-          path: /tmp/iotistic-artifacts
-
-      - name: Download install script bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: install-script-latest
-          path: /tmp/iotistic-scripts
-
-      - name: Download SBOM bundle
-        uses: actions/download-artifact@v4
-        with:
-          name: agent-sbom
-          path: /tmp/sbom
-
       - name: Azure login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Download staged artifacts from Azure
+        run: |
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          RUN_PREFIX="agent/staging/run-${{ github.run_id }}"
+          mkdir -p /tmp/iotistic-artifacts /tmp/iotistic-scripts /tmp/sbom /tmp/dl
+
+          az storage blob download-batch --account-name "$ACCT" --source scripts \
+            --destination /tmp/dl --pattern "${RUN_PREFIX}/tarballs/*" --no-progress
+          find /tmp/dl -type f -exec mv {} /tmp/iotistic-artifacts/ \;
+
+          az storage blob download-batch --account-name "$ACCT" --source scripts \
+            --destination /tmp/dl --pattern "${RUN_PREFIX}/scripts/*" --no-progress
+          find /tmp/dl -type f -exec mv {} /tmp/iotistic-scripts/ \;
+
+          az storage blob download-batch --account-name "$ACCT" --source scripts \
+            --destination /tmp/dl --pattern "${RUN_PREFIX}/sbom/*" --no-progress
+          find /tmp/dl -type f -exec mv {} /tmp/sbom/ \;
 
       - name: Upload tarballs and checksums
         run: |
@@ -370,6 +387,24 @@ jobs:
               --file "/tmp/sbom/${f}.cyclonedx.json" \
               --overwrite true --content-type application/json
           done
+
+  cleanup-staging:
+    name: Cleanup Azure Staging
+    needs: [upload-artifacts]
+    runs-on: [arc-runner-set-iotistica-v2]
+    if: always()
+
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Delete staging blobs
+        run: |
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          az storage blob delete-batch --account-name "$ACCT" --source scripts \
+            --pattern "agent/staging/run-${{ github.run_id }}/*"
 
   report:
     name: Release Summary
