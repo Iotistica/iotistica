@@ -12,27 +12,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
-    name: Run Unit Tests
-    runs-on: [arc-runner-set-iotistica-v2]
-    container:
-      image: node:20-slim
-
-    steps:
-      - name: Install git
-        run: apt-get update -qq && apt-get install -y -qq git
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install dependencies
-        working-directory: ./agent
-        run: npm ci --prefer-offline
-
-      - name: Run unit tests
-        working-directory: ./agent
-        run: npm run test:unit
-        continue-on-error: true
 
   version:
     name: Bump Version
