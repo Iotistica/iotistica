@@ -125,6 +125,15 @@ jobs:
           echo "- \`iotistic/provisioning-api:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/provisioning-api:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: ./provisioning
+        run: npm ci --prefer-offline --no-audit
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -194,6 +203,15 @@ jobs:
           echo "- \`iotistic/provisioning-worker:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/provisioning-worker:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: ./provisioning
+        run: npm ci --prefer-offline --no-audit
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
