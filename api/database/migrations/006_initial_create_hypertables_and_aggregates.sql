@@ -474,7 +474,7 @@ END $$;
 -- Step 2: Create new unpartitioned table with TimescaleDB-compatible schema
 CREATE TABLE IF NOT EXISTS agent_metrics (
     id BIGSERIAL,
-    device_uuid UUID NOT NULL,
+    agent_uuid UUID NOT NULL,
     cpu_usage NUMERIC,
     cpu_temp NUMERIC,
     memory_usage BIGINT,
@@ -487,7 +487,7 @@ CREATE TABLE IF NOT EXISTS agent_metrics (
 );
 
 COMMENT ON TABLE agent_metrics IS 'Agent/device system metrics: CPU, memory, storage, temperature (TimescaleDB hypertable)';
-COMMENT ON COLUMN agent_metrics.device_uuid IS 'UUID of the agent/device';
+COMMENT ON COLUMN agent_metrics.agent_uuid IS 'UUID of the agent/device';
 COMMENT ON COLUMN agent_metrics.cpu_usage IS 'CPU usage percentage (0-100)';
 COMMENT ON COLUMN agent_metrics.cpu_temp IS 'CPU temperature in Celsius';
 COMMENT ON COLUMN agent_metrics.memory_usage IS 'Used memory in bytes';
@@ -529,7 +529,7 @@ BEGIN
     ) THEN
         ALTER TABLE agent_metrics SET (
             timescaledb.compress,
-            timescaledb.compress_segmentby = 'device_uuid',
+            timescaledb.compress_segmentby = 'agent_uuid',
             timescaledb.compress_orderby = 'recorded_at DESC'
         );
         RAISE NOTICE 'agent_metrics: Compression enabled';
@@ -588,7 +588,7 @@ END $$;
 -- Step 8: Create indexes for query performance
 -- Index 1: Device + time range queries (most common pattern)
 CREATE INDEX IF NOT EXISTS idx_device_metrics_device_time 
-ON agent_metrics (device_uuid, recorded_at DESC);
+ON agent_metrics (agent_uuid, recorded_at DESC);
 
 -- Index 2: Time-series queries only
 CREATE INDEX IF NOT EXISTS idx_device_metrics_recorded_at 
@@ -611,7 +611,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS agent_metrics_5min
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('5 minutes', recorded_at) AS bucket,
-    device_uuid,
+    agent_uuid,
     -- CPU metrics
     avg(cpu_usage) AS avg_cpu_usage,
     max(cpu_usage) AS max_cpu_usage,
@@ -629,7 +629,7 @@ SELECT
     -- Row count
     count(*) AS sample_count
 FROM agent_metrics
-GROUP BY bucket, device_uuid
+GROUP BY bucket, agent_uuid
 WITH NO DATA;
 
 -- Hourly aggregates (medium-term trends)
@@ -637,7 +637,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS agent_metrics_hourly
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 hour', recorded_at) AS bucket,
-    device_uuid,
+    agent_uuid,
     -- CPU metrics
     avg(cpu_usage) AS avg_cpu_usage,
     max(cpu_usage) AS max_cpu_usage,
@@ -655,7 +655,7 @@ SELECT
     -- Row count
     count(*) AS sample_count
 FROM agent_metrics
-GROUP BY bucket, device_uuid
+GROUP BY bucket, agent_uuid
 WITH NO DATA;
 
 -- Daily aggregates (long-term analysis)
@@ -663,7 +663,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS agent_metrics_daily
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 day', recorded_at) AS bucket,
-    device_uuid,
+    agent_uuid,
     -- CPU metrics
     avg(cpu_usage) AS avg_cpu_usage,
     max(cpu_usage) AS max_cpu_usage,
@@ -681,7 +681,7 @@ SELECT
     -- Row count
     count(*) AS sample_count
 FROM agent_metrics
-GROUP BY bucket, device_uuid
+GROUP BY bucket, agent_uuid
 WITH NO DATA;
 
 -- Step 10: Add refresh policies for agent_metrics continuous aggregates
@@ -821,7 +821,7 @@ BEGIN
     ) THEN
         ALTER TABLE agent_logs SET (
             timescaledb.compress,
-            timescaledb.compress_segmentby = 'device_uuid, service_name',
+            timescaledb.compress_segmentby = 'agent_uuid, service_name',
             timescaledb.compress_orderby = 'timestamp DESC'
         );
         RAISE NOTICE 'agent_logs: Compression enabled';
@@ -877,7 +877,7 @@ END $$;
 
 -- Step 6: Create indexes for query performance
 CREATE INDEX IF NOT EXISTS idx_device_logs_device_time 
-ON agent_logs (device_uuid, timestamp DESC);
+ON agent_logs (agent_uuid, timestamp DESC);
 
 CREATE INDEX IF NOT EXISTS idx_device_logs_service_time 
 ON agent_logs (service_name, timestamp DESC);
@@ -898,7 +898,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS device_logs_5min
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('5 minutes', timestamp) AS bucket,
-    device_uuid,
+    agent_uuid,
     service_name,
     COUNT(*) AS total_count,
     COUNT(*) FILTER (WHERE level = 'ERROR') AS error_count,
@@ -912,7 +912,7 @@ SELECT
     time_bucket('5 minutes', timestamp) AS bucket_start,
     time_bucket('5 minutes', timestamp) + INTERVAL '5 minutes' AS bucket_end
 FROM agent_logs
-GROUP BY bucket, device_uuid, service_name
+GROUP BY bucket, agent_uuid, service_name
 WITH NO DATA;
 
 -- Hourly log summary (historical log analysis)
@@ -920,7 +920,7 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS device_logs_hourly
 WITH (timescaledb.continuous) AS
 SELECT
     time_bucket('1 hour', timestamp) AS bucket,
-    device_uuid,
+    agent_uuid,
     service_name,
     COUNT(*) AS total_count,
     COUNT(*) FILTER (WHERE level = 'ERROR') AS error_count,
@@ -934,7 +934,7 @@ SELECT
     time_bucket('1 hour', timestamp) AS bucket_start,
     time_bucket('1 hour', timestamp) + INTERVAL '1 hour' AS bucket_end
 FROM agent_logs
-GROUP BY bucket, device_uuid, service_name
+GROUP BY bucket, agent_uuid, service_name
 WITH NO DATA;
 
 -- Step 8: Add refresh policies for agent_logs continuous aggregates
