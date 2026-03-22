@@ -9,6 +9,13 @@ on:
       - '.github/workflows/build-provisioning-ci.yml'
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+concurrency:
+  group: provisioning-ci
+  cancel-in-progress: true
+
 jobs:
   version:
     name: Bump Version
@@ -118,23 +125,12 @@ jobs:
           echo "- \`iotistic/provisioning-api:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/provisioning-api:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           driver-opts: |
             image=moby/buildkit:buildx-stable-1
             network=host
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache-provisioning-api
-          key: ${{ runner.os }}-buildx-provisioning-api-${{ hashFiles('provisioning/package-lock.json', 'provisioning/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-provisioning-api-
 
       - name: Login to Docker Hub
         if: success()
@@ -143,7 +139,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build Provisioning API image for scanning
+      - name: Build and push Provisioning API image
         id: docker_build_api
         if: success()
         uses: docker/build-push-action@v5
@@ -151,14 +147,15 @@ jobs:
           context: ./provisioning
           file: ./provisioning/Dockerfile
           target: provisioning
-          push: false
-          load: true
+          push: true
+          provenance: false
           platforms: linux/amd64
-          cache-from: |
-            type=local,src=/tmp/.buildx-cache-provisioning-api
-            type=registry,ref=iotistic/provisioning-api:buildcache
-          cache-to: type=local,dest=/tmp/.buildx-cache-provisioning-api-new,mode=max
-          tags: iotistic/provisioning-api:${{ needs.version.outputs.package_version }}
+          cache-from: type=registry,ref=iotistic/provisioning-api:buildcache
+          cache-to: type=registry,ref=iotistic/provisioning-api:buildcache,mode=max
+          tags: |
+            iotistic/provisioning-api:${{ needs.version.outputs.package_version }}
+            iotistic/provisioning-api:${{ needs.version.outputs.sha_short }}
+            iotistic/provisioning-api:latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
@@ -169,21 +166,6 @@ jobs:
           output-file: 'trivy-api-results.sarif'
           fail-on-critical: 'true'
           ignore-file: 'provisioning/.trivyignore'
-
-      - name: Push Provisioning API image to Docker Hub
-        if: success()
-        run: |
-          docker push iotistic/provisioning-api:${{ needs.version.outputs.package_version }}
-          docker tag iotistic/provisioning-api:${{ needs.version.outputs.package_version }} iotistic/provisioning-api:latest
-          docker tag iotistic/provisioning-api:${{ needs.version.outputs.package_version }} iotistic/provisioning-api:${{ needs.version.outputs.sha_short }}
-          docker push iotistic/provisioning-api:latest
-          docker push iotistic/provisioning-api:${{ needs.version.outputs.sha_short }}
-
-      - name: Move cache
-        if: always()
-        run: |
-          rm -rf /tmp/.buildx-cache-provisioning-api
-          mv /tmp/.buildx-cache-provisioning-api-new /tmp/.buildx-cache-provisioning-api || true
 
   buildx-worker:
     name: Build & Push Provisioning Worker
@@ -213,23 +195,12 @@ jobs:
           echo "- \`iotistic/provisioning-worker:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           driver-opts: |
             image=moby/buildkit:buildx-stable-1
             network=host
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache-provisioning-worker
-          key: ${{ runner.os }}-buildx-provisioning-worker-${{ hashFiles('provisioning/package-lock.json', 'provisioning/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-provisioning-worker-
 
       - name: Login to Docker Hub
         if: success()
@@ -238,7 +209,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build Provisioning Worker image for scanning
+      - name: Build and push Provisioning Worker image
         id: docker_build_worker
         if: success()
         uses: docker/build-push-action@v5
@@ -246,14 +217,15 @@ jobs:
           context: ./provisioning
           file: ./provisioning/Dockerfile
           target: worker
-          push: false
-          load: true
+          push: true
+          provenance: false
           platforms: linux/amd64
-          cache-from: |
-            type=local,src=/tmp/.buildx-cache-provisioning-worker
-            type=registry,ref=iotistic/provisioning-worker:buildcache
-          cache-to: type=local,dest=/tmp/.buildx-cache-provisioning-worker-new,mode=max
-          tags: iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}
+          cache-from: type=registry,ref=iotistic/provisioning-worker:buildcache
+          cache-to: type=registry,ref=iotistic/provisioning-worker:buildcache,mode=max
+          tags: |
+            iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}
+            iotistic/provisioning-worker:${{ needs.version.outputs.sha_short }}
+            iotistic/provisioning-worker:latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
@@ -264,21 +236,6 @@ jobs:
           output-file: 'trivy-worker-results.sarif'
           fail-on-critical: 'true'
           ignore-file: 'provisioning/.trivyignore'
-
-      - name: Push Provisioning Worker image to Docker Hub
-        if: success()
-        run: |
-          docker push iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}
-          docker tag iotistic/provisioning-worker:${{ needs.version.outputs.package_version }} iotistic/provisioning-worker:latest
-          docker tag iotistic/provisioning-worker:${{ needs.version.outputs.package_version }} iotistic/provisioning-worker:${{ needs.version.outputs.sha_short }}
-          docker push iotistic/provisioning-worker:latest
-          docker push iotistic/provisioning-worker:${{ needs.version.outputs.sha_short }}
-
-      - name: Move cache
-        if: always()
-        run: |
-          rm -rf /tmp/.buildx-cache-provisioning-worker
-          mv /tmp/.buildx-cache-provisioning-worker-new /tmp/.buildx-cache-provisioning-worker || true
 
   report:
     name: Generate Reports
