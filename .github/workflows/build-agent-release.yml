@@ -7,7 +7,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 concurrency:
@@ -15,18 +15,71 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  version:
-    name: Bump Version
-    runs-on: [arc-runner-set-iotistica-v2]
-    outputs:
-      package_version: ${{ steps.bump.outputs.package_version }}
-      sha_short: ${{ steps.bump.outputs.sha_short }}
+  publish:
+    name: Promote Azure Latest to Version
+    runs-on: [arc-runner-set-iotistica-light]
+    permissions:
+      contents: write
+    if: success()
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Download latest artifacts from Azure
+        run: |
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          mkdir -p /tmp/release /tmp/release/sbom
+
+          for f in agent-latest-x86_64.tar.gz agent-latest-x86_64.tar.gz.sha256 agent-latest-arm64.tar.gz agent-latest-arm64.tar.gz.sha256 agent-latest.tar.gz agent-latest.tar.gz.sha256; do
+            az storage blob download --account-name "$ACCT" --container-name scripts \
+              --name "agent/${f}" --file "/tmp/release/${f}" --auth-mode login --overwrite true
+          done
+
+          az storage blob download --account-name "$ACCT" --container-name scripts \
+            --name agent/install --file /tmp/release/install.sh --auth-mode login --overwrite true
+          az storage blob download --account-name "$ACCT" --container-name scripts \
+            --name agent/install.sha256 --file /tmp/release/install.sh.sha256 --auth-mode login --overwrite true
+          az storage blob download --account-name "$ACCT" --container-name scripts \
+            --name agent/agent-latest-build-meta.json --file /tmp/release/agent-latest-build-meta.json --auth-mode login --overwrite true
+
+          for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
+            az storage blob download --account-name "$ACCT" --container-name scripts \
+              --name "agent/sbom/${f}.cyclonedx.json" \
+              --file "/tmp/release/sbom/${f}.cyclonedx.json" --auth-mode login --overwrite true
+          done
+
+      - name: Verify downloaded checksums
+        run: |
+          cd /tmp/release
+          sha256sum -c agent-latest-x86_64.tar.gz.sha256
+          sha256sum -c agent-latest-arm64.tar.gz.sha256
+          sha256sum -c agent-latest.tar.gz.sha256
+          sha256sum -c install.sh.sha256
+
+      - name: Verify artifact commit matches release commit
+        id: verify_commit
+        run: |
+          ARTIFACT_COMMIT=$(jq -r '.commit' /tmp/release/agent-latest-build-meta.json)
+          RELEASE_COMMIT=$(git rev-parse HEAD)
+          if [ -z "$ARTIFACT_COMMIT" ] || [ "$ARTIFACT_COMMIT" = "null" ]; then
+            echo "agent-latest-build-meta.json does not contain commit"
+            exit 1
+          fi
+          if [ "$ARTIFACT_COMMIT" != "$RELEASE_COMMIT" ]; then
+            echo "Artifact commit mismatch"
+            echo "artifact=$ARTIFACT_COMMIT"
+            echo "release=$RELEASE_COMMIT"
+            exit 1
+          fi
+          echo "artifact_commit=$ARTIFACT_COMMIT" >> $GITHUB_OUTPUT
 
       - name: Bump patch version
         id: bump
@@ -37,433 +90,72 @@ jobs:
           NEW_VERSION="${V[0]}.${V[1]}.$((${V[2]} + 1))"
           jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
           echo "package_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Commit and push version bump
+        id: push
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add agent/package.json
           git commit -m "chore: bump agent version to ${{ steps.bump.outputs.package_version }} [skip ci]"
 
+          PUSHED=false
           for i in {1..5}; do
             git fetch origin master
             git -c rebase.autoStash=true rebase origin/master
-            git push origin HEAD:master && exit 0
+            if git push origin HEAD:master; then
+              PUSHED=true
+              break
+            fi
             sleep 2
           done
 
-          echo "Failed to push after 5 attempts"
-          exit 1
-
-  build:
-    name: Build ${{ matrix.arch }} tarball
-    needs: [version]
-    runs-on: [arc-runner-set-iotistica-v2]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            platform: linux/amd64
-            suffix: -x86_64
-          - arch: arm64
-            platform: linux/arm64
-            suffix: -arm64
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Set up QEMU
-        if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
-
-      - name: Cache node_modules
-        id: node-modules-cache
-        uses: actions/cache@v4
-        with:
-          path: agent/node_modules
-          key: ${{ runner.os }}-node-modules-${{ matrix.arch }}-${{ hashFiles('agent/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-modules-${{ matrix.arch }}-
-
-      - name: Install dependencies
-        if: steps.node-modules-cache.outputs.cache-hit != 'true'
-        working-directory: ./agent
-        run: npm ci --legacy-peer-deps
-
-      - name: Build
-        working-directory: ./agent
-        run: npm run build
-
-      - name: Rebuild arm64 native modules
-        if: matrix.arch == 'arm64' && steps.node-modules-cache.outputs.cache-hit != 'true'
-        working-directory: ./agent
-        run: |
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD:/work" -w /work \
-            node:20 bash -c '
-              apt-get update -qq && apt-get install -y -qq libsqlite3-dev
-              npm rebuild sqlite3 --build-from-source
-            '
-
-      - name: Package and checksum tarball
-        run: |
-          VERSION=${{ needs.version.outputs.package_version }}
-          SUFFIX=${{ matrix.suffix }}
-          mkdir -p /tmp/iotistic-artifacts
-
-          tar -czf "/tmp/iotistic-artifacts/agent-${VERSION}${SUFFIX}.tar.gz" \
-            -C agent dist/ package.json package-lock.json node_modules/ bin/
-
-          cp "/tmp/iotistic-artifacts/agent-${VERSION}${SUFFIX}.tar.gz" \
-             "/tmp/iotistic-artifacts/agent-latest${SUFFIX}.tar.gz"
-
-          if [ "${{ matrix.arch }}" = "x86_64" ]; then
-            cp "/tmp/iotistic-artifacts/agent-${VERSION}${SUFFIX}.tar.gz" \
-               "/tmp/iotistic-artifacts/agent-latest.tar.gz"
+          if [ "$PUSHED" != "true" ]; then
+            echo "Failed to push after 5 attempts"
+            exit 1
           fi
 
-          cd /tmp/iotistic-artifacts
-          for f in *.tar.gz; do sha256sum "$f" > "${f}.sha256"; done
+          echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Stage tarballs to Azure
+      - name: Promote artifacts to versioned paths
         run: |
+          VERSION=${{ steps.bump.outputs.package_version }}
           ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          PREFIX="agent/staging/run-${{ github.run_id }}/tarballs"
-          for f in /tmp/iotistic-artifacts/*; do
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "${PREFIX}/$(basename "$f")" --file "$f" --overwrite true \
-              --auth-mode login
-          done
 
-  prepare-install-script:
-    name: Prepare install.sh
-    needs: [version]
-    runs-on: [arc-runner-set-iotistica-light]
+          promote_blob() {
+            SRC="$1"
+            DST="$2"
+            az storage blob copy start --account-name "$ACCT" --auth-mode login \
+              --destination-container scripts --destination-blob "$DST" \
+              --source-account-name "$ACCT" --source-container scripts --source-blob "$SRC" >/dev/null
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Stamp version and checksum
-        run: |
-          mkdir -p /tmp/iotistic-scripts
-          sed "s/AGENT_VERSION_PLACEHOLDER/${{ needs.version.outputs.package_version }}/g" \
-            agent/bin/install.sh > /tmp/iotistic-scripts/install.sh
-          chmod +x /tmp/iotistic-scripts/install.sh
-          cd /tmp/iotistic-scripts && sha256sum install.sh > install.sh.sha256
-
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Stage install script to Azure
-        run: |
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          PREFIX="agent/staging/run-${{ github.run_id }}/scripts"
-          for f in /tmp/iotistic-scripts/*; do
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "${PREFIX}/$(basename "$f")" --file "$f" --overwrite true \
-              --auth-mode login
-          done
-
-  verify-install:
-    name: Verify install (${{ matrix.arch }})
-    needs: [version, build, prepare-install-script]
-    runs-on: [arc-runner-set-iotistica-light]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            platform: linux/amd64
-            suffix: -x86_64
-          - arch: arm64
-            platform: linux/arm64
-            suffix: -arm64
-
-    steps:
-      - name: Set up QEMU
-        if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
-
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Download tarballs from Azure staging
-        run: |
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          VERSION=${{ needs.version.outputs.package_version }}
-          SUFFIX=${{ matrix.suffix }}
-          mkdir -p /tmp/iotistic-artifacts
-          az storage blob download --account-name "$ACCT" --container-name scripts \
-            --name "agent/staging/run-${{ github.run_id }}/tarballs/agent-${VERSION}${SUFFIX}.tar.gz" \
-            --file "/tmp/iotistic-artifacts/agent-${VERSION}${SUFFIX}.tar.gz"
-
-      - name: Verify artifact structure and JS syntax
-        run: |
-          docker run --rm --platform ${{ matrix.platform }} \
-            -e VERSION="${{ needs.version.outputs.package_version }}" \
-            -e SUFFIX="${{ matrix.suffix }}" \
-            -v "/tmp/iotistic-artifacts:/artifacts:ro" \
-            node:20-slim bash -c '
-              set -e
-              mkdir -p /verify && cd /verify
-              tar -xzf "/artifacts/agent-${VERSION}${SUFFIX}.tar.gz"
-
-              if [ -f dist/app.js ]; then
-                ENTRY=dist/app.js
-              elif [ -f dist/src/app.js ]; then
-                ENTRY=dist/src/app.js
-              else
-                echo "ERROR: app.js not found in dist/ or dist/src/"
-                find dist -name "*.js" | head -10 || true
-                exit 1
+            for i in {1..30}; do
+              STATUS=$(az storage blob show --account-name "$ACCT" --container-name scripts --name "$DST" --auth-mode login --query properties.copy.status -o tsv 2>/dev/null || true)
+              if [ "$STATUS" = "success" ]; then
+                return 0
               fi
-              echo "Entry point: $ENTRY"
+              sleep 2
+            done
 
-              find dist -name "*.js" | xargs -r node --check
-              echo "All JS syntax checks passed"
-            '
+            echo "Timed out waiting for blob copy: $SRC -> $DST"
+            return 1
+          }
 
-  generate-sbom:
-    name: Generate SBOM & Scan
-    needs: [version, build, prepare-install-script]
-    runs-on: [arc-runner-set-iotistica-light]
-    permissions:
-      contents: read
+          promote_blob "agent/agent-latest-x86_64.tar.gz" "agent/versions/agent-${VERSION}-x86_64.tar.gz"
+          promote_blob "agent/agent-latest-x86_64.tar.gz.sha256" "agent/versions/agent-${VERSION}-x86_64.tar.gz.sha256"
+          promote_blob "agent/agent-latest-arm64.tar.gz" "agent/versions/agent-${VERSION}-arm64.tar.gz"
+          promote_blob "agent/agent-latest-arm64.tar.gz.sha256" "agent/versions/agent-${VERSION}-arm64.tar.gz.sha256"
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+          promote_blob "agent/install" "agent/versions/install-${VERSION}.sh"
+          promote_blob "agent/install.sha256" "agent/versions/install-${VERSION}.sh.sha256"
+          promote_blob "agent/agent-latest-build-meta.json" "agent/versions/${VERSION}/agent-build-meta.json"
 
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Download staged artifacts from Azure
-        run: |
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          RUN_PREFIX="agent/staging/run-${{ github.run_id }}"
-          mkdir -p /tmp/iotistic-artifacts /tmp/iotistic-scripts
-
-          az storage blob download-batch \
-            --source "https://${ACCT}.blob.core.windows.net/scripts/${RUN_PREFIX}/tarballs" \
-            --destination /tmp/iotistic-artifacts --auth-mode login --no-progress
-
-          az storage blob download-batch \
-            --source "https://${ACCT}.blob.core.windows.net/scripts/${RUN_PREFIX}/scripts" \
-            --destination /tmp/iotistic-scripts --auth-mode login --no-progress
-
-      - name: Install Syft and Trivy
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-
-      - name: Generate CycloneDX SBOM
-        run: |
-          mkdir -p /tmp/sbom /tmp/trivy-reports
-          syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source.cyclonedx.json
-          syft dir:/tmp/iotistic-artifacts -o cyclonedx-json=/tmp/sbom/agent-artifacts.cyclonedx.json
-          syft dir:/tmp/iotistic-scripts -o cyclonedx-json=/tmp/sbom/install-script.cyclonedx.json
-
-      - name: Scan SBOMs and enforce CVE policy
-        # Reports CRITICAL vulnerabilities in the Job Summary but does not block the release.
-        # Upgrade to --exit-code 1 when you are ready to gate releases on CVEs.
-        run: |
-          FAILED_SCOPES=""
-          for scope in agent-source agent-artifacts install-script; do
-            trivy sbom --format table --output "/tmp/trivy-reports/${scope}.txt" "/tmp/sbom/${scope}.cyclonedx.json" || true
-            trivy sbom --format json  --output "/tmp/trivy-reports/${scope}.json" "/tmp/sbom/${scope}.cyclonedx.json" || true
-            if trivy sbom --exit-code 1 --severity CRITICAL "/tmp/sbom/${scope}.cyclonedx.json" 2>/dev/null; then
-              echo "[OK] ${scope}: no CRITICAL CVEs"
-            else
-              echo "[WARN] ${scope}: CRITICAL CVEs found - review Trivy report before shipping"
-              FAILED_SCOPES="${FAILED_SCOPES} ${scope}"
-            fi
-          done
-          if [ -n "$FAILED_SCOPES" ]; then
-            echo "## CVE Warning" >> $GITHUB_STEP_SUMMARY
-            echo "CRITICAL CVEs detected in:${FAILED_SCOPES}" >> $GITHUB_STEP_SUMMARY
-            echo "Review Trivy reports in the staged artifacts before distributing." >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - name: Stage SBOMs and Trivy reports to Azure
-        run: |
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          RUN_PREFIX="agent/staging/run-${{ github.run_id }}"
-          for f in /tmp/sbom/*; do
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "${RUN_PREFIX}/sbom/$(basename "$f")" --file "$f" --overwrite true \
-              --auth-mode login
-          done
-          for f in /tmp/trivy-reports/*; do
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "${RUN_PREFIX}/trivy/$(basename "$f")" --file "$f" --overwrite true \
-              --auth-mode login
+          for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
+            promote_blob "agent/sbom/${f}.cyclonedx.json" "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json"
           done
 
-      - name: Append SBOM summary
-        run: |
-          echo "# SBOM Generated" >> $GITHUB_STEP_SUMMARY
-          echo "- agent-artifacts.cyclonedx.json" >> $GITHUB_STEP_SUMMARY
-          echo "- install-script.cyclonedx.json" >> $GITHUB_STEP_SUMMARY
-          echo "- agent-source.cyclonedx.json" >> $GITHUB_STEP_SUMMARY
-
-  upload-artifacts:
-    name: Upload to Azure
-    needs: [version, build, verify-install, prepare-install-script, generate-sbom]
-    runs-on: [arc-runner-set-iotistica-light]
-    if: success()
-
-    steps:
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Download staged artifacts from Azure
-        run: |
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          RUN_PREFIX="agent/staging/run-${{ github.run_id }}"
-          mkdir -p /tmp/iotistic-artifacts /tmp/iotistic-scripts /tmp/sbom
-
-          az storage blob download-batch \
-            --source "https://${ACCT}.blob.core.windows.net/scripts/${RUN_PREFIX}/tarballs" \
-            --destination /tmp/iotistic-artifacts --auth-mode login --no-progress
-
-          az storage blob download-batch \
-            --source "https://${ACCT}.blob.core.windows.net/scripts/${RUN_PREFIX}/scripts" \
-            --destination /tmp/iotistic-scripts --auth-mode login --no-progress
-
-          az storage blob download-batch \
-            --source "https://${ACCT}.blob.core.windows.net/scripts/${RUN_PREFIX}/sbom" \
-            --destination /tmp/sbom --auth-mode login --no-progress
-
-      - name: Upload tarballs and checksums
-        run: |
-          VERSION=${{ needs.version.outputs.package_version }}
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-
-          for arch in x86_64 arm64; do
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "agent/versions/agent-${VERSION}-${arch}.tar.gz" \
-              --file "/tmp/iotistic-artifacts/agent-${VERSION}-${arch}.tar.gz" \
-              --overwrite true --auth-mode login --content-type application/gzip
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "agent/agent-latest-${arch}.tar.gz" \
-              --file "/tmp/iotistic-artifacts/agent-latest-${arch}.tar.gz" \
-              --overwrite true --auth-mode login --content-type application/gzip
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "agent/versions/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --file "/tmp/iotistic-artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --overwrite true --auth-mode login --content-type text/plain
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "agent/agent-latest-${arch}.tar.gz.sha256" \
-              --file "/tmp/iotistic-artifacts/agent-latest-${arch}.tar.gz.sha256" \
-              --overwrite true --auth-mode login --content-type text/plain
-          done
-
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent/agent-latest.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
-            --overwrite true --auth-mode login --content-type application/gzip
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent/agent-latest.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
-            --overwrite true --auth-mode login --content-type text/plain
-
-      - name: Upload install.sh
-        run: |
-          VERSION=${{ needs.version.outputs.package_version }}
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent/install --file /tmp/iotistic-scripts/install.sh \
-            --overwrite true --auth-mode login --content-type application/x-sh \
-            --content-disposition "attachment; filename=install"
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent/install.sha256 --file /tmp/iotistic-scripts/install.sh.sha256 \
-            --overwrite true --auth-mode login --content-type text/plain
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/versions/install-${VERSION}.sh" \
-            --file /tmp/iotistic-scripts/install.sh \
-            --overwrite true --auth-mode login --content-type application/x-sh \
-            --content-disposition "attachment; filename=install-${VERSION}.sh"
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/versions/install-${VERSION}.sh.sha256" \
-            --file /tmp/iotistic-scripts/install.sh.sha256 \
-            --overwrite true --auth-mode login --content-type text/plain
-
-      - name: Upload SBOMs
-        run: |
-          VERSION=${{ needs.version.outputs.package_version }}
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-
-          for f in agent-artifacts install-script agent-source; do
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json" \
-              --file "/tmp/sbom/${f}.cyclonedx.json" \
-              --overwrite true --auth-mode login --content-type application/json
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "agent/sbom/${f}.cyclonedx.json" \
-              --file "/tmp/sbom/${f}.cyclonedx.json" \
-              --overwrite true --auth-mode login --content-type application/json
-          done
-              --overwrite true --content-type application/json
-          done
-
-  cleanup-staging:
-    name: Cleanup Azure Staging
-    needs: [upload-artifacts]
-    runs-on: [arc-runner-set-iotistica-light]
-    if: always()
-
-    steps:
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Delete staging blobs
-        run: |
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          az storage blob delete-batch --account-name "$ACCT" --source scripts \
-            --pattern "agent/staging/run-${{ github.run_id }}/*" \
-            --auth-mode login
-
-  report:
-    name: Release Summary
-    needs: [version, upload-artifacts]
-    runs-on: [arc-runner-set-iotistica-v2]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Generate changelog summary
+      - name: Write release summary
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -z "$PREV_TAG" ]; then
@@ -474,8 +166,11 @@ jobs:
 
           echo "# Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**SHA:** ${{ needs.version.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.bump.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Artifact Commit:** ${{ steps.verify_commit.outputs.artifact_commit }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version Bump Commit:** ${{ steps.push.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Promoted Azure latest artifacts without rebuilding." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Recent commits" >> $GITHUB_STEP_SUMMARY
           echo "$COMMITS" | head -20 >> $GITHUB_STEP_SUMMARY
-

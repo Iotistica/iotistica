@@ -153,6 +153,16 @@ jobs:
 
           if [ "$ARCH" = "x86_64" ]; then
             sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
+
+            VERSION=$(jq -r '.version' "${{ github.workspace }}/agent/package.json")
+            cat > agent-latest-build-meta.json <<EOF
+            {
+              "commit": "${{ github.sha }}",
+              "sha_short": "$(git rev-parse --short HEAD)",
+              "version": "${VERSION}",
+              "generated_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }
+            EOF
           fi
 
       - name: Upload latest tarball and checksum (${{ matrix.arch }})
@@ -197,6 +207,15 @@ jobs:
             --overwrite true \
             --auth-mode key \
             --content-type text/plain
+
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/agent-latest-build-meta.json \
+            --file /tmp/iotistic-artifacts/agent-latest-build-meta.json \
+            --overwrite true \
+            --auth-mode key \
+            --content-type application/json
 
   docker:
     name: Docker Build, Scan & Push
