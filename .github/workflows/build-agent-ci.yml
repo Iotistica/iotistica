@@ -165,7 +165,7 @@ jobs:
             --name agent/agent-latest-${ARCH}.tar.gz \
             --file /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz \
             --overwrite true \
-            --auth-mode login \
+            --auth-mode key \
             --content-type application/gzip
 
           az storage blob upload \
@@ -174,7 +174,7 @@ jobs:
             --name agent/agent-latest-${ARCH}.tar.gz.sha256 \
             --file /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz.sha256 \
             --overwrite true \
-            --auth-mode login \
+            --auth-mode key \
             --content-type text/plain
 
       - name: Upload generic latest tarball and checksum (x86_64 only)
@@ -186,7 +186,7 @@ jobs:
             --name agent/agent-latest.tar.gz \
             --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
             --overwrite true \
-            --auth-mode login \
+            --auth-mode key \
             --content-type application/gzip
 
           az storage blob upload \
@@ -195,7 +195,7 @@ jobs:
             --name agent/agent-latest.tar.gz.sha256 \
             --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
             --overwrite true \
-            --auth-mode login \
+            --auth-mode key \
             --content-type text/plain
 
   docker:
