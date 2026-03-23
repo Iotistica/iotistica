@@ -70,16 +70,6 @@ jobs:
               --name "agent/${f}" --file "/tmp/release/${f}" --auth-mode key --overwrite true
           done
 
-          HAS_INSTALL=false
-          if download_if_exists "agent/install" "/tmp/release/install.sh"; then
-            download_if_exists "agent/install.sha256" "/tmp/release/install.sh.sha256" || {
-              echo "install exists but install.sha256 is missing"
-              exit 1
-            }
-            HAS_INSTALL=true
-          fi
-          echo "HAS_INSTALL=$HAS_INSTALL" >> $GITHUB_ENV
-
           az storage blob download --account-name "$ACCT" --container-name scripts \
             --name agent/agent-latest-build-meta.json --file /tmp/release/agent-latest-build-meta.json --auth-mode key --overwrite true
 
@@ -139,9 +129,6 @@ jobs:
           sha256sum -c agent-latest-x86_64.tar.gz.sha256
           sha256sum -c agent-latest-arm64.tar.gz.sha256
           sha256sum -c agent-latest.tar.gz.sha256
-          if [ "${HAS_INSTALL:-false}" = "true" ]; then
-            sha256sum -c install.sh.sha256
-          fi
 
       - name: Bump patch version
         id: bump
@@ -214,11 +201,29 @@ jobs:
           promote_blob "agent/agent-latest-arm64.tar.gz" "agent/versions/agent-${VERSION}-arm64.tar.gz" || exit 1
           promote_blob "agent/agent-latest-arm64.tar.gz.sha256" "agent/versions/agent-${VERSION}-arm64.tar.gz.sha256" || exit 1
 
-          if [ "${HAS_INSTALL:-false}" = "true" ]; then
-            promote_blob "agent/install" "agent/versions/install-${VERSION}.sh" || exit 1
-            promote_blob "agent/install.sha256" "agent/versions/install-${VERSION}.sh.sha256" || exit 1
-          fi
           promote_blob "agent/agent-latest-build-meta.json" "agent/versions/${VERSION}/agent-build-meta.json" || exit 1
+
+          # Stamp install.sh with the release version and upload (latest + versioned)
+          STAMPED="/tmp/release/install.sh"
+          sed "s/AGENT_VERSION_PLACEHOLDER/${VERSION}/g" "agent/bin/install.sh" > "$STAMPED"
+          CKSUM_FILE="${STAMPED}.sha256"
+          (cd /tmp/release && sha256sum "install.sh") > "$CKSUM_FILE"
+
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/install.sh" --file "$STAMPED" \
+            --overwrite true --auth-mode key --content-type text/x-shellscript
+
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/install.sh.sha256" --file "$CKSUM_FILE" \
+            --overwrite true --auth-mode key --content-type text/plain
+
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/versions/install-${VERSION}.sh" --file "$STAMPED" \
+            --overwrite true --auth-mode key --content-type text/x-shellscript
+
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/versions/install-${VERSION}.sh.sha256" --file "$CKSUM_FILE" \
+            --overwrite true --auth-mode key --content-type text/plain
 
           if [ "${HAS_SBOM:-false}" = "true" ]; then
             for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
@@ -244,6 +249,13 @@ jobs:
           echo "**Version Bump Commit:** ${{ steps.push.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Promoted Azure latest artifacts without rebuilding." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ steps.bump.outputs.package_version }}-x86_64.tar.gz](https://apps.iotistic.ca/agent/versions/agent-${{ steps.bump.outputs.package_version }}-x86_64.tar.gz)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ steps.bump.outputs.package_version }}-arm64.tar.gz](https://apps.iotistic.ca/agent/versions/agent-${{ steps.bump.outputs.package_version }}-arm64.tar.gz)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Install Scripts" >> $GITHUB_STEP_SUMMARY
+          echo "- [install.sh](https://apps.iotistic.ca/agent/install.sh) (latest) — [versioned](https://apps.iotistic.ca/agent/versions/install-${{ steps.bump.outputs.package_version }}.sh)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Recent commits" >> $GITHUB_STEP_SUMMARY
           echo "$COMMITS" | head -20 >> $GITHUB_STEP_SUMMARY
