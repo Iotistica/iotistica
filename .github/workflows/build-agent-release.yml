@@ -153,7 +153,7 @@ jobs:
   prepare-install-script:
     name: Prepare install.sh
     needs: [version]
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on: [arc-runner-set-iotistica-light]
 
     steps:
       - name: Checkout repository
@@ -185,7 +185,7 @@ jobs:
   verify-install:
     name: Verify install (${{ matrix.arch }})
     needs: [version, build, prepare-install-script]
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on: [arc-runner-set-iotistica-light]
     strategy:
       fail-fast: false
       matrix:
@@ -248,7 +248,7 @@ jobs:
   generate-sbom:
     name: Generate SBOM & Scan
     needs: [version, build, prepare-install-script]
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on: [arc-runner-set-iotistica-light]
     permissions:
       contents: read
 
@@ -333,7 +333,7 @@ jobs:
   upload-artifacts:
     name: Upload to Azure
     needs: [version, build, verify-install, prepare-install-script, generate-sbom]
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on: [arc-runner-set-iotistica-light]
     if: success()
 
     steps:
@@ -436,7 +436,7 @@ jobs:
   cleanup-staging:
     name: Cleanup Azure Staging
     needs: [upload-artifacts]
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on: [arc-runner-set-iotistica-light]
     if: always()
 
     steps:
