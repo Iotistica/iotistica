@@ -28,6 +28,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Capture release base commit
+        id: base
+        run: |
+          echo "base_commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
       - name: Azure login
         uses: azure/login@v2
         with:
@@ -86,6 +91,88 @@ jobs:
           done
           echo "HAS_SBOM=$HAS_SBOM" >> $GITHUB_ENV
 
+      - name: Verify artifact commit matches release base commit
+        id: verify_commit
+        run: |
+          set -euo pipefail
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          RELEASE_BASE_COMMIT=${{ steps.base.outputs.base_commit }}
+
+          blob_exists() {
+            local name="$1"
+            az storage blob exists \
+              --account-name "$ACCT" \
+              --container-name scripts \
+              --name "$name" \
+              --auth-mode key \
+              --query exists -o tsv
+          }
+
+          download_if_exists() {
+            local src="$1"
+            local dst="$2"
+            if [ "$(blob_exists "$src")" = "true" ]; then
+              az storage blob download --account-name "$ACCT" --container-name scripts \
+                --name "$src" --file "$dst" --auth-mode key --overwrite true
+              return 0
+            fi
+            return 1
+          }
+
+          refresh_artifacts() {
+            mkdir -p /tmp/release /tmp/release/sbom
+            for f in agent-latest-x86_64.tar.gz agent-latest-x86_64.tar.gz.sha256 agent-latest-arm64.tar.gz agent-latest-arm64.tar.gz.sha256 agent-latest.tar.gz agent-latest.tar.gz.sha256; do
+              az storage blob download --account-name "$ACCT" --container-name scripts \
+                --name "agent/${f}" --file "/tmp/release/${f}" --auth-mode key --overwrite true
+            done
+
+            HAS_INSTALL=false
+            if download_if_exists "agent/install" "/tmp/release/install.sh"; then
+              download_if_exists "agent/install.sha256" "/tmp/release/install.sh.sha256" || {
+                echo "install exists but install.sha256 is missing"
+                exit 1
+              }
+              HAS_INSTALL=true
+            fi
+            echo "HAS_INSTALL=$HAS_INSTALL" >> $GITHUB_ENV
+
+            az storage blob download --account-name "$ACCT" --container-name scripts \
+              --name agent/agent-latest-build-meta.json --file /tmp/release/agent-latest-build-meta.json --auth-mode key --overwrite true
+
+            HAS_SBOM=false
+            for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
+              if download_if_exists "agent/sbom/${f}.cyclonedx.json" "/tmp/release/sbom/${f}.cyclonedx.json"; then
+                HAS_SBOM=true
+              fi
+            done
+            echo "HAS_SBOM=$HAS_SBOM" >> $GITHUB_ENV
+          }
+
+          ATTEMPTS=20
+          SLEEP_SECONDS=30
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            ARTIFACT_COMMIT=$(jq -r '.commit' /tmp/release/agent-latest-build-meta.json 2>/dev/null || echo "")
+            if [ -n "$ARTIFACT_COMMIT" ] && [ "$ARTIFACT_COMMIT" != "null" ] && [ "$ARTIFACT_COMMIT" = "$RELEASE_BASE_COMMIT" ]; then
+              echo "artifact_commit=$ARTIFACT_COMMIT" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            if [ "$attempt" -lt "$ATTEMPTS" ]; then
+              echo "Artifact commit not ready for base commit yet"
+              echo "artifact=${ARTIFACT_COMMIT:-<missing>}"
+              echo "base_commit=$RELEASE_BASE_COMMIT"
+              echo "Waiting ${SLEEP_SECONDS}s and refreshing Azure latest artifacts... (${attempt}/${ATTEMPTS})"
+              sleep "$SLEEP_SECONDS"
+              refresh_artifacts
+            fi
+          done
+
+          echo "Artifact commit mismatch"
+          echo "artifact=${ARTIFACT_COMMIT:-<missing>}"
+          echo "base_commit=$RELEASE_BASE_COMMIT"
+          echo "Timed out waiting for CI to publish matching latest artifacts."
+          exit 1
+
       - name: Verify downloaded checksums
         run: |
           set -euo pipefail
@@ -96,30 +183,6 @@ jobs:
           if [ "${HAS_INSTALL:-false}" = "true" ]; then
             sha256sum -c install.sh.sha256
           fi
-
-      - name: Capture release base commit
-        id: base
-        run: |
-          echo "base_commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Verify artifact commit matches release base commit
-        id: verify_commit
-        run: |
-          ARTIFACT_COMMIT=$(jq -r '.commit' /tmp/release/agent-latest-build-meta.json)
-          RELEASE_BASE_COMMIT=${{ steps.base.outputs.base_commit }}
-
-          if [ -z "$ARTIFACT_COMMIT" ] || [ "$ARTIFACT_COMMIT" = "null" ]; then
-            echo "agent-latest-build-meta.json does not contain commit"
-            exit 1
-          fi
-          if [ "$ARTIFACT_COMMIT" != "$RELEASE_BASE_COMMIT" ]; then
-            echo "Artifact commit mismatch"
-            echo "artifact=$ARTIFACT_COMMIT"
-            echo "base_commit=$RELEASE_BASE_COMMIT"
-            echo "Run release after CI publishes latest for this base commit."
-            exit 1
-          fi
-          echo "artifact_commit=$ARTIFACT_COMMIT" >> $GITHUB_OUTPUT
 
       - name: Bump patch version
         id: bump
