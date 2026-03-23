@@ -22,7 +22,7 @@ concurrency:
 jobs:
   build:
     name: Test, Build, Scan & Push
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on: [arc-runner-set-iotistica-light]
     permissions:
       contents: read
       security-events: write
