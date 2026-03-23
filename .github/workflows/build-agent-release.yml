@@ -35,34 +35,67 @@ jobs:
 
       - name: Download latest artifacts from Azure
         run: |
+          set -euo pipefail
           ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
           mkdir -p /tmp/release /tmp/release/sbom
+
+          blob_exists() {
+            local name="$1"
+            az storage blob exists \
+              --account-name "$ACCT" \
+              --container-name scripts \
+              --name "$name" \
+              --auth-mode key \
+              --query exists -o tsv
+          }
+
+          download_if_exists() {
+            local src="$1"
+            local dst="$2"
+            if [ "$(blob_exists "$src")" = "true" ]; then
+              az storage blob download --account-name "$ACCT" --container-name scripts \
+                --name "$src" --file "$dst" --auth-mode key --overwrite true
+              return 0
+            fi
+            return 1
+          }
 
           for f in agent-latest-x86_64.tar.gz agent-latest-x86_64.tar.gz.sha256 agent-latest-arm64.tar.gz agent-latest-arm64.tar.gz.sha256 agent-latest.tar.gz agent-latest.tar.gz.sha256; do
             az storage blob download --account-name "$ACCT" --container-name scripts \
               --name "agent/${f}" --file "/tmp/release/${f}" --auth-mode key --overwrite true
           done
 
-          az storage blob download --account-name "$ACCT" --container-name scripts \
-            --name agent/install --file /tmp/release/install.sh --auth-mode key --overwrite true
-          az storage blob download --account-name "$ACCT" --container-name scripts \
-            --name agent/install.sha256 --file /tmp/release/install.sh.sha256 --auth-mode key --overwrite true
+          HAS_INSTALL=false
+          if download_if_exists "agent/install" "/tmp/release/install.sh"; then
+            download_if_exists "agent/install.sha256" "/tmp/release/install.sh.sha256" || {
+              echo "install exists but install.sha256 is missing"
+              exit 1
+            }
+            HAS_INSTALL=true
+          fi
+          echo "HAS_INSTALL=$HAS_INSTALL" >> $GITHUB_ENV
+
           az storage blob download --account-name "$ACCT" --container-name scripts \
             --name agent/agent-latest-build-meta.json --file /tmp/release/agent-latest-build-meta.json --auth-mode key --overwrite true
 
+          HAS_SBOM=false
           for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
-            az storage blob download --account-name "$ACCT" --container-name scripts \
-              --name "agent/sbom/${f}.cyclonedx.json" \
-              --file "/tmp/release/sbom/${f}.cyclonedx.json" --auth-mode key --overwrite true
+            if download_if_exists "agent/sbom/${f}.cyclonedx.json" "/tmp/release/sbom/${f}.cyclonedx.json"; then
+              HAS_SBOM=true
+            fi
           done
+          echo "HAS_SBOM=$HAS_SBOM" >> $GITHUB_ENV
 
       - name: Verify downloaded checksums
         run: |
+          set -euo pipefail
           cd /tmp/release
           sha256sum -c agent-latest-x86_64.tar.gz.sha256
           sha256sum -c agent-latest-arm64.tar.gz.sha256
           sha256sum -c agent-latest.tar.gz.sha256
-          sha256sum -c install.sh.sha256
+          if [ "${HAS_INSTALL:-false}" = "true" ]; then
+            sha256sum -c install.sh.sha256
+          fi
 
       - name: Capture release base commit
         id: base
@@ -154,13 +187,19 @@ jobs:
           promote_blob "agent/agent-latest-arm64.tar.gz" "agent/versions/agent-${VERSION}-arm64.tar.gz" || exit 1
           promote_blob "agent/agent-latest-arm64.tar.gz.sha256" "agent/versions/agent-${VERSION}-arm64.tar.gz.sha256" || exit 1
 
-          promote_blob "agent/install" "agent/versions/install-${VERSION}.sh" || exit 1
-          promote_blob "agent/install.sha256" "agent/versions/install-${VERSION}.sh.sha256" || exit 1
+          if [ "${HAS_INSTALL:-false}" = "true" ]; then
+            promote_blob "agent/install" "agent/versions/install-${VERSION}.sh" || exit 1
+            promote_blob "agent/install.sha256" "agent/versions/install-${VERSION}.sh.sha256" || exit 1
+          fi
           promote_blob "agent/agent-latest-build-meta.json" "agent/versions/${VERSION}/agent-build-meta.json" || exit 1
 
-          for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
-            promote_blob "agent/sbom/${f}.cyclonedx.json" "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json" || exit 1
-          done
+          if [ "${HAS_SBOM:-false}" = "true" ]; then
+            for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
+              if [ -f "/tmp/release/sbom/${f}.cyclonedx.json" ]; then
+                promote_blob "agent/sbom/${f}.cyclonedx.json" "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json" || exit 1
+              fi
+            done
+          fi
 
       - name: Write release summary
         run: |
