@@ -146,6 +146,7 @@ jobs:
 
       - name: Generate checksums (${{ matrix.arch }})
         run: |
+          set -euo pipefail
           ARCH="${{ matrix.arch }}"
 
           cd /tmp/iotistic-artifacts
@@ -155,14 +156,18 @@ jobs:
             sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
 
             VERSION=$(jq -r '.version' "${{ github.workspace }}/agent/package.json")
-            cat > agent-latest-build-meta.json <<EOF
-            {
-              "commit": "${{ github.sha }}",
-              "sha_short": "$(git rev-parse --short HEAD)",
-              "version": "${VERSION}",
-              "generated_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            }
-            EOF
+            SHA_SHORT=$(printf '%s' "${{ github.sha }}" | cut -c1-7)
+            jq -n \
+              --arg commit "${{ github.sha }}" \
+              --arg sha_short "$SHA_SHORT" \
+              --arg version "$VERSION" \
+              --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{
+                commit: $commit,
+                sha_short: $sha_short,
+                version: $version,
+                generated_at_utc: $generated_at_utc
+              }' > agent-latest-build-meta.json
           fi
 
       - name: Upload latest tarball and checksum (${{ matrix.arch }})

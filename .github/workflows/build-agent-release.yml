@@ -20,7 +20,7 @@ jobs:
     runs-on: [arc-runner-set-iotistica-light]
     permissions:
       contents: write
-    if: success()
+    if: success() && github.ref == 'refs/heads/master'
 
     steps:
       - name: Checkout repository
@@ -64,22 +64,10 @@ jobs:
           sha256sum -c agent-latest.tar.gz.sha256
           sha256sum -c install.sh.sha256
 
-      - name: Verify artifact commit matches release commit
-        id: verify_commit
+      - name: Capture release base commit
+        id: base
         run: |
-          ARTIFACT_COMMIT=$(jq -r '.commit' /tmp/release/agent-latest-build-meta.json)
-          RELEASE_COMMIT=$(git rev-parse HEAD)
-          if [ -z "$ARTIFACT_COMMIT" ] || [ "$ARTIFACT_COMMIT" = "null" ]; then
-            echo "agent-latest-build-meta.json does not contain commit"
-            exit 1
-          fi
-          if [ "$ARTIFACT_COMMIT" != "$RELEASE_COMMIT" ]; then
-            echo "Artifact commit mismatch"
-            echo "artifact=$ARTIFACT_COMMIT"
-            echo "release=$RELEASE_COMMIT"
-            exit 1
-          fi
-          echo "artifact_commit=$ARTIFACT_COMMIT" >> $GITHUB_OUTPUT
+          echo "base_commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - name: Bump patch version
         id: bump
@@ -118,8 +106,27 @@ jobs:
           echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Verify artifact commit matches rebased release base
+        id: verify_commit
+        run: |
+          ARTIFACT_COMMIT=$(jq -r '.commit' /tmp/release/agent-latest-build-meta.json)
+          RELEASE_BASE_COMMIT=${{ steps.base.outputs.base_commit }}
+
+          if [ -z "$ARTIFACT_COMMIT" ] || [ "$ARTIFACT_COMMIT" = "null" ]; then
+            echo "agent-latest-build-meta.json does not contain commit"
+            exit 1
+          fi
+          if [ "$ARTIFACT_COMMIT" != "$RELEASE_BASE_COMMIT" ]; then
+            echo "Artifact commit mismatch after rebase"
+            echo "artifact=$ARTIFACT_COMMIT"
+            echo "origin_master=$RELEASE_BASE_COMMIT"
+            exit 1
+          fi
+          echo "artifact_commit=$ARTIFACT_COMMIT" >> $GITHUB_OUTPUT
+
       - name: Promote artifacts to versioned paths
         run: |
+          set -euo pipefail
           VERSION=${{ steps.bump.outputs.package_version }}
           ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
 
@@ -142,17 +149,17 @@ jobs:
             return 1
           }
 
-          promote_blob "agent/agent-latest-x86_64.tar.gz" "agent/versions/agent-${VERSION}-x86_64.tar.gz"
-          promote_blob "agent/agent-latest-x86_64.tar.gz.sha256" "agent/versions/agent-${VERSION}-x86_64.tar.gz.sha256"
-          promote_blob "agent/agent-latest-arm64.tar.gz" "agent/versions/agent-${VERSION}-arm64.tar.gz"
-          promote_blob "agent/agent-latest-arm64.tar.gz.sha256" "agent/versions/agent-${VERSION}-arm64.tar.gz.sha256"
+          promote_blob "agent/agent-latest-x86_64.tar.gz" "agent/versions/agent-${VERSION}-x86_64.tar.gz" || exit 1
+          promote_blob "agent/agent-latest-x86_64.tar.gz.sha256" "agent/versions/agent-${VERSION}-x86_64.tar.gz.sha256" || exit 1
+          promote_blob "agent/agent-latest-arm64.tar.gz" "agent/versions/agent-${VERSION}-arm64.tar.gz" || exit 1
+          promote_blob "agent/agent-latest-arm64.tar.gz.sha256" "agent/versions/agent-${VERSION}-arm64.tar.gz.sha256" || exit 1
 
-          promote_blob "agent/install" "agent/versions/install-${VERSION}.sh"
-          promote_blob "agent/install.sha256" "agent/versions/install-${VERSION}.sh.sha256"
-          promote_blob "agent/agent-latest-build-meta.json" "agent/versions/${VERSION}/agent-build-meta.json"
+          promote_blob "agent/install" "agent/versions/install-${VERSION}.sh" || exit 1
+          promote_blob "agent/install.sha256" "agent/versions/install-${VERSION}.sh.sha256" || exit 1
+          promote_blob "agent/agent-latest-build-meta.json" "agent/versions/${VERSION}/agent-build-meta.json" || exit 1
 
           for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
-            promote_blob "agent/sbom/${f}.cyclonedx.json" "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json"
+            promote_blob "agent/sbom/${f}.cyclonedx.json" "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json" || exit 1
           done
 
       - name: Write release summary
