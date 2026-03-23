@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build:
     name: Build & Test
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on:  [arc-runner-set-iotistica-light]
     outputs:
       sha_short: ${{ steps.meta.outputs.sha_short }}
       agent_version: ${{ steps.meta.outputs.agent_version }}
