@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# Iotistic Agent - Unified Installation Script
+# Iotistica Agent - Unified Installation Script
 # Version: AGENT_VERSION_PLACEHOLDER
 # This script installs the Iotistic agent using either Docker or Systemd
 # Usage: curl -sfL https://get.iotistica.com/agent | sh
