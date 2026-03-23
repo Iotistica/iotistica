@@ -102,6 +102,25 @@ jobs:
         run: |
           echo "base_commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Verify artifact commit matches release base commit
+        id: verify_commit
+        run: |
+          ARTIFACT_COMMIT=$(jq -r '.commit' /tmp/release/agent-latest-build-meta.json)
+          RELEASE_BASE_COMMIT=${{ steps.base.outputs.base_commit }}
+
+          if [ -z "$ARTIFACT_COMMIT" ] || [ "$ARTIFACT_COMMIT" = "null" ]; then
+            echo "agent-latest-build-meta.json does not contain commit"
+            exit 1
+          fi
+          if [ "$ARTIFACT_COMMIT" != "$RELEASE_BASE_COMMIT" ]; then
+            echo "Artifact commit mismatch"
+            echo "artifact=$ARTIFACT_COMMIT"
+            echo "base_commit=$RELEASE_BASE_COMMIT"
+            echo "Run release after CI publishes latest for this base commit."
+            exit 1
+          fi
+          echo "artifact_commit=$ARTIFACT_COMMIT" >> $GITHUB_OUTPUT
+
       - name: Bump patch version
         id: bump
         run: |
@@ -115,47 +134,33 @@ jobs:
       - name: Commit and push version bump
         id: push
         run: |
+          set -euo pipefail
+          BASE_COMMIT=${{ steps.base.outputs.base_commit }}
+
+          git fetch origin master
+          REMOTE_HEAD=$(git rev-parse origin/master)
+          if [ "$REMOTE_HEAD" != "$BASE_COMMIT" ]; then
+            echo "master moved before release bump"
+            echo "base_commit=$BASE_COMMIT"
+            echo "origin_master=$REMOTE_HEAD"
+            echo "Rerun release after CI completes for the new head."
+            exit 1
+          fi
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add agent/package.json
           git commit -m "chore: bump agent version to ${{ steps.bump.outputs.package_version }} [skip ci]"
 
-          PUSHED=false
-          for i in {1..5}; do
+          if ! git push origin HEAD:master; then
             git fetch origin master
-            git -c rebase.autoStash=true rebase origin/master
-            if git push origin HEAD:master; then
-              PUSHED=true
-              break
-            fi
-            sleep 2
-          done
-
-          if [ "$PUSHED" != "true" ]; then
-            echo "Failed to push after 5 attempts"
+            echo "Push failed; master changed during release."
+            echo "origin_master=$(git rev-parse origin/master)"
             exit 1
           fi
 
           echo "commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Verify artifact commit matches rebased release base
-        id: verify_commit
-        run: |
-          ARTIFACT_COMMIT=$(jq -r '.commit' /tmp/release/agent-latest-build-meta.json)
-          RELEASE_BASE_COMMIT=${{ steps.base.outputs.base_commit }}
-
-          if [ -z "$ARTIFACT_COMMIT" ] || [ "$ARTIFACT_COMMIT" = "null" ]; then
-            echo "agent-latest-build-meta.json does not contain commit"
-            exit 1
-          fi
-          if [ "$ARTIFACT_COMMIT" != "$RELEASE_BASE_COMMIT" ]; then
-            echo "Artifact commit mismatch after rebase"
-            echo "artifact=$ARTIFACT_COMMIT"
-            echo "origin_master=$RELEASE_BASE_COMMIT"
-            exit 1
-          fi
-          echo "artifact_commit=$ARTIFACT_COMMIT" >> $GITHUB_OUTPUT
 
       - name: Promote artifacts to versioned paths
         run: |
