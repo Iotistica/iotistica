@@ -40,20 +40,20 @@ jobs:
 
           for f in agent-latest-x86_64.tar.gz agent-latest-x86_64.tar.gz.sha256 agent-latest-arm64.tar.gz agent-latest-arm64.tar.gz.sha256 agent-latest.tar.gz agent-latest.tar.gz.sha256; do
             az storage blob download --account-name "$ACCT" --container-name scripts \
-              --name "agent/${f}" --file "/tmp/release/${f}" --auth-mode login --overwrite true
+              --name "agent/${f}" --file "/tmp/release/${f}" --auth-mode key --overwrite true
           done
 
           az storage blob download --account-name "$ACCT" --container-name scripts \
-            --name agent/install --file /tmp/release/install.sh --auth-mode login --overwrite true
+            --name agent/install --file /tmp/release/install.sh --auth-mode key --overwrite true
           az storage blob download --account-name "$ACCT" --container-name scripts \
-            --name agent/install.sha256 --file /tmp/release/install.sh.sha256 --auth-mode login --overwrite true
+            --name agent/install.sha256 --file /tmp/release/install.sh.sha256 --auth-mode key --overwrite true
           az storage blob download --account-name "$ACCT" --container-name scripts \
-            --name agent/agent-latest-build-meta.json --file /tmp/release/agent-latest-build-meta.json --auth-mode login --overwrite true
+            --name agent/agent-latest-build-meta.json --file /tmp/release/agent-latest-build-meta.json --auth-mode key --overwrite true
 
           for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
             az storage blob download --account-name "$ACCT" --container-name scripts \
               --name "agent/sbom/${f}.cyclonedx.json" \
-              --file "/tmp/release/sbom/${f}.cyclonedx.json" --auth-mode login --overwrite true
+              --file "/tmp/release/sbom/${f}.cyclonedx.json" --auth-mode key --overwrite true
           done
 
       - name: Verify downloaded checksums
@@ -133,12 +133,12 @@ jobs:
           promote_blob() {
             SRC="$1"
             DST="$2"
-            az storage blob copy start --account-name "$ACCT" --auth-mode login \
+            az storage blob copy start --account-name "$ACCT" --auth-mode key \
               --destination-container scripts --destination-blob "$DST" \
               --source-account-name "$ACCT" --source-container scripts --source-blob "$SRC" >/dev/null
 
             for i in {1..30}; do
-              STATUS=$(az storage blob show --account-name "$ACCT" --container-name scripts --name "$DST" --auth-mode login --query properties.copy.status -o tsv 2>/dev/null || true)
+              STATUS=$(az storage blob show --account-name "$ACCT" --container-name scripts --name "$DST" --auth-mode key --query properties.copy.status -o tsv 2>/dev/null || true)
               if [ "$STATUS" = "success" ]; then
                 return 0
               fi
