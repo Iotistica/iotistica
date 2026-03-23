@@ -18,7 +18,7 @@ on:
 jobs:
   build:
     name: Test, Build, Scan & Push Dashboard
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on: [arc-runner-set-iotistica-playwright]
     permissions:
       contents: read
     env:
