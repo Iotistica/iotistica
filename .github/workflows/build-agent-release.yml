@@ -115,7 +115,10 @@ jobs:
             exit 1
           fi
 
-          CHANGED_FILES=$(git diff --name-only "$ARTIFACT_COMMIT..$RELEASE_BASE_COMMIT" -- agent .github/workflows/build-agent-ci.yml)
+          # Exclude agent/package.json — only the version field changes there (bumped by the
+          # release workflow itself after every release), which does not affect the compiled binary.
+          CHANGED_FILES=$(git diff --name-only "$ARTIFACT_COMMIT..$RELEASE_BASE_COMMIT" \
+            -- agent ':(exclude)agent/package.json' .github/workflows/build-agent-ci.yml)
           if [ -n "$CHANGED_FILES" ]; then
             echo "Artifact commit mismatch with agent-impacting changes detected"
             echo "artifact=$ARTIFACT_COMMIT"
