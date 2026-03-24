@@ -338,7 +338,7 @@ export class AnomalyFeed {
         }
 
         this.dispatchToAnomaly(metricKey, {
-          source: 'sensor', protocol: this.protocol, rawDeviceState: rawState,
+          source: 'endpoint', protocol: this.protocol, rawDeviceState: rawState,
           value: num, unit: '', timestamp: timestampMs, quality: 'GOOD',
           deviceId: effectiveDeviceId,
           tags: {

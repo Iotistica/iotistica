@@ -175,7 +175,7 @@ export function createSensorDataPoint(
 	quality?: 'GOOD' | 'BAD' | 'UNCERTAIN'
 ): DataPoint {
 	return {
-		source: 'sensor',
+		source: 'device',
 		metric,
 		value,
 		unit,

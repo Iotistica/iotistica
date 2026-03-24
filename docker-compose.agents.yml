@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-03-24 07:27:02
+# Generated: 2026-03-24 08:17:08
 # Agents: 1 to 1
 # Ports: 48481 to 48481
 
@@ -31,12 +31,13 @@ services:
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=3d2f2b7c01e9b5e06112a0fa74e92279dd42550ce6a3bd28776542f192fe32cb
+      - PROVISIONING_KEY=faf9e08fe01361e47a8ecaeb748d51185c1d51eb1b673f909b66dbba8c00d877
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
-      - SIMULATION_MODE=false
-      - SIMULATION_CONFIG={}
+      - SIMULATION_MODE=true
+      - SIMULATION_PROFILE=baseline-realistic
+      - SIMULATION_CONFIG='{"scenarios":{"anomaly_injection":{"metrics":["cpu_temp","memory_percent"],"intervalMs":60000,"severity":"warning","magnitude":2,"pattern":"spike","enabled":true},"sensor_data":{"enabled":true,"publishIntervalMs":10000,"devices":[{"unit":"C","variance":2.0,"max":35,"protocol":"modbus","baseValue":23.0,"metric":"temperature","min":15,"endpointTopic":"modbus"},{"unit":"%","variance":10.0,"max":80,"protocol":"snmp","baseValue":55.0,"metric":"humidity","min":30,"endpointTopic":"snmp"},{"unit":"hPa","variance":5.0,"max":1050,"protocol":"opcua","baseValue":1013.25,"metric":"pressure","min":980,"endpointTopic":"opcua"}],"pattern":"realistic"}}}'
       - SIMULATE_MEMORY_LEAK=false
       - USE_MSGPACK_POC=false
       - USE_KEY_COMPACTION_POC=false
