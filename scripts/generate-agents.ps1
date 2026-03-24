@@ -735,7 +735,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $provisioningKeys += "${agentName}: $apiKey"
     
     $volumeName = "$agentName-data"
-    $simConfig = Get-SimulationConfig -Index $i -SimulationEnabled $EnableSimulation.IsPresent
+    $simConfig = Get-SimulationConfig -Index $i -SimulationEnabled ([bool]$EnableSimulation)
 
     if ($simConfig.enabled -eq 'true') {
         Write-Host "    Simulation profile: $($simConfig.name) [$($simConfig.scenarioNames -join ', ')]" -ForegroundColor DarkGray

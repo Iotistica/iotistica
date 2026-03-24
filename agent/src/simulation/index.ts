@@ -266,11 +266,39 @@ export function loadSimulationConfig(): Partial<SimulationConfig> {
 	
 	// Try to parse SIMULATION_CONFIG JSON
 	let config: Partial<SimulationConfig> = { enabled: true };
+
+	const parseSimulationEnvJson = (rawValue: string): any => {
+		const candidates: string[] = [];
+		const trimmed = rawValue.trim();
+		candidates.push(trimmed);
+
+		// Docker compose/env files can preserve wrapping quotes as literal characters.
+		if (
+			(trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+			(trimmed.startsWith('"') && trimmed.endsWith('"'))
+		) {
+			candidates.push(trimmed.slice(1, -1));
+		}
+
+		// Some pipelines provide JSON with escaped quotes as a plain env string.
+		candidates.push(trimmed.replace(/\\"/g, '"'));
+
+		let lastError: unknown;
+		for (const candidate of candidates) {
+			try {
+				return JSON.parse(candidate);
+			} catch (error) {
+				lastError = error;
+			}
+		}
+
+		throw lastError instanceof Error ? lastError : new Error('Invalid SIMULATION_CONFIG JSON');
+	};
 	
 	const configStr = process.env.SIMULATION_CONFIG;
 	if (configStr) {
 		try {
-			const parsed = JSON.parse(configStr);
+			const parsed = parseSimulationEnvJson(configStr);
 			config = { enabled: true, ...parsed };
 		} catch (error) {
 			console.error('Failed to parse SIMULATION_CONFIG:', error);
