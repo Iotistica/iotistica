@@ -184,43 +184,43 @@ services:
         networks:
             - iotistica-net
 
-    housekeeper:
-        build:
-            context: ./housekeeper
-            dockerfile: Dockerfile
-        container_name: iotistic-housekeeper
-        restart: unless-stopped
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "10m"
-                max-file: "3"
-        environment:
-            - PORT=${HOUSEKEEPER_PORT:-3400}
-            - NODE_ENV=${NODE_ENV:-development}
-            - LOG_LEVEL=${LOG_LEVEL:-info}
-            # TigerData Cloud TimescaleDB Configuration
-            - DB_HOST=${DB_HOST:-bg4k3yxway.pcwz234dvp.tsdb.cloud.timescale.com}
-            - DB_PORT=${DB_PORT:-30692}
-            - DB_NAME=${DB_NAME:-tsdb}
-            - DB_USER=${DB_USER:-tsdbadmin}
-            - DB_PASSWORD=${DB_PASSWORD:-w2qm8tm693xd3b9v}
-            - DB_POOL_MAX=${DB_POOL_MAX:-10}
-            - DB_IDLE_TIMEOUT=${DB_IDLE_TIMEOUT:-30000}
-            - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10000}
-            # Task configuration
-            - EVENTS_RETENTION_DAYS=${EVENTS_RETENTION_DAYS:-90}
-            - DEVICE_LOGS_RETENTION_DAYS=${DEVICE_LOGS_RETENTION_DAYS:-30}
-        ports:
-            - "${HOUSEKEEPER_PORT_EXT:-3400}:3400"
-        healthcheck:
-            test: ["CMD", "node", "-e", "require('http').get('http://localhost:3400/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 40s
-        networks:
-            - iotistica-net
+    # housekeeper:
+    #     build:
+    #         context: ./housekeeper
+    #         dockerfile: Dockerfile
+    #     container_name: iotistic-housekeeper
+    #     restart: unless-stopped
+    #     logging:
+    #         driver: "json-file"
+    #         options:
+    #             max-size: "10m"
+    #             max-file: "3"
+    #     environment:
+    #         - PORT=${HOUSEKEEPER_PORT:-3400}
+    #         - NODE_ENV=${NODE_ENV:-development}
+    #         - LOG_LEVEL=${LOG_LEVEL:-info}
+    #         # TigerData Cloud TimescaleDB Configuration
+    #         - DB_HOST=${DB_HOST:-bg4k3yxway.pcwz234dvp.tsdb.cloud.timescale.com}
+    #         - DB_PORT=${DB_PORT:-30692}
+    #         - DB_NAME=${DB_NAME:-tsdb}
+    #         - DB_USER=${DB_USER:-tsdbadmin}
+    #         - DB_PASSWORD=${DB_PASSWORD:-w2qm8tm693xd3b9v}
+    #         - DB_POOL_MAX=${DB_POOL_MAX:-10}
+    #         - DB_IDLE_TIMEOUT=${DB_IDLE_TIMEOUT:-30000}
+    #         - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10000}
+    #         # Task configuration
+    #         - EVENTS_RETENTION_DAYS=${EVENTS_RETENTION_DAYS:-90}
+    #         - DEVICE_LOGS_RETENTION_DAYS=${DEVICE_LOGS_RETENTION_DAYS:-30}
+    #     ports:
+    #         - "${HOUSEKEEPER_PORT_EXT:-3400}:3400"
+    #     healthcheck:
+    #         test: ["CMD", "node", "-e", "require('http').get('http://localhost:3400/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+    #         interval: 30s
+    #         timeout: 10s
+    #         retries: 3
+    #         start_period: 40s
+    #     networks:
+    #         - iotistica-net
 
     mosquitto:
         image: iegomez/mosquitto-go-auth
@@ -245,30 +245,30 @@ services:
         networks:
             - iotistica-net
 
-    mosquitto-agent:
-        image: iegomez/mosquitto-go-auth
-        restart: unless-stopped
-        container_name: iotistic-mosquitto-agent
-        ports:
-          - "${AGENT_MOSQUITTO_PORT_EXT:-5884}:1883"     # Dedicated MQTT for agent traffic
-          - "${AGENT_MOSQUITTO_WS_PORT_EXT:-59003}:9001" # Dedicated MQTT WebSocket for agent traffic
-        environment:
-            - AGENT_API_HOST=${AGENT_API_HOST:-host.docker.internal}
-        volumes:
-          - ./mosquitto/mosquitto-agent.conf:/etc/mosquitto/mosquitto.conf:ro
-        healthcheck:
-            test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 10s
-        depends_on:
-            api:
-                condition: service_healthy
-            redis:
-                condition: service_healthy
-        networks:
-            - iotistica-net
+    # mosquitto-agent:
+    #     image: iegomez/mosquitto-go-auth
+    #     restart: unless-stopped
+    #     container_name: iotistic-mosquitto-agent
+    #     ports:
+    #       - "${AGENT_MOSQUITTO_PORT_EXT:-5884}:1883"     # Dedicated MQTT for agent traffic
+    #       - "${AGENT_MOSQUITTO_WS_PORT_EXT:-59003}:9001" # Dedicated MQTT WebSocket for agent traffic
+    #     environment:
+    #         - AGENT_API_HOST=${AGENT_API_HOST:-host.docker.internal}
+    #     volumes:
+    #       - ./mosquitto/mosquitto-agent.conf:/etc/mosquitto/mosquitto.conf:ro
+    #     healthcheck:
+    #         test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
+    #         interval: 30s
+    #         timeout: 10s
+    #         retries: 3
+    #         start_period: 10s
+    #     depends_on:
+    #         api:
+    #             condition: service_healthy
+    #         redis:
+    #             condition: service_healthy
+    #     networks:
+    #         - iotistica-net
 
     # emqx:
     #     image: emqx/emqx:latest
@@ -386,24 +386,24 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
-    sim-bacnet:
-        build:
-            context: ./simulators/bacnet-simulator
-            dockerfile: Dockerfile
-        container_name: sim-bacnet
-        restart: unless-stopped
-        # Bridge network with port mapping - accessible from Windows host IP
-        ports:
-            - "47808:47808/udp"
-        environment:
-            - BACPYPES_IFACE=0.0.0.0:47808/24  # Bind to all interfaces on port 47808
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-        networks:
-            - iotistica-net
+    # sim-bacnet:
+    #     build:
+    #         context: ./simulators/bacnet-simulator
+    #         dockerfile: Dockerfile
+    #     container_name: sim-bacnet
+    #     restart: unless-stopped
+    #     # Bridge network with port mapping - accessible from Windows host IP
+    #     ports:
+    #         - "47808:47808/udp"
+    #     environment:
+    #         - BACPYPES_IFACE=0.0.0.0:47808/24  # Bind to all interfaces on port 47808
+    #     logging:
+    #         driver: "json-file"
+    #         options:
+    #             max-size: "5m"
+    #             max-file: "2"
+    #     networks:
+    #         - iotistica-net
 
     sim-mqtt:
         build:
