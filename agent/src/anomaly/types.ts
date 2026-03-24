@@ -19,7 +19,7 @@ export type CanonicalDeviceState = 'running' | 'idle' | 'fault' | 'unknown';
  * Unified data point for all monitored values
  */
 export interface DataPoint {
-	source: 'sensor' | 'system' | 'container' | 'endpoint';
+	source: 'device' | 'system' | 'container' | 'endpoint';
 	protocol?: Protocol;      // Protocol/source type (modbus, opcua, system, etc.)
 	deviceState?: CanonicalDeviceState; // Normalized operational state
 	rawDeviceState?: unknown; // Protocol-specific raw state value (optional)

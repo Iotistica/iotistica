@@ -8,13 +8,11 @@
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import type { AnomalyDetectionService } from '../../anomaly';
-import type { MqttManager } from '../../mqtt/manager';
-import { createJsonPayload } from '../../mqtt/manager';
 import type {
 	SimulationScenario,
 	SimulationScenarioStatus,
-	SensorDataSimulationConfig,
-	SimulationPattern,
+	SensorDataSimulationConfig as DeviceDataSimulationConfig,
+	SimulationProtocol,
 } from '../types';
 
 /**
@@ -24,16 +22,15 @@ import type {
  * - MQTT Topic: iot/device/{deviceUuid}/endpoints/{mqttTopic}
  * - Payload: { sensor: "name", timestamp: "ISO", messages: ["data"] }
  */
-export class SensorDataSimulation implements SimulationScenario {
-	name = 'sensor_data';
-	description = 'Generates synthetic sensor data (MQTT + anomaly detection)';
+export class DeviceDataSimulation implements SimulationScenario {
+	name = 'device_data';
+	description = 'Generates synthetic device data (MQTT + anomaly detection)';
 	enabled = false;
 	
-	private config: SensorDataSimulationConfig;
+	private config: DeviceDataSimulationConfig;
 	private logger?: AgentLogger;
 	private anomalyService?: AnomalyDetectionService;
-	private mqttManager?: MqttManager;
-	private deviceUuid?: string;
+	private publishToDeviceFeature?: (endpointTopic: string, message: Record<string, any>) => Promise<boolean> | boolean;
 	private running = false;
 	private startedAt?: number;
 	private publishInterval?: NodeJS.Timeout;
@@ -42,22 +39,20 @@ export class SensorDataSimulation implements SimulationScenario {
 	private driftOffset: Record<string, number> = {}; // For drift pattern
 	
 	constructor(
-		config: SensorDataSimulationConfig,
+		config: DeviceDataSimulationConfig,
 		anomalyService?: AnomalyDetectionService,
 		logger?: AgentLogger,
-		mqttManager?: MqttManager,
-		deviceUuid?: string
+		publishToDeviceFeature?: (endpointTopic: string, message: Record<string, any>) => Promise<boolean> | boolean
 	) {
 		this.config = config;
 		this.anomalyService = anomalyService;
 		this.logger = logger;
-		this.mqttManager = mqttManager;
-		this.deviceUuid = deviceUuid;
+		this.publishToDeviceFeature = publishToDeviceFeature;
 		this.enabled = config.enabled;
 		
 		// Initialize drift offsets
-		this.config.sensors.forEach(sensor => {
-			this.driftOffset[sensor.metric] = 0;
+		this.config.devices.forEach(device => {
+			this.driftOffset[device.metric] = 0;
 		});
 	}
 	
@@ -72,10 +67,12 @@ export class SensorDataSimulation implements SimulationScenario {
 			});
 			return;
 		}
+
+		this.validateConfiguration();
 		
 		this.logger?.infoSync('Starting sensor data simulation', {
 			component: LogComponents.metrics,
-			sensors: this.config.sensors.map(s => s.metric),
+			devices: this.config.devices.map(s => ({ metric: s.metric, endpointTopic: s.endpointTopic, protocol: s.protocol })),
 			pattern: this.config.pattern,
 			intervalMs: this.config.publishIntervalMs,
 		});
@@ -85,13 +82,13 @@ export class SensorDataSimulation implements SimulationScenario {
 		this.publishCount = 0;
 		
 		// Publish immediately on start (but don't await to avoid blocking)
-		this.publishSensorData().catch(() => {
+		this.publishDeviceData().catch(() => {
 			// Ignore errors on start - likely MQTT not connected
 		});
 		
 		// Then publish on interval
 		this.publishInterval = setInterval(() => {
-			this.publishSensorData().catch(() => {
+			this.publishDeviceData().catch(() => {
 				// Ignore errors - likely MQTT not connected
 			});
 		}, this.config.publishIntervalMs);
@@ -107,7 +104,7 @@ export class SensorDataSimulation implements SimulationScenario {
 			this.publishInterval = undefined;
 		}
 		
-		this.logger?.infoSync('Sensor data simulation stopped', {
+		this.logger?.infoSync('Device data simulation stopped', {
 			component: LogComponents.metrics,
 			totalPublishes: this.publishCount,
 			durationMs: this.startedAt ? Date.now() - this.startedAt : 0,
@@ -123,7 +120,7 @@ export class SensorDataSimulation implements SimulationScenario {
 			running: this.running,
 			startedAt: this.startedAt,
 			stats: {
-				sensors: this.config.sensors.map(s => s.metric),
+				sensors: this.config.devices.map(s => s.metric),
 				pattern: this.config.pattern,
 				publishCount: this.publishCount,
 				intervalMs: this.config.publishIntervalMs,
@@ -131,7 +128,7 @@ export class SensorDataSimulation implements SimulationScenario {
 		};
 	}
 	
-	async updateConfig(config: Partial<SensorDataSimulationConfig>): Promise<void> {
+	async updateConfig(config: Partial<DeviceDataSimulationConfig>): Promise<void> {
 		this.config = { ...this.config, ...config };
 		this.enabled = this.config.enabled;
 		
@@ -145,54 +142,40 @@ export class SensorDataSimulation implements SimulationScenario {
 	/**
 	 * Publish sensor data for all Configured Endpoints
 	 * 
-	 * Matches the real sensor-publish format:
+	 * Matches the real device-publish format:
 	 * - Topic: iot/device/{deviceUuid}/endpoints/{mqttTopic}
 	 * - Payload: { sensor: "name", timestamp: "ISO", messages: [data] }
 	 */
-	private async publishSensorData(): Promise<void> {
-		for (const sensor of this.config.sensors) {
-			const value = this.generateSensorValue(sensor);
-			
-			// 1. Publish to MQTT (matching sensor-publish format)
-			// Skip if MQTT not connected (e.g., device not provisioned)
-			if (this.mqttManager && this.deviceUuid && this.mqttManager.isConnected()) {
-				try {
-					const topic = `iot/device/${this.deviceUuid}/endpoints/${sensor.metric}`;
-					const data = {
-						sensor: sensor.metric,
-						timestamp: new Date().toISOString(),
-						messages: [
-							JSON.stringify({
-								value: parseFloat(value.toFixed(2)),
-								unit: sensor.unit,
-								timestamp: Date.now(),
-								simulation: true
-							})
-						]
-					};
-					
-					// Use msgId for HA deduplication
-					const msgIdGen = this.mqttManager.getMessageIdGenerator();
-					const payload = createJsonPayload(data, msgIdGen);
-					
-					await this.mqttManager.publish(topic, payload, { qos: 1 });
-					
-					this.logger?.debugSync('Simulated sensor MQTT published', {
-						component: LogComponents.metrics,
-						topic,
-						sensor: sensor.metric,
-						value: value.toFixed(2),
-					});
-				} catch (error) {
-					// Silently skip MQTT errors when not connected
-					// This is normal when device is not provisioned
-				}
+	private async publishDeviceData(): Promise<void> {
+		for (const sensor of this.config.devices) {
+			const value = this.generateDeviceValue(sensor);
+			const protocolPayload = this.buildProtocolPayload(sensor, value);
+
+			let publishedViaFeature = false;
+			try {
+				publishedViaFeature = await this.publishToDeviceFeature!(sensor.endpointTopic, protocolPayload);
+			} catch (error) {
+				this.logger?.warnSync('Simulation publish failed via Device Publish Feature', {
+					component: LogComponents.metrics,
+					endpointTopic: sensor.endpointTopic,
+					metric: sensor.metric,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+
+			if (!publishedViaFeature) {
+				this.logger?.warnSync('Simulation message dropped: no matching Device Publish endpoint', {
+					component: LogComponents.metrics,
+					endpointTopic: sensor.endpointTopic,
+					metric: sensor.metric,
+					protocol: sensor.protocol,
+				});
 			}
 			
 			// 2. Feed to anomaly detection if available (for testing detection)
 			if (this.anomalyService) {
 				const dataPoint = {
-					source: 'sensor' as const,
+					source: 'device' as const,
 					metric: sensor.metric,
 					value,
 					unit: sensor.unit,
@@ -209,18 +192,96 @@ export class SensorDataSimulation implements SimulationScenario {
 				metric: sensor.metric,
 				value: value.toFixed(2),
 				unit: sensor.unit,
+				endpointTopic: sensor.endpointTopic,
+				viaDevicePublishFeature: publishedViaFeature,
 				pattern: this.config.pattern,
 			});
 		}
 		
 		this.publishCount++;
 	}
+
+	private buildProtocolPayload(
+		sensor: DeviceDataSimulationConfig['devices'][number],
+		value: number,
+	): Record<string, any> {
+		switch (sensor.protocol) {
+			case 'modbus':
+				return {
+					register: sensor.metric,
+					value: parseFloat(value.toFixed(2)),
+					unit: sensor.unit,
+					timestamp: Date.now(),
+					quality: 'GOOD',
+					simulation: true,
+				};
+			case 'opcua':
+				return {
+					nodeId: sensor.metric,
+					value: parseFloat(value.toFixed(2)),
+					statusCode: 'Good',
+					timestamp: Date.now(),
+					simulation: true,
+				};
+			case 'snmp':
+				return {
+					oid: sensor.metric,
+					value: parseFloat(value.toFixed(2)),
+					metricType: 'gauge',
+					timestamp: Date.now(),
+					simulation: true,
+				};
+			case 'can':
+				return {
+					id: '0x18FF50E5',
+					dlc: 8,
+					signals: {
+						[sensor.metric]: parseFloat(value.toFixed(2)),
+					},
+					timestamp: Date.now(),
+					simulation: true,
+				};
+			case 'mqtt':
+				return {
+					topic: sensor.endpointTopic,
+					metric: sensor.metric,
+					value: parseFloat(value.toFixed(2)),
+					unit: sensor.unit,
+					timestamp: Date.now(),
+					simulation: true,
+				};
+			default:
+				return {
+					value: parseFloat(value.toFixed(2)),
+					metric: sensor.metric,
+					unit: sensor.unit,
+					timestamp: Date.now(),
+					simulation: true,
+				};
+		}
+	}
+
+	private validateConfiguration(): void {
+		if (!this.publishToDeviceFeature) {
+			throw new Error('Device data simulation requires Device Publish Feature integration');
+		}
+
+		for (const device of this.config.devices) {
+			if (!device.endpointTopic || device.endpointTopic.trim().length === 0) {
+				throw new Error(`Simulation device '${device.metric}' is missing required endpointTopic`);
+			}
+
+			if (!device.protocol || device.protocol.trim().length === 0) {
+				throw new Error(`Simulation device '${device.metric}' is missing required protocol`);
+			}
+		}
+	}
 	
 	/**
-	 * Generate sensor value based on pattern
+	 * Generate device value based on pattern
 	 */
-	private generateSensorValue(sensor: typeof this.config.sensors[0]): number {
-		const { baseValue, variance, min, max } = sensor;
+	private generateDeviceValue(device: typeof this.config.devices[0]): number {
+		const { baseValue, variance, min, max } = device;
 		let value: number;
 		
 		switch (this.config.pattern) {
@@ -240,8 +301,8 @@ export class SensorDataSimulation implements SimulationScenario {
 				
 			case 'drift':
 				// Slow drift over time
-				this.driftOffset[sensor.metric] += (Math.random() - 0.5) * 0.1;
-				value = baseValue + this.driftOffset[sensor.metric] + this.randomGaussian() * variance * 0.5;
+				this.driftOffset[device.metric] += (Math.random() - 0.5) * 0.1;
+				value = baseValue + this.driftOffset[device.metric] + this.randomGaussian() * variance * 0.5;
 				break;
 				
 			case 'cyclic':

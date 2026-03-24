@@ -175,6 +175,28 @@ export class DevicePublishFeature extends BaseFeature {
     return stats;
   }
 
+  /**
+   * Inject one simulated message into a specific endpoint topic pipeline.
+   * Returns true when a matching endpoint exists and message was routed.
+   */
+  public publishSimulationMessage(endpointTopic: string, message: Record<string, any>): boolean {
+    const publishConfig = this.config as DevicePublishConfig;
+
+    for (let i = 0; i < this.sensors.length; i++) {
+      const endpoint = publishConfig.endpoints[i];
+      if (!endpoint) {
+        continue;
+      }
+
+      if (endpoint.mqttTopic === endpointTopic) {
+        this.sensors[i].injectSimulationMessage(message);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private createDeviceManager(config: DeviceConfig, index: number, total: number): PublishManager {
     config.name = config.name || `device-${index + 1}`;
     this.logger.debug(`Creating device '${config.name}' (${index + 1}/${total})`);

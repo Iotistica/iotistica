@@ -25,7 +25,7 @@ import {
 } from './types';
 import { MemoryLeakSimulation } from './scenarios/memory-leak';
 import { AnomalyInjectionSimulation } from './scenarios/anomaly';
-import { SensorDataSimulation } from './scenarios/publish-data';
+import { DeviceDataSimulation } from './scenarios/publish-data';
 
 /**
  * Simulation orchestrator
@@ -89,12 +89,11 @@ export class SimulationOrchestrator {
 				...this.config.scenarios.sensor_data,
 			};
 			
-			const scenario = new SensorDataSimulation(
+			const scenario = new DeviceDataSimulation(
 				sensorConfig,
 				this.dependencies.anomalyService,
 				this.logger,
-				this.dependencies.mqttManager,
-				this.dependencies.deviceUuid
+				this.dependencies.publishToDeviceFeature
 			);
 			this.scenarios.set('sensor_data', scenario);
 		}
@@ -298,4 +297,4 @@ export function loadSimulationConfig(): Partial<SimulationConfig> {
 /**
  * Export scenario classes for direct use if needed
  */
-export { MemoryLeakSimulation, AnomalyInjectionSimulation, SensorDataSimulation };
+export { MemoryLeakSimulation, AnomalyInjectionSimulation, DeviceDataSimulation as SensorDataSimulation };

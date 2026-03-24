@@ -1,6 +1,5 @@
 import { LogComponents } from '../logging/types.js';
 import { SimulationOrchestrator, loadSimulationConfig } from '../simulation/index.js';
-import { MqttManager } from '../mqtt/manager.js';
 import type { AgentInitContext } from './context.js';
 
 export async function initializeSimulationMode(ctx: AgentInitContext): Promise<void> {
@@ -27,11 +26,18 @@ export async function initializeSimulationMode(ctx: AgentInitContext): Promise<v
 			devMode: isDevMode,
 		});
 
+		const sensorPublish = ctx.featureInitializer?.getFeatures()?.sensorPublish;
+
 		ctx.simulationOrchestrator = new SimulationOrchestrator(config, {
 			logger: ctx.agentLogger,
 			anomalyService: ctx.anomalyService,
-			mqttManager: MqttManager.getInstance(),
-			deviceUuid: ctx.deviceInfo.uuid,
+			publishToDeviceFeature: async (endpointTopic, message) => {
+				if (!sensorPublish) {
+					return false;
+				}
+
+				return sensorPublish.publishSimulationMessage(endpointTopic, message);
+			},
 		});
 
 		await ctx.simulationOrchestrator.start();

@@ -8,7 +8,6 @@
 
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../anomaly';
-import type { MqttManager } from '../mqtt/manager';
 
 /**
  * Simulation pattern types
@@ -22,6 +21,8 @@ export type SimulationPattern =
 	| 'faulty'        // Intermittent failures
 	| 'extreme'       // Edge case values
 	| 'random';       // Completely random
+
+export type SimulationProtocol = 'modbus' | 'opcua' | 'snmp' | 'can' | 'mqtt' | 'system';
 
 /**
  * Simulation severity for anomalies
@@ -56,8 +57,10 @@ export interface AnomalySimulationConfig {
  */
 export interface SensorDataSimulationConfig {
 	enabled: boolean;
-	sensors: Array<{
+	devices: Array<{
+		endpointTopic: string;             // Explicit MQTT/device-publish endpoint topic to route through
 		metric: string;                   // e.g., 'temperature', 'humidity'
+		protocol: SimulationProtocol;     // Explicit protocol payload shape to generate
 		unit: string;                     // e.g., '°C', '%'
 		baseValue: number;                // Normal baseline value
 		variance: number;                 // Normal variance range
@@ -151,8 +154,7 @@ export interface SimulationScenarioStatus {
 export interface SimulationDependencies {
 	logger?: AgentLogger;
 	anomalyService?: AnomalyDetectionService;
-	mqttManager?: MqttManager;
-	deviceUuid?: string;
+	publishToDeviceFeature?: (endpointTopic: string, message: Record<string, any>) => Promise<boolean> | boolean;
 }
 
 /**
@@ -193,10 +195,10 @@ export const DEFAULT_ANOMALY_CONFIG: AnomalySimulationConfig = {
  */
 export const DEFAULT_SENSOR_DATA_CONFIG: SensorDataSimulationConfig = {
 	enabled: false,
-	sensors: [
-		{ metric: 'temperature', unit: '°C', baseValue: 23.0, variance: 2.0, min: 15, max: 35 },
-		{ metric: 'humidity', unit: '%', baseValue: 55.0, variance: 10.0, min: 30, max: 80 },
-		{ metric: 'pressure', unit: 'hPa', baseValue: 1013.25, variance: 5.0, min: 980, max: 1050 },
+	devices: [
+		{ endpointTopic: 'modbus', metric: 'temperature', protocol: 'modbus', unit: '°C', baseValue: 23.0, variance: 2.0, min: 15, max: 35 },
+		{ endpointTopic: 'snmp', metric: 'humidity', protocol: 'snmp', unit: '%', baseValue: 55.0, variance: 10.0, min: 30, max: 80 },
+		{ endpointTopic: 'opcua', metric: 'pressure', protocol: 'opcua', unit: 'hPa', baseValue: 1013.25, variance: 5.0, min: 980, max: 1050 },
 	],
 	pattern: 'realistic',
 	publishIntervalMs: 10000,

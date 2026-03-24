@@ -1,174 +1,28 @@
 import mqtt, { MqttClient, IClientOptions, IClientPublishOptions } from 'mqtt';
 import { EventEmitter } from 'events';
-import msgpack from 'msgpack-lite';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { MessageIdGenerator } from './utils';
 import type { DictionaryManager } from '../managers/dictionary';
 import { MessageBufferSync } from './buffer';
 import type { BufferSyncConfig } from './buffer';
+import { serializePayload } from './codec';
+import type { MqttPayload } from './codec';
+import { MqttRouter } from './router';
+
+// Backward-compatible re-exports: existing imports from './manager' keep working.
+export {
+  createJsonPayload,
+  createMsgpackPayload,
+  serializePayload,
+  deserializePayload,
+  logCompressionStats,
+} from './codec';
+export type { MqttPayload } from './codec';
 
 export interface MqttConnectOptions {
   bufferSync?: boolean;
   bufferSyncOptions?: Partial<BufferSyncConfig>;
-}
-
-/**
- * Explicit payload contract - callers must specify format
- * This prevents implicit parsing/serialization in the transport layer
- */
-export type MqttPayload =
-  | { format: 'json'; data: object }
-  | { format: 'msgpack'; data: object }
-  | { format: 'binary'; data: Buffer }
-  | { format: 'text'; data: string };
-
-/**
- * Subscription handler entry
- * Supports multiple subscriptions to same or overlapping patterns
- */
-type SubscriptionHandler = {
-  pattern: string;
-  handler: (topic: string, payload: Buffer) => void;
-};
-
-/**
- * Helper: Create JSON payload with msgId injection
- * Use this for messages that need HA deduplication
- */
-export function createJsonPayload(data: object, msgIdGenerator?: MessageIdGenerator): MqttPayload {
-  const enrichedData = msgIdGenerator
-    ? { ...data, msgId: msgIdGenerator.generate() }
-    : data;
-  return { format: 'json', data: enrichedData };
-}
-
-/**
- * Helper: Create MessagePack payload with msgId injection
- * Use this for high-frequency sensor data (better compression + faster)
- */
-export function createMsgpackPayload(data: object, msgIdGenerator?: MessageIdGenerator): MqttPayload {
-  const enrichedData = msgIdGenerator
-    ? { ...data, msgId: msgIdGenerator.generate() }
-    : data;
-  return { format: 'msgpack', data: enrichedData };
-}
-
-/**
- * Helper: Serialize payload to Buffer for MQTT transport
- * This is the ONLY place where serialization happens
- */
-export function serializePayload(payload: MqttPayload): Buffer {
-  switch (payload.format) {
-    case 'json':
-      return Buffer.from(JSON.stringify(payload.data), 'utf-8');
-    case 'msgpack':
-      return msgpack.encode(payload.data);
-    case 'binary':
-      return payload.data;
-    case 'text':
-      return Buffer.from(payload.data, 'utf-8');
-    default:
-      // TypeScript exhaustiveness check
-      const _exhaustive: never = payload;
-      throw new Error(`Unknown payload format: ${(_exhaustive as any).format}`);
-  }
-}
-
-/**
- * Helper: Deserialize Buffer to payload (for received messages)
- * Tries MessagePack first (fast binary check), then JSON, then binary
- * 
- * TODO (POST-POC): Replace auto-detection with explicit format signaling
- * 
- * Current approach (first-byte heuristics) is acceptable for POC but not production-safe:
- * - Binary data can coincidentally start with msgpack markers (0x90-0x9f, 0x80-0x8f)
- * - Some msgpack types won't match markers (e.g., positive fixint 0x00-0x7f)
- * - False positives = corrupted decoding and data loss
- * 
- * Production solution (choose one):
- * 
- * 1. Topic-based format (RECOMMENDED):
- *    - Agent: Publish to `iot/device/{uuid}/endpoints/msgpack/{endpoint}`
- *    - API: Route by topic pattern, deserialize with explicit format
- *    - Benefits: Format visible in topic, easy debugging, backward compatible
- * 
- * 2. MQTT v5 contentType property:
- *    - Set `properties: { contentType: 'application/x-msgpack' }`
- *    - Requires MQTT v5 broker support
- * 
- * 3. Format prefix byte:
- *    - Prepend 0x01 (JSON) or 0x02 (msgpack) before serialized data
- *    - Simple but adds 1 byte overhead per message
- * 
- * See: docs/MESSAGEPACK-POC-GUIDE.md for migration plan
- */
-export function deserializePayload(buffer: Buffer): MqttPayload {
-  // Try MessagePack first (check first byte for msgpack markers)
-  if (buffer.length > 0) {
-    const firstByte = buffer[0];
-    // MessagePack markers: 0x90-0x9f (fixarray), 0xdc-0xdd (array16/32), 0x80-0x8f (fixmap)
-    if ((firstByte >= 0x90 && firstByte <= 0x9f) || 
-        firstByte === 0xdc || firstByte === 0xdd ||
-        (firstByte >= 0x80 && firstByte <= 0x8f)) {
-      try {
-        const data = msgpack.decode(buffer);
-        return { format: 'msgpack', data };
-      } catch {
-        // Not msgpack, continue to JSON
-      }
-    }
-  }
-  
-  // Try JSON
-  try {
-    const str = buffer.toString('utf-8');
-    const data = JSON.parse(str);
-    return { format: 'json', data };
-  } catch {
-    // Not JSON - treat as binary
-    return { format: 'binary', data: buffer };
-  }
-}
-
-/**
- * Calculate and log compression ratio for POC testing
- * Compares msgpack size vs JSON size
- */
-export function logCompressionStats(
-  data: object,
-  format: 'json' | 'msgpack',
-  logger?: AgentLogger | { info: (msg: string, ...args: any[]) => void },
-  topic?: string
-): void {
-  if (format !== 'msgpack' || !logger) return; // Only log for msgpack with valid logger
-  
-  try {
-    const jsonSize = Buffer.from(JSON.stringify(data), 'utf-8').length;
-    const msgpackSize = msgpack.encode(data).length;
-    const compressionRatio = ((jsonSize - msgpackSize) / jsonSize * 100).toFixed(1);
-    const savingsBytes = jsonSize - msgpackSize;
-    
-    // Use infoSync for AgentLogger, info for simple Logger
-    if ('infoSync' in logger) {
-      logger.infoSync('MessagePack compression stats', {
-        component: LogComponents.mqtt,
-        topic: topic?.substring(topic.lastIndexOf('/') + 1) || 'unknown',
-        jsonBytes: jsonSize,
-        msgpackBytes: msgpackSize,
-        savingsBytes,
-        compressionPct: `${compressionRatio}%`,
-        ratio: `${jsonSize}:${msgpackSize}`
-      });
-    } else {
-      logger.info(
-        `MessagePack compression stats - topic: ${topic?.substring(topic.lastIndexOf('/') + 1) || 'unknown'}, ` +
-        `json: ${jsonSize}B, msgpack: ${msgpackSize}B, savings: ${savingsBytes}B (${compressionRatio}%)`
-      );
-    }
-  } catch (error) {
-    // Ignore logging errors
-  }
 }
 
 /**
@@ -218,7 +72,7 @@ export class MqttManager extends EventEmitter {
   private static instance: MqttManager;
   private client: MqttClient | null = null;
   private connected = false;
-  private subscriptionHandlers: SubscriptionHandler[] = [];
+  private readonly router = new MqttRouter();
   private subscribedTopics = new Set<string>(); // Tracks topics actually subscribed with the broker
   private connectionPromise: Promise<void> | null = null;
   private debug = false;
@@ -319,15 +173,13 @@ export class MqttManager extends EventEmitter {
         this.bufferSync
           ?.start()
           .then(() => {
-            this.logger?.infoSync('Message buffer sync started', {
-              component: LogComponents.mqtt,
-            });
+            this.logInfo('Message buffer sync started');
           })
           .catch((error) => {
-            this.logger?.errorSync(
+            this.logError(
               'Failed to start message buffer sync after MQTT connect',
               error instanceof Error ? error : new Error(String(error)),
-              { component: LogComponents.mqtt }
+              undefined
             );
           });
       });
@@ -345,9 +197,7 @@ export class MqttManager extends EventEmitter {
     this.bufferSync.stop();
     this.bufferSync = undefined;
 
-    this.logger?.infoSync('Message buffer sync stopped', {
-      component: LogComponents.mqtt,
-    });
+    this.logInfo('Message buffer sync stopped');
   }
 
   /**
@@ -412,19 +262,77 @@ export class MqttManager extends EventEmitter {
     }
 
     // Clean up old client if exists (prevent listener leaks on reconnection)
-    if (this.client) {
-      this.debugLog('Cleaning up old MQTT client before reconnection');
-      this.client.removeAllListeners();
-      try {
-        this.client.end(true);
-      } catch (error) {
-        this.debugLog(`Error ending old client: ${error}`);
-      }
-      this.client = null;
-    }
+    this.cleanupExistingClient();
 
     this.debugLog(`Connecting to MQTT broker: ${brokerUrl}`);
 
+    return this.waitForConnection(brokerUrl, options);
+  }
+
+  private cleanupExistingClient(): void {
+    if (!this.client) {
+      return;
+    }
+
+    this.debugLog('Cleaning up old MQTT client before reconnection');
+    this.client.removeAllListeners();
+    try {
+      this.client.end(true);
+    } catch (error) {
+      this.debugLog(`Error ending old client: ${error}`);
+    }
+    this.client = null;
+  }
+
+  private createClient(brokerUrl: string, options?: IClientOptions): MqttClient {
+    return mqtt.connect(brokerUrl, {
+      ...options,
+      clean: true,
+      reconnectPeriod: 0, // Disable auto-reconnect, we'll handle it manually
+      connectTimeout: 10000,
+      keepalive: 60, // Send PINGREQ every 60s to detect dead connections
+      reschedulePings: true, // Reschedule ping timer on activity
+    });
+  }
+
+  private attachClientHandlers(
+    client: MqttClient,
+    brokerUrl: string,
+    options: IClientOptions | undefined,
+    connectionTimeout: ReturnType<typeof setTimeout>,
+    resolve: () => void,
+    reject: (reason?: any) => void
+  ): void {
+    client.on('connect', () => {
+      this.handleConnect(brokerUrl, connectionTimeout, resolve);
+    });
+
+    client.on('error', (err) => {
+      this.handleConnectionError(err, brokerUrl, connectionTimeout, reject);
+    });
+
+    client.on('reconnect', () => {
+      this.handleReconnect();
+    });
+
+    client.on('offline', () => {
+      this.handleOffline(brokerUrl, options);
+    });
+
+    client.on('close', () => {
+      this.handleClose(brokerUrl, options);
+    });
+
+    client.on('disconnect', () => {
+      this.handleDisconnect(brokerUrl, options);
+    });
+
+    client.on('message', (topic: string, payload: Buffer) => {
+      this.routeMessage(topic, payload);
+    });
+  }
+
+  private waitForConnection(brokerUrl: string, options?: IClientOptions): Promise<void> {
     this.connectionPromise = new Promise((resolve, reject) => {
       const connectionTimeout = setTimeout(() => {
         if (!this.connected && this.client) {
@@ -434,102 +342,93 @@ export class MqttManager extends EventEmitter {
         }
       }, 10000);
 
-      this.client = mqtt.connect(brokerUrl, {
-        ...options,
-        clean: true,
-        reconnectPeriod: 0, // Disable auto-reconnect, we'll handle it manually
-        connectTimeout: 10000,
-        keepalive: 60, // Send PINGREQ every 60s to detect dead connections
-        reschedulePings: true, // Reschedule ping timer on activity
-      });
-
-      this.client.on('connect', () => {
-        clearTimeout(connectionTimeout);
-        this.connected = true;
-        this.reconnectAttempts = 0; // Reset backoff counter on successful connect
-        this.isReconnecting = false; // Reset reconnection state
-        
-        this.logger?.infoSync('Connected to MQTT broker', {
-          component: LogComponents.mqtt,
-          brokerUrl,
-          reconnectAttempts: 0
-        });
-        
-        this.connectionPromise = null;
-        
-        // Resubscribe to all previously registered topics (new client session starts clean)
-        this.resubscribeAll();
-        
-        // Drain pending publishes
-        this.drainPendingPublishes();
-        
-        // Emit connect event for listeners (e.g., CloudSync)
-        this.emit('connect');
-        
-        resolve();
-      });
-
-      this.client.on('error', (err) => {
-        this.logger?.errorSync('MQTT connection error', err, {
-          component: LogComponents.mqtt,
-          brokerUrl,
-          connected: this.connected
-        });
-        
-        if (!this.connected) {
-          clearTimeout(connectionTimeout);
-          this.connectionPromise = null;
-          reject(err);
-        }
-      });
-
-      this.client.on('reconnect', () => {
-        this.logger?.infoSync('MQTT client reconnecting', {
-          component: LogComponents.mqtt,
-          reconnectAttempts: this.reconnectAttempts + 1
-        });
-      });
-
-      this.client.on('offline', () => {
-        this.connected = false;
-        this.logger?.infoSync('MQTT client offline', {
-          component: LogComponents.mqtt,
-          pendingPublishes: this.pendingPublishes.length
-        });
-        // Trigger reconnect immediately on offline
-        this.scheduleReconnect(brokerUrl, options);
-      });
-
-      this.client.on('close', () => {
-        this.connected = false;
-        this.logger?.infoSync('MQTT connection closed', {
-          component: LogComponents.mqtt,
-          pendingPublishes: this.pendingPublishes.length,
-          reconnectAttempts: this.reconnectAttempts
-        });
-        
-        // Schedule reconnect with exponential backoff
-        this.scheduleReconnect(brokerUrl, options);
-      });
-
-      // Critical: Handle 'disconnect' event (broker-initiated disconnect)
-      this.client.on('disconnect', () => {
-        this.connected = false;
-        this.logger?.warnSync('MQTT broker disconnected client (possibly API restart)', {
-          component: LogComponents.mqtt,
-          pendingPublishes: this.pendingPublishes.length
-        });
-        // Trigger immediate reconnect
-        this.scheduleReconnect(brokerUrl, options);
-      });
-
-      // Set up global message handler
-      this.client.on('message', (topic: string, payload: Buffer) => {
-        this.routeMessage(topic, payload);
-      });
+      this.client = this.createClient(brokerUrl, options);
+      this.attachClientHandlers(this.client, brokerUrl, options, connectionTimeout, resolve, reject);
     });
 
     return this.connectionPromise;
+  }
+
+  private handleConnect(
+    brokerUrl: string,
+    connectionTimeout: ReturnType<typeof setTimeout>,
+    resolve: () => void
+  ): void {
+    clearTimeout(connectionTimeout);
+    this.connected = true;
+    this.reconnectAttempts = 0; // Reset backoff counter on successful connect
+    this.isReconnecting = false; // Reset reconnection state
+
+    this.logInfo('Connected to MQTT broker', {
+      brokerUrl,
+      reconnectAttempts: 0
+    });
+
+    this.connectionPromise = null;
+
+    // Resubscribe to all previously registered topics (new client session starts clean)
+    this.resubscribeAll();
+
+    // Drain pending publishes
+    this.drainPendingPublishes();
+
+    // Emit connect event for listeners (e.g., CloudSync)
+    this.emit('connect');
+
+    resolve();
+  }
+
+  private handleConnectionError(
+    err: Error,
+    brokerUrl: string,
+    connectionTimeout: ReturnType<typeof setTimeout>,
+    reject: (reason?: any) => void
+  ): void {
+    this.logError('MQTT connection error', err, {
+      brokerUrl,
+      connected: this.connected
+    });
+
+    if (!this.connected) {
+      clearTimeout(connectionTimeout);
+      this.connectionPromise = null;
+      reject(err);
+    }
+  }
+
+  private handleReconnect(): void {
+    this.logInfo('MQTT client reconnecting', {
+      reconnectAttempts: this.reconnectAttempts + 1
+    });
+  }
+
+  private handleOffline(brokerUrl: string, options?: IClientOptions): void {
+    this.connected = false;
+    this.logInfo('MQTT client offline', {
+      pendingPublishes: this.pendingPublishes.length
+    });
+    // Trigger reconnect immediately on offline
+    this.scheduleReconnect(brokerUrl, options);
+  }
+
+  private handleClose(brokerUrl: string, options?: IClientOptions): void {
+    this.connected = false;
+    this.logInfo('MQTT connection closed', {
+      pendingPublishes: this.pendingPublishes.length,
+      reconnectAttempts: this.reconnectAttempts
+    });
+
+    // Schedule reconnect with exponential backoff
+    this.scheduleReconnect(brokerUrl, options);
+  }
+
+  private handleDisconnect(brokerUrl: string, options?: IClientOptions): void {
+    this.connected = false;
+    this.logWarn('MQTT broker disconnected client (possibly API restart)', {
+      pendingPublishes: this.pendingPublishes.length
+    });
+    // Trigger immediate reconnect
+    this.scheduleReconnect(brokerUrl, options);
   }
 
   /**
@@ -568,8 +467,7 @@ export class MqttManager extends EventEmitter {
     if (!this.client || !this.connected) {
       // Trigger reconnection if we have broker config (self-healing)
       if (this.lastBrokerUrl && !this.connectionPromise) {
-        this.logger?.warnSync('MQTT disconnected - triggering reconnection', {
-          component: LogComponents.mqtt,
+        this.logWarn('MQTT disconnected - triggering reconnection', {
           pendingMessages: this.pendingPublishes.length
         });
         this.scheduleReconnect(this.lastBrokerUrl, this.lastOptions);
@@ -577,9 +475,7 @@ export class MqttManager extends EventEmitter {
       
       // Queue message for delivery on reconnect
       if (this.pendingPublishes.length >= this.MAX_PENDING_PUBLISHES) {
-        this.logger?.warnSync(`Pending publish queue full (${this.MAX_PENDING_PUBLISHES}), dropping oldest message`, {
-          component: LogComponents.mqtt
-        });
+        this.logWarn(`Pending publish queue full (${this.MAX_PENDING_PUBLISHES}), dropping oldest message`);
         this.pendingPublishes.shift(); // Remove oldest
       }
       
@@ -604,8 +500,7 @@ export class MqttManager extends EventEmitter {
       this.client!.publish(topic, buffer, options || {}, (error) => {
         clearTimeout(timeout);
         if (error) {
-          this.logger?.warnSync('MQTT publish failed - forcing reconnect', {
-            component: LogComponents.mqtt,
+          this.logWarn('MQTT publish failed - forcing reconnect', {
             topic,
             error: error.message
           });
@@ -685,8 +580,7 @@ export class MqttManager extends EventEmitter {
       if (!this.lastBrokerUrl) {
         throw new Error('MQTT client not connected and no broker URL available for reconnect');
       }
-      this.logger?.infoSync('Auto-reconnecting for subscribe operation', {
-        component: LogComponents.mqtt,
+      this.logInfo('Auto-reconnecting for subscribe operation', {
         topic
       });
       await this.connect(this.lastBrokerUrl, this.lastOptions);
@@ -695,20 +589,17 @@ export class MqttManager extends EventEmitter {
     // Register handler and topic BEFORE the broker subscribe call so that
     // resubscribeAll() picks them up if a reconnect fires concurrently.
     if (handler) {
-      this.subscriptionHandlers.push({
-        pattern: topic,
-        handler
-      });
+      this.router.addHandler(topic, handler);
     }
     this.subscribedTopics.add(topic);
 
     return new Promise((resolve, reject) => {
       const rollback = () => {
         if (handler) {
-          this.subscriptionHandlers = this.subscriptionHandlers.filter(h => h.handler !== handler);
+          this.router.removeHandler(handler);
         }
         // Only remove from set if no other handler still references this topic
-        if (!this.subscriptionHandlers.some(h => h.pattern === topic)) {
+        if (!this.router.hasPattern(topic)) {
           this.subscribedTopics.delete(topic);
         }
       };
@@ -717,8 +608,7 @@ export class MqttManager extends EventEmitter {
         if (error) {
           const errorMsg = `Subscribe error: ${error.message || 'Unspecified error'}`;
           this.debugLog(`${errorMsg} for topic: ${topic}`);
-          this.logger?.errorSync(`Subscribe failed for topic: ${topic}`, error, {
-            component: LogComponents.mqtt,
+          this.logError(`Subscribe failed for topic: ${topic}`, error, {
             topic,
             errorCode: (error as any).code,
             granted
@@ -728,8 +618,7 @@ export class MqttManager extends EventEmitter {
         } else if (!granted || granted.length === 0) {
           const errorMsg = `Subscribe failed: No subscription granted for topic: ${topic}`;
           this.debugLog(`${errorMsg}`);
-          this.logger?.errorSync(errorMsg, undefined, {
-            component: LogComponents.mqtt,
+          this.logError(errorMsg, undefined, {
             topic,
             granted
           });
@@ -739,8 +628,7 @@ export class MqttManager extends EventEmitter {
           // QoS 128 means subscription failed (rejected by broker)
           const errorMsg = `Subscribe rejected by broker (QoS=128) for topic: ${topic}`;
           this.debugLog(` ${errorMsg}`);
-          this.logger?.errorSync(errorMsg, undefined, {
-            component: LogComponents.mqtt,
+          this.logError(errorMsg, undefined, {
             topic,
             granted
           });
@@ -768,9 +656,7 @@ export class MqttManager extends EventEmitter {
           reject(error);
         } else {
           // Remove all handlers and the tracked topic for this pattern
-          this.subscriptionHandlers = this.subscriptionHandlers.filter(
-            h => h.pattern !== topic
-          );
+          this.router.removePattern(topic);
           this.subscribedTopics.delete(topic);
           this.debugLog(`Unsubscribed from topic: ${topic}`);
           resolve();
@@ -798,7 +684,7 @@ export class MqttManager extends EventEmitter {
     return new Promise((resolve) => {
       this.client!.end(false, {}, () => {
         this.connected = false;
-        this.subscriptionHandlers = [];
+        this.router.clear();
         this.subscribedTopics.clear();
         this.debugLog('Disconnected from MQTT broker');
         resolve();
@@ -826,46 +712,13 @@ export class MqttManager extends EventEmitter {
    */
   private routeMessage(topic: string, payload: Buffer): void {
     this.debugLog(`Received MQTT message: ${topic} (${payload.length} bytes)`);
-    
-    for (const subscription of this.subscriptionHandlers) {
-      if (this.topicMatches(subscription.pattern, topic)) {
-        try {
-          subscription.handler(topic, payload);
-        } catch (error) {
-          this.logger?.errorSync(`Error in MQTT handler for pattern ${subscription.pattern}`, error as Error, {
-            component: LogComponents.mqtt,
-            topic,
-            pattern: subscription.pattern
-          });
-        }
-      }
-    }
-  }
 
-  /**
-   * Check if a topic matches a subscription pattern (supports wildcards)
-   */
-  private topicMatches(pattern: string, topic: string): boolean {
-    const patternParts = pattern.split('/');
-    const topicParts = topic.split('/');
-
-    if (patternParts.length !== topicParts.length && !pattern.includes('#')) {
-      return false;
-    }
-
-    for (let i = 0; i < patternParts.length; i++) {
-      if (patternParts[i] === '#') {
-        return true; // Multi-level wildcard matches everything after
-      }
-      if (patternParts[i] === '+') {
-        continue; // Single-level wildcard matches any value at this level
-      }
-      if (patternParts[i] !== topicParts[i]) {
-        return false;
-      }
-    }
-
-    return patternParts.length === topicParts.length;
+    this.router.route(topic, payload, (pattern, error) => {
+      this.logError(`Error in MQTT handler for pattern ${pattern}`, error as Error, {
+        topic,
+        pattern
+      });
+    });
   }
 
   /**
@@ -887,27 +740,23 @@ export class MqttManager extends EventEmitter {
     }
 
     const topics = [...this.subscribedTopics];
-    this.logger?.infoSync(`Resubscribing to ${topics.length} topic(s) after reconnect`, {
-      component: LogComponents.mqtt,
+    this.logInfo(`Resubscribing to ${topics.length} topic(s) after reconnect`, {
       topics
     });
 
     for (const topic of topics) {
       this.client!.subscribe(topic, { qos: 1 }, (error, granted) => {
         if (error) {
-          this.logger?.errorSync(`Resubscribe failed for topic: ${topic}`, error, {
-            component: LogComponents.mqtt,
+          this.logError(`Resubscribe failed for topic: ${topic}`, error, {
             topic
           });
         } else if (!granted || granted.length === 0 || granted[0].qos === 128) {
-          this.logger?.errorSync(`Resubscribe rejected by broker for topic: ${topic}`, undefined, {
-            component: LogComponents.mqtt,
+          this.logError(`Resubscribe rejected by broker for topic: ${topic}`, undefined, {
             topic,
             granted
           });
         } else {
-          this.logger?.infoSync(`Resubscribed to topic: ${topic} (QoS=${granted[0].qos})`, {
-            component: LogComponents.mqtt,
+          this.logInfo(`Resubscribed to topic: ${topic} (QoS=${granted[0].qos})`, {
             topic
           });
         }
@@ -1004,8 +853,7 @@ export class MqttManager extends EventEmitter {
     }
 
     const count = this.pendingPublishes.length;
-    this.logger?.infoSync(`Draining ${count} pending MQTT messages`, {
-      component: LogComponents.mqtt,
+    this.logInfo(`Draining ${count} pending MQTT messages`, {
       maxInflight: this.MAX_INFLIGHT
     });
 
@@ -1032,9 +880,7 @@ export class MqttManager extends EventEmitter {
         this.inflightPublishes--; // Release token
 
         if (error) {
-          this.logger?.errorSync(`Failed to drain message to ${msg.topic}`, error, {
-            component: LogComponents.mqtt
-          });
+          this.logError(`Failed to drain message to ${msg.topic}`, error);
           // Re-queue failed message (back to front to preserve order)
           this.pendingPublishes.unshift(msg);
         }
@@ -1066,6 +912,27 @@ export class MqttManager extends EventEmitter {
         component: LogComponents.mqtt
       });
     }
+  }
+
+  private logInfo(msg: string, data?: object): void {
+    this.logger?.infoSync(msg, {
+      component: LogComponents.mqtt,
+      ...(data || {})
+    });
+  }
+
+  private logWarn(msg: string, data?: object): void {
+    this.logger?.warnSync(msg, {
+      component: LogComponents.mqtt,
+      ...(data || {})
+    });
+  }
+
+  private logError(msg: string, err?: Error, data?: object): void {
+    this.logger?.errorSync(msg, err, {
+      component: LogComponents.mqtt,
+      ...(data || {})
+    });
   }
 }
 

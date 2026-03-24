@@ -14,7 +14,7 @@
  */
 
 import type { MqttManager } from './manager';
-import { createJsonPayload, serializePayload } from './manager';
+import { createJsonPayload, serializePayload } from './codec';
 import { MessageBufferModel } from '../db/models';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';

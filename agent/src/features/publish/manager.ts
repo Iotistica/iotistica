@@ -155,6 +155,23 @@ export class PublishManager extends EventEmitter {
     return this.connection.state;
   }
 
+  /**
+   * Inject a simulated protocol message directly into the same publish pipeline.
+   * This reuses batching, anomaly enrichment, compression, and MQTT publish paths.
+   */
+  public injectSimulationMessage(message: Record<string, any>): void {
+    if (this.needStop) {
+      return;
+    }
+
+    try {
+      const raw = JSON.stringify(message) + this.config.eomDelimiter;
+      this.batcher.appendData(Buffer.from(raw, 'utf8'));
+    } catch (error) {
+      this.logger?.error(`Failed to inject simulation message for endpoint '${this.config.name || 'unknown'}'`, error);
+    }
+  }
+
   getRuntimeSnapshot(staleThresholdMs = 60000): Record<string, any> {
     const stats = this.getStats();
     const state = this.getState();
