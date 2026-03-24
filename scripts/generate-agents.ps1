@@ -38,7 +38,9 @@ param(
     #[string]$ApiUrl = "https://api.iotistica.com",
     [string]$ApiUrl = "https://localhost:3443",
     #[string]$ApiUrl = "https://api-client-b07708418f4e.iotistica.com",
-    [string]$FleetUuid = "b9f49527-daa8-45e0-8d90-2fd4ff392273",
+    # Optional explicit fleet UUID override. If empty (default), script auto-resolves
+    # an existing default fleet or creates one in the database.
+    [string]$FleetUuid = "",
     [bool]$UseDirectDb = $true,
     [string]$DbHost = "localhost",
     [int]$DbPort = 5432,
@@ -117,6 +119,134 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function New-DbConnectionString {
+    param(
+        [string]$DbHost,
+        [int]$DbPort,
+        [string]$DbName,
+        [string]$DbUser,
+        [string]$DbSslMode,
+        [string]$DatabaseUrl
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($DatabaseUrl)) {
+        return $DatabaseUrl
+    }
+
+    $sslPart = if ([string]::IsNullOrWhiteSpace($DbSslMode)) { "" } else { " sslmode=$DbSslMode" }
+    return "host=$DbHost port=$DbPort dbname=$DbName user=$DbUser$sslPart"
+}
+
+function Get-OrCreateDefaultFleetUuid {
+    param(
+        [string]$PreferredFleetUuid,
+        [string]$DbHost,
+        [int]$DbPort,
+        [string]$DbName,
+        [string]$DbUser,
+        [string]$DbPassword,
+        [string]$DbSslMode,
+        [string]$DatabaseUrl
+    )
+
+    if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
+        Write-Error "psql is required for direct provisioning. Install PostgreSQL client tools or add psql to PATH."
+        exit 1
+    }
+
+    $env:PGPASSWORD = $DbPassword
+    $connectionString = New-DbConnectionString -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
+
+    # Ensure fleets table exists before trying to resolve/create a fleet.
+    $hasFleetsTable = psql -d "$connectionString" -t -A -q -c "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='fleets'" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to inspect database schema: $hasFleetsTable"
+        exit 1
+    }
+    if (-not ($hasFleetsTable -match '1')) {
+        Write-Error "Table 'fleets' was not found. Run API database migrations first."
+        exit 1
+    }
+
+    # 1) If caller provided a fleet UUID and it exists, use it.
+    if (-not [string]::IsNullOrWhiteSpace($PreferredFleetUuid)) {
+        $escapedPreferredUuid = $PreferredFleetUuid -replace "'", "''"
+        $existingPreferred = psql -d "$connectionString" -t -A -q -c "SELECT fleet_uuid::text FROM fleets WHERE fleet_uuid = '$escapedPreferredUuid'::uuid LIMIT 1" 2>&1
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingPreferred)) {
+            return $existingPreferred.Trim()
+        }
+
+        Write-Host "⚠️  Provided FleetUuid '$PreferredFleetUuid' not found. Falling back to default fleet lookup/create." -ForegroundColor Yellow
+    }
+
+    # 2) Try to find an existing default fleet by fleet_id or fleet_name.
+    $defaultFleetQuery = @"
+SELECT fleet_uuid::text
+FROM fleets
+WHERE
+    lower(COALESCE(fleet_id, '')) IN ('default', 'default-fleet')
+    OR lower(COALESCE(fleet_name, '')) IN ('default', 'default fleet')
+ORDER BY
+    CASE
+        WHEN lower(COALESCE(fleet_id, '')) = 'default-fleet' THEN 1
+        WHEN lower(COALESCE(fleet_name, '')) = 'default fleet' THEN 2
+        WHEN lower(COALESCE(fleet_id, '')) = 'default' THEN 3
+        ELSE 4
+    END,
+    created_at ASC
+LIMIT 1;
+"@
+
+    $existingDefault = psql -d "$connectionString" -t -A -q -c $defaultFleetQuery 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to query default fleet: $existingDefault"
+        exit 1
+    }
+    if (-not [string]::IsNullOrWhiteSpace($existingDefault)) {
+        return $existingDefault.Trim()
+    }
+
+    # 3) Create default fleet when missing.
+    $newFleetUuid = [guid]::NewGuid().ToString()
+    $escapedNewFleetUuid = $newFleetUuid -replace "'", "''"
+    $defaultCustomerId = '00000000-0000-0000-0000-000000000001'
+
+    $createDefaultSql = @"
+INSERT INTO fleets (
+    fleet_uuid,
+    fleet_id,
+    fleet_name,
+    customer_id,
+    fleet_type,
+    description,
+    status,
+    created_by,
+    created_at,
+    updated_at
+)
+VALUES (
+    '$escapedNewFleetUuid'::uuid,
+    'default-fleet',
+    'Default Fleet',
+    '$defaultCustomerId'::uuid,
+    'mixed',
+    'Auto-created by scripts/generate-agents.ps1 for provisioning keys',
+    'active',
+    'generate-agents.ps1',
+    NOW(),
+    NOW()
+);
+"@
+
+    $createResult = psql -d "$connectionString" -v ON_ERROR_STOP=1 -q -c $createDefaultSql 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to create default fleet: $createResult"
+        exit 1
+    }
+
+    return $newFleetUuid
+}
 
 # Cleanup function - stop containers, remove volumes, and delete images
 function Remove-AgentResources {
@@ -298,11 +428,7 @@ function New-ProvisioningKey {
         $key = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
 
         $env:PGPASSWORD = $DbPassword
-        $connectionString = $DatabaseUrl
-        if ([string]::IsNullOrWhiteSpace($connectionString)) {
-            $sslPart = if ([string]::IsNullOrWhiteSpace($DbSslMode)) { "" } else { " sslmode=$DbSslMode" }
-            $connectionString = "host=$DbHost port=$DbPort dbname=$DbName user=$DbUser$sslPart"
-        }
+        $connectionString = New-DbConnectionString -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
 
         $schemaSql = @"
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -449,6 +575,9 @@ if ($EnableSimulation) {
 }
 Write-Host "🔑 Generating provisioning keys via direct DB access..." -ForegroundColor Cyan
 
+$resolvedFleetUuid = Get-OrCreateDefaultFleetUuid -PreferredFleetUuid $FleetUuid -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbPassword $DbPassword -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
+Write-Host "📦 Using fleet UUID: $resolvedFleetUuid" -ForegroundColor Gray
+
 $services = @()
 $volumes = @()
 $provisioningKeys = @()
@@ -459,7 +588,7 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     
     # Generate provisioning key via API
     Write-Host "  Generating key for $agentName..." -ForegroundColor Gray
-    $apiKey = New-ProvisioningKey -ApiUrl $ApiUrl -FleetUuid $FleetUuid -UseDirectDb $UseDirectDb `
+    $apiKey = New-ProvisioningKey -ApiUrl $ApiUrl -FleetUuid $resolvedFleetUuid -UseDirectDb $UseDirectDb `
         -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbPassword $DbPassword `
         -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
     $provisioningKeys += "${agentName}: $apiKey"
