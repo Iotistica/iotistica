@@ -220,7 +220,7 @@ jobs:
             echo "- \`iotistic/${APP}\` (will find last built image from ${APP}/**)" >> $GITHUB_STEP_SUMMARY
           done
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Requires a CI image for the latest source commit. Release fails immediately if the image is missing — no fallback." >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Uses the most recent CI image per app. Warns if any source commits have no image." >> $GITHUB_STEP_SUMMARY
 
   create-tag:
     name: Create git tag (for workflow_dispatch)
@@ -290,8 +290,6 @@ jobs:
             local WORKFLOW_FILE=".github/workflows/build-${APP}-ci.yml"
             local APP_COMMIT=""
             local SHORT_SHA=""
-            local FOUND="false"
-            local LATEST_SOURCE_COMMIT=""
 
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Promoting $APP"
@@ -303,47 +301,56 @@ jobs:
             git log --format='  - %H %s' "$RELEASE_COMMIT" -n 5 -- $SOURCE_FILTER || true
             echo ""
 
-            # Pick latest source commit for guidance and search backwards for latest CI-built image.
-            LATEST_SOURCE_COMMIT=$(git log --format=%H "$RELEASE_COMMIT" -n 1 -- $SOURCE_FILTER || true)
-            if [ -z "$LATEST_SOURCE_COMMIT" ]; then
-              echo ""
+            # Get up to 10 source commits to search for a CI image
+            local ALL_SOURCE_COMMITS
+            ALL_SOURCE_COMMITS=$(git log --format=%H "$RELEASE_COMMIT" -n 10 -- $SOURCE_FILTER || true)
+            if [ -z "$ALL_SOURCE_COMMITS" ]; then
               echo "❌ No source commits found for $APP up to release commit"
               echo "   Check source filter: $SOURCE_FILTER"
               exit 1
             fi
 
+            local LATEST_SOURCE_COMMIT
+            LATEST_SOURCE_COMMIT=$(echo "$ALL_SOURCE_COMMITS" | head -1)
             echo "Latest source commit: $LATEST_SOURCE_COMMIT"
+            echo ""
 
-            # Fast-path: check the latest source commit first before walking history.
-            # If CI hasn't built it yet, fail immediately rather than silently promoting
-            # a stale image that may be missing recent changes (e.g. DB migrations).
-            LATEST_SHORT_SHA="${LATEST_SOURCE_COMMIT:0:12}"
-            echo -n "Checking if latest source commit has a CI image (ci-${LATEST_SHORT_SHA})... "
-            if ! docker manifest inspect "${DOCKER_ORG}/${APP}:ci-${LATEST_SHORT_SHA}" >/dev/null 2>&1; then
-              echo "not found"
+            # Walk commits from newest to oldest, use first one with a CI image
+            local SKIPPED=()
+            while IFS= read -r COMMIT; do
+              local SHORT="${COMMIT:0:12}"
+              echo -n "  Checking ci-${SHORT} ($(git log -1 --format='%s' $COMMIT))... "
+              if docker manifest inspect "${DOCKER_ORG}/${APP}:ci-${SHORT}" >/dev/null 2>&1; then
+                echo "found"
+                APP_COMMIT="$COMMIT"
+                break
+              else
+                echo "no image"
+                SKIPPED+=("$COMMIT")
+              fi
+            done <<< "$ALL_SOURCE_COMMITS"
+
+            if [ -z "$APP_COMMIT" ]; then
               echo ""
-              echo "❌ The latest source commit for ${APP} does not have a CI image yet."
-              echo "   Latest source commit: ${LATEST_SOURCE_COMMIT}"
-              echo "   Expected image:       ${DOCKER_ORG}/${APP}:ci-${LATEST_SHORT_SHA}"
-              echo ""
-              echo "   This means source changes (e.g. DB migrations, code) exist that have"
-              echo "   NOT been built into a Docker image. Promoting an older image would"
-              echo "   deploy stale code/migrations to Kubernetes."
-              echo ""
-              echo "   Fix: wait for the CI build to complete, then re-run this release."
-              echo "   Or trigger it manually:"
-              echo "   gh workflow run build-${APP}-ci.yml -f ref=${LATEST_SOURCE_COMMIT}"
-              echo ""
+              echo "❌ No CI image found for $APP in the last 10 source commits."
+              echo "   Trigger a build and re-run the release:"
+              echo "   gh workflow run ${WORKFLOW_FILE} -f ref=${LATEST_SOURCE_COMMIT}"
               exit 1
             fi
-            echo "✅ found"
-            APP_COMMIT="$LATEST_SOURCE_COMMIT"
+
+            # Warn explicitly about any commits not included in this release
+            if [ ${#SKIPPED[@]} -gt 0 ]; then
+              echo ""
+              echo "⚠️  WARNING: ${#SKIPPED[@]} source commit(s) have no CI image and are NOT included in this release:"
+              for sc in "${SKIPPED[@]}"; do
+                echo "   - $(git log -1 --format='%h %s' $sc)"
+              done
+              echo "   Using image from: ${APP_COMMIT:0:12}"
+              echo ""
+            fi
 
             SHORT_SHA="${APP_COMMIT:0:12}"
-            echo "Using commit with available CI image: $APP_COMMIT"
             echo "Selected ci tag: ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
-            echo "Files from selected commit that match source filter:"
-            git show --name-only --pretty='format:' "$APP_COMMIT" -- $SOURCE_FILTER | sed 's/^/  - /' || true
 
             # Pull the single ci- tag and promote to release version
             docker pull "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
