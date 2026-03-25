@@ -19,8 +19,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Wait for Docker daemon (DinD sidecar)
+        run: |
+          for i in $(seq 1 30); do
+            docker info > /dev/null 2>&1 && echo "Docker ready after ${i}s" && break
+            echo "Waiting for Docker daemon... ($i/30)"
+            sleep 1
+          done
+          docker info
+
       - name: Set up Docker Buildx
-        
         uses: docker/setup-buildx-action@v3
         with:
           driver-opts: |
