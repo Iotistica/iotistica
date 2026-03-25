@@ -313,6 +313,7 @@ async function applyMigration(migration: Migration): Promise<void> {
         });
       } else {
         const client = await getClient();
+        let clientError: Error | undefined;
         try {
           logger.info('Running migration without transaction (-- NO TRANSACTION marker found)', {
             migration: migration.filename,
@@ -331,13 +332,19 @@ async function applyMigration(migration: Migration): Promise<void> {
              VALUES ($1, $2, $3, $4, $5)`,
             [migration.id, migration.name, migration.filename, checksum, executionTime]
           );
+        } catch (err) {
+          clientError = err as Error;
+          throw err;
         } finally {
           try {
             await client.query('RESET statement_timeout');
           } catch {
             // Best effort reset; client release still occurs.
           }
-          client.release();
+          // Pass error to release() so pg-pool destroys this connection rather than
+          // recycling it. Without this, the pool may return the broken connection
+          // (still in aborted-transaction state) to the next caller, causing 25P02.
+          client.release(clientError);
         }
       }
 
@@ -395,7 +402,8 @@ async function applyPendingMigrations(pendingMigrations: Migration[]): Promise<v
       await applyMigration(migration);
     } catch (error) {
       logger.error(`Migration ${migration.id} failed`, {
-        error,
+        error: (error as Error).message,
+        stack: (error as Error).stack,
         filename: migration.filename,
         migrationId: migration.id,
       });
@@ -446,7 +454,7 @@ export async function runMigrations(): Promise<void> {
     await applyPendingMigrations(pendingMigrations);
     
   } catch (error) {
-    logger.error('Migration system error', { error });
+    logger.error('Migration system error', { error: (error as Error).message, stack: (error as Error).stack });
     throw error;
   }
 }

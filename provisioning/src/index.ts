@@ -29,6 +29,7 @@ import internalInvitesRouter from './routes/internal-invites';
 
 // Middleware
 import { authenticateAdmin } from './middleware/auth';
+import { logger } from './utils/logger';
 import { apiLimiter, strictLimiter } from './middleware/rate-limit';
 
 // Services
@@ -137,47 +138,45 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err: any, req: any, res: any, next: any) => {
-  console.error('Unhandled error:', err);
+  logger.error('Unhandled error', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
 // Initialize and start server
 async function start() {
   try {
-    console.log('🚀 Starting Provisioning...');
+    logger.info('Starting Provisioning...');
 
     // Test database connection
     await testConnection();
-    console.log('✅ Database connected');
+    logger.info('Database connected');
 
     // Initialize license generator (load RSA keys)
     LicenseGenerator.init();
-    console.log('✅ License generator initialized');
+    logger.info('License generator initialized');
 
     // Start server
     app.listen(PORT, () => {
-      console.log(`✅ Provisioning API listening on port ${PORT}`);
-      console.log(`   Health: http://localhost:${PORT}/health`);
-      console.log(`   API: http://localhost:${PORT}/api`);
-      console.log(`   Queue Dashboard: http://localhost:${PORT}/admin/queues`);
-      console.log('');
-      console.log('ℹ️  Note: Deployment worker runs in separate container');
-      console.log('   Start with: npm run worker (or docker-compose up worker)');
+      logger.info(`Provisioning API listening on port ${PORT}`);
+      logger.info(`Health: http://localhost:${PORT}/health`);
+      logger.info(`API: http://localhost:${PORT}/api`);
+      logger.info(`Queue Dashboard: http://localhost:${PORT}/admin/queues`);
+      logger.info('Note: Deployment worker runs in separate container. Start with: npm run worker');
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    logger.error('Failed to start server', error);
     process.exit(1);
   }
 }
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('📴 SIGTERM received, shutting down gracefully...');
+  logger.info('SIGTERM received, shutting down gracefully...');
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('📴 SIGINT received, shutting down gracefully...');
+  logger.info('SIGINT received, shutting down gracefully...');
   process.exit(0);
 });
 
