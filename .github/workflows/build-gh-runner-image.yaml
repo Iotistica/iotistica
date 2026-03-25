@@ -10,7 +10,7 @@ on:
 
 jobs:
   build-and-push:
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-v2]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
