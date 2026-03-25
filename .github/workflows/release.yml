@@ -298,12 +298,13 @@ jobs:
             echo "Workflow file: $WORKFLOW_FILE"
             echo "Release commit: $RELEASE_COMMIT"
             echo "Recent commits touching $APP source (up to release commit):"
-            git log --format='  - %H %s' "$RELEASE_COMMIT" -n 5 -- $SOURCE_FILTER || true
+            git log --format='  - %H %s' "$RELEASE_COMMIT" -n 5 -- $SOURCE_FILTER $WORKFLOW_FILE || true
             echo ""
 
             # Get up to 10 source commits to search for a CI image
+            # Include the workflow file so rebuilds triggered by CI changes are also considered
             local ALL_SOURCE_COMMITS
-            ALL_SOURCE_COMMITS=$(git log --format=%H "$RELEASE_COMMIT" -n 10 -- $SOURCE_FILTER || true)
+            ALL_SOURCE_COMMITS=$(git log --format=%H "$RELEASE_COMMIT" -n 10 -- $SOURCE_FILTER $WORKFLOW_FILE || true)
             if [ -z "$ALL_SOURCE_COMMITS" ]; then
               echo "❌ No source commits found for $APP up to release commit"
               echo "   Check source filter: $SOURCE_FILTER"

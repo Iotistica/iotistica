@@ -103,7 +103,9 @@ jobs:
           platforms: linux/amd64
           cache-from: type=registry,ref=iotistic/api:buildcache
           cache-to: type=registry,ref=iotistic/api:buildcache,mode=max
-          tags: iotistic/api:ci-${{ steps.sha.outputs.short_sha }}
+          tags: |
+            iotistic/api:ci-${{ steps.sha.outputs.short_sha }}
+            iotistic/api:ci-latest
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
