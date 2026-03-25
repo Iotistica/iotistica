@@ -104,7 +104,7 @@ param(
     [int]$SnmpPort = 161,
     
     # Simulation Control
-    [switch]$EnableSimulation = $true,
+    [switch]$EnableSimulation = $false,
 
     
     # Container Resources

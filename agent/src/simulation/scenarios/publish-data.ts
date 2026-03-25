@@ -187,7 +187,7 @@ export class DeviceDataSimulation implements SimulationScenario {
 				this.anomalyService.processDataPoint(dataPoint);
 			}
 			
-			this.logger?.debugSync('Sensor data published', {
+			this.logger?.debugSync('Device data published', {
 				component: LogComponents.metrics,
 				metric: sensor.metric,
 				value: value.toFixed(2),

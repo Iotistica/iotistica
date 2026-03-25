@@ -135,6 +135,10 @@ export class SimulationOrchestrator {
 				);
 			}
 		}
+
+		const runningScenarios = Array.from(this.scenarios.values())
+			.filter(scenario => scenario.getStatus().running)
+			.map(scenario => scenario.name);
 		
 		// Log periodic warning that simulation is active
 		if (this.config.warningInterval && this.config.warningInterval > 0) {
@@ -148,7 +152,7 @@ export class SimulationOrchestrator {
 		
 		this.logger?.infoSync('Simulation orchestrator started', {
 			component: LogComponents.agent,
-			activeScenarios: enabledScenarios.map(s => s.name),
+			activeScenarios: runningScenarios,
 		});
 	}
 	
