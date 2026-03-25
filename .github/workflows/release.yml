@@ -284,7 +284,7 @@ jobs:
           declare -A DIGESTS
           for APP in ${{ env.APPS }}; do
             CI_LATEST="${DOCKER_ORG}/${APP}:ci-latest"
-            DIGEST=$(docker buildx imagetools inspect "$CI_LATEST" --format '{{.Manifest.Digest}}' 2>/dev/null || true)
+            DIGEST=$(docker buildx imagetools inspect "$CI_LATEST" 2>/dev/null | grep "^Digest:" | awk '{print $2}' || true)
             if [ -z "$DIGEST" ]; then
               echo "❌ Could not resolve digest for $CI_LATEST"
               echo "   Ensure a CI build has completed and pushed ci-latest for $APP"
