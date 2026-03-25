@@ -313,19 +313,32 @@ jobs:
             fi
 
             echo "Latest source commit: $LATEST_SOURCE_COMMIT"
-            echo "Searching for latest CI image tag in source history..."
-            for COMMIT in $(git log --format=%H "$RELEASE_COMMIT" -n 50 -- $SOURCE_FILTER); do
-              SHORT_SHA="${COMMIT:0:12}"
-              echo -n "  - trying ci-${SHORT_SHA}... "
-              if docker manifest inspect "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" >/dev/null 2>&1; then
-                APP_COMMIT="$COMMIT"
-                FOUND="true"
-                echo "✅ found"
-                break
-              else
-                echo "not found"
-              fi
-            done
+
+            # Fast-path: check the latest source commit first before walking history.
+            # If CI hasn't built it yet, fail immediately rather than silently promoting
+            # a stale image that may be missing recent changes (e.g. DB migrations).
+            LATEST_SHORT_SHA="${LATEST_SOURCE_COMMIT:0:12}"
+            echo -n "Checking if latest source commit has a CI image (ci-${LATEST_SHORT_SHA})... "
+            if ! docker manifest inspect "${DOCKER_ORG}/${APP}:ci-${LATEST_SHORT_SHA}" >/dev/null 2>&1; then
+              echo "not found"
+              echo ""
+              echo "❌ The latest source commit for ${APP} does not have a CI image yet."
+              echo "   Latest source commit: ${LATEST_SOURCE_COMMIT}"
+              echo "   Expected image:       ${DOCKER_ORG}/${APP}:ci-${LATEST_SHORT_SHA}"
+              echo ""
+              echo "   This means source changes (e.g. DB migrations, code) exist that have"
+              echo "   NOT been built into a Docker image. Promoting an older image would"
+              echo "   deploy stale code/migrations to Kubernetes."
+              echo ""
+              echo "   Fix: wait for the CI build to complete, then re-run this release."
+              echo "   Or trigger it manually:"
+              echo "   gh workflow run build-${APP}-ci.yml -f ref=${LATEST_SOURCE_COMMIT}"
+              echo ""
+              exit 1
+            fi
+            echo "✅ found"
+            APP_COMMIT="$LATEST_SOURCE_COMMIT"
+            FOUND="true"
 
             if [ "$FOUND" != "true" ]; then
               echo ""
