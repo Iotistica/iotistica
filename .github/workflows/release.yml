@@ -259,11 +259,6 @@ jobs:
     # Skipped jobs count as satisfied dependencies, so promote-images will run
     if: always() && needs.validate-release.result == 'success'
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -275,132 +270,76 @@ jobs:
         run: |
           set -euo pipefail
           RELEASE="${{ needs.validate-release.outputs.release_version }}"
-          
+
           echo "Release version: $RELEASE"
           echo ""
 
-          # Commit the release tag points to (fallback to HEAD when tag is absent)
-          RELEASE_COMMIT=$(git rev-list -n 1 "$RELEASE" 2>/dev/null || git rev-parse HEAD)
-          echo "Release commit: $RELEASE_COMMIT"
+          # ── Phase 1: Freeze point ────────────────────────────────────────────
+          # Resolve ALL digests before touching any registry tags.
+          # This creates a consistent cross-app snapshot at a single moment in
+          # time — no app can drift to a newer CI image mid-release.
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Phase 1: Resolving digests (freeze point)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          declare -A DIGESTS
+          for APP in ${{ env.APPS }}; do
+            CI_LATEST="${DOCKER_ORG}/${APP}:ci-latest"
+            DIGEST=$(docker buildx imagetools inspect "$CI_LATEST" --format '{{.Manifest.Digest}}' 2>/dev/null || true)
+            if [ -z "$DIGEST" ]; then
+              echo "❌ Could not resolve digest for $CI_LATEST"
+              echo "   Ensure a CI build has completed and pushed ci-latest for $APP"
+              exit 1
+            fi
+            DIGESTS[$APP]="$DIGEST"
+            echo "  $APP → $DIGEST"
+          done
+          echo ""
+          echo "✅ All digests resolved at the same moment — consistent snapshot locked"
           echo ""
 
-          promote_app() {
-            local APP="$1"
-            local SOURCE_FILTER="${APP}/**"
-            local WORKFLOW_FILE=".github/workflows/build-${APP}-ci.yml"
-            local APP_COMMIT=""
-            local SHORT_SHA=""
-
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Promoting $APP"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Source filter: $SOURCE_FILTER"
-            echo "Workflow file: $WORKFLOW_FILE"
-            echo "Release commit: $RELEASE_COMMIT"
-            echo "Recent commits touching $APP source (up to release commit):"
-            git log --format='  - %H %s' "$RELEASE_COMMIT" -n 5 -- $SOURCE_FILTER $WORKFLOW_FILE || true
-            echo ""
-
-            # Get up to 10 source commits to search for a CI image
-            # Include the workflow file so rebuilds triggered by CI changes are also considered
-            local ALL_SOURCE_COMMITS
-            ALL_SOURCE_COMMITS=$(git log --format=%H "$RELEASE_COMMIT" -n 10 -- $SOURCE_FILTER $WORKFLOW_FILE || true)
-            if [ -z "$ALL_SOURCE_COMMITS" ]; then
-              echo "❌ No source commits found for $APP up to release commit"
-              echo "   Check source filter: $SOURCE_FILTER"
-              exit 1
-            fi
-
-            local LATEST_SOURCE_COMMIT
-            LATEST_SOURCE_COMMIT=$(echo "$ALL_SOURCE_COMMITS" | head -1)
-            echo "Latest source commit: $LATEST_SOURCE_COMMIT"
-            echo ""
-
-            # Walk commits from newest to oldest, use first one with a CI image
-            local SKIPPED=()
-            while IFS= read -r COMMIT; do
-              local SHORT="${COMMIT:0:12}"
-              echo -n "  Checking ci-${SHORT} ($(git log -1 --format='%s' $COMMIT))... "
-              if docker manifest inspect "${DOCKER_ORG}/${APP}:ci-${SHORT}" >/dev/null 2>&1; then
-                echo "found"
-                APP_COMMIT="$COMMIT"
-                break
-              else
-                echo "no image"
-                SKIPPED+=("$COMMIT")
-              fi
-            done <<< "$ALL_SOURCE_COMMITS"
-
-            if [ -z "$APP_COMMIT" ]; then
-              echo ""
-              echo "❌ No CI image found for $APP in the last 10 source commits."
-              echo "   Trigger a build and re-run the release:"
-              echo "   gh workflow run ${WORKFLOW_FILE} -f ref=${LATEST_SOURCE_COMMIT}"
-              exit 1
-            fi
-
-            # Warn explicitly about any commits not included in this release
-            if [ ${#SKIPPED[@]} -gt 0 ]; then
-              echo ""
-              echo "⚠️  WARNING: ${#SKIPPED[@]} source commit(s) have no CI image and are NOT included in this release:"
-              for sc in "${SKIPPED[@]}"; do
-                echo "   - $(git log -1 --format='%h %s' $sc)"
-              done
-              echo "   Using image from: ${APP_COMMIT:0:12}"
-              echo ""
-            fi
-
-            SHORT_SHA="${APP_COMMIT:0:12}"
-            echo "Selected ci tag: ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
-
-            # Pull the single ci- tag and promote to release version
-            docker pull "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}"
-            docker tag "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" "${DOCKER_ORG}/${APP}:${RELEASE}"
-            docker push "${DOCKER_ORG}/${APP}:${RELEASE}"
-            echo "✅ ${DOCKER_ORG}/${APP}:ci-${SHORT_SHA} → ${RELEASE}"
-            echo ""
-
-            # Emit per-app selection details for run summary
-            echo "### ${APP}" >> $GITHUB_STEP_SUMMARY
-            echo "- selected commit: \`${APP_COMMIT}\`" >> $GITHUB_STEP_SUMMARY
-            echo "- selected ci tag: \`iotistic/${APP}:ci-${SHORT_SHA}\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-
-            # Save SHORT_SHA for later use (no full SHA needed)
-            echo "$SHORT_SHA" > "/tmp/${APP}_sha.txt"
-          }
-
-          # Promote all apps
+          # ── Phase 2: Promote ─────────────────────────────────────────────────
+          # All pulls/tags/pushes use the frozen digests from Phase 1.
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Phase 2: Promoting to $RELEASE"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           for APP in ${{ env.APPS }}; do
-            promote_app "$APP"
-          done
+            DIGEST="${DIGESTS[$APP]}"
+            IMAGE_BY_DIGEST="${DOCKER_ORG}/${APP}@${DIGEST}"
 
-          # Tag as 'latest' for final releases
+            docker pull "$IMAGE_BY_DIGEST"
+            docker tag "$IMAGE_BY_DIGEST" "${DOCKER_ORG}/${APP}:${RELEASE}"
+            docker push "${DOCKER_ORG}/${APP}:${RELEASE}"
+            echo "✅ $APP: ${DIGEST:0:19}... → ${RELEASE}"
+          done
+          echo ""
+
+          # ── Phase 3: Tag as 'latest' for final releases ───────────────────────
           if [[ "$RELEASE" != *"-rc."* ]]; then
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "Tagging as 'latest'"
+            echo "Phase 3: Tagging as 'latest'"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             for APP in ${{ env.APPS }}; do
-              SHORT_SHA=$(cat /tmp/${APP}_sha.txt)
-              docker tag "${DOCKER_ORG}/${APP}:ci-${SHORT_SHA}" "${DOCKER_ORG}/${APP}:latest"
+              DIGEST="${DIGESTS[$APP]}"
+              docker tag "${DOCKER_ORG}/${APP}@${DIGEST}" "${DOCKER_ORG}/${APP}:latest"
               docker push "${DOCKER_ORG}/${APP}:latest"
               echo "✅ ${DOCKER_ORG}/${APP}:latest"
             done
+            echo ""
           fi
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "✅ All images promoted"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          
-          # Generate summary with actual SHAs
+
+          # ── Summary ───────────────────────────────────────────────────────────
           echo "## Image Promotion Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Release:** \`$RELEASE\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Promoted Images" >> $GITHUB_STEP_SUMMARY
           for APP in ${{ env.APPS }}; do
-            SHORT_SHA=$(cat /tmp/${APP}_sha.txt)
-            echo "- **${APP}**: \`iotistic/${APP}:ci-${SHORT_SHA}\` → \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+            DIGEST="${DIGESTS[$APP]}"
+            echo "- **${APP}**: \`iotistic/${APP}:ci-latest\` (\`${DIGEST:0:19}...\`) → \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           done
 
   create-release:
