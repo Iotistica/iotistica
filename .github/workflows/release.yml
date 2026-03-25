@@ -220,7 +220,7 @@ jobs:
             echo "- \`iotistic/${APP}\` (will find last built image from ${APP}/**)" >> $GITHUB_STEP_SUMMARY
           done
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Searches for ci-tagged images (CI-built, last 50 commits)" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Requires a CI image for the latest source commit. Release fails immediately if the image is missing — no fallback." >> $GITHUB_STEP_SUMMARY
 
   create-tag:
     name: Create git tag (for workflow_dispatch)
@@ -338,17 +338,6 @@ jobs:
             fi
             echo "✅ found"
             APP_COMMIT="$LATEST_SOURCE_COMMIT"
-            FOUND="true"
-
-            if [ "$FOUND" != "true" ]; then
-              echo ""
-              echo "❌ No CI image found for $APP in the last 50 source commits"
-              echo "   Latest source commit is: $LATEST_SOURCE_COMMIT"
-              echo "   Build and push it first:"
-              echo "   Run: gh workflow run build-${APP}-ci.yml -f ref=${LATEST_SOURCE_COMMIT}"
-              echo ""
-              exit 1
-            fi
 
             SHORT_SHA="${APP_COMMIT:0:12}"
             echo "Using commit with available CI image: $APP_COMMIT"
