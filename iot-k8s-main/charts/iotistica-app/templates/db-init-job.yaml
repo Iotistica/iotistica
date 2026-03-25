@@ -1,0 +1,124 @@
+{{- if and .Values.api.dbInit .Values.api.dbInit.enabled }}
+---
+# Database initialisation job: creates the per-client app role and grants schema
+# permissions on the CNPG-managed database.
+#
+# Runs once per ArgoCD sync (argocd hook: Sync, wave -1) so the role exists
+# before the API deployment starts. The job is idempotent.
+#
+# Prerequisites (created by the provisioning service before first sync):
+#   - {{ .Values.api.sql.SecretName }}     – app-user credentials (server, port,
+#                                            dbname, username, password)
+#   - {{ .Values.api.dbInit.adminSecretName }} – superuser credentials (username,
+#                                            password) used to CREATE ROLE / GRANT
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "iotistic.fullname" . }}-db-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "iotistic.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-init
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        {{- include "iotistic.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: db-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: db-init
+        image: "postgres:16.6-alpine"
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+
+          echo "Waiting for PostgreSQL cluster to be ready..."
+          until pg_isready -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d postgres; do
+            echo "  PostgreSQL not ready, retrying in 5s..."
+            sleep 5
+          done
+
+          echo "Waiting for database '${APP_DB}' to exist..."
+          until psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${APP_DB}" \
+                     -c "SELECT 1" >/dev/null 2>&1; do
+            echo "  Database '${APP_DB}' not yet available, retrying in 5s..."
+            sleep 5
+          done
+
+          ESCAPED_PASSWORD=$(printf '%s' "${APP_PASSWORD}" | sed "s/'/''/g")
+
+          echo "Creating application role '${APP_USER}' (idempotent)..."
+          ROLE_EXISTS=$(psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d postgres \
+            -t -c "SELECT 1 FROM pg_roles WHERE rolname='${APP_USER}'" | xargs)
+          if [ "${ROLE_EXISTS}" != "1" ]; then
+            psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d postgres \
+              -c "CREATE ROLE \"${APP_USER}\" WITH LOGIN PASSWORD '${ESCAPED_PASSWORD}';"
+            echo "  Created role: ${APP_USER}"
+          else
+            echo "  Role '${APP_USER}' already exists — skipping creation"
+          fi
+
+          echo "Granting permissions on database '${APP_DB}'..."
+          psql -h "${PG_HOST}" -p "${PG_PORT}" -U "${PGUSER}" -d "${APP_DB}" <<-EOSQL
+          -- Connect privilege
+          GRANT CONNECT ON DATABASE "${APP_DB}" TO "${APP_USER}";
+
+          -- Schema access
+          GRANT USAGE, CREATE ON SCHEMA public TO "${APP_USER}";
+
+          -- Existing tables / sequences
+          GRANT ALL ON ALL TABLES IN SCHEMA public TO "${APP_USER}";
+          GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO "${APP_USER}";
+
+          -- Future tables / sequences created by any role (e.g. migration runner)
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT ALL ON TABLES TO "${APP_USER}";
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT ALL ON SEQUENCES TO "${APP_USER}";
+
+          SELECT 'DB init complete for role ' || '${APP_USER}';
+          EOSQL
+
+          echo "Database init finished successfully."
+        env:
+        - name: PG_HOST
+          value: {{ .Values.api.dbInit.pgHost | default "iotistica-cnpg-cl01-rw.iotistica-cnpg-cl01.svc.cluster.local" | quote }}
+        - name: PG_PORT
+          value: {{ .Values.api.dbInit.pgPort | default "5432" | quote }}
+        # Admin (billing superuser) credentials — used to CREATE ROLE / GRANT
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.dbInit.adminSecretName }}
+              key: username
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.dbInit.adminSecretName }}
+              key: password
+        # App-user credentials read from the existing sql-credentials secret
+        - name: APP_USER
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.sql.SecretName }}
+              key: username
+        - name: APP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.sql.SecretName }}
+              key: password
+        - name: APP_DB
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.api.sql.SecretName }}
+              key: dbname
+{{- end }}
