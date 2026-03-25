@@ -298,17 +298,15 @@ jobs:
           echo ""
 
           # ── Phase 2: Promote ─────────────────────────────────────────────────
-          # All pulls/tags/pushes use the frozen digests from Phase 1.
+          # imagetools create is a pure registry-side copy — no docker daemon needed.
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "Phase 2: Promoting to $RELEASE"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           for APP in ${{ env.APPS }}; do
             DIGEST="${DIGESTS[$APP]}"
-            IMAGE_BY_DIGEST="${DOCKER_ORG}/${APP}@${DIGEST}"
-
-            docker pull "$IMAGE_BY_DIGEST"
-            docker tag "$IMAGE_BY_DIGEST" "${DOCKER_ORG}/${APP}:${RELEASE}"
-            docker push "${DOCKER_ORG}/${APP}:${RELEASE}"
+            docker buildx imagetools create \
+              -t "${DOCKER_ORG}/${APP}:${RELEASE}" \
+              "${DOCKER_ORG}/${APP}@${DIGEST}"
             echo "✅ $APP: ${DIGEST:0:19}... → ${RELEASE}"
           done
           echo ""
@@ -320,8 +318,9 @@ jobs:
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             for APP in ${{ env.APPS }}; do
               DIGEST="${DIGESTS[$APP]}"
-              docker tag "${DOCKER_ORG}/${APP}@${DIGEST}" "${DOCKER_ORG}/${APP}:latest"
-              docker push "${DOCKER_ORG}/${APP}:latest"
+              docker buildx imagetools create \
+                -t "${DOCKER_ORG}/${APP}:latest" \
+                "${DOCKER_ORG}/${APP}@${DIGEST}"
               echo "✅ ${DOCKER_ORG}/${APP}:latest"
             done
             echo ""
