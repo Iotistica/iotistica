@@ -179,7 +179,7 @@ jobs:
   buildx-worker:
     name: Build & Push Provisioning Worker
     needs: version
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on: [arc-runner-set-iotistica-light]
     permissions:
       contents: write
       security-events: write
