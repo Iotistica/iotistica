@@ -19,7 +19,7 @@ concurrency:
 jobs:
   version:
     name: Bump Version
-    runs-on: [arc-runner-set-iotistica-v2]
+    runs-on: [arc-runner-set-iotistica-light]
     permissions:
       contents: write
     outputs:
