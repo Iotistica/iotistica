@@ -31,8 +31,8 @@ on:
         default: true
         type: boolean
       client_name:
-        description: 'K8s client name (namespace)'
-        required: true
+        description: 'K8s client name (namespace) — required when deploy is checked'
+        required: false
         type: string
 
 permissions:
@@ -413,10 +413,10 @@ jobs:
         run: |
           CLIENT="${{ github.event.inputs.client_name }}"
           if [ -z "$CLIENT" ]; then
-            echo "ERROR: client_name is required for deployment"
-            exit 1
+            echo "WARNING: client_name is empty — deployment steps will use fallback 'demo' namespace"
+          else
+            echo "Deploy target client: $CLIENT"
           fi
-          echo "Deploy target client: $CLIENT"
 
       - name: Checkout iotistic repository
         uses: actions/checkout@v4

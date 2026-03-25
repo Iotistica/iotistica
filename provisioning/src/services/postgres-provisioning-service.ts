@@ -968,6 +968,7 @@ export class PostgresProvisioningService {
         namespace,
         ownerRole: `${namespace}-owner`,
         appRole: `${namespace}-app`,
+        initial_password: password, // persisted in db_api_response for password recovery on retry
       });
     } catch (error) {
       throw new PostgresProvisioningError(

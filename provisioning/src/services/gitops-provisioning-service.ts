@@ -400,6 +400,19 @@ export class GitOpsProvisioningService {
 
         // Update customer record with DB details
         console.log(`\nSaving database details to customer record...`);
+
+        // When the DB already existed (retry scenario), provisionDatabase returns fullResponse: null.
+        // Preserve any previously saved db_api_response (which contains the initial_password) so the
+        // password recovery path below can still find it.
+        let dbApiResponse = dbResult.fullResponse;
+        if (!dbApiResponse) {
+          const existingCustomer = await CustomerModel.getById(data.customerId);
+          dbApiResponse = existingCustomer?.db_api_response ?? null;
+          if (dbApiResponse) {
+            logger.info('Preserved existing db_api_response for retry recovery', { customerId: data.customerId });
+          }
+        }
+
         await CustomerModel.updateTigerDataDetails(data.customerId, {
           db_service_id: dbResult.serviceId,
           db_host: dbResult.host,
@@ -407,7 +420,7 @@ export class GitOpsProvisioningService {
           db_name: dbResult.dbName,
           db_region: dbResult.region,
           db_provisioned_at: new Date(),
-          db_api_response: dbResult.fullResponse,
+          db_api_response: dbApiResponse,
           db_initialized: false,
           deployment_status: 'db_ready',
           db_provider: this.dbProvider,
@@ -584,7 +597,7 @@ export class GitOpsProvisioningService {
             throw new Error(
               `Database ${dbResult.serviceId} not ready yet. ` +
               `Will retry (attempt ${job?.attemptsMade ? job.attemptsMade + 1 : 1}/${job?.opts.attempts || 1}). ` +
-              `Database is still provisioning on TigerData's end.`
+              `Database is still provisioning.`
             );
           }
           
@@ -602,7 +615,7 @@ export class GitOpsProvisioningService {
           console.log(`   2. Saving deployment with placeholder password: "PENDING_MANUAL_UPDATE"`);
           console.log(`   3. Retrieve password from TigerData console`);
           console.log(`   4. Update 1Password secret with actual password`);
-          console.log(`   5. TigerData Console: https://console.cloud.timescale.com`);
+    
           console.log(`⚠️  ════════════════════════════════════════════════════════════════\n`);
           
           // Use placeholder password (rare case)
