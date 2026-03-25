@@ -500,8 +500,15 @@ router.post('/direct-signup', async (req: Request, res: Response) => {
       const description = auth0Error?.description || auth0Error?.error_description || signupErr.message;
 
       if (signupErr?.response?.status === 400) {
+        const descLower = String(description || '').toLowerCase();
+        const isExistingUser =
+          auth0Error?.code === 'invalid_signup' ||
+          descLower.includes('already') ||
+          descLower.includes('exists') ||
+          descLower.includes('in use');
         return res.status(409).json({
-          error: 'Signup failed',
+          error: isExistingUser ? 'Email already registered' : 'Signup failed',
+          code: isExistingUser ? 'EMAIL_EXISTS' : 'INVALID_SIGNUP',
           details: description || 'Account may already exist',
         });
       }

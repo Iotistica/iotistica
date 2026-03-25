@@ -532,10 +532,10 @@
             }
         }
 
-        // Show error message
+        // Show error message (message may contain safe HTML such as anchor links)
         function showError(message) {
             const errorDiv = document.getElementById('errorMessage');
-            errorDiv.textContent = message;
+            errorDiv.innerHTML = message;
             errorDiv.style.display = 'block';
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -594,6 +594,12 @@
 
                 if (!directSignupResponse.ok) {
                     const errorData = await directSignupResponse.json().catch(() => ({ error: 'Direct signup failed' }));
+                    if (directSignupResponse.status === 409 && errorData.code === 'EMAIL_EXISTS') {
+                        showError('An account with this email already exists. <a href="login.html" style="color:inherit;text-decoration:underline">Sign in instead &rarr;</a>');
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Start Your Free Trial';
+                        return;
+                    }
                     throw new Error(errorData.details || errorData.error || 'Unable to create Auth0 account');
                 }
 
