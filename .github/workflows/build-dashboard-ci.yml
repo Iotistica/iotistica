@@ -143,11 +143,11 @@ jobs:
           echo "### Docker Image" >> $GITHUB_STEP_SUMMARY
           echo "**Tag:** iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}" >> $GITHUB_STEP_SUMMARY
 
-          # Pull image to inspect size locally
-          if docker pull "iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}" >/dev/null 2>&1; then
-            SIZE_BYTES=$(docker image inspect "iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}" --format='{{.Size}}')
-            SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
-            echo "**Size:** ${SIZE_MB} MB" >> $GITHUB_STEP_SUMMARY
+          # Inspect image size via registry (no local Docker daemon required)
+          RAW=$(docker buildx imagetools inspect "iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}" 2>/dev/null || true)
+          SIZE_LINE=$(echo "$RAW" | grep -i 'size:' | head -1 || true)
+          if [ -n "$SIZE_LINE" ]; then
+            echo "**Size:** ${SIZE_LINE#*:}" >> $GITHUB_STEP_SUMMARY
           else
             echo "_(Size unavailable)_" >> $GITHUB_STEP_SUMMARY
           fi

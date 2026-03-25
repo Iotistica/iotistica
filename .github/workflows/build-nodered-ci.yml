@@ -129,25 +129,34 @@ jobs:
           # Save first 20 lines for summary
           echo "$COMMITS" | head -20 > changelog_summary.txt
 
+      - name: Login to Docker Hub
+        if: needs.buildx.result == 'success'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
       - name: Get Docker image size
         id: image_size
         if: needs.buildx.result == 'success'
         run: |
-          # Login to Docker Hub to pull the image
-          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          
-          # Pull the image
-          docker pull iotistic/nodered:ci-${{ needs.buildx.outputs.short_sha }}
-          
-          # Get image size
-          SIZE_BYTES=$(docker image inspect iotistic/nodered:ci-${{ needs.buildx.outputs.short_sha }} --format='{{.Size}}')
-          SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
-          
+          IMAGE="iotistic/nodered:ci-${{ needs.buildx.outputs.short_sha }}"
+
+          # Use registry API via imagetools — no local Docker daemon required
+          RAW=$(docker buildx imagetools inspect "$IMAGE" 2>/dev/null || true)
+
+          # Extract compressed size from manifest (sum of layer sizes in bytes)
+          TOTAL_BYTES=$(echo "$RAW" | awk '/Size:/{gsub(/[^0-9]/,"",$2); sum+=$2} END{print sum+0}')
+          if [ "$TOTAL_BYTES" -gt 0 ] 2>/dev/null; then
+            SIZE_MB=$(echo "scale=2; $TOTAL_BYTES / 1024 / 1024" | bc)
+          else
+            SIZE_MB=0
+          fi
+
+          LAYERS=$(echo "$RAW" | grep -c 'digest:' || echo 0)
+
           echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
-          echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
-          
-          # Get layer count
-          LAYERS=$(docker image inspect iotistic/nodered:ci-${{ needs.buildx.outputs.short_sha }} --format='{{len .RootFS.Layers}}')
+          echo "size_bytes=$TOTAL_BYTES" >> $GITHUB_OUTPUT
           echo "layers=$LAYERS" >> $GITHUB_OUTPUT
 
       - name: Generate Summary Report
