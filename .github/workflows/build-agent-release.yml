@@ -251,11 +251,11 @@ jobs:
           echo "Promoted Azure latest artifacts without rebuilding." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- [agent-${{ steps.bump.outputs.package_version }}-x86_64.tar.gz](https://apps.iotistic.ca/agent/versions/agent-${{ steps.bump.outputs.package_version }}-x86_64.tar.gz)" >> $GITHUB_STEP_SUMMARY
-          echo "- [agent-${{ steps.bump.outputs.package_version }}-arm64.tar.gz](https://apps.iotistic.ca/agent/versions/agent-${{ steps.bump.outputs.package_version }}-arm64.tar.gz)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ steps.bump.outputs.package_version }}-x86_64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ steps.bump.outputs.package_version }}-x86_64.tar.gz)" >> $GITHUB_STEP_SUMMARY
+          echo "- [agent-${{ steps.bump.outputs.package_version }}-arm64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${{ steps.bump.outputs.package_version }}-arm64.tar.gz)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Install Scripts" >> $GITHUB_STEP_SUMMARY
-          echo "- [install.sh](https://apps.iotistic.ca/agent/install.sh) (latest) — [versioned](https://apps.iotistic.ca/agent/versions/install-${{ steps.bump.outputs.package_version }}.sh)" >> $GITHUB_STEP_SUMMARY
+          echo "- [install.sh](https://apps.iotistica.com/agent/install.sh) (latest) — [versioned](https://apps.iotistica.com/agent/versions/install-${{ steps.bump.outputs.package_version }}.sh)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Recent commits" >> $GITHUB_STEP_SUMMARY
           echo "$COMMITS" | head -20 >> $GITHUB_STEP_SUMMARY

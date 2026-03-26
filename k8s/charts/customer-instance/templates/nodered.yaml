@@ -65,10 +65,10 @@ spec:
           value: "{{ .Values.nodered.auth0.issuer }}"
         # CSP frame-ancestors policy - allow Node-RED to be embedded from dashboard and self
         - name: NODE_RED_FRAME_ANCESTORS
-          value: "'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
+          value: "'self' https://*.iotistica.com https://*.iotistica.com http://localhost:* http://*:30*"
         # Explicit CSP header to override any middleware defaults
         - name: NODE_RED_CSP_HEADER
-          value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: http:; font-src 'self' data: https: http:; connect-src 'self' wss: ws: https: http:; frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
+          value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: http:; font-src 'self' data: https: http:; connect-src 'self' wss: ws: https: http:; frame-ancestors 'self' https://*.iotistica.com https://*.iotistica.com http://localhost:* http://*:30*"
         resources:
           {{- toYaml .Values.nodered.resources | nindent 10 }}
         livenessProbe:
@@ -124,7 +124,7 @@ spec:
           responseHeaderModifier:
             set:
               - name: Content-Security-Policy
-                value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: http:; font-src 'self' data: https: http:; connect-src 'self' wss: ws: https: http:; frame-ancestors 'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
+                value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https: http:; font-src 'self' data: https: http:; connect-src 'self' wss: ws: https: http:; frame-ancestors 'self' https://*.iotistica.com https://*.iotistica.com http://localhost:* http://*:30*"
       backendRefs:
         - group: ""
           kind: Service

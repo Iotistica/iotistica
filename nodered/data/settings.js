@@ -307,7 +307,7 @@ module.exports = {
         
         // Frame ancestors can be set via ENV, defaults to localhost + production domains
         const frameAncestors = process.env.NODE_RED_FRAME_ANCESTORS || 
-            "'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://127.0.0.1:*"
+            "'self' https://*.iotistica.com https://*.iotistica.com http://localhost:* http://127.0.0.1:*"
         
         // Font sources can be customized via ENV
         const fontSrc = process.env.NODE_RED_FONT_SRC || 

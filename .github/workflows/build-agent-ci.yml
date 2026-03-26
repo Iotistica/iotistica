@@ -285,8 +285,8 @@ jobs:
           echo "- [\`iotistic/agent:${{ needs.build.outputs.sha_short }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.build.outputs.sha_short }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Installation Scripts:" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-docker.sh](https://apps.iotistic.ca/agent/install-docker.sh) ([checksum](https://apps.iotistic.ca/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-systemd.sh](https://apps.iotistic.ca/agent/install-systemd.sh) ([checksum](https://apps.iotistic.ca/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+          echo "- [install-docker.sh](https://apps.iotistica.com/agent/install-docker.sh) ([checksum](https://apps.iotistica.com/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+          echo "- [install-systemd.sh](https://apps.iotistica.com/agent/install-systemd.sh) ([checksum](https://apps.iotistica.com/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
 
   # trigger-integration-tests:
   #   name: Trigger Integration Tests

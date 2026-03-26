@@ -19,7 +19,7 @@
 #   --help                  Show this help message
 #
 # Example:
-#   ./cluster-setup.sh --domain iotistic.ca --email admin@iotistic.ca
+#   ./cluster-setup.sh --domain iotistica.com --email admin@iotistica.com
 #
 ################################################################################
 

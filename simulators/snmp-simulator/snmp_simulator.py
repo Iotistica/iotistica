@@ -62,7 +62,7 @@ class DynamicMibInstrumController(instrum.MibInstrumController):
             return TimeTicks(uptime)
         
         elif oid_str == '1.3.6.1.2.1.1.4.0':  # sysContact
-            return OctetString('admin@iotistic.ca')
+            return OctetString('admin@iotistica.com')
         
         elif oid_str == '1.3.6.1.2.1.1.5.0':  # sysName
             return OctetString('iotistic-snmp-simulator')

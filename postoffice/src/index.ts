@@ -26,7 +26,7 @@ export class PostOffice {
     private baseUrl = 'http://localhost'
   ) {
     this.mailDefaults = { 
-      from: config.from || '"Iotistica Platform" <donotreply@iotistic.ca>' 
+      from: config.from || '"Iotistica Platform" <donotreply@iotistica.com>' 
     };
     
     // Register built-in templates

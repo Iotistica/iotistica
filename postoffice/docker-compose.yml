@@ -52,7 +52,7 @@ services:
       - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
       - EMAIL_FROM=${EMAIL_FROM:-"Iotistic Platform <noreply@iotistic.cloud>"}
       - EMAIL_DEBUG=${EMAIL_DEBUG:-false}
-      - BASE_URL=${BASE_URL:-https://iotistic.ca}
+      - BASE_URL=${BASE_URL:-https://iotistica.com}
       
       # SMTP (if configured)
       - SMTP_HOST=${SMTP_HOST}

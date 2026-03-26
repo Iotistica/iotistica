@@ -18,7 +18,7 @@ export function NodeRedPage() {
     
     // K8s deployment - derive from dashboard URL
     // Pattern: https://dash1.iotistica.com -> https://nodered1.iotistica.com
-    // Pattern: https://client-{id}.iotistic.ca -> https://nr-{id}.iotistic.ca
+    // Pattern: https://client-{id}.iotistica.com -> https://nr-{id}.iotistica.com
     const protocol = window.location.protocol;
     let noderedHostname = hostname;
     

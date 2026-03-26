@@ -119,7 +119,7 @@ create_ca() {
     export EASYRSA_REQ_PROVINCE="ON"
     export EASYRSA_REQ_CITY="Toronto"
     export EASYRSA_REQ_ORG="Iotistic Platform"
-    export EASYRSA_REQ_EMAIL="ca@iotistic.ca"
+    export EASYRSA_REQ_EMAIL="ca@iotistica.com"
     export EASYRSA_REQ_OU="VPN Certificate Authority"
     export EASYRSA_REQ_CN="Iotistic VPN CA"
     

@@ -195,24 +195,24 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Installation" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -sSL https://apps.iotistic.ca/agent/install-docker.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sSL https://apps.iotistica.com/agent/install-docker.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Systemd Installation (with PM2)" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -sSL https://apps.iotistic.ca/agent/install-systemd.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sSL https://apps.iotistica.com/agent/install-systemd.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Version ${{ steps.version.outputs.package_version }} Scripts" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Installation (Versioned)" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -sSL https://apps.iotistic.ca/agent/versions/install-docker-${{ steps.version.outputs.package_version }}.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sSL https://apps.iotistica.com/agent/versions/install-docker-${{ steps.version.outputs.package_version }}.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Systemd Installation (Versioned)" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "curl -sSL https://apps.iotistic.ca/agent/versions/install-systemd-${{ steps.version.outputs.package_version }}.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
+          echo "curl -sSL https://apps.iotistica.com/agent/versions/install-systemd-${{ steps.version.outputs.package_version }}.sh | sudo bash" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Features" >> $GITHUB_STEP_SUMMARY

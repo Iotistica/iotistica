@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS vpn_config (
     
     -- VPN Server Settings
     enabled BOOLEAN NOT NULL DEFAULT false,
-    server_host VARCHAR(255) NOT NULL,  -- e.g., "vpn-abc123.iotistic.ca"
+    server_host VARCHAR(255) NOT NULL,  -- e.g., "vpn-abc123.iotistica.com"
     server_port INTEGER NOT NULL DEFAULT 1194,
     protocol VARCHAR(10) NOT NULL DEFAULT 'udp',  -- udp or tcp
     
@@ -78,6 +78,6 @@ INSERT INTO vpn_config (
 -- Comments for documentation
 COMMENT ON TABLE vpn_config IS 'VPN server configurations for secure device connectivity';
 COMMENT ON COLUMN vpn_config.enabled IS 'Enable/disable VPN for devices using this config';
-COMMENT ON COLUMN vpn_config.server_host IS 'External VPN server hostname (e.g., vpn-abc123.iotistic.ca)';
+COMMENT ON COLUMN vpn_config.server_host IS 'External VPN server hostname (e.g., vpn-abc123.iotistica.com)';
 COMMENT ON COLUMN vpn_config.ca_cert_url IS 'Internal URL to fetch CA certificate (e.g., http://vpn:8080)';
 COMMENT ON COLUMN devices.vpn_config_id IS 'VPN configuration to use for this device (NULL = use default)';

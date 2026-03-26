@@ -4,12 +4,12 @@ set -e
 # Iotistic Agent - Docker Installation Script
 # Version: AGENT_VERSION_PLACEHOLDER
 # This script installs the Iotistic agent as a Docker container
-# Usage: curl -sSL https://apps.iotistic.ca/agent/install-docker.sh | bash
+# Usage: curl -sSL https://apps.iotistica.com/agent/install-docker.sh | bash
 #
 # Environment Variables (CI/Non-interactive mode):
 #   IOTISTIC_AGENT_VERSION        - Agent version to install (default: latest)
 #   IOTISTIC_DEVICE_PORT          - Device API port (default: 48484)
-#   IOTISTIC_IOTISTICA_API   - Cloud API endpoint (e.g., https://api.iotistic.ca)
+#   IOTISTIC_IOTISTICA_API   - Cloud API endpoint (e.g., https://api.iotistica.com)
 #   IOTISTIC_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
 
 SCRIPT_VERSION="AGENT_VERSION_PLACEHOLDER"

@@ -53,7 +53,7 @@ function getSettingsPane () {
     const settings = getSettings()
     console.log('settings', JSON.stringify(settings, null, 2))
     events.on('connection-state', () => { refreshConnectionState() })
-    pane.find('#flowfuse-nr-tools-settings-iotisticURL').val(settings.iotisticURL || 'https://api.iotistic.ca')
+    pane.find('#flowfuse-nr-tools-settings-iotisticURL').val(settings.iotisticURL || 'https://api.iotistica.com')
     ConnectionStatusWidget().appendTo(pane.find('.flowfuse-nr-tools-settings-connectionStatus'))
 
     // Disconnect button handler

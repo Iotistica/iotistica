@@ -52,11 +52,11 @@ Get a token via POST /api/v1/auth/login or /api/v1/auth/register.
     `,
     contact: {
       name: 'Iotistic Support',
-      email: 'support@iotistic.ca'
+      email: 'support@iotistica.com'
     },
     license: {
       name: 'Proprietary',
-      url: 'https://iotistic.ca/license'
+      url: 'https://iotistica.com/license'
     }
   },
   servers: [
@@ -65,7 +65,7 @@ Get a token via POST /api/v1/auth/login or /api/v1/auth/register.
       description: 'Development server'
     },
     {
-      url: `https://api.iotistic.ca${API_BASE}`,
+      url: `https://api.iotistica.com${API_BASE}`,
       description: 'Production server'
     }
   ],

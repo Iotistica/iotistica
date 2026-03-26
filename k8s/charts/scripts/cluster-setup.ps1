@@ -17,7 +17,7 @@
 #   -Help               Show this help message
 #
 # Example:
-#   .\cluster-setup.ps1 -Domain iotistic.ca -Email admin@iotistic.ca
+#   .\cluster-setup.ps1 -Domain iotistica.com -Email admin@iotistica.com
 #
 ################################################################################
 

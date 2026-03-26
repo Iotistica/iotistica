@@ -14,7 +14,7 @@ function init (RED) {
             settings.iotisticURL = RED.settings.iotisticURL
             console.log('[nr-devices-plugin] Using iotisticURL from Node-RED settings:', settings.iotisticURL)
         } else {
-            settings.iotisticURL = 'https://api.iotistic.ca'
+            settings.iotisticURL = 'https://api.iotistica.com'
             console.log('[nr-devices-plugin] Using default iotisticURL:', settings.iotisticURL)
         }
     } else {

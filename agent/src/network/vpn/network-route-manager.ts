@@ -9,7 +9,7 @@ import { LogComponents } from '../../logging/types';
 import { WireGuardManager } from './wireguard-manager';
 
 export interface RouteConfig {
-	publicEndpoint: string;   // e.g., https://api.iotistic.ca
+	publicEndpoint: string;   // e.g., https://api.iotistica.com
 	vpnEndpoint?: string;     // e.g., http://10.8.0.1:3002
 	preferVpn?: boolean;      // Default: true if VPN configured
 }

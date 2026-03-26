@@ -11,7 +11,7 @@ const logger: Logger = {
 // Example email configuration
 const emailConfig: EmailConfig = {
   enabled: true,
-  from: '"Iotistic Platform" <noreply@iotistic.ca>',
+  from: '"Iotistic Platform" <noreply@iotistica.com>',
   debug: true,
   smtp: {
     host: 'smtp.gmail.com',

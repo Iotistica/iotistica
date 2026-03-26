@@ -42,7 +42,7 @@ module.exports = {
     // Custom HTTP middleware to set CSP headers
     httpAdminMiddleware: (req, res, next) => {
         const frameAncestors = process.env.NODE_RED_FRAME_ANCESTORS ||
-            "'self' https://*.iotistica.com https://*.iotistic.ca http://localhost:* http://*:30*"
+            "'self' https://*.iotistica.com https://*.iotistica.com http://localhost:* http://*:30*"
         const fontSrc = process.env.NODE_RED_FONT_SRC ||
             "'self' data: https: http:"
 

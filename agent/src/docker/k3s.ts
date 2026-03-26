@@ -554,7 +554,7 @@ export class K3sDriver extends BaseOrchestratorDriver {
 			if (!deployment.spec.template.metadata.annotations) {
 				deployment.spec.template.metadata.annotations = {};
 			}
-			deployment.spec.template.metadata.annotations['iotistic.ca/restartedAt'] = new Date().toISOString();
+			deployment.spec.template.metadata.annotations['iotistica.com/restartedAt'] = new Date().toISOString();
 			
 			// Update deployment
 			await this.appsV1Api.replaceNamespacedDeployment(serviceId, this.namespace, deployment);

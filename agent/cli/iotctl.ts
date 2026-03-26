@@ -701,7 +701,7 @@ SYSTEM:
 EXAMPLES:
 
   # Set cloud API endpoint
-  iotctl config set-api https://cloud.iotistic.ca
+  iotctl config set-api https://cloud.iotistica.com
 
   # View current configuration
   iotctl config show

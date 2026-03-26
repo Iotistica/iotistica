@@ -16,7 +16,7 @@ license:
 
 # Domain configuration
 domain:
-  base: "iotistic.local"  # Use .local for local dev, change to iotistic.ca for production
+  base: "iotistic.local"  # Use .local for local dev, change to iotistica.com for production
   # Instance will be accessible at: {customer.id}.{domain.base}
 
 # PostgreSQL database
