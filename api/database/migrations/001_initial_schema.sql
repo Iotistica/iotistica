@@ -495,39 +495,6 @@ END;
 $$;
 
 
---
--- Name: create_events_partition(date); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.create_events_partition(partition_date date) RETURNS text
-    LANGUAGE plpgsql
-    AS $$
-DECLARE
-    partition_name TEXT;
-    start_date DATE;
-    end_date DATE;
-BEGIN
-    partition_name := 'events_' || TO_CHAR(partition_date, 'YYYY_MM_DD');
-    start_date := partition_date;
-    end_date := partition_date + INTERVAL '1 day';
-    
-    IF EXISTS (
-        SELECT 1 FROM pg_tables 
-        WHERE schemaname = 'public' AND tablename = partition_name
-    ) THEN
-        RETURN 'EXISTS: ' || partition_name;
-    END IF;
-    
-    EXECUTE format(
-        'CREATE TABLE %I PARTITION OF events 
-         FOR VALUES FROM (%L) TO (%L)',
-        partition_name, start_date, end_date
-    );
-    
-    RETURN 'CREATED: ' || partition_name;
-END;
-$$;
-
 
 --
 -- Name: create_state_snapshot(uuid, character varying, jsonb, character varying, text); Type: FUNCTION; Schema: public; Owner: -
@@ -667,62 +634,6 @@ BEGIN
     END IF;
 END;
 $_$;
-
-
---
--- Name: drop_old_event_partitions(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.drop_old_event_partitions() RETURNS void
-    LANGUAGE plpgsql
-    AS $_$
-DECLARE
-  partition_record RECORD;
-  partition_date DATE;
-  min_retention_days INTEGER;
-BEGIN
-  -- Get the minimum retention days across all event types
-  -- (we keep partitions based on the longest retention requirement)
-  SELECT MIN(retention_days) INTO min_retention_days FROM event_types;
-  
-  -- Default to 90 days if no retention policies set
-  min_retention_days := COALESCE(min_retention_days, 90);
-  
-  FOR partition_record IN 
-    SELECT tablename 
-    FROM pg_tables 
-    WHERE schemaname = 'public' 
-    AND tablename LIKE 'events_%'
-    AND tablename ~ '^events_\d{4}_\d{2}_\d{2}$'
-  LOOP
-    -- Extract date from partition name (format: events_YYYY_MM_DD)
-    partition_date := TO_DATE(
-      SUBSTRING(partition_record.tablename FROM 8), 
-      'YYYY_MM_DD'
-    );
-    
-    -- Drop partition if older than minimum retention period
-    IF partition_date < CURRENT_DATE - min_retention_days THEN
-      EXECUTE FORMAT('DROP TABLE IF EXISTS %I', partition_record.tablename);
-      RAISE NOTICE 'Dropped old partition: %', partition_record.tablename;
-    END IF;
-  END LOOP;
-END;
-$_$;
-
-
---
--- Name: ensure_device_logs_partitions(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.ensure_device_logs_partitions() RETURNS TABLE(result text)
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    -- Create partitions for current month + next 3 months
-    RETURN QUERY SELECT * FROM create_agent_logs_partitions_range(0, 3);
-END;
-$$;
 
 
 --
@@ -3104,9 +3015,7 @@ CREATE TABLE public.events (
     actor_id character varying(255),
     severity character varying(20),
     impact character varying(20)
-)
-PARTITION BY RANGE ("timestamp");
-
+);
 
 --
 -- Name: events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -3126,1755 +3035,6 @@ CREATE SEQUENCE public.events_id_seq
 
 ALTER SEQUENCE public.events_id_seq OWNED BY public.events.id;
 
-
---
--- Name: events_2026_01_11; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_11 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_12; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_12 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_13; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_13 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_14; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_14 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_15; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_15 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_16; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_16 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_17; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_17 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_18; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_18 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_19; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_19 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_20; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_20 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_21; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_21 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_22; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_22 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_23; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_23 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_24; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_24 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_25; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_25 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_26; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_26 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_27; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_27 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_28; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_28 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_29; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_29 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_30; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_30 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_01_31; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_01_31 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_01; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_01 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_02; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_02 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_03; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_03 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_04; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_04 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_05; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_05 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_06; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_06 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_07; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_07 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_08; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_08 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_09; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_09 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_10; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_10 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_11; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_11 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_12; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_12 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_13; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_13 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_14; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_14 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_15; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_15 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_16; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_16 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_17; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_17 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_22; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_22 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_23; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_23 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_24; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_24 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_25; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_25 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_26; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_26 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_27; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_27 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_02_28; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_02_28 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_01; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_01 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_02; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_02 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_03; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_03 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_04; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_04 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_05; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_05 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_06; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_06 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_07; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_07 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_08; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_08 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_09; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_09 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_10; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_10 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_11; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_11 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_12; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_12 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_13; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_13 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_14; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_14 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_15; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_15 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_16; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_16 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_17; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_17 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_18; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_18 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_19; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_19 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_20; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_20 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_21; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_21 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_22; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_22 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_23; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_23 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_24; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_24 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
-
-
---
--- Name: events_2026_03_25; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.events_2026_03_25 (
-    id bigint DEFAULT nextval('public.events_id_seq'::regclass) NOT NULL,
-    event_id uuid DEFAULT gen_random_uuid() NOT NULL,
-    event_type character varying(100) NOT NULL,
-    event_version integer DEFAULT 1 NOT NULL,
-    "timestamp" timestamp without time zone DEFAULT now() NOT NULL,
-    aggregate_type character varying(50) NOT NULL,
-    aggregate_id character varying(255) NOT NULL,
-    data jsonb NOT NULL,
-    metadata jsonb,
-    correlation_id uuid,
-    causation_id uuid,
-    source character varying(100),
-    checksum character varying(64) NOT NULL,
-    actor_type character varying(50),
-    actor_id character varying(255),
-    severity character varying(20),
-    impact character varying(20)
-);
 
 
 --
@@ -6492,496 +4652,6 @@ ALTER SEQUENCE public.wg_peers_id_seq OWNED BY public.wg_peers.id;
 
 
 --
--- Name: events_2026_01_11; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_11 FOR VALUES FROM ('2026-01-11 00:00:00') TO ('2026-01-12 00:00:00');
-
-
---
--- Name: events_2026_01_12; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_12 FOR VALUES FROM ('2026-01-12 00:00:00') TO ('2026-01-13 00:00:00');
-
-
---
--- Name: events_2026_01_13; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_13 FOR VALUES FROM ('2026-01-13 00:00:00') TO ('2026-01-14 00:00:00');
-
-
---
--- Name: events_2026_01_14; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_14 FOR VALUES FROM ('2026-01-14 00:00:00') TO ('2026-01-15 00:00:00');
-
-
---
--- Name: events_2026_01_15; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_15 FOR VALUES FROM ('2026-01-15 00:00:00') TO ('2026-01-16 00:00:00');
-
-
---
--- Name: events_2026_01_16; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_16 FOR VALUES FROM ('2026-01-16 00:00:00') TO ('2026-01-17 00:00:00');
-
-
---
--- Name: events_2026_01_17; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_17 FOR VALUES FROM ('2026-01-17 00:00:00') TO ('2026-01-18 00:00:00');
-
-
---
--- Name: events_2026_01_18; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_18 FOR VALUES FROM ('2026-01-18 00:00:00') TO ('2026-01-19 00:00:00');
-
-
---
--- Name: events_2026_01_19; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_19 FOR VALUES FROM ('2026-01-19 00:00:00') TO ('2026-01-20 00:00:00');
-
-
---
--- Name: events_2026_01_20; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_20 FOR VALUES FROM ('2026-01-20 00:00:00') TO ('2026-01-21 00:00:00');
-
-
---
--- Name: events_2026_01_21; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_21 FOR VALUES FROM ('2026-01-21 00:00:00') TO ('2026-01-22 00:00:00');
-
-
---
--- Name: events_2026_01_22; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_22 FOR VALUES FROM ('2026-01-22 00:00:00') TO ('2026-01-23 00:00:00');
-
-
---
--- Name: events_2026_01_23; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_23 FOR VALUES FROM ('2026-01-23 00:00:00') TO ('2026-01-24 00:00:00');
-
-
---
--- Name: events_2026_01_24; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_24 FOR VALUES FROM ('2026-01-24 00:00:00') TO ('2026-01-25 00:00:00');
-
-
---
--- Name: events_2026_01_25; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_25 FOR VALUES FROM ('2026-01-25 00:00:00') TO ('2026-01-26 00:00:00');
-
-
---
--- Name: events_2026_01_26; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_26 FOR VALUES FROM ('2026-01-26 00:00:00') TO ('2026-01-27 00:00:00');
-
-
---
--- Name: events_2026_01_27; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_27 FOR VALUES FROM ('2026-01-27 00:00:00') TO ('2026-01-28 00:00:00');
-
-
---
--- Name: events_2026_01_28; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_28 FOR VALUES FROM ('2026-01-28 00:00:00') TO ('2026-01-29 00:00:00');
-
-
---
--- Name: events_2026_01_29; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_29 FOR VALUES FROM ('2026-01-29 00:00:00') TO ('2026-01-30 00:00:00');
-
-
---
--- Name: events_2026_01_30; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_30 FOR VALUES FROM ('2026-01-30 00:00:00') TO ('2026-01-31 00:00:00');
-
-
---
--- Name: events_2026_01_31; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_01_31 FOR VALUES FROM ('2026-01-31 00:00:00') TO ('2026-02-01 00:00:00');
-
-
---
--- Name: events_2026_02_01; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_01 FOR VALUES FROM ('2026-02-01 00:00:00') TO ('2026-02-02 00:00:00');
-
-
---
--- Name: events_2026_02_02; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_02 FOR VALUES FROM ('2026-02-02 00:00:00') TO ('2026-02-03 00:00:00');
-
-
---
--- Name: events_2026_02_03; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_03 FOR VALUES FROM ('2026-02-03 00:00:00') TO ('2026-02-04 00:00:00');
-
-
---
--- Name: events_2026_02_04; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_04 FOR VALUES FROM ('2026-02-04 00:00:00') TO ('2026-02-05 00:00:00');
-
-
---
--- Name: events_2026_02_05; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_05 FOR VALUES FROM ('2026-02-05 00:00:00') TO ('2026-02-06 00:00:00');
-
-
---
--- Name: events_2026_02_06; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_06 FOR VALUES FROM ('2026-02-06 00:00:00') TO ('2026-02-07 00:00:00');
-
-
---
--- Name: events_2026_02_07; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_07 FOR VALUES FROM ('2026-02-07 00:00:00') TO ('2026-02-08 00:00:00');
-
-
---
--- Name: events_2026_02_08; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_08 FOR VALUES FROM ('2026-02-08 00:00:00') TO ('2026-02-09 00:00:00');
-
-
---
--- Name: events_2026_02_09; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_09 FOR VALUES FROM ('2026-02-09 00:00:00') TO ('2026-02-10 00:00:00');
-
-
---
--- Name: events_2026_02_10; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_10 FOR VALUES FROM ('2026-02-10 00:00:00') TO ('2026-02-11 00:00:00');
-
-
---
--- Name: events_2026_02_11; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_11 FOR VALUES FROM ('2026-02-11 00:00:00') TO ('2026-02-12 00:00:00');
-
-
---
--- Name: events_2026_02_12; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_12 FOR VALUES FROM ('2026-02-12 00:00:00') TO ('2026-02-13 00:00:00');
-
-
---
--- Name: events_2026_02_13; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_13 FOR VALUES FROM ('2026-02-13 00:00:00') TO ('2026-02-14 00:00:00');
-
-
---
--- Name: events_2026_02_14; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_14 FOR VALUES FROM ('2026-02-14 00:00:00') TO ('2026-02-15 00:00:00');
-
-
---
--- Name: events_2026_02_15; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_15 FOR VALUES FROM ('2026-02-15 00:00:00') TO ('2026-02-16 00:00:00');
-
-
---
--- Name: events_2026_02_16; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_16 FOR VALUES FROM ('2026-02-16 00:00:00') TO ('2026-02-17 00:00:00');
-
-
---
--- Name: events_2026_02_17; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_17 FOR VALUES FROM ('2026-02-17 00:00:00') TO ('2026-02-18 00:00:00');
-
-
---
--- Name: events_2026_02_22; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_22 FOR VALUES FROM ('2026-02-22 00:00:00') TO ('2026-02-23 00:00:00');
-
-
---
--- Name: events_2026_02_23; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_23 FOR VALUES FROM ('2026-02-23 00:00:00') TO ('2026-02-24 00:00:00');
-
-
---
--- Name: events_2026_02_24; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_24 FOR VALUES FROM ('2026-02-24 00:00:00') TO ('2026-02-25 00:00:00');
-
-
---
--- Name: events_2026_02_25; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_25 FOR VALUES FROM ('2026-02-25 00:00:00') TO ('2026-02-26 00:00:00');
-
-
---
--- Name: events_2026_02_26; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_26 FOR VALUES FROM ('2026-02-26 00:00:00') TO ('2026-02-27 00:00:00');
-
-
---
--- Name: events_2026_02_27; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_27 FOR VALUES FROM ('2026-02-27 00:00:00') TO ('2026-02-28 00:00:00');
-
-
---
--- Name: events_2026_02_28; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_02_28 FOR VALUES FROM ('2026-02-28 00:00:00') TO ('2026-03-01 00:00:00');
-
-
---
--- Name: events_2026_03_01; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_01 FOR VALUES FROM ('2026-03-01 00:00:00') TO ('2026-03-02 00:00:00');
-
-
---
--- Name: events_2026_03_02; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_02 FOR VALUES FROM ('2026-03-02 00:00:00') TO ('2026-03-03 00:00:00');
-
-
---
--- Name: events_2026_03_03; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_03 FOR VALUES FROM ('2026-03-03 00:00:00') TO ('2026-03-04 00:00:00');
-
-
---
--- Name: events_2026_03_04; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_04 FOR VALUES FROM ('2026-03-04 00:00:00') TO ('2026-03-05 00:00:00');
-
-
---
--- Name: events_2026_03_05; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_05 FOR VALUES FROM ('2026-03-05 00:00:00') TO ('2026-03-06 00:00:00');
-
-
---
--- Name: events_2026_03_06; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_06 FOR VALUES FROM ('2026-03-06 00:00:00') TO ('2026-03-07 00:00:00');
-
-
---
--- Name: events_2026_03_07; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_07 FOR VALUES FROM ('2026-03-07 00:00:00') TO ('2026-03-08 00:00:00');
-
-
---
--- Name: events_2026_03_08; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_08 FOR VALUES FROM ('2026-03-08 00:00:00') TO ('2026-03-09 00:00:00');
-
-
---
--- Name: events_2026_03_09; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_09 FOR VALUES FROM ('2026-03-09 00:00:00') TO ('2026-03-10 00:00:00');
-
-
---
--- Name: events_2026_03_10; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_10 FOR VALUES FROM ('2026-03-10 00:00:00') TO ('2026-03-11 00:00:00');
-
-
---
--- Name: events_2026_03_11; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_11 FOR VALUES FROM ('2026-03-11 00:00:00') TO ('2026-03-12 00:00:00');
-
-
---
--- Name: events_2026_03_12; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_12 FOR VALUES FROM ('2026-03-12 00:00:00') TO ('2026-03-13 00:00:00');
-
-
---
--- Name: events_2026_03_13; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_13 FOR VALUES FROM ('2026-03-13 00:00:00') TO ('2026-03-14 00:00:00');
-
-
---
--- Name: events_2026_03_14; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_14 FOR VALUES FROM ('2026-03-14 00:00:00') TO ('2026-03-15 00:00:00');
-
-
---
--- Name: events_2026_03_15; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_15 FOR VALUES FROM ('2026-03-15 00:00:00') TO ('2026-03-16 00:00:00');
-
-
---
--- Name: events_2026_03_16; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_16 FOR VALUES FROM ('2026-03-16 00:00:00') TO ('2026-03-17 00:00:00');
-
-
---
--- Name: events_2026_03_17; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_17 FOR VALUES FROM ('2026-03-17 00:00:00') TO ('2026-03-18 00:00:00');
-
-
---
--- Name: events_2026_03_18; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_18 FOR VALUES FROM ('2026-03-18 00:00:00') TO ('2026-03-19 00:00:00');
-
-
---
--- Name: events_2026_03_19; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_19 FOR VALUES FROM ('2026-03-19 00:00:00') TO ('2026-03-20 00:00:00');
-
-
---
--- Name: events_2026_03_20; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_20 FOR VALUES FROM ('2026-03-20 00:00:00') TO ('2026-03-21 00:00:00');
-
-
---
--- Name: events_2026_03_21; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_21 FOR VALUES FROM ('2026-03-21 00:00:00') TO ('2026-03-22 00:00:00');
-
-
---
--- Name: events_2026_03_22; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_22 FOR VALUES FROM ('2026-03-22 00:00:00') TO ('2026-03-23 00:00:00');
-
-
---
--- Name: events_2026_03_23; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_23 FOR VALUES FROM ('2026-03-23 00:00:00') TO ('2026-03-24 00:00:00');
-
-
---
--- Name: events_2026_03_24; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_24 FOR VALUES FROM ('2026-03-24 00:00:00') TO ('2026-03-25 00:00:00');
-
-
---
--- Name: events_2026_03_25; Type: TABLE ATTACH; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events ATTACH PARTITION public.events_2026_03_25 FOR VALUES FROM ('2026-03-25 00:00:00') TO ('2026-03-26 00:00:00');
-
-
---
 -- Name: agent_api_key_history id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -7899,1145 +5569,6 @@ ALTER TABLE ONLY public.event_types
     ADD CONSTRAINT event_types_pkey PRIMARY KEY (event_type);
 
 
---
--- Name: events events_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events
-    ADD CONSTRAINT events_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_11 events_2026_01_11_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_11
-    ADD CONSTRAINT events_2026_01_11_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events
-    ADD CONSTRAINT events_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_11 events_2026_01_11_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_11
-    ADD CONSTRAINT events_2026_01_11_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_12 events_2026_01_12_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_12
-    ADD CONSTRAINT events_2026_01_12_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_12 events_2026_01_12_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_12
-    ADD CONSTRAINT events_2026_01_12_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_13 events_2026_01_13_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_13
-    ADD CONSTRAINT events_2026_01_13_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_13 events_2026_01_13_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_13
-    ADD CONSTRAINT events_2026_01_13_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_14 events_2026_01_14_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_14
-    ADD CONSTRAINT events_2026_01_14_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_14 events_2026_01_14_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_14
-    ADD CONSTRAINT events_2026_01_14_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_15 events_2026_01_15_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_15
-    ADD CONSTRAINT events_2026_01_15_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_15 events_2026_01_15_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_15
-    ADD CONSTRAINT events_2026_01_15_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_16 events_2026_01_16_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_16
-    ADD CONSTRAINT events_2026_01_16_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_16 events_2026_01_16_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_16
-    ADD CONSTRAINT events_2026_01_16_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_17 events_2026_01_17_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_17
-    ADD CONSTRAINT events_2026_01_17_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_17 events_2026_01_17_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_17
-    ADD CONSTRAINT events_2026_01_17_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_18 events_2026_01_18_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_18
-    ADD CONSTRAINT events_2026_01_18_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_18 events_2026_01_18_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_18
-    ADD CONSTRAINT events_2026_01_18_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_19 events_2026_01_19_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_19
-    ADD CONSTRAINT events_2026_01_19_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_19 events_2026_01_19_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_19
-    ADD CONSTRAINT events_2026_01_19_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_20 events_2026_01_20_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_20
-    ADD CONSTRAINT events_2026_01_20_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_20 events_2026_01_20_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_20
-    ADD CONSTRAINT events_2026_01_20_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_21 events_2026_01_21_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_21
-    ADD CONSTRAINT events_2026_01_21_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_21 events_2026_01_21_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_21
-    ADD CONSTRAINT events_2026_01_21_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_22 events_2026_01_22_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_22
-    ADD CONSTRAINT events_2026_01_22_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_22 events_2026_01_22_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_22
-    ADD CONSTRAINT events_2026_01_22_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_23 events_2026_01_23_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_23
-    ADD CONSTRAINT events_2026_01_23_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_23 events_2026_01_23_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_23
-    ADD CONSTRAINT events_2026_01_23_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_24 events_2026_01_24_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_24
-    ADD CONSTRAINT events_2026_01_24_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_24 events_2026_01_24_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_24
-    ADD CONSTRAINT events_2026_01_24_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_25 events_2026_01_25_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_25
-    ADD CONSTRAINT events_2026_01_25_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_25 events_2026_01_25_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_25
-    ADD CONSTRAINT events_2026_01_25_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_26 events_2026_01_26_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_26
-    ADD CONSTRAINT events_2026_01_26_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_26 events_2026_01_26_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_26
-    ADD CONSTRAINT events_2026_01_26_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_27 events_2026_01_27_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_27
-    ADD CONSTRAINT events_2026_01_27_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_27 events_2026_01_27_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_27
-    ADD CONSTRAINT events_2026_01_27_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_28 events_2026_01_28_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_28
-    ADD CONSTRAINT events_2026_01_28_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_28 events_2026_01_28_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_28
-    ADD CONSTRAINT events_2026_01_28_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_29 events_2026_01_29_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_29
-    ADD CONSTRAINT events_2026_01_29_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_29 events_2026_01_29_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_29
-    ADD CONSTRAINT events_2026_01_29_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_30 events_2026_01_30_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_30
-    ADD CONSTRAINT events_2026_01_30_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_30 events_2026_01_30_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_30
-    ADD CONSTRAINT events_2026_01_30_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_01_31 events_2026_01_31_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_31
-    ADD CONSTRAINT events_2026_01_31_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_01_31 events_2026_01_31_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_01_31
-    ADD CONSTRAINT events_2026_01_31_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_01 events_2026_02_01_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_01
-    ADD CONSTRAINT events_2026_02_01_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_01 events_2026_02_01_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_01
-    ADD CONSTRAINT events_2026_02_01_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_02 events_2026_02_02_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_02
-    ADD CONSTRAINT events_2026_02_02_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_02 events_2026_02_02_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_02
-    ADD CONSTRAINT events_2026_02_02_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_03 events_2026_02_03_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_03
-    ADD CONSTRAINT events_2026_02_03_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_03 events_2026_02_03_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_03
-    ADD CONSTRAINT events_2026_02_03_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_04 events_2026_02_04_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_04
-    ADD CONSTRAINT events_2026_02_04_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_04 events_2026_02_04_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_04
-    ADD CONSTRAINT events_2026_02_04_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_05 events_2026_02_05_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_05
-    ADD CONSTRAINT events_2026_02_05_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_05 events_2026_02_05_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_05
-    ADD CONSTRAINT events_2026_02_05_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_06 events_2026_02_06_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_06
-    ADD CONSTRAINT events_2026_02_06_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_06 events_2026_02_06_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_06
-    ADD CONSTRAINT events_2026_02_06_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_07 events_2026_02_07_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_07
-    ADD CONSTRAINT events_2026_02_07_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_07 events_2026_02_07_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_07
-    ADD CONSTRAINT events_2026_02_07_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_08 events_2026_02_08_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_08
-    ADD CONSTRAINT events_2026_02_08_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_08 events_2026_02_08_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_08
-    ADD CONSTRAINT events_2026_02_08_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_09 events_2026_02_09_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_09
-    ADD CONSTRAINT events_2026_02_09_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_09 events_2026_02_09_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_09
-    ADD CONSTRAINT events_2026_02_09_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_10 events_2026_02_10_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_10
-    ADD CONSTRAINT events_2026_02_10_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_10 events_2026_02_10_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_10
-    ADD CONSTRAINT events_2026_02_10_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_11 events_2026_02_11_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_11
-    ADD CONSTRAINT events_2026_02_11_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_11 events_2026_02_11_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_11
-    ADD CONSTRAINT events_2026_02_11_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_12 events_2026_02_12_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_12
-    ADD CONSTRAINT events_2026_02_12_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_12 events_2026_02_12_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_12
-    ADD CONSTRAINT events_2026_02_12_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_13 events_2026_02_13_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_13
-    ADD CONSTRAINT events_2026_02_13_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_13 events_2026_02_13_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_13
-    ADD CONSTRAINT events_2026_02_13_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_14 events_2026_02_14_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_14
-    ADD CONSTRAINT events_2026_02_14_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_14 events_2026_02_14_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_14
-    ADD CONSTRAINT events_2026_02_14_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_15 events_2026_02_15_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_15
-    ADD CONSTRAINT events_2026_02_15_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_15 events_2026_02_15_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_15
-    ADD CONSTRAINT events_2026_02_15_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_16 events_2026_02_16_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_16
-    ADD CONSTRAINT events_2026_02_16_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_16 events_2026_02_16_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_16
-    ADD CONSTRAINT events_2026_02_16_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_17 events_2026_02_17_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_17
-    ADD CONSTRAINT events_2026_02_17_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_17 events_2026_02_17_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_17
-    ADD CONSTRAINT events_2026_02_17_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_22 events_2026_02_22_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_22
-    ADD CONSTRAINT events_2026_02_22_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_22 events_2026_02_22_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_22
-    ADD CONSTRAINT events_2026_02_22_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_23 events_2026_02_23_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_23
-    ADD CONSTRAINT events_2026_02_23_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_23 events_2026_02_23_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_23
-    ADD CONSTRAINT events_2026_02_23_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_24 events_2026_02_24_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_24
-    ADD CONSTRAINT events_2026_02_24_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_24 events_2026_02_24_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_24
-    ADD CONSTRAINT events_2026_02_24_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_25 events_2026_02_25_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_25
-    ADD CONSTRAINT events_2026_02_25_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_25 events_2026_02_25_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_25
-    ADD CONSTRAINT events_2026_02_25_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_26 events_2026_02_26_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_26
-    ADD CONSTRAINT events_2026_02_26_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_26 events_2026_02_26_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_26
-    ADD CONSTRAINT events_2026_02_26_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_27 events_2026_02_27_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_27
-    ADD CONSTRAINT events_2026_02_27_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_27 events_2026_02_27_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_27
-    ADD CONSTRAINT events_2026_02_27_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_02_28 events_2026_02_28_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_28
-    ADD CONSTRAINT events_2026_02_28_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_02_28 events_2026_02_28_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_02_28
-    ADD CONSTRAINT events_2026_02_28_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_01 events_2026_03_01_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_01
-    ADD CONSTRAINT events_2026_03_01_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_01 events_2026_03_01_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_01
-    ADD CONSTRAINT events_2026_03_01_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_02 events_2026_03_02_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_02
-    ADD CONSTRAINT events_2026_03_02_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_02 events_2026_03_02_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_02
-    ADD CONSTRAINT events_2026_03_02_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_03 events_2026_03_03_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_03
-    ADD CONSTRAINT events_2026_03_03_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_03 events_2026_03_03_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_03
-    ADD CONSTRAINT events_2026_03_03_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_04 events_2026_03_04_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_04
-    ADD CONSTRAINT events_2026_03_04_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_04 events_2026_03_04_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_04
-    ADD CONSTRAINT events_2026_03_04_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_05 events_2026_03_05_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_05
-    ADD CONSTRAINT events_2026_03_05_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_05 events_2026_03_05_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_05
-    ADD CONSTRAINT events_2026_03_05_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_06 events_2026_03_06_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_06
-    ADD CONSTRAINT events_2026_03_06_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_06 events_2026_03_06_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_06
-    ADD CONSTRAINT events_2026_03_06_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_07 events_2026_03_07_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_07
-    ADD CONSTRAINT events_2026_03_07_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_07 events_2026_03_07_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_07
-    ADD CONSTRAINT events_2026_03_07_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_08 events_2026_03_08_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_08
-    ADD CONSTRAINT events_2026_03_08_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_08 events_2026_03_08_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_08
-    ADD CONSTRAINT events_2026_03_08_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_09 events_2026_03_09_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_09
-    ADD CONSTRAINT events_2026_03_09_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_09 events_2026_03_09_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_09
-    ADD CONSTRAINT events_2026_03_09_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_10 events_2026_03_10_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_10
-    ADD CONSTRAINT events_2026_03_10_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_10 events_2026_03_10_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_10
-    ADD CONSTRAINT events_2026_03_10_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_11 events_2026_03_11_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_11
-    ADD CONSTRAINT events_2026_03_11_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_11 events_2026_03_11_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_11
-    ADD CONSTRAINT events_2026_03_11_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_12 events_2026_03_12_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_12
-    ADD CONSTRAINT events_2026_03_12_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_12 events_2026_03_12_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_12
-    ADD CONSTRAINT events_2026_03_12_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_13 events_2026_03_13_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_13
-    ADD CONSTRAINT events_2026_03_13_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_13 events_2026_03_13_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_13
-    ADD CONSTRAINT events_2026_03_13_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_14 events_2026_03_14_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_14
-    ADD CONSTRAINT events_2026_03_14_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_14 events_2026_03_14_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_14
-    ADD CONSTRAINT events_2026_03_14_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_15 events_2026_03_15_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_15
-    ADD CONSTRAINT events_2026_03_15_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_15 events_2026_03_15_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_15
-    ADD CONSTRAINT events_2026_03_15_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_16 events_2026_03_16_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_16
-    ADD CONSTRAINT events_2026_03_16_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_16 events_2026_03_16_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_16
-    ADD CONSTRAINT events_2026_03_16_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_17 events_2026_03_17_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_17
-    ADD CONSTRAINT events_2026_03_17_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_17 events_2026_03_17_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_17
-    ADD CONSTRAINT events_2026_03_17_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_18 events_2026_03_18_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_18
-    ADD CONSTRAINT events_2026_03_18_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_18 events_2026_03_18_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_18
-    ADD CONSTRAINT events_2026_03_18_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_19 events_2026_03_19_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_19
-    ADD CONSTRAINT events_2026_03_19_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_19 events_2026_03_19_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_19
-    ADD CONSTRAINT events_2026_03_19_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_20 events_2026_03_20_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_20
-    ADD CONSTRAINT events_2026_03_20_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_20 events_2026_03_20_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_20
-    ADD CONSTRAINT events_2026_03_20_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_21 events_2026_03_21_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_21
-    ADD CONSTRAINT events_2026_03_21_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_21 events_2026_03_21_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_21
-    ADD CONSTRAINT events_2026_03_21_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_22 events_2026_03_22_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_22
-    ADD CONSTRAINT events_2026_03_22_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_22 events_2026_03_22_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_22
-    ADD CONSTRAINT events_2026_03_22_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_23 events_2026_03_23_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_23
-    ADD CONSTRAINT events_2026_03_23_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_23 events_2026_03_23_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_23
-    ADD CONSTRAINT events_2026_03_23_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_24 events_2026_03_24_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_24
-    ADD CONSTRAINT events_2026_03_24_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_24 events_2026_03_24_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_24
-    ADD CONSTRAINT events_2026_03_24_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: events_2026_03_25 events_2026_03_25_event_id_timestamp_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_25
-    ADD CONSTRAINT events_2026_03_25_event_id_timestamp_key UNIQUE (event_id, "timestamp");
-
-
---
--- Name: events_2026_03_25 events_2026_03_25_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.events_2026_03_25
-    ADD CONSTRAINT events_2026_03_25_pkey PRIMARY KEY (id, "timestamp");
-
-
---
--- Name: fleet_billing_history fleet_billing_history_fleet_id_billing_month_key; Type: CONSTRAINT; Schema: public; Owner: -
---
 
 ALTER TABLE ONLY public.fleet_billing_history
     ADD CONSTRAINT fleet_billing_history_fleet_id_billing_month_key UNIQUE (fleet_id, billing_month);
@@ -9624,3980 +6155,6 @@ CREATE INDEX anomaly_events_timestamp_ms_idx ON public.anomaly_events USING btre
 CREATE INDEX device_logs_timestamp_idx ON public.agent_logs USING btree ("timestamp" DESC);
 
 
---
--- Name: idx_events_actor; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_events_actor ON ONLY public.events USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_11_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_11_actor_type_actor_id_idx ON public.events_2026_01_11 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: idx_events_aggregate; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_events_aggregate ON ONLY public.events USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_11_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_11_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_11 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: idx_events_causation; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_events_causation ON ONLY public.events USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_11_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_11_causation_id_idx ON public.events_2026_01_11 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: idx_events_correlation; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_events_correlation ON ONLY public.events USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_11_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_11_correlation_id_idx ON public.events_2026_01_11 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: idx_events_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_events_type ON ONLY public.events USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_11_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_11_event_type_timestamp_idx ON public.events_2026_01_11 USING btree (event_type, "timestamp");
-
-
---
--- Name: idx_events_impact; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_events_impact ON ONLY public.events USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_11_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_11_impact_idx ON public.events_2026_01_11 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: idx_events_severity; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_events_severity ON ONLY public.events USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_11_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_11_severity_idx ON public.events_2026_01_11 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: idx_events_timestamp; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_events_timestamp ON ONLY public.events USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_11_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_11_timestamp_idx ON public.events_2026_01_11 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_12_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_12_actor_type_actor_id_idx ON public.events_2026_01_12 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_12_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_12_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_12 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_12_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_12_causation_id_idx ON public.events_2026_01_12 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_12_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_12_correlation_id_idx ON public.events_2026_01_12 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_12_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_12_event_type_timestamp_idx ON public.events_2026_01_12 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_12_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_12_impact_idx ON public.events_2026_01_12 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_12_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_12_severity_idx ON public.events_2026_01_12 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_12_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_12_timestamp_idx ON public.events_2026_01_12 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_13_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_13_actor_type_actor_id_idx ON public.events_2026_01_13 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_13_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_13_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_13 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_13_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_13_causation_id_idx ON public.events_2026_01_13 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_13_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_13_correlation_id_idx ON public.events_2026_01_13 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_13_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_13_event_type_timestamp_idx ON public.events_2026_01_13 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_13_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_13_impact_idx ON public.events_2026_01_13 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_13_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_13_severity_idx ON public.events_2026_01_13 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_13_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_13_timestamp_idx ON public.events_2026_01_13 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_14_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_14_actor_type_actor_id_idx ON public.events_2026_01_14 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_14_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_14_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_14 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_14_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_14_causation_id_idx ON public.events_2026_01_14 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_14_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_14_correlation_id_idx ON public.events_2026_01_14 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_14_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_14_event_type_timestamp_idx ON public.events_2026_01_14 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_14_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_14_impact_idx ON public.events_2026_01_14 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_14_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_14_severity_idx ON public.events_2026_01_14 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_14_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_14_timestamp_idx ON public.events_2026_01_14 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_15_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_15_actor_type_actor_id_idx ON public.events_2026_01_15 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_15_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_15_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_15 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_15_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_15_causation_id_idx ON public.events_2026_01_15 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_15_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_15_correlation_id_idx ON public.events_2026_01_15 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_15_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_15_event_type_timestamp_idx ON public.events_2026_01_15 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_15_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_15_impact_idx ON public.events_2026_01_15 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_15_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_15_severity_idx ON public.events_2026_01_15 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_15_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_15_timestamp_idx ON public.events_2026_01_15 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_16_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_16_actor_type_actor_id_idx ON public.events_2026_01_16 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_16_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_16_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_16 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_16_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_16_causation_id_idx ON public.events_2026_01_16 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_16_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_16_correlation_id_idx ON public.events_2026_01_16 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_16_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_16_event_type_timestamp_idx ON public.events_2026_01_16 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_16_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_16_impact_idx ON public.events_2026_01_16 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_16_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_16_severity_idx ON public.events_2026_01_16 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_16_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_16_timestamp_idx ON public.events_2026_01_16 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_17_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_17_actor_type_actor_id_idx ON public.events_2026_01_17 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_17_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_17_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_17 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_17_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_17_causation_id_idx ON public.events_2026_01_17 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_17_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_17_correlation_id_idx ON public.events_2026_01_17 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_17_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_17_event_type_timestamp_idx ON public.events_2026_01_17 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_17_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_17_impact_idx ON public.events_2026_01_17 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_17_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_17_severity_idx ON public.events_2026_01_17 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_17_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_17_timestamp_idx ON public.events_2026_01_17 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_18_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_18_actor_type_actor_id_idx ON public.events_2026_01_18 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_18_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_18_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_18 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_18_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_18_causation_id_idx ON public.events_2026_01_18 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_18_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_18_correlation_id_idx ON public.events_2026_01_18 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_18_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_18_event_type_timestamp_idx ON public.events_2026_01_18 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_18_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_18_impact_idx ON public.events_2026_01_18 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_18_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_18_severity_idx ON public.events_2026_01_18 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_18_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_18_timestamp_idx ON public.events_2026_01_18 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_19_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_19_actor_type_actor_id_idx ON public.events_2026_01_19 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_19_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_19_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_19 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_19_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_19_causation_id_idx ON public.events_2026_01_19 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_19_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_19_correlation_id_idx ON public.events_2026_01_19 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_19_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_19_event_type_timestamp_idx ON public.events_2026_01_19 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_19_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_19_impact_idx ON public.events_2026_01_19 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_19_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_19_severity_idx ON public.events_2026_01_19 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_19_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_19_timestamp_idx ON public.events_2026_01_19 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_20_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_20_actor_type_actor_id_idx ON public.events_2026_01_20 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_20_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_20_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_20 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_20_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_20_causation_id_idx ON public.events_2026_01_20 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_20_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_20_correlation_id_idx ON public.events_2026_01_20 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_20_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_20_event_type_timestamp_idx ON public.events_2026_01_20 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_20_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_20_impact_idx ON public.events_2026_01_20 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_20_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_20_severity_idx ON public.events_2026_01_20 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_20_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_20_timestamp_idx ON public.events_2026_01_20 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_21_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_21_actor_type_actor_id_idx ON public.events_2026_01_21 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_21_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_21_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_21 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_21_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_21_causation_id_idx ON public.events_2026_01_21 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_21_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_21_correlation_id_idx ON public.events_2026_01_21 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_21_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_21_event_type_timestamp_idx ON public.events_2026_01_21 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_21_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_21_impact_idx ON public.events_2026_01_21 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_21_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_21_severity_idx ON public.events_2026_01_21 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_21_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_21_timestamp_idx ON public.events_2026_01_21 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_22_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_22_actor_type_actor_id_idx ON public.events_2026_01_22 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_22_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_22_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_22 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_22_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_22_causation_id_idx ON public.events_2026_01_22 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_22_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_22_correlation_id_idx ON public.events_2026_01_22 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_22_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_22_event_type_timestamp_idx ON public.events_2026_01_22 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_22_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_22_impact_idx ON public.events_2026_01_22 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_22_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_22_severity_idx ON public.events_2026_01_22 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_22_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_22_timestamp_idx ON public.events_2026_01_22 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_23_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_23_actor_type_actor_id_idx ON public.events_2026_01_23 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_23_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_23_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_23 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_23_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_23_causation_id_idx ON public.events_2026_01_23 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_23_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_23_correlation_id_idx ON public.events_2026_01_23 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_23_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_23_event_type_timestamp_idx ON public.events_2026_01_23 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_23_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_23_impact_idx ON public.events_2026_01_23 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_23_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_23_severity_idx ON public.events_2026_01_23 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_23_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_23_timestamp_idx ON public.events_2026_01_23 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_24_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_24_actor_type_actor_id_idx ON public.events_2026_01_24 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_24_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_24_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_24 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_24_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_24_causation_id_idx ON public.events_2026_01_24 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_24_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_24_correlation_id_idx ON public.events_2026_01_24 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_24_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_24_event_type_timestamp_idx ON public.events_2026_01_24 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_24_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_24_impact_idx ON public.events_2026_01_24 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_24_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_24_severity_idx ON public.events_2026_01_24 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_24_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_24_timestamp_idx ON public.events_2026_01_24 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_25_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_25_actor_type_actor_id_idx ON public.events_2026_01_25 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_25_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_25_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_25 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_25_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_25_causation_id_idx ON public.events_2026_01_25 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_25_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_25_correlation_id_idx ON public.events_2026_01_25 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_25_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_25_event_type_timestamp_idx ON public.events_2026_01_25 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_25_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_25_impact_idx ON public.events_2026_01_25 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_25_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_25_severity_idx ON public.events_2026_01_25 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_25_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_25_timestamp_idx ON public.events_2026_01_25 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_26_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_26_actor_type_actor_id_idx ON public.events_2026_01_26 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_26_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_26_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_26 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_26_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_26_causation_id_idx ON public.events_2026_01_26 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_26_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_26_correlation_id_idx ON public.events_2026_01_26 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_26_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_26_event_type_timestamp_idx ON public.events_2026_01_26 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_26_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_26_impact_idx ON public.events_2026_01_26 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_26_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_26_severity_idx ON public.events_2026_01_26 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_26_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_26_timestamp_idx ON public.events_2026_01_26 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_27_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_27_actor_type_actor_id_idx ON public.events_2026_01_27 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_27_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_27_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_27 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_27_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_27_causation_id_idx ON public.events_2026_01_27 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_27_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_27_correlation_id_idx ON public.events_2026_01_27 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_27_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_27_event_type_timestamp_idx ON public.events_2026_01_27 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_27_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_27_impact_idx ON public.events_2026_01_27 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_27_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_27_severity_idx ON public.events_2026_01_27 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_27_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_27_timestamp_idx ON public.events_2026_01_27 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_28_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_28_actor_type_actor_id_idx ON public.events_2026_01_28 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_28_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_28_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_28 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_28_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_28_causation_id_idx ON public.events_2026_01_28 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_28_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_28_correlation_id_idx ON public.events_2026_01_28 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_28_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_28_event_type_timestamp_idx ON public.events_2026_01_28 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_28_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_28_impact_idx ON public.events_2026_01_28 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_28_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_28_severity_idx ON public.events_2026_01_28 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_28_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_28_timestamp_idx ON public.events_2026_01_28 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_29_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_29_actor_type_actor_id_idx ON public.events_2026_01_29 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_29_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_29_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_29 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_29_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_29_causation_id_idx ON public.events_2026_01_29 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_29_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_29_correlation_id_idx ON public.events_2026_01_29 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_29_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_29_event_type_timestamp_idx ON public.events_2026_01_29 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_29_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_29_impact_idx ON public.events_2026_01_29 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_29_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_29_severity_idx ON public.events_2026_01_29 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_29_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_29_timestamp_idx ON public.events_2026_01_29 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_30_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_30_actor_type_actor_id_idx ON public.events_2026_01_30 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_30_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_30_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_30 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_30_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_30_causation_id_idx ON public.events_2026_01_30 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_30_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_30_correlation_id_idx ON public.events_2026_01_30 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_30_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_30_event_type_timestamp_idx ON public.events_2026_01_30 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_30_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_30_impact_idx ON public.events_2026_01_30 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_30_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_30_severity_idx ON public.events_2026_01_30 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_30_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_30_timestamp_idx ON public.events_2026_01_30 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_01_31_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_31_actor_type_actor_id_idx ON public.events_2026_01_31 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_01_31_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_31_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_01_31 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_01_31_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_31_causation_id_idx ON public.events_2026_01_31 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_31_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_31_correlation_id_idx ON public.events_2026_01_31 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_01_31_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_31_event_type_timestamp_idx ON public.events_2026_01_31 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_01_31_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_31_impact_idx ON public.events_2026_01_31 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_01_31_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_31_severity_idx ON public.events_2026_01_31 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_01_31_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_01_31_timestamp_idx ON public.events_2026_01_31 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_01_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_01_actor_type_actor_id_idx ON public.events_2026_02_01 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_01_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_01_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_01 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_01_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_01_causation_id_idx ON public.events_2026_02_01 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_01_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_01_correlation_id_idx ON public.events_2026_02_01 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_01_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_01_event_type_timestamp_idx ON public.events_2026_02_01 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_01_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_01_impact_idx ON public.events_2026_02_01 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_01_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_01_severity_idx ON public.events_2026_02_01 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_01_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_01_timestamp_idx ON public.events_2026_02_01 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_02_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_02_actor_type_actor_id_idx ON public.events_2026_02_02 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_02_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_02_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_02 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_02_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_02_causation_id_idx ON public.events_2026_02_02 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_02_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_02_correlation_id_idx ON public.events_2026_02_02 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_02_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_02_event_type_timestamp_idx ON public.events_2026_02_02 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_02_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_02_impact_idx ON public.events_2026_02_02 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_02_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_02_severity_idx ON public.events_2026_02_02 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_02_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_02_timestamp_idx ON public.events_2026_02_02 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_03_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_03_actor_type_actor_id_idx ON public.events_2026_02_03 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_03_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_03_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_03 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_03_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_03_causation_id_idx ON public.events_2026_02_03 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_03_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_03_correlation_id_idx ON public.events_2026_02_03 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_03_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_03_event_type_timestamp_idx ON public.events_2026_02_03 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_03_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_03_impact_idx ON public.events_2026_02_03 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_03_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_03_severity_idx ON public.events_2026_02_03 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_03_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_03_timestamp_idx ON public.events_2026_02_03 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_04_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_04_actor_type_actor_id_idx ON public.events_2026_02_04 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_04_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_04_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_04 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_04_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_04_causation_id_idx ON public.events_2026_02_04 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_04_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_04_correlation_id_idx ON public.events_2026_02_04 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_04_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_04_event_type_timestamp_idx ON public.events_2026_02_04 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_04_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_04_impact_idx ON public.events_2026_02_04 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_04_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_04_severity_idx ON public.events_2026_02_04 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_04_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_04_timestamp_idx ON public.events_2026_02_04 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_05_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_05_actor_type_actor_id_idx ON public.events_2026_02_05 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_05_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_05_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_05 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_05_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_05_causation_id_idx ON public.events_2026_02_05 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_05_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_05_correlation_id_idx ON public.events_2026_02_05 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_05_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_05_event_type_timestamp_idx ON public.events_2026_02_05 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_05_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_05_impact_idx ON public.events_2026_02_05 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_05_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_05_severity_idx ON public.events_2026_02_05 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_05_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_05_timestamp_idx ON public.events_2026_02_05 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_06_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_06_actor_type_actor_id_idx ON public.events_2026_02_06 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_06_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_06_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_06 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_06_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_06_causation_id_idx ON public.events_2026_02_06 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_06_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_06_correlation_id_idx ON public.events_2026_02_06 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_06_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_06_event_type_timestamp_idx ON public.events_2026_02_06 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_06_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_06_impact_idx ON public.events_2026_02_06 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_06_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_06_severity_idx ON public.events_2026_02_06 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_06_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_06_timestamp_idx ON public.events_2026_02_06 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_07_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_07_actor_type_actor_id_idx ON public.events_2026_02_07 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_07_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_07_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_07 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_07_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_07_causation_id_idx ON public.events_2026_02_07 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_07_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_07_correlation_id_idx ON public.events_2026_02_07 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_07_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_07_event_type_timestamp_idx ON public.events_2026_02_07 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_07_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_07_impact_idx ON public.events_2026_02_07 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_07_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_07_severity_idx ON public.events_2026_02_07 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_07_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_07_timestamp_idx ON public.events_2026_02_07 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_08_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_08_actor_type_actor_id_idx ON public.events_2026_02_08 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_08_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_08_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_08 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_08_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_08_causation_id_idx ON public.events_2026_02_08 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_08_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_08_correlation_id_idx ON public.events_2026_02_08 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_08_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_08_event_type_timestamp_idx ON public.events_2026_02_08 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_08_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_08_impact_idx ON public.events_2026_02_08 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_08_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_08_severity_idx ON public.events_2026_02_08 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_08_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_08_timestamp_idx ON public.events_2026_02_08 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_09_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_09_actor_type_actor_id_idx ON public.events_2026_02_09 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_09_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_09_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_09 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_09_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_09_causation_id_idx ON public.events_2026_02_09 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_09_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_09_correlation_id_idx ON public.events_2026_02_09 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_09_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_09_event_type_timestamp_idx ON public.events_2026_02_09 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_09_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_09_impact_idx ON public.events_2026_02_09 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_09_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_09_severity_idx ON public.events_2026_02_09 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_09_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_09_timestamp_idx ON public.events_2026_02_09 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_10_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_10_actor_type_actor_id_idx ON public.events_2026_02_10 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_10_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_10_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_10 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_10_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_10_causation_id_idx ON public.events_2026_02_10 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_10_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_10_correlation_id_idx ON public.events_2026_02_10 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_10_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_10_event_type_timestamp_idx ON public.events_2026_02_10 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_10_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_10_impact_idx ON public.events_2026_02_10 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_10_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_10_severity_idx ON public.events_2026_02_10 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_10_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_10_timestamp_idx ON public.events_2026_02_10 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_11_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_11_actor_type_actor_id_idx ON public.events_2026_02_11 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_11_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_11_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_11 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_11_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_11_causation_id_idx ON public.events_2026_02_11 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_11_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_11_correlation_id_idx ON public.events_2026_02_11 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_11_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_11_event_type_timestamp_idx ON public.events_2026_02_11 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_11_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_11_impact_idx ON public.events_2026_02_11 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_11_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_11_severity_idx ON public.events_2026_02_11 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_11_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_11_timestamp_idx ON public.events_2026_02_11 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_12_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_12_actor_type_actor_id_idx ON public.events_2026_02_12 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_12_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_12_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_12 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_12_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_12_causation_id_idx ON public.events_2026_02_12 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_12_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_12_correlation_id_idx ON public.events_2026_02_12 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_12_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_12_event_type_timestamp_idx ON public.events_2026_02_12 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_12_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_12_impact_idx ON public.events_2026_02_12 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_12_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_12_severity_idx ON public.events_2026_02_12 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_12_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_12_timestamp_idx ON public.events_2026_02_12 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_13_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_13_actor_type_actor_id_idx ON public.events_2026_02_13 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_13_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_13_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_13 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_13_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_13_causation_id_idx ON public.events_2026_02_13 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_13_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_13_correlation_id_idx ON public.events_2026_02_13 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_13_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_13_event_type_timestamp_idx ON public.events_2026_02_13 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_13_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_13_impact_idx ON public.events_2026_02_13 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_13_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_13_severity_idx ON public.events_2026_02_13 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_13_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_13_timestamp_idx ON public.events_2026_02_13 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_14_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_14_actor_type_actor_id_idx ON public.events_2026_02_14 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_14_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_14_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_14 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_14_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_14_causation_id_idx ON public.events_2026_02_14 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_14_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_14_correlation_id_idx ON public.events_2026_02_14 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_14_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_14_event_type_timestamp_idx ON public.events_2026_02_14 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_14_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_14_impact_idx ON public.events_2026_02_14 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_14_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_14_severity_idx ON public.events_2026_02_14 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_14_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_14_timestamp_idx ON public.events_2026_02_14 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_15_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_15_actor_type_actor_id_idx ON public.events_2026_02_15 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_15_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_15_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_15 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_15_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_15_causation_id_idx ON public.events_2026_02_15 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_15_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_15_correlation_id_idx ON public.events_2026_02_15 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_15_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_15_event_type_timestamp_idx ON public.events_2026_02_15 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_15_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_15_impact_idx ON public.events_2026_02_15 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_15_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_15_severity_idx ON public.events_2026_02_15 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_15_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_15_timestamp_idx ON public.events_2026_02_15 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_16_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_16_actor_type_actor_id_idx ON public.events_2026_02_16 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_16_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_16_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_16 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_16_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_16_causation_id_idx ON public.events_2026_02_16 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_16_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_16_correlation_id_idx ON public.events_2026_02_16 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_16_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_16_event_type_timestamp_idx ON public.events_2026_02_16 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_16_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_16_impact_idx ON public.events_2026_02_16 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_16_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_16_severity_idx ON public.events_2026_02_16 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_16_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_16_timestamp_idx ON public.events_2026_02_16 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_17_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_17_actor_type_actor_id_idx ON public.events_2026_02_17 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_17_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_17_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_17 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_17_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_17_causation_id_idx ON public.events_2026_02_17 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_17_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_17_correlation_id_idx ON public.events_2026_02_17 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_17_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_17_event_type_timestamp_idx ON public.events_2026_02_17 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_17_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_17_impact_idx ON public.events_2026_02_17 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_17_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_17_severity_idx ON public.events_2026_02_17 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_17_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_17_timestamp_idx ON public.events_2026_02_17 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_22_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_22_actor_type_actor_id_idx ON public.events_2026_02_22 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_22_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_22_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_22 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_22_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_22_causation_id_idx ON public.events_2026_02_22 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_22_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_22_correlation_id_idx ON public.events_2026_02_22 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_22_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_22_event_type_timestamp_idx ON public.events_2026_02_22 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_22_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_22_impact_idx ON public.events_2026_02_22 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_22_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_22_severity_idx ON public.events_2026_02_22 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_22_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_22_timestamp_idx ON public.events_2026_02_22 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_23_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_23_actor_type_actor_id_idx ON public.events_2026_02_23 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_23_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_23_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_23 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_23_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_23_causation_id_idx ON public.events_2026_02_23 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_23_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_23_correlation_id_idx ON public.events_2026_02_23 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_23_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_23_event_type_timestamp_idx ON public.events_2026_02_23 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_23_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_23_impact_idx ON public.events_2026_02_23 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_23_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_23_severity_idx ON public.events_2026_02_23 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_23_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_23_timestamp_idx ON public.events_2026_02_23 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_24_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_24_actor_type_actor_id_idx ON public.events_2026_02_24 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_24_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_24_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_24 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_24_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_24_causation_id_idx ON public.events_2026_02_24 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_24_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_24_correlation_id_idx ON public.events_2026_02_24 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_24_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_24_event_type_timestamp_idx ON public.events_2026_02_24 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_24_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_24_impact_idx ON public.events_2026_02_24 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_24_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_24_severity_idx ON public.events_2026_02_24 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_24_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_24_timestamp_idx ON public.events_2026_02_24 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_25_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_25_actor_type_actor_id_idx ON public.events_2026_02_25 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_25_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_25_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_25 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_25_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_25_causation_id_idx ON public.events_2026_02_25 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_25_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_25_correlation_id_idx ON public.events_2026_02_25 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_25_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_25_event_type_timestamp_idx ON public.events_2026_02_25 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_25_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_25_impact_idx ON public.events_2026_02_25 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_25_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_25_severity_idx ON public.events_2026_02_25 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_25_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_25_timestamp_idx ON public.events_2026_02_25 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_26_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_26_actor_type_actor_id_idx ON public.events_2026_02_26 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_26_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_26_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_26 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_26_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_26_causation_id_idx ON public.events_2026_02_26 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_26_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_26_correlation_id_idx ON public.events_2026_02_26 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_26_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_26_event_type_timestamp_idx ON public.events_2026_02_26 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_26_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_26_impact_idx ON public.events_2026_02_26 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_26_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_26_severity_idx ON public.events_2026_02_26 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_26_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_26_timestamp_idx ON public.events_2026_02_26 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_27_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_27_actor_type_actor_id_idx ON public.events_2026_02_27 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_27_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_27_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_27 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_27_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_27_causation_id_idx ON public.events_2026_02_27 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_27_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_27_correlation_id_idx ON public.events_2026_02_27 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_27_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_27_event_type_timestamp_idx ON public.events_2026_02_27 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_27_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_27_impact_idx ON public.events_2026_02_27 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_27_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_27_severity_idx ON public.events_2026_02_27 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_27_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_27_timestamp_idx ON public.events_2026_02_27 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_02_28_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_28_actor_type_actor_id_idx ON public.events_2026_02_28 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_02_28_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_28_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_02_28 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_02_28_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_28_causation_id_idx ON public.events_2026_02_28 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_28_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_28_correlation_id_idx ON public.events_2026_02_28 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_02_28_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_28_event_type_timestamp_idx ON public.events_2026_02_28 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_02_28_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_28_impact_idx ON public.events_2026_02_28 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_02_28_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_28_severity_idx ON public.events_2026_02_28 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_02_28_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_02_28_timestamp_idx ON public.events_2026_02_28 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_01_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_01_actor_type_actor_id_idx ON public.events_2026_03_01 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_01_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_01_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_01 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_01_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_01_causation_id_idx ON public.events_2026_03_01 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_01_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_01_correlation_id_idx ON public.events_2026_03_01 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_01_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_01_event_type_timestamp_idx ON public.events_2026_03_01 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_01_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_01_impact_idx ON public.events_2026_03_01 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_01_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_01_severity_idx ON public.events_2026_03_01 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_01_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_01_timestamp_idx ON public.events_2026_03_01 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_02_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_02_actor_type_actor_id_idx ON public.events_2026_03_02 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_02_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_02_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_02 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_02_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_02_causation_id_idx ON public.events_2026_03_02 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_02_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_02_correlation_id_idx ON public.events_2026_03_02 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_02_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_02_event_type_timestamp_idx ON public.events_2026_03_02 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_02_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_02_impact_idx ON public.events_2026_03_02 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_02_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_02_severity_idx ON public.events_2026_03_02 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_02_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_02_timestamp_idx ON public.events_2026_03_02 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_03_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_03_actor_type_actor_id_idx ON public.events_2026_03_03 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_03_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_03_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_03 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_03_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_03_causation_id_idx ON public.events_2026_03_03 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_03_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_03_correlation_id_idx ON public.events_2026_03_03 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_03_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_03_event_type_timestamp_idx ON public.events_2026_03_03 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_03_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_03_impact_idx ON public.events_2026_03_03 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_03_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_03_severity_idx ON public.events_2026_03_03 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_03_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_03_timestamp_idx ON public.events_2026_03_03 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_04_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_04_actor_type_actor_id_idx ON public.events_2026_03_04 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_04_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_04_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_04 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_04_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_04_causation_id_idx ON public.events_2026_03_04 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_04_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_04_correlation_id_idx ON public.events_2026_03_04 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_04_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_04_event_type_timestamp_idx ON public.events_2026_03_04 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_04_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_04_impact_idx ON public.events_2026_03_04 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_04_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_04_severity_idx ON public.events_2026_03_04 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_04_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_04_timestamp_idx ON public.events_2026_03_04 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_05_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_05_actor_type_actor_id_idx ON public.events_2026_03_05 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_05_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_05_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_05 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_05_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_05_causation_id_idx ON public.events_2026_03_05 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_05_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_05_correlation_id_idx ON public.events_2026_03_05 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_05_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_05_event_type_timestamp_idx ON public.events_2026_03_05 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_05_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_05_impact_idx ON public.events_2026_03_05 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_05_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_05_severity_idx ON public.events_2026_03_05 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_05_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_05_timestamp_idx ON public.events_2026_03_05 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_06_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_06_actor_type_actor_id_idx ON public.events_2026_03_06 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_06_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_06_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_06 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_06_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_06_causation_id_idx ON public.events_2026_03_06 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_06_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_06_correlation_id_idx ON public.events_2026_03_06 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_06_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_06_event_type_timestamp_idx ON public.events_2026_03_06 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_06_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_06_impact_idx ON public.events_2026_03_06 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_06_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_06_severity_idx ON public.events_2026_03_06 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_06_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_06_timestamp_idx ON public.events_2026_03_06 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_07_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_07_actor_type_actor_id_idx ON public.events_2026_03_07 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_07_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_07_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_07 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_07_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_07_causation_id_idx ON public.events_2026_03_07 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_07_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_07_correlation_id_idx ON public.events_2026_03_07 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_07_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_07_event_type_timestamp_idx ON public.events_2026_03_07 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_07_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_07_impact_idx ON public.events_2026_03_07 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_07_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_07_severity_idx ON public.events_2026_03_07 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_07_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_07_timestamp_idx ON public.events_2026_03_07 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_08_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_08_actor_type_actor_id_idx ON public.events_2026_03_08 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_08_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_08_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_08 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_08_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_08_causation_id_idx ON public.events_2026_03_08 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_08_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_08_correlation_id_idx ON public.events_2026_03_08 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_08_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_08_event_type_timestamp_idx ON public.events_2026_03_08 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_08_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_08_impact_idx ON public.events_2026_03_08 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_08_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_08_severity_idx ON public.events_2026_03_08 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_08_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_08_timestamp_idx ON public.events_2026_03_08 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_09_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_09_actor_type_actor_id_idx ON public.events_2026_03_09 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_09_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_09_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_09 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_09_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_09_causation_id_idx ON public.events_2026_03_09 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_09_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_09_correlation_id_idx ON public.events_2026_03_09 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_09_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_09_event_type_timestamp_idx ON public.events_2026_03_09 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_09_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_09_impact_idx ON public.events_2026_03_09 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_09_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_09_severity_idx ON public.events_2026_03_09 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_09_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_09_timestamp_idx ON public.events_2026_03_09 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_10_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_10_actor_type_actor_id_idx ON public.events_2026_03_10 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_10_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_10_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_10 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_10_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_10_causation_id_idx ON public.events_2026_03_10 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_10_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_10_correlation_id_idx ON public.events_2026_03_10 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_10_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_10_event_type_timestamp_idx ON public.events_2026_03_10 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_10_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_10_impact_idx ON public.events_2026_03_10 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_10_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_10_severity_idx ON public.events_2026_03_10 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_10_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_10_timestamp_idx ON public.events_2026_03_10 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_11_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_11_actor_type_actor_id_idx ON public.events_2026_03_11 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_11_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_11_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_11 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_11_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_11_causation_id_idx ON public.events_2026_03_11 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_11_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_11_correlation_id_idx ON public.events_2026_03_11 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_11_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_11_event_type_timestamp_idx ON public.events_2026_03_11 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_11_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_11_impact_idx ON public.events_2026_03_11 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_11_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_11_severity_idx ON public.events_2026_03_11 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_11_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_11_timestamp_idx ON public.events_2026_03_11 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_12_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_12_actor_type_actor_id_idx ON public.events_2026_03_12 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_12_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_12_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_12 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_12_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_12_causation_id_idx ON public.events_2026_03_12 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_12_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_12_correlation_id_idx ON public.events_2026_03_12 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_12_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_12_event_type_timestamp_idx ON public.events_2026_03_12 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_12_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_12_impact_idx ON public.events_2026_03_12 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_12_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_12_severity_idx ON public.events_2026_03_12 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_12_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_12_timestamp_idx ON public.events_2026_03_12 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_13_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_13_actor_type_actor_id_idx ON public.events_2026_03_13 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_13_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_13_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_13 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_13_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_13_causation_id_idx ON public.events_2026_03_13 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_13_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_13_correlation_id_idx ON public.events_2026_03_13 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_13_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_13_event_type_timestamp_idx ON public.events_2026_03_13 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_13_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_13_impact_idx ON public.events_2026_03_13 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_13_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_13_severity_idx ON public.events_2026_03_13 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_13_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_13_timestamp_idx ON public.events_2026_03_13 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_14_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_14_actor_type_actor_id_idx ON public.events_2026_03_14 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_14_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_14_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_14 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_14_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_14_causation_id_idx ON public.events_2026_03_14 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_14_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_14_correlation_id_idx ON public.events_2026_03_14 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_14_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_14_event_type_timestamp_idx ON public.events_2026_03_14 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_14_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_14_impact_idx ON public.events_2026_03_14 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_14_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_14_severity_idx ON public.events_2026_03_14 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_14_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_14_timestamp_idx ON public.events_2026_03_14 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_15_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_15_actor_type_actor_id_idx ON public.events_2026_03_15 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_15_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_15_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_15 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_15_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_15_causation_id_idx ON public.events_2026_03_15 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_15_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_15_correlation_id_idx ON public.events_2026_03_15 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_15_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_15_event_type_timestamp_idx ON public.events_2026_03_15 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_15_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_15_impact_idx ON public.events_2026_03_15 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_15_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_15_severity_idx ON public.events_2026_03_15 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_15_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_15_timestamp_idx ON public.events_2026_03_15 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_16_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_16_actor_type_actor_id_idx ON public.events_2026_03_16 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_16_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_16_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_16 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_16_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_16_causation_id_idx ON public.events_2026_03_16 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_16_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_16_correlation_id_idx ON public.events_2026_03_16 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_16_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_16_event_type_timestamp_idx ON public.events_2026_03_16 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_16_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_16_impact_idx ON public.events_2026_03_16 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_16_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_16_severity_idx ON public.events_2026_03_16 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_16_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_16_timestamp_idx ON public.events_2026_03_16 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_17_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_17_actor_type_actor_id_idx ON public.events_2026_03_17 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_17_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_17_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_17 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_17_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_17_causation_id_idx ON public.events_2026_03_17 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_17_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_17_correlation_id_idx ON public.events_2026_03_17 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_17_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_17_event_type_timestamp_idx ON public.events_2026_03_17 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_17_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_17_impact_idx ON public.events_2026_03_17 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_17_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_17_severity_idx ON public.events_2026_03_17 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_17_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_17_timestamp_idx ON public.events_2026_03_17 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_18_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_18_actor_type_actor_id_idx ON public.events_2026_03_18 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_18_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_18_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_18 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_18_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_18_causation_id_idx ON public.events_2026_03_18 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_18_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_18_correlation_id_idx ON public.events_2026_03_18 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_18_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_18_event_type_timestamp_idx ON public.events_2026_03_18 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_18_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_18_impact_idx ON public.events_2026_03_18 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_18_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_18_severity_idx ON public.events_2026_03_18 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_18_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_18_timestamp_idx ON public.events_2026_03_18 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_19_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_19_actor_type_actor_id_idx ON public.events_2026_03_19 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_19_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_19_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_19 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_19_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_19_causation_id_idx ON public.events_2026_03_19 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_19_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_19_correlation_id_idx ON public.events_2026_03_19 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_19_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_19_event_type_timestamp_idx ON public.events_2026_03_19 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_19_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_19_impact_idx ON public.events_2026_03_19 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_19_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_19_severity_idx ON public.events_2026_03_19 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_19_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_19_timestamp_idx ON public.events_2026_03_19 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_20_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_20_actor_type_actor_id_idx ON public.events_2026_03_20 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_20_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_20_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_20 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_20_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_20_causation_id_idx ON public.events_2026_03_20 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_20_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_20_correlation_id_idx ON public.events_2026_03_20 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_20_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_20_event_type_timestamp_idx ON public.events_2026_03_20 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_20_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_20_impact_idx ON public.events_2026_03_20 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_20_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_20_severity_idx ON public.events_2026_03_20 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_20_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_20_timestamp_idx ON public.events_2026_03_20 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_21_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_21_actor_type_actor_id_idx ON public.events_2026_03_21 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_21_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_21_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_21 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_21_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_21_causation_id_idx ON public.events_2026_03_21 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_21_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_21_correlation_id_idx ON public.events_2026_03_21 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_21_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_21_event_type_timestamp_idx ON public.events_2026_03_21 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_21_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_21_impact_idx ON public.events_2026_03_21 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_21_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_21_severity_idx ON public.events_2026_03_21 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_21_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_21_timestamp_idx ON public.events_2026_03_21 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_22_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_22_actor_type_actor_id_idx ON public.events_2026_03_22 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_22_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_22_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_22 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_22_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_22_causation_id_idx ON public.events_2026_03_22 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_22_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_22_correlation_id_idx ON public.events_2026_03_22 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_22_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_22_event_type_timestamp_idx ON public.events_2026_03_22 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_22_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_22_impact_idx ON public.events_2026_03_22 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_22_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_22_severity_idx ON public.events_2026_03_22 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_22_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_22_timestamp_idx ON public.events_2026_03_22 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_23_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_23_actor_type_actor_id_idx ON public.events_2026_03_23 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_23_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_23_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_23 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_23_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_23_causation_id_idx ON public.events_2026_03_23 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_23_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_23_correlation_id_idx ON public.events_2026_03_23 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_23_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_23_event_type_timestamp_idx ON public.events_2026_03_23 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_23_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_23_impact_idx ON public.events_2026_03_23 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_23_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_23_severity_idx ON public.events_2026_03_23 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_23_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_23_timestamp_idx ON public.events_2026_03_23 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_24_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_24_actor_type_actor_id_idx ON public.events_2026_03_24 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_24_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_24_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_24 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_24_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_24_causation_id_idx ON public.events_2026_03_24 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_24_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_24_correlation_id_idx ON public.events_2026_03_24 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_24_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_24_event_type_timestamp_idx ON public.events_2026_03_24 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_24_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_24_impact_idx ON public.events_2026_03_24 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_24_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_24_severity_idx ON public.events_2026_03_24 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_24_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_24_timestamp_idx ON public.events_2026_03_24 USING btree ("timestamp" DESC);
-
-
---
--- Name: events_2026_03_25_actor_type_actor_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_25_actor_type_actor_id_idx ON public.events_2026_03_25 USING btree (actor_type, actor_id) WHERE (actor_type IS NOT NULL);
-
-
---
--- Name: events_2026_03_25_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_25_aggregate_type_aggregate_id_timestamp_idx ON public.events_2026_03_25 USING btree (aggregate_type, aggregate_id, "timestamp");
-
-
---
--- Name: events_2026_03_25_causation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_25_causation_id_idx ON public.events_2026_03_25 USING btree (causation_id) WHERE (causation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_25_correlation_id_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_25_correlation_id_idx ON public.events_2026_03_25 USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
-
-
---
--- Name: events_2026_03_25_event_type_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_25_event_type_timestamp_idx ON public.events_2026_03_25 USING btree (event_type, "timestamp");
-
-
---
--- Name: events_2026_03_25_impact_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_25_impact_idx ON public.events_2026_03_25 USING btree (impact) WHERE (impact IS NOT NULL);
-
-
---
--- Name: events_2026_03_25_severity_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_25_severity_idx ON public.events_2026_03_25 USING btree (severity) WHERE (severity IS NOT NULL);
-
-
---
--- Name: events_2026_03_25_timestamp_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX events_2026_03_25_timestamp_idx ON public.events_2026_03_25 USING btree ("timestamp" DESC);
 
 
 --
@@ -15568,4903 +8125,3503 @@ CREATE INDEX readings_time_idx ON public.readings USING btree ("time" DESC);
 
 
 --
--- Name: events_2026_01_11_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_11_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_11_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_11_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_11_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_11_causation_id_idx;
 
 
 --
--- Name: events_2026_01_11_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_11_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_11_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_11_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_11_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_11_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_11_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_11_impact_idx;
 
 
 --
--- Name: events_2026_01_11_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_11_pkey;
 
 
 --
--- Name: events_2026_01_11_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_11_severity_idx;
 
 
 --
--- Name: events_2026_01_11_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_11_timestamp_idx;
 
 
 --
--- Name: events_2026_01_12_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_12_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_12_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_12_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_12_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_12_causation_id_idx;
 
 
 --
--- Name: events_2026_01_12_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_12_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_12_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_12_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_12_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_12_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_12_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_12_impact_idx;
 
 
 --
--- Name: events_2026_01_12_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_12_pkey;
 
 
 --
--- Name: events_2026_01_12_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_12_severity_idx;
 
 
 --
--- Name: events_2026_01_12_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_12_timestamp_idx;
 
 
 --
--- Name: events_2026_01_13_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_13_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_13_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_13_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_13_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_13_causation_id_idx;
 
 
 --
--- Name: events_2026_01_13_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_13_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_13_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_13_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_13_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_13_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_13_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_13_impact_idx;
 
 
 --
--- Name: events_2026_01_13_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_13_pkey;
 
 
 --
--- Name: events_2026_01_13_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_13_severity_idx;
 
 
 --
--- Name: events_2026_01_13_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_13_timestamp_idx;
 
 
 --
--- Name: events_2026_01_14_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_14_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_14_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_14_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_14_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_14_causation_id_idx;
 
 
 --
--- Name: events_2026_01_14_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_14_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_14_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_14_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_14_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_14_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_14_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_14_impact_idx;
 
 
 --
--- Name: events_2026_01_14_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_14_pkey;
 
 
 --
--- Name: events_2026_01_14_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_14_severity_idx;
 
 
 --
--- Name: events_2026_01_14_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_14_timestamp_idx;
 
 
 --
--- Name: events_2026_01_15_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_15_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_15_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_15_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_15_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_15_causation_id_idx;
 
 
 --
--- Name: events_2026_01_15_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_15_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_15_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_15_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_15_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_15_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_15_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_15_impact_idx;
 
 
 --
--- Name: events_2026_01_15_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_15_pkey;
 
 
 --
--- Name: events_2026_01_15_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_15_severity_idx;
 
 
 --
--- Name: events_2026_01_15_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_15_timestamp_idx;
 
 
 --
--- Name: events_2026_01_16_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_16_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_16_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_16_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_16_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_16_causation_id_idx;
 
 
 --
--- Name: events_2026_01_16_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_16_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_16_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_16_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_16_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_16_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_16_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_16_impact_idx;
 
 
 --
--- Name: events_2026_01_16_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_16_pkey;
 
 
 --
--- Name: events_2026_01_16_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_16_severity_idx;
 
 
 --
--- Name: events_2026_01_16_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_16_timestamp_idx;
 
 
 --
--- Name: events_2026_01_17_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_17_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_17_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_17_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_17_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_17_causation_id_idx;
 
 
 --
--- Name: events_2026_01_17_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_17_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_17_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_17_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_17_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_17_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_17_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_17_impact_idx;
 
 
 --
--- Name: events_2026_01_17_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_17_pkey;
 
 
 --
--- Name: events_2026_01_17_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_17_severity_idx;
 
 
 --
--- Name: events_2026_01_17_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_17_timestamp_idx;
 
 
 --
--- Name: events_2026_01_18_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_18_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_18_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_18_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_18_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_18_causation_id_idx;
 
 
 --
--- Name: events_2026_01_18_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_18_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_18_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_18_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_18_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_18_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_18_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_18_impact_idx;
 
 
 --
--- Name: events_2026_01_18_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_18_pkey;
 
 
 --
--- Name: events_2026_01_18_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_18_severity_idx;
 
 
 --
--- Name: events_2026_01_18_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_18_timestamp_idx;
 
 
 --
--- Name: events_2026_01_19_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_19_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_19_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_19_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_19_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_19_causation_id_idx;
 
 
 --
--- Name: events_2026_01_19_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_19_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_19_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_19_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_19_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_19_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_19_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_19_impact_idx;
 
 
 --
--- Name: events_2026_01_19_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_19_pkey;
 
 
 --
--- Name: events_2026_01_19_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_19_severity_idx;
 
 
 --
--- Name: events_2026_01_19_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_19_timestamp_idx;
 
 
 --
--- Name: events_2026_01_20_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_20_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_20_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_20_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_20_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_20_causation_id_idx;
 
 
 --
--- Name: events_2026_01_20_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_20_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_20_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_20_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_20_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_20_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_20_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_20_impact_idx;
 
 
 --
--- Name: events_2026_01_20_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_20_pkey;
 
 
 --
--- Name: events_2026_01_20_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_20_severity_idx;
 
 
 --
--- Name: events_2026_01_20_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_20_timestamp_idx;
 
 
 --
--- Name: events_2026_01_21_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_21_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_21_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_21_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_21_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_21_causation_id_idx;
 
 
 --
--- Name: events_2026_01_21_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_21_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_21_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_21_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_21_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_21_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_21_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_21_impact_idx;
 
 
 --
--- Name: events_2026_01_21_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_21_pkey;
 
 
 --
--- Name: events_2026_01_21_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_21_severity_idx;
 
 
 --
--- Name: events_2026_01_21_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_21_timestamp_idx;
 
 
 --
--- Name: events_2026_01_22_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_22_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_22_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_22_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_22_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_22_causation_id_idx;
 
 
 --
--- Name: events_2026_01_22_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_22_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_22_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_22_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_22_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_22_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_22_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_22_impact_idx;
 
 
 --
--- Name: events_2026_01_22_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_22_pkey;
 
 
 --
--- Name: events_2026_01_22_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_22_severity_idx;
 
 
 --
--- Name: events_2026_01_22_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_22_timestamp_idx;
 
 
 --
--- Name: events_2026_01_23_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_23_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_23_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_23_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_23_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_23_causation_id_idx;
 
 
 --
--- Name: events_2026_01_23_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_23_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_23_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_23_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_23_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_23_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_23_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_23_impact_idx;
 
 
 --
--- Name: events_2026_01_23_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_23_pkey;
 
 
 --
--- Name: events_2026_01_23_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_23_severity_idx;
 
 
 --
--- Name: events_2026_01_23_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_23_timestamp_idx;
 
 
 --
--- Name: events_2026_01_24_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_24_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_24_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_24_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_24_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_24_causation_id_idx;
 
 
 --
--- Name: events_2026_01_24_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_24_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_24_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_24_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_24_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_24_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_24_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_24_impact_idx;
 
 
 --
--- Name: events_2026_01_24_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_24_pkey;
 
 
 --
--- Name: events_2026_01_24_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_24_severity_idx;
 
 
 --
--- Name: events_2026_01_24_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_24_timestamp_idx;
 
 
 --
--- Name: events_2026_01_25_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_25_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_25_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_25_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_25_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_25_causation_id_idx;
 
 
 --
--- Name: events_2026_01_25_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_25_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_25_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_25_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_25_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_25_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_25_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_25_impact_idx;
 
 
 --
--- Name: events_2026_01_25_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_25_pkey;
 
 
 --
--- Name: events_2026_01_25_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_25_severity_idx;
 
 
 --
--- Name: events_2026_01_25_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_25_timestamp_idx;
 
 
 --
--- Name: events_2026_01_26_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_26_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_26_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_26_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_26_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_26_causation_id_idx;
 
 
 --
--- Name: events_2026_01_26_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_26_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_26_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_26_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_26_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_26_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_26_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_26_impact_idx;
 
 
 --
--- Name: events_2026_01_26_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_26_pkey;
 
 
 --
--- Name: events_2026_01_26_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_26_severity_idx;
 
 
 --
--- Name: events_2026_01_26_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_26_timestamp_idx;
 
 
 --
--- Name: events_2026_01_27_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_27_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_27_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_27_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_27_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_27_causation_id_idx;
 
 
 --
--- Name: events_2026_01_27_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_27_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_27_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_27_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_27_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_27_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_27_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_27_impact_idx;
 
 
 --
--- Name: events_2026_01_27_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_27_pkey;
 
 
 --
--- Name: events_2026_01_27_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_27_severity_idx;
 
 
 --
--- Name: events_2026_01_27_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_27_timestamp_idx;
 
 
 --
--- Name: events_2026_01_28_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_28_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_28_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_28_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_28_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_28_causation_id_idx;
 
 
 --
--- Name: events_2026_01_28_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_28_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_28_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_28_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_28_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_28_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_28_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_28_impact_idx;
 
 
 --
--- Name: events_2026_01_28_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_28_pkey;
 
 
 --
--- Name: events_2026_01_28_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_28_severity_idx;
 
 
 --
--- Name: events_2026_01_28_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_28_timestamp_idx;
 
 
 --
--- Name: events_2026_01_29_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_29_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_29_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_29_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_29_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_29_causation_id_idx;
 
 
 --
--- Name: events_2026_01_29_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_29_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_29_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_29_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_29_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_29_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_29_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_29_impact_idx;
 
 
 --
--- Name: events_2026_01_29_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_29_pkey;
 
 
 --
--- Name: events_2026_01_29_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_29_severity_idx;
 
 
 --
--- Name: events_2026_01_29_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_29_timestamp_idx;
 
 
 --
--- Name: events_2026_01_30_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_30_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_30_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_30_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_30_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_30_causation_id_idx;
 
 
 --
--- Name: events_2026_01_30_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_30_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_30_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_30_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_30_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_30_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_30_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_30_impact_idx;
 
 
 --
--- Name: events_2026_01_30_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_30_pkey;
 
 
 --
--- Name: events_2026_01_30_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_30_severity_idx;
 
 
 --
--- Name: events_2026_01_30_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_30_timestamp_idx;
 
 
 --
--- Name: events_2026_01_31_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_01_31_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_01_31_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_01_31_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_01_31_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_01_31_causation_id_idx;
 
 
 --
--- Name: events_2026_01_31_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_01_31_correlation_id_idx;
 
 
 --
--- Name: events_2026_01_31_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_01_31_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_01_31_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_01_31_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_01_31_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_01_31_impact_idx;
 
 
 --
--- Name: events_2026_01_31_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_01_31_pkey;
 
 
 --
--- Name: events_2026_01_31_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_01_31_severity_idx;
 
 
 --
--- Name: events_2026_01_31_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_01_31_timestamp_idx;
 
 
 --
--- Name: events_2026_02_01_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_01_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_01_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_01_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_01_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_01_causation_id_idx;
 
 
 --
--- Name: events_2026_02_01_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_01_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_01_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_01_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_01_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_01_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_01_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_01_impact_idx;
 
 
 --
--- Name: events_2026_02_01_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_01_pkey;
 
 
 --
--- Name: events_2026_02_01_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_01_severity_idx;
 
 
 --
--- Name: events_2026_02_01_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_01_timestamp_idx;
 
 
 --
--- Name: events_2026_02_02_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_02_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_02_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_02_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_02_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_02_causation_id_idx;
 
 
 --
--- Name: events_2026_02_02_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_02_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_02_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_02_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_02_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_02_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_02_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_02_impact_idx;
 
 
 --
--- Name: events_2026_02_02_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_02_pkey;
 
 
 --
--- Name: events_2026_02_02_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_02_severity_idx;
 
 
 --
--- Name: events_2026_02_02_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_02_timestamp_idx;
 
 
 --
--- Name: events_2026_02_03_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_03_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_03_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_03_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_03_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_03_causation_id_idx;
 
 
 --
--- Name: events_2026_02_03_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_03_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_03_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_03_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_03_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_03_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_03_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_03_impact_idx;
 
 
 --
--- Name: events_2026_02_03_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_03_pkey;
 
 
 --
--- Name: events_2026_02_03_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_03_severity_idx;
 
 
 --
--- Name: events_2026_02_03_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_03_timestamp_idx;
 
 
 --
--- Name: events_2026_02_04_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_04_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_04_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_04_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_04_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_04_causation_id_idx;
 
 
 --
--- Name: events_2026_02_04_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_04_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_04_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_04_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_04_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_04_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_04_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_04_impact_idx;
 
 
 --
--- Name: events_2026_02_04_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_04_pkey;
 
 
 --
--- Name: events_2026_02_04_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_04_severity_idx;
 
 
 --
--- Name: events_2026_02_04_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_04_timestamp_idx;
 
 
 --
--- Name: events_2026_02_05_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_05_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_05_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_05_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_05_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_05_causation_id_idx;
 
 
 --
--- Name: events_2026_02_05_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_05_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_05_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_05_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_05_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_05_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_05_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_05_impact_idx;
 
 
 --
--- Name: events_2026_02_05_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_05_pkey;
 
 
 --
--- Name: events_2026_02_05_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_05_severity_idx;
 
 
 --
--- Name: events_2026_02_05_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_05_timestamp_idx;
 
 
 --
--- Name: events_2026_02_06_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_06_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_06_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_06_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_06_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_06_causation_id_idx;
 
 
 --
--- Name: events_2026_02_06_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_06_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_06_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_06_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_06_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_06_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_06_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_06_impact_idx;
 
 
 --
--- Name: events_2026_02_06_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_06_pkey;
 
 
 --
--- Name: events_2026_02_06_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_06_severity_idx;
 
 
 --
--- Name: events_2026_02_06_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_06_timestamp_idx;
 
 
 --
--- Name: events_2026_02_07_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_07_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_07_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_07_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_07_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_07_causation_id_idx;
 
 
 --
--- Name: events_2026_02_07_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_07_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_07_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_07_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_07_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_07_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_07_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_07_impact_idx;
 
 
 --
--- Name: events_2026_02_07_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_07_pkey;
 
 
 --
--- Name: events_2026_02_07_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_07_severity_idx;
 
 
 --
--- Name: events_2026_02_07_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_07_timestamp_idx;
 
 
 --
--- Name: events_2026_02_08_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_08_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_08_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_08_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_08_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_08_causation_id_idx;
 
 
 --
--- Name: events_2026_02_08_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_08_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_08_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_08_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_08_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_08_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_08_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_08_impact_idx;
 
 
 --
--- Name: events_2026_02_08_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_08_pkey;
 
 
 --
--- Name: events_2026_02_08_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_08_severity_idx;
 
 
 --
--- Name: events_2026_02_08_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_08_timestamp_idx;
 
 
 --
--- Name: events_2026_02_09_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_09_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_09_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_09_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_09_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_09_causation_id_idx;
 
 
 --
--- Name: events_2026_02_09_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_09_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_09_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_09_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_09_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_09_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_09_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_09_impact_idx;
 
 
 --
--- Name: events_2026_02_09_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_09_pkey;
 
 
 --
--- Name: events_2026_02_09_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_09_severity_idx;
 
 
 --
--- Name: events_2026_02_09_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_09_timestamp_idx;
 
 
 --
--- Name: events_2026_02_10_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_10_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_10_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_10_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_10_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_10_causation_id_idx;
 
 
 --
--- Name: events_2026_02_10_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_10_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_10_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_10_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_10_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_10_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_10_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_10_impact_idx;
 
 
 --
--- Name: events_2026_02_10_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_10_pkey;
 
 
 --
--- Name: events_2026_02_10_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_10_severity_idx;
 
 
 --
--- Name: events_2026_02_10_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_10_timestamp_idx;
 
 
 --
--- Name: events_2026_02_11_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_11_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_11_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_11_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_11_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_11_causation_id_idx;
 
 
 --
--- Name: events_2026_02_11_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_11_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_11_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_11_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_11_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_11_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_11_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_11_impact_idx;
 
 
 --
--- Name: events_2026_02_11_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_11_pkey;
 
 
 --
--- Name: events_2026_02_11_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_11_severity_idx;
 
 
 --
--- Name: events_2026_02_11_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_11_timestamp_idx;
 
 
 --
--- Name: events_2026_02_12_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_12_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_12_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_12_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_12_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_12_causation_id_idx;
 
 
 --
--- Name: events_2026_02_12_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_12_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_12_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_12_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_12_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_12_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_12_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_12_impact_idx;
 
 
 --
--- Name: events_2026_02_12_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_12_pkey;
 
 
 --
--- Name: events_2026_02_12_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_12_severity_idx;
 
 
 --
--- Name: events_2026_02_12_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_12_timestamp_idx;
 
 
 --
--- Name: events_2026_02_13_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_13_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_13_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_13_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_13_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_13_causation_id_idx;
 
 
 --
--- Name: events_2026_02_13_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_13_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_13_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_13_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_13_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_13_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_13_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_13_impact_idx;
 
 
 --
--- Name: events_2026_02_13_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_13_pkey;
 
 
 --
--- Name: events_2026_02_13_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_13_severity_idx;
 
 
 --
--- Name: events_2026_02_13_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_13_timestamp_idx;
 
 
 --
--- Name: events_2026_02_14_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_14_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_14_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_14_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_14_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_14_causation_id_idx;
 
 
 --
--- Name: events_2026_02_14_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_14_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_14_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_14_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_14_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_14_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_14_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_14_impact_idx;
 
 
 --
--- Name: events_2026_02_14_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_14_pkey;
 
 
 --
--- Name: events_2026_02_14_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_14_severity_idx;
 
 
 --
--- Name: events_2026_02_14_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_14_timestamp_idx;
 
 
 --
--- Name: events_2026_02_15_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_15_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_15_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_15_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_15_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_15_causation_id_idx;
 
 
 --
--- Name: events_2026_02_15_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_15_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_15_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_15_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_15_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_15_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_15_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_15_impact_idx;
 
 
 --
--- Name: events_2026_02_15_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_15_pkey;
 
 
 --
--- Name: events_2026_02_15_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_15_severity_idx;
 
 
 --
--- Name: events_2026_02_15_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_15_timestamp_idx;
 
 
 --
--- Name: events_2026_02_16_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_16_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_16_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_16_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_16_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_16_causation_id_idx;
 
 
 --
--- Name: events_2026_02_16_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_16_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_16_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_16_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_16_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_16_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_16_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_16_impact_idx;
 
 
 --
--- Name: events_2026_02_16_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_16_pkey;
 
 
 --
--- Name: events_2026_02_16_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_16_severity_idx;
 
 
 --
--- Name: events_2026_02_16_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_16_timestamp_idx;
 
 
 --
--- Name: events_2026_02_17_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_17_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_17_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_17_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_17_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_17_causation_id_idx;
 
 
 --
--- Name: events_2026_02_17_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_17_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_17_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_17_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_17_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_17_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_17_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_17_impact_idx;
 
 
 --
--- Name: events_2026_02_17_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_17_pkey;
 
 
 --
--- Name: events_2026_02_17_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_17_severity_idx;
 
 
 --
--- Name: events_2026_02_17_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_17_timestamp_idx;
 
 
 --
--- Name: events_2026_02_22_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_22_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_22_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_22_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_22_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_22_causation_id_idx;
 
 
 --
--- Name: events_2026_02_22_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_22_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_22_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_22_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_22_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_22_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_22_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_22_impact_idx;
 
 
 --
--- Name: events_2026_02_22_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_22_pkey;
 
 
 --
--- Name: events_2026_02_22_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_22_severity_idx;
 
 
 --
--- Name: events_2026_02_22_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_22_timestamp_idx;
 
 
 --
--- Name: events_2026_02_23_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_23_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_23_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_23_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_23_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_23_causation_id_idx;
 
 
 --
--- Name: events_2026_02_23_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_23_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_23_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_23_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_23_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_23_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_23_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_23_impact_idx;
 
 
 --
--- Name: events_2026_02_23_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_23_pkey;
 
 
 --
--- Name: events_2026_02_23_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_23_severity_idx;
 
 
 --
--- Name: events_2026_02_23_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_23_timestamp_idx;
 
 
 --
--- Name: events_2026_02_24_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_24_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_24_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_24_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_24_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_24_causation_id_idx;
 
 
 --
--- Name: events_2026_02_24_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_24_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_24_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_24_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_24_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_24_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_24_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_24_impact_idx;
 
 
 --
--- Name: events_2026_02_24_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_24_pkey;
 
 
 --
--- Name: events_2026_02_24_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_24_severity_idx;
 
 
 --
--- Name: events_2026_02_24_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_24_timestamp_idx;
 
 
 --
--- Name: events_2026_02_25_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_25_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_25_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_25_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_25_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_25_causation_id_idx;
 
 
 --
--- Name: events_2026_02_25_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_25_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_25_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_25_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_25_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_25_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_25_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_25_impact_idx;
 
 
 --
--- Name: events_2026_02_25_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_25_pkey;
 
 
 --
--- Name: events_2026_02_25_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_25_severity_idx;
 
 
 --
--- Name: events_2026_02_25_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_25_timestamp_idx;
 
 
 --
--- Name: events_2026_02_26_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_26_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_26_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_26_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_26_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_26_causation_id_idx;
 
 
 --
--- Name: events_2026_02_26_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_26_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_26_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_26_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_26_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_26_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_26_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_26_impact_idx;
 
 
 --
--- Name: events_2026_02_26_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_26_pkey;
 
 
 --
--- Name: events_2026_02_26_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_26_severity_idx;
 
 
 --
--- Name: events_2026_02_26_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_26_timestamp_idx;
 
 
 --
--- Name: events_2026_02_27_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_27_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_27_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_27_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_27_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_27_causation_id_idx;
 
 
 --
--- Name: events_2026_02_27_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_27_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_27_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_27_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_27_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_27_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_27_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_27_impact_idx;
 
 
 --
--- Name: events_2026_02_27_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_27_pkey;
 
 
 --
--- Name: events_2026_02_27_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_27_severity_idx;
 
 
 --
--- Name: events_2026_02_27_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_27_timestamp_idx;
 
 
 --
--- Name: events_2026_02_28_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_02_28_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_02_28_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_02_28_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_02_28_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_02_28_causation_id_idx;
 
 
 --
--- Name: events_2026_02_28_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_02_28_correlation_id_idx;
 
 
 --
--- Name: events_2026_02_28_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_02_28_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_02_28_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_02_28_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_02_28_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_02_28_impact_idx;
 
 
 --
--- Name: events_2026_02_28_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_02_28_pkey;
 
 
 --
--- Name: events_2026_02_28_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_02_28_severity_idx;
 
 
 --
--- Name: events_2026_02_28_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_02_28_timestamp_idx;
 
 
 --
--- Name: events_2026_03_01_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_01_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_01_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_01_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_01_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_01_causation_id_idx;
 
 
 --
--- Name: events_2026_03_01_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_01_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_01_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_01_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_01_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_01_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_01_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_01_impact_idx;
 
 
 --
--- Name: events_2026_03_01_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_01_pkey;
 
 
 --
--- Name: events_2026_03_01_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_01_severity_idx;
 
 
 --
--- Name: events_2026_03_01_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_01_timestamp_idx;
 
 
 --
--- Name: events_2026_03_02_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_02_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_02_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_02_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_02_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_02_causation_id_idx;
 
 
 --
--- Name: events_2026_03_02_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_02_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_02_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_02_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_02_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_02_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_02_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_02_impact_idx;
 
 
 --
--- Name: events_2026_03_02_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_02_pkey;
 
 
 --
--- Name: events_2026_03_02_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_02_severity_idx;
 
 
 --
--- Name: events_2026_03_02_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_02_timestamp_idx;
 
 
 --
--- Name: events_2026_03_03_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_03_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_03_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_03_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_03_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_03_causation_id_idx;
 
 
 --
--- Name: events_2026_03_03_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_03_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_03_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_03_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_03_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_03_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_03_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_03_impact_idx;
 
 
 --
--- Name: events_2026_03_03_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_03_pkey;
 
 
 --
--- Name: events_2026_03_03_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_03_severity_idx;
 
 
 --
--- Name: events_2026_03_03_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_03_timestamp_idx;
 
 
 --
--- Name: events_2026_03_04_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_04_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_04_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_04_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_04_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_04_causation_id_idx;
 
 
 --
--- Name: events_2026_03_04_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_04_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_04_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_04_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_04_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_04_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_04_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_04_impact_idx;
 
 
 --
--- Name: events_2026_03_04_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_04_pkey;
 
 
 --
--- Name: events_2026_03_04_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_04_severity_idx;
 
 
 --
--- Name: events_2026_03_04_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_04_timestamp_idx;
 
 
 --
--- Name: events_2026_03_05_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_05_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_05_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_05_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_05_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_05_causation_id_idx;
 
 
 --
--- Name: events_2026_03_05_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_05_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_05_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_05_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_05_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_05_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_05_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_05_impact_idx;
 
 
 --
--- Name: events_2026_03_05_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_05_pkey;
 
 
 --
--- Name: events_2026_03_05_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_05_severity_idx;
 
 
 --
--- Name: events_2026_03_05_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_05_timestamp_idx;
 
 
 --
--- Name: events_2026_03_06_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_06_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_06_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_06_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_06_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_06_causation_id_idx;
 
 
 --
--- Name: events_2026_03_06_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_06_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_06_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_06_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_06_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_06_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_06_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_06_impact_idx;
 
 
 --
--- Name: events_2026_03_06_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_06_pkey;
 
 
 --
--- Name: events_2026_03_06_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_06_severity_idx;
 
 
 --
--- Name: events_2026_03_06_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_06_timestamp_idx;
 
 
 --
--- Name: events_2026_03_07_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_07_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_07_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_07_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_07_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_07_causation_id_idx;
 
 
 --
--- Name: events_2026_03_07_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_07_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_07_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_07_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_07_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_07_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_07_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_07_impact_idx;
 
 
 --
--- Name: events_2026_03_07_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_07_pkey;
 
 
 --
--- Name: events_2026_03_07_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_07_severity_idx;
 
 
 --
--- Name: events_2026_03_07_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_07_timestamp_idx;
 
 
 --
--- Name: events_2026_03_08_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_08_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_08_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_08_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_08_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_08_causation_id_idx;
 
 
 --
--- Name: events_2026_03_08_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_08_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_08_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_08_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_08_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_08_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_08_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_08_impact_idx;
 
 
 --
--- Name: events_2026_03_08_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_08_pkey;
 
 
 --
--- Name: events_2026_03_08_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_08_severity_idx;
 
 
 --
--- Name: events_2026_03_08_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_08_timestamp_idx;
 
 
 --
--- Name: events_2026_03_09_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_09_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_09_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_09_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_09_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_09_causation_id_idx;
 
 
 --
--- Name: events_2026_03_09_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_09_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_09_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_09_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_09_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_09_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_09_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_09_impact_idx;
 
 
 --
--- Name: events_2026_03_09_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_09_pkey;
 
 
 --
--- Name: events_2026_03_09_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_09_severity_idx;
 
 
 --
--- Name: events_2026_03_09_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_09_timestamp_idx;
 
 
 --
--- Name: events_2026_03_10_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_10_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_10_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_10_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_10_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_10_causation_id_idx;
 
 
 --
--- Name: events_2026_03_10_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_10_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_10_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_10_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_10_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_10_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_10_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_10_impact_idx;
 
 
 --
--- Name: events_2026_03_10_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_10_pkey;
 
 
 --
--- Name: events_2026_03_10_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_10_severity_idx;
 
 
 --
--- Name: events_2026_03_10_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_10_timestamp_idx;
 
 
 --
--- Name: events_2026_03_11_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_11_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_11_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_11_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_11_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_11_causation_id_idx;
 
 
 --
--- Name: events_2026_03_11_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_11_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_11_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_11_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_11_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_11_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_11_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_11_impact_idx;
 
 
 --
--- Name: events_2026_03_11_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_11_pkey;
 
 
 --
--- Name: events_2026_03_11_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_11_severity_idx;
 
 
 --
--- Name: events_2026_03_11_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_11_timestamp_idx;
 
 
 --
--- Name: events_2026_03_12_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_12_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_12_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_12_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_12_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_12_causation_id_idx;
 
 
 --
--- Name: events_2026_03_12_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_12_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_12_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_12_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_12_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_12_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_12_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_12_impact_idx;
 
 
 --
--- Name: events_2026_03_12_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_12_pkey;
 
 
 --
--- Name: events_2026_03_12_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_12_severity_idx;
 
 
 --
--- Name: events_2026_03_12_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_12_timestamp_idx;
 
 
 --
--- Name: events_2026_03_13_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_13_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_13_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_13_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_13_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_13_causation_id_idx;
 
 
 --
--- Name: events_2026_03_13_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_13_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_13_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_13_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_13_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_13_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_13_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_13_impact_idx;
 
 
 --
--- Name: events_2026_03_13_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_13_pkey;
 
 
 --
--- Name: events_2026_03_13_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_13_severity_idx;
 
 
 --
--- Name: events_2026_03_13_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_13_timestamp_idx;
 
 
 --
--- Name: events_2026_03_14_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_14_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_14_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_14_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_14_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_14_causation_id_idx;
 
 
 --
--- Name: events_2026_03_14_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_14_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_14_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_14_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_14_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_14_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_14_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_14_impact_idx;
 
 
 --
--- Name: events_2026_03_14_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_14_pkey;
 
 
 --
--- Name: events_2026_03_14_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_14_severity_idx;
 
 
 --
--- Name: events_2026_03_14_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_14_timestamp_idx;
 
 
 --
--- Name: events_2026_03_15_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_15_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_15_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_15_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_15_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_15_causation_id_idx;
 
 
 --
--- Name: events_2026_03_15_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_15_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_15_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_15_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_15_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_15_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_15_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_15_impact_idx;
 
 
 --
--- Name: events_2026_03_15_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_15_pkey;
 
 
 --
--- Name: events_2026_03_15_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_15_severity_idx;
 
 
 --
--- Name: events_2026_03_15_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_15_timestamp_idx;
 
 
 --
--- Name: events_2026_03_16_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_16_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_16_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_16_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_16_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_16_causation_id_idx;
 
 
 --
--- Name: events_2026_03_16_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_16_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_16_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_16_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_16_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_16_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_16_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_16_impact_idx;
 
 
 --
--- Name: events_2026_03_16_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_16_pkey;
 
 
 --
--- Name: events_2026_03_16_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_16_severity_idx;
 
 
 --
--- Name: events_2026_03_16_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_16_timestamp_idx;
 
 
 --
--- Name: events_2026_03_17_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_17_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_17_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_17_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_17_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_17_causation_id_idx;
 
 
 --
--- Name: events_2026_03_17_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_17_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_17_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_17_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_17_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_17_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_17_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_17_impact_idx;
 
 
 --
--- Name: events_2026_03_17_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_17_pkey;
 
 
 --
--- Name: events_2026_03_17_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_17_severity_idx;
 
 
 --
--- Name: events_2026_03_17_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_17_timestamp_idx;
 
 
 --
--- Name: events_2026_03_18_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_18_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_18_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_18_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_18_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_18_causation_id_idx;
 
 
 --
--- Name: events_2026_03_18_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_18_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_18_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_18_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_18_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_18_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_18_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_18_impact_idx;
 
 
 --
--- Name: events_2026_03_18_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_18_pkey;
 
 
 --
--- Name: events_2026_03_18_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_18_severity_idx;
 
 
 --
--- Name: events_2026_03_18_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_18_timestamp_idx;
 
 
 --
--- Name: events_2026_03_19_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_19_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_19_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_19_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_19_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_19_causation_id_idx;
 
 
 --
--- Name: events_2026_03_19_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_19_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_19_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_19_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_19_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_19_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_19_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_19_impact_idx;
 
 
 --
--- Name: events_2026_03_19_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_19_pkey;
 
 
 --
--- Name: events_2026_03_19_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_19_severity_idx;
 
 
 --
--- Name: events_2026_03_19_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_19_timestamp_idx;
 
 
 --
--- Name: events_2026_03_20_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_20_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_20_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_20_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_20_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_20_causation_id_idx;
 
 
 --
--- Name: events_2026_03_20_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_20_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_20_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_20_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_20_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_20_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_20_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_20_impact_idx;
 
 
 --
--- Name: events_2026_03_20_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_20_pkey;
 
 
 --
--- Name: events_2026_03_20_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_20_severity_idx;
 
 
 --
--- Name: events_2026_03_20_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_20_timestamp_idx;
 
 
 --
--- Name: events_2026_03_21_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_21_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_21_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_21_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_21_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_21_causation_id_idx;
 
 
 --
--- Name: events_2026_03_21_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_21_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_21_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_21_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_21_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_21_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_21_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_21_impact_idx;
 
 
 --
--- Name: events_2026_03_21_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_21_pkey;
 
 
 --
--- Name: events_2026_03_21_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_21_severity_idx;
 
 
 --
--- Name: events_2026_03_21_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_21_timestamp_idx;
 
 
 --
--- Name: events_2026_03_22_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_22_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_22_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_22_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_22_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_22_causation_id_idx;
 
 
 --
--- Name: events_2026_03_22_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_22_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_22_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_22_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_22_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_22_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_22_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_22_impact_idx;
 
 
 --
--- Name: events_2026_03_22_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_22_pkey;
 
 
 --
--- Name: events_2026_03_22_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_22_severity_idx;
 
 
 --
--- Name: events_2026_03_22_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_22_timestamp_idx;
 
 
 --
--- Name: events_2026_03_23_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_23_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_23_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_23_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_23_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_23_causation_id_idx;
 
 
 --
--- Name: events_2026_03_23_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_23_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_23_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_23_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_23_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_23_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_23_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_23_impact_idx;
 
 
 --
--- Name: events_2026_03_23_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_23_pkey;
 
 
 --
--- Name: events_2026_03_23_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_23_severity_idx;
 
 
 --
--- Name: events_2026_03_23_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_23_timestamp_idx;
 
 
 --
--- Name: events_2026_03_24_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_24_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_24_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_24_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_24_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_24_causation_id_idx;
 
 
 --
--- Name: events_2026_03_24_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_24_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_24_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_24_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_24_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_24_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_24_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_24_impact_idx;
 
 
 --
--- Name: events_2026_03_24_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_24_pkey;
 
 
 --
--- Name: events_2026_03_24_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_24_severity_idx;
 
 
 --
--- Name: events_2026_03_24_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_24_timestamp_idx;
 
 
 --
--- Name: events_2026_03_25_actor_type_actor_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_actor ATTACH PARTITION public.events_2026_03_25_actor_type_actor_id_idx;
 
 
 --
--- Name: events_2026_03_25_aggregate_type_aggregate_id_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_aggregate ATTACH PARTITION public.events_2026_03_25_aggregate_type_aggregate_id_timestamp_idx;
 
 
 --
--- Name: events_2026_03_25_causation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_causation ATTACH PARTITION public.events_2026_03_25_causation_id_idx;
 
 
 --
--- Name: events_2026_03_25_correlation_id_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_correlation ATTACH PARTITION public.events_2026_03_25_correlation_id_idx;
 
 
 --
--- Name: events_2026_03_25_event_id_timestamp_key; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_event_id_timestamp_key ATTACH PARTITION public.events_2026_03_25_event_id_timestamp_key;
 
 
 --
--- Name: events_2026_03_25_event_type_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_type ATTACH PARTITION public.events_2026_03_25_event_type_timestamp_idx;
 
 
 --
--- Name: events_2026_03_25_impact_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_impact ATTACH PARTITION public.events_2026_03_25_impact_idx;
 
 
 --
--- Name: events_2026_03_25_pkey; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.events_pkey ATTACH PARTITION public.events_2026_03_25_pkey;
 
 
 --
--- Name: events_2026_03_25_severity_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_severity ATTACH PARTITION public.events_2026_03_25_severity_idx;
 
 
 --
--- Name: events_2026_03_25_timestamp_idx; Type: INDEX ATTACH; Schema: public; Owner: -
 --
 
-ALTER INDEX public.idx_events_timestamp ATTACH PARTITION public.events_2026_03_25_timestamp_idx;
 
 
 --
