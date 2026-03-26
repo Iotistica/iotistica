@@ -15,6 +15,7 @@
 import { EventEmitter } from 'events';
 import { SensorDataPoint, DeviceStatus, Logger } from './types.js';
 import { Endpoint } from '../../db/models/endpoint.model.js';
+import { DeviceModel } from '../../db/models/device.model.js';
 
 /**
  * Generic device configuration (from database)
@@ -434,6 +435,9 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
       status.registersUpdated = registersUpdated ?? 0;
       status.errorCount = 0; // Reset on success
       status.lastError = null;
+      DeviceModel.updateLastSeenByEndpointName(deviceName).catch(err => {
+        this.logger.warn(`Failed to update device lastSeenAt for ${deviceName}: ${err.message}`);
+      });
     } else {
       status.errorCount++;
     }

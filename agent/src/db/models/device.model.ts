@@ -71,6 +71,18 @@ export class DeviceModel {
   }
 
   /**
+   * Update lastSeenAt for all devices belonging to the named endpoint.
+   * Called from the poll adapters on each successful read.
+   */
+  static async updateLastSeenByEndpointName(endpointName: string): Promise<void> {
+    const knex = getKnex();
+    const now = new Date().toISOString();
+    const endpoint = await knex('endpoints').where('name', endpointName).select('id').first();
+    if (!endpoint) return;
+    await knex(this.table).where('endpoint_id', endpoint.id).update({ lastSeenAt: now, updated_at: now });
+  }
+
+  /**
    * Upsert a device by (endpoint_id, identifier).
    * For 1:1 protocols (identifier null/undefined), matches on endpoint_id alone.
    */

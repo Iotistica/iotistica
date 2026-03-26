@@ -5,6 +5,7 @@ import { ModbusClient } from './client';
 import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
 import { DeviceMetrics, MetricsSummary } from '../metrics.js';
 import { EndpointModel } from '../../../db/models/endpoint.model.js';
+import { DeviceModel } from '../../../db/models/device.model.js';
 
 /**
  * Main Modbus Adapter class that coordinates Modbus devices
@@ -667,6 +668,9 @@ export class ModbusAdapter extends EventEmitter {
       // Uses name-based lookup since cloud-synced devices don't have fingerprints
       EndpointModel.updateLastSeenByName(deviceName).catch(err => {
         this.logger.warn(`Failed to update lastSeen for ${deviceName}: ${err.message}`);
+      });
+      DeviceModel.updateLastSeenByEndpointName(deviceName).catch(err => {
+        this.logger.warn(`Failed to update device lastSeenAt for ${deviceName}: ${err.message}`);
       });
     } else {
       status.errorCount++;

@@ -3,6 +3,7 @@ import { BACnetAdapterConfig, BACnetDevice } from './types';
 import { BACnetClient } from './client';
 import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
 import { DeviceMetrics } from '../metrics.js';
+import { DeviceModel } from '../../../db/models/device.model.js';
 
 /**
  * Main BACnet Adapter class that coordinates BACnet devices
@@ -425,6 +426,12 @@ export class BACnetAdapter extends EventEmitter {
     this.updateDeviceStatus(deviceName, {
       pollSuccessRate: successRate,
     });
+
+    if (success) {
+      DeviceModel.updateLastSeenByEndpointName(deviceName).catch(err => {
+        this.logger.warn(`Failed to update device lastSeenAt for ${deviceName}: ${err.message}`);
+      });
+    }
   }
 
   /**
