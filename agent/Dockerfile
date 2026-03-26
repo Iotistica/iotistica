@@ -55,7 +55,7 @@ COPY agent/src ./src
 COPY agent/cli ./cli
 
 # Build TypeScript using build-specific config (excludes CLI)
-RUN npx tsc --project tsconfig.build.json && npm run copy:migrations && npm run copy:pipeline-assets
+RUN npx tsc --project tsconfig.build.json && npm run copy:migrations
 
 # Build CLI separately
 RUN npx tsc cli/iotctl.ts --outDir dist/cli --module commonjs --target es2020

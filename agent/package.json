@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm run copy:migrations && npm run copy:pipeline-assets",
+    "build": "tsc -p tsconfig.build.json && npm run copy:migrations",
     "copy:migrations": "node -e \"const fs=require('fs'); fs.cpSync('src/db/migrations','dist/db/migrations',{recursive:true}); fs.mkdirSync('dist/db',{recursive:true}); fs.copyFileSync('src/db/template.sqlite.sql','dist/db/template.sqlite.sql');\"",
     "copy:pipeline-assets": "node -e \"const fs=require('fs'); fs.cpSync('src/features/pipeline/nr-nodes','dist/features/pipeline/nr-nodes',{recursive:true}); fs.cpSync('src/features/pipeline/flows','dist/features/pipeline/flows',{recursive:true});\"",
     "watch": "tsc --watch",
@@ -42,7 +42,6 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@iotistic/types": "file:../packages/types",
     "@node-red/nodes": "^4.1.7",
     "@node-red/runtime": "^4.1.7",
     "@types/mqtt": "^0.0.34",
