@@ -29,6 +29,7 @@
  *   iotctl db restore <file> --yes    - Restore from backup
  *   iotctl db prune --keep 24         - Prune old backups
  *   iotctl buffer status              - Show offline buffer summary
+ *   iotctl memory                     - Show memory leak diagnostics
  *   iotctl help                       - Show this help
  */
 
@@ -682,6 +683,8 @@ SYSTEM:
 
 	buffer status                     Show offline buffer summary
 
+	memory                            Show agent process memory diagnostics and leak detection status
+
 	db backup [--name <name>]         Create SQLite backup with integrity and checksum gates
 
 	db list                           List available SQLite backups
@@ -1054,6 +1057,74 @@ async function bufferStatus(): Promise<void> {
 		}
 	} catch (error) {
 		logger.error('Failed to read buffer status', error as Error);
+	}
+}
+
+// ============================================================================
+// Memory Diagnostics Command
+// ============================================================================
+
+async function memoryDiagnostics(): Promise<void> {
+	clearApiCache();
+	try {
+		const result = await apiRequest(`${DEVICE_API_V1}/memory`);
+		const d = result.diagnostics;
+		const r = result.restartPolicy;
+
+		// Determine overall health status
+		const isLeaking = !!d.leakPattern;
+		const statusLabel = isLeaking ? 'LEAK DETECTED' : (d.heapStable ? 'HEALTHY' : 'MONITORING');
+
+		logger.info(`Memory status: ${statusLabel}`, {
+			leakPattern: d.leakPattern || 'none',
+			leakDescription: d.leakDescription || 'none',
+			uptimeSeconds: d.uptimeSeconds,
+			samples: d.samples,
+		});
+
+		logger.info('Heap (V8)', {
+			currentMB: d.currentHeapMB,
+			baselineMB: d.baselineHeapMB,
+			growthFromBaselineMB: d.growthFromBaselineMB,
+			growthRateMBperMin: d.heapGrowthRateMBperMin ?? 'n/a (< 10 samples)',
+			utilization: d.heapUtilization,
+			limitPressure: d.heapLimitPressure,
+			thresholdMBperMin: d.heapThresholdMBperMin,
+		});
+
+		logger.info('RSS (resident set)', {
+			currentMB: d.currentRSSMB,
+			baselineMB: d.baselineRSSMB,
+			growthFromBaselineMB: d.rssGrowthFromBaselineMB,
+		});
+
+		logger.info('External memory (Buffers / native)', {
+			currentMB: d.currentExternalMB,
+			baselineMB: d.baselineExternalMB,
+			growthFromBaselineMB: d.externalGrowthFromBaselineMB,
+			growthRateMBperMin: d.externalGrowthRateMBperMin ?? 'n/a',
+			thresholdMBperMin: d.externalThresholdMBperMin,
+		});
+
+		logger.info('Survivor (long-lived objects)', {
+			baselineMB: d.survivorBaselineMB,
+			growthRateMBperMin: d.survivorGrowthRateMBperMin,
+			floorMonotonic: d.survivorFloorMonotonic,
+			retainedMB: d.survivorRetainedMB,
+			thresholdMBperMin: d.survivorThresholdMBperMin,
+		});
+
+		logger.info('Restart policy', {
+			canRestart: r.canRestart,
+			blockReason: r.blockReason || 'none',
+			attemptsSinceStartup: r.restartAttemptsSinceStartup,
+			maxAttempts: r.maxAttempts,
+			lastRestartAgo: r.timeSinceLastRestartMs != null
+				? `${Math.round(r.timeSinceLastRestartMs / 60000)} minutes ago`
+				: 'never',
+		});
+	} catch (error) {
+		logger.error('Failed to read memory diagnostics', error as Error);
 	}
 }
 
@@ -2363,6 +2434,9 @@ async function main(): Promise<void> {
 		buffer: {
 			status: bufferStatus,
 			_default: bufferStatus,
+		},
+		memory: {
+			_default: memoryDiagnostics,
 		},
 		diag: {
 			_default: runDiagnostics

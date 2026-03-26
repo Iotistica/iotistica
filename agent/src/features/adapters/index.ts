@@ -25,7 +25,7 @@ import { EndpointOutputModel } from '../../db/models/endpoint-outputs.model.js';
 import { DeviceEndpointModel } from '../../db/models/endpoint.model.js';
 
 // Type imports only (no runtime loading)
-import type { OPCUAAdapter } from './opcua/opcua-adapter.js';
+import type { OPCUAAdapter } from './opcua/adapter.js';
 import type { OPCUAAdapterConfig } from './opcua/types.js';
 
 // SNMP imports
@@ -374,7 +374,7 @@ export class SensorsFeature extends BaseFeature {
       this.socketServers.set('opcua', opcuaSocket);
    
       // Dynamically import OPC-UA adapter (only loads node-opcua-client when needed)
-      const { OPCUAAdapter } = await import('./opcua/opcua-adapter.js');
+      const { OPCUAAdapter } = await import('./opcua/adapter.js');
       
       // Create OPC-UA adapter (constructor takes device array, not config object)
       const opcuaAdapter = new OPCUAAdapter(opcuaDevices, this.logger);

@@ -8,6 +8,7 @@ import type { Request, Response, NextFunction } from 'express';
 import * as actions from './actions';
 import * as vpnActions from './vpn-actions';
 import { router as mqttAuthRouter } from './mqtt-auth';
+import { getMemoryDiagnostics, getRestartPolicyStatus } from '../system/memory.js';
 
 export const router = express.Router();
 
@@ -279,6 +280,20 @@ router.post('/v1/anomaly/save-baselines', async (req: Request, res: Response, ne
 			message: 'Baseline save triggered',
 			stats
 		});
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/memory
+ * Get agent process memory diagnostics and leak detection status
+ */
+router.get('/v1/memory', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const diagnostics = getMemoryDiagnostics();
+		const restartPolicy = getRestartPolicyStatus();
+		return res.status(200).json({ diagnostics, restartPolicy });
 	} catch (error) {
 		next(error);
 	}

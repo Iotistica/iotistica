@@ -221,22 +221,31 @@ export class FeatureInitializer {
 
     const devicePublishEnabled = this.isDevicePublishEnabled();
     if (!devicePublishEnabled) {
-      if (this.features.sensorPublish) {
+      const wasRunning = !!this.features.sensorPublish;
+      if (wasRunning) {
         try {
-          await this.features.sensorPublish.stop();
+          await this.features.sensorPublish!.stop();
         } catch (error) {
           logger.warnSync('Failed to stop Device Publish while disabled by feature toggle', {
             component: LogComponents.agent,
             error: error instanceof Error ? error.message : String(error)
           });
         }
+        this.features.sensorPublish = undefined;
+        // Dynamic runtime disable — log at INFO so operators know it was explicitly turned off
+        logger.infoSync('Device Publish Feature disabled by feature toggle', {
+          component: LogComponents.agent,
+          enableDeviceSensorPublish: devicePublishEnabled,
+        });
+      } else {
+        // Feature is disabled in local state before cloud sync has delivered the real
+        // target state — this fires on every startup and resolves after reconciliation.
+        // Log at DEBUG only to avoid misleading the operator.
+        logger.debugSync('Device Publish Feature skipped (disabled in current state, pending cloud sync)', {
+          component: LogComponents.agent,
+          enableDeviceSensorPublish: devicePublishEnabled,
+        });
       }
-
-      this.features.sensorPublish = undefined;
-      logger.infoSync('Device Publish Feature skipped by feature toggle', {
-        component: LogComponents.agent,
-        enableDeviceSensorPublish: devicePublishEnabled,
-      });
       return;
     }
 
