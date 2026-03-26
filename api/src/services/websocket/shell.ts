@@ -2,7 +2,7 @@ import { WebSocket } from 'ws';
 import { JwtPayload } from 'jsonwebtoken';
 import { z } from 'zod';
 import { createHmac } from 'crypto';
-import { sessionManager } from '../session-manager';
+import { sessionManager } from '../auth/session-manager';
 import { query } from '../../db/connection';
 import logger from '../../utils/logger';
 import { mqttDeviceTopic } from '../../mqtt/topics';

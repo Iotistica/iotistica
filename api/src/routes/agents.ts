@@ -29,8 +29,8 @@ import logger from '../utils/logger';
 import { SystemConfig } from '../config/system-config';
 import deviceAuth from '../middleware/agent-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
-import { virtualAgentDeployer } from '../services/virtual-agent-deployer';
-import { provisioningService } from '../services/provisioning.service';
+import { virtualAgentDeployer } from '../services/provisioning/virtual-agent-deployer';
+import { provisioningService } from '../services/provisioning/provisioning.service';
 import { mqttDeviceTopic } from '../mqtt/topics';
 import { getTenantId } from '../redis/tenant-keys';
 

@@ -4,7 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
-import { LicenseValidator } from './license-validator';
+import { LicenseValidator } from './auth/license-validator';
 
 export interface CheckoutSessionResponse {
   session_id: string;

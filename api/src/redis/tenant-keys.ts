@@ -27,7 +27,7 @@
  * - Consumer groups MUST include tenantId to prevent message stealing
  */
 
-import { LicenseValidator } from '../services/license-validator';
+import { LicenseValidator } from '../services/auth/license-validator';
 
 /**
  * Return the validated tenantId or throw.

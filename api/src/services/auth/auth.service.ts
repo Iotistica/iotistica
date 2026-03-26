@@ -6,9 +6,9 @@
 
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
-import { query } from '../db/connection';
-import { generateAccessToken, generateRefreshToken, verifyToken } from '../middleware/jwt-auth';
-import logger from '../utils/logger';
+import { query } from '../../db/connection';
+import { generateAccessToken, generateRefreshToken, verifyToken } from '../../middleware/jwt-auth';
+import logger from '../../utils/logger';
 
 const BCRYPT_ROUNDS = 10;
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;

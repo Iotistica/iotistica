@@ -6,7 +6,7 @@
  */
 
 import express from 'express';
-import { NodeRedStorageService } from '../services/nodered-storage.service';
+import { NodeRedStorageService } from '../services/nodered/nodered-storage.service';
 import { jwtAuth } from '../middleware/jwt-auth';
 import { query } from '../db/connection';
 import logger from '../utils/logger';

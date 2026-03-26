@@ -4,7 +4,7 @@
  */
 
 import express from 'express';
-import { LicenseValidator } from '../services/license-validator';
+import { LicenseValidator } from '../services/auth/license-validator';
 import { DeviceModel } from '../db/models';
 import { logger } from '../utils/logger';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';

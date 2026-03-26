@@ -54,7 +54,7 @@ import { z } from 'zod';
 import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
 import logger from '../../utils/logger';
 import fetch from 'node-fetch';
-import { sessionManager } from '../session-manager';
+import { sessionManager } from '../auth/session-manager';
 import { agentMetricsPattern, getTenantId, tenantPrefix } from '../../redis/tenant-keys';
 import {
   WebSocketClient,

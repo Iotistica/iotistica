@@ -734,7 +734,7 @@ export class FeatureInitializer {
     }
 
     try {
-      const { ShellHandler } = await import('../shell/shell-handler.js');
+      const { ShellHandler } = await import('../features/remote-access/shell-handler.js');
       
       this.features.shellHandler = new ShellHandler(
         deviceInfo.uuid,

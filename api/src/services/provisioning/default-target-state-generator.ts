@@ -30,10 +30,10 @@
  * }
  */
 
-import logger from '../utils/logger';
+import logger from '../../utils/logger';
 import { 
   TargetState
-} from '../types/target-state.js';
+} from '../../types/target-state.js';
 
 
 interface LicenseData {

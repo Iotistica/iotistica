@@ -28,7 +28,7 @@ import {
   DeviceMetricsModel,
   DeviceLogsModel,
 } from '../db/models';
-import { validateTargetStateConfigMiddleware } from '../validators/target-state-config.validator';
+import { validateTargetStateConfigMiddleware } from '../services/provisioning/target-state-config.validator';
 import { EventPublisher, objectsAreEqual } from '../services/event-sourcing';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/agent-auth';
 import { resolveAppsImages } from '../services/docker-registry';

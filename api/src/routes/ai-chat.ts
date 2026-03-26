@@ -5,7 +5,7 @@
 
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { processAIChat } from '../services/ai-chat.service';
+import { processAIChat } from '../services/ai/chat.service';
 import { logger } from '../utils/logger';
 import { jwtAuth } from '../middleware/jwt-auth';
 

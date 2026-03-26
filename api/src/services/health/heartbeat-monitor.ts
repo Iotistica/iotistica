@@ -8,10 +8,10 @@
  * - Prevents false offline detections during API maintenance/crashes
  */
 
-import { query } from '../db/connection';
-import { logAuditEvent, AuditEventType, AuditSeverity } from '../utils/audit-logger';
-import { EventPublisher } from './event-sourcing';
-import logger from '../utils/logger';
+import { query } from '../../db/connection';
+import { logAuditEvent, AuditEventType, AuditSeverity } from '../../utils/audit-logger';
+import { EventPublisher } from './../event-sourcing';
+import logger from '../../utils/logger';
 
 const HEARTBEAT_STATE_KEY = 'heartbeat_last_check';
 
@@ -44,7 +44,7 @@ export class HeartbeatMonitor {
       return;
     }
 
-     logger.info('🫀 Starting heartbeat monitor...');
+     logger.info('Starting heartbeat monitor...');
      logger.info(`   Check interval: ${this.checkInterval / 1000}s`);
      logger.info(`   Offline threshold: ${this.offlineThreshold} minutes`);
 

@@ -1,7 +1,7 @@
 import { WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import logger from '../utils/logger';
-import { query } from '../db/connection';
+import logger from '../../utils/logger';
+import { query } from '../../db/connection';
 
 interface SessionInfo {
   sessionId: string;

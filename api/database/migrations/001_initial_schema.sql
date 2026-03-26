@@ -5569,6 +5569,23 @@ ALTER TABLE ONLY public.event_types
     ADD CONSTRAINT event_types_pkey PRIMARY KEY (event_type);
 
 
+--
+-- Name: events events_event_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.events
+    ADD CONSTRAINT events_event_id_key UNIQUE (event_id);
+
+
+--
+-- Name: events events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.events
+    ADD CONSTRAINT events_pkey PRIMARY KEY (id);
+
+
+--
 
 ALTER TABLE ONLY public.fleet_billing_history
     ADD CONSTRAINT fleet_billing_history_fleet_id_billing_month_key UNIQUE (fleet_id, billing_month);
@@ -7219,6 +7236,62 @@ CREATE INDEX idx_enum_units_device ON public.dictionary_enum_units USING btree (
 --
 
 CREATE INDEX idx_enum_units_index ON public.dictionary_enum_units USING btree (device_uuid, enum_index);
+
+
+--
+-- Name: idx_events_actor; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_events_actor ON public.events USING btree (actor_type, actor_id);
+
+
+--
+-- Name: idx_events_aggregate; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_events_aggregate ON public.events USING btree (aggregate_type, aggregate_id);
+
+
+--
+-- Name: idx_events_checksum; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_events_checksum ON public.events USING btree (checksum);
+
+
+--
+-- Name: idx_events_correlation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_events_correlation_id ON public.events USING btree (correlation_id) WHERE (correlation_id IS NOT NULL);
+
+
+--
+-- Name: idx_events_severity; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_events_severity ON public.events USING btree (severity) WHERE (severity IS NOT NULL);
+
+
+--
+-- Name: idx_events_source; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_events_source ON public.events USING btree (source) WHERE (source IS NOT NULL);
+
+
+--
+-- Name: idx_events_timestamp; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_events_timestamp ON public.events USING btree ("timestamp" DESC);
+
+
+--
+-- Name: idx_events_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_events_type ON public.events USING btree (event_type);
 
 
 --

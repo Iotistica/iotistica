@@ -13,7 +13,7 @@
 
 import * as WebIFC from 'web-ifc';
 import * as fs from 'fs';
-import logger from '../utils/logger';
+import logger from '../../utils/logger';
 
 /**
  * Supported equipment types for extraction

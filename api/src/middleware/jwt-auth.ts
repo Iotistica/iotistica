@@ -585,7 +585,7 @@ export async function tenantResolve(
     // Auth0 token: resolve tenant from hostname
     let customerId: string;
     try {
-      const { getTenantIdFromHost } = await import('../services/tenant-resolution.service');
+      const { getTenantIdFromHost } = await import('../services/auth/tenant-resolution.service');
       customerId = getTenantIdFromHost(req.hostname);
       logger.info('Tenant resolved from hostname', { customerId });
     } catch (error: any) {
@@ -669,7 +669,7 @@ export async function rbacLookup(
 
       let roleData: any;
       try {
-        const { getRoleAndStatus } = await import('../services/rbac-cache.service');
+        const { getRoleAndStatus } = await import('../services/auth/rbac-cache.service');
         roleData = await getRoleAndStatus(auth0Payload.sub, customerId, auth0Payload.exp);
         console.log('[JWT-AUTH] Role fetched:', roleData.role, 'Status:', roleData.customer_status);
       } catch (error: any) {

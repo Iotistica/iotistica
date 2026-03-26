@@ -12,8 +12,8 @@
  */
 
 import * as k8s from '@kubernetes/client-node';
-import logger from '../utils/logger';
-import { DeviceModel } from '../db/models';
+import logger from '../../utils/logger';
+import { DeviceModel } from '../../db/models';
 
 export interface VirtualAgentConfig {
   deviceUuid: string;
@@ -227,7 +227,7 @@ export class VirtualAgentDeployer {
     // This ensures pod resources match the fleet quota
     let fleetConfig = null;
     if (config.fleetUuid) {
-      const { query } = await import('../db/connection');
+      const { query } = await import('../../db/connection');
       const result = await query(
         'SELECT agent_count, agents_per_agent, k8s_namespace FROM fleets WHERE fleet_uuid = $1',
         [config.fleetUuid]
@@ -253,7 +253,7 @@ export class VirtualAgentDeployer {
     config.resourceLimits.memory = config.resourceLimits.memory || '512Mi'; // 512Mi memory limit
 
     // Fetch MQTT broker config (same config works for all if using public URL)
-    const { getBrokerConfigForExternalDevice, buildBrokerUrl } = await import('../utils/mqtt-broker-config');
+    const { getBrokerConfigForExternalDevice, buildBrokerUrl } = await import('../../utils/mqtt-broker-config');
     const brokerConfig = await getBrokerConfigForExternalDevice(config.deviceUuid);
     
     if (!brokerConfig) {

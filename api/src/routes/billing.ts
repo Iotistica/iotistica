@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { BillingClient } from '../services/billing-client';
-import { LicenseValidator } from '../services/license-validator';
+import { LicenseValidator } from '../services/auth/license-validator';
 import { jwtAuth } from '../middleware/jwt-auth';
 
 const router = Router();

@@ -1,4 +1,4 @@
-import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../db/models';
+import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
 
 export const aiTools = [
   {

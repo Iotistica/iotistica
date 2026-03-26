@@ -4,8 +4,8 @@
  * Single instance storage (no device isolation)
  */
 
-import { query } from '../db/connection';
-import logger from '../utils/logger';
+import { query } from '../../db/connection';
+import logger from '../../utils/logger';
 import { DeviceFlowExtractionService } from './device-flow-extraction.service';
 
 interface NodeRedFlows {

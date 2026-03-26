@@ -24,7 +24,7 @@ router.use(requireRole('admin'));
  */
 router.get('/admin/heartbeat', async (req, res) => {
   try {
-    const heartbeatMonitor = await import('../services/heartbeat-monitor');
+    const heartbeatMonitor = await import('../services/health/heartbeat-monitor');
     const config = heartbeatMonitor.default.getConfig();
 
     res.json({
@@ -48,7 +48,7 @@ router.post('/admin/heartbeat/check', async (req, res) => {
   try {
     logger.info('🔍 Manual heartbeat check triggered');
     
-    const heartbeatMonitor = await import('../services/heartbeat-monitor');
+    const heartbeatMonitor = await import('../services/health/heartbeat-monitor');
     await heartbeatMonitor.default.checkNow();
 
     res.json({

@@ -11,39 +11,39 @@
 
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
-import { query } from '../db/connection';
+import { query } from '../../db/connection';
 import {
   DeviceModel,
   DeviceTargetStateModel,
   Device,
-} from '../db/models';
+} from '../../db/models';
 import {
   validateProvisioningKey,
   incrementProvisioningKeyUsage,
   createProvisioningKey,
   ProvisioningKey,
-} from '../utils/provisioning-keys';
-import { tailscaleService } from './tailscale.service';
+} from '../../utils/provisioning-keys';
+import { tailscaleService } from '../tailscale.service';
 import {
   logAuditEvent,
   logProvisioningAttempt,
   checkProvisioningRateLimit,
   AuditEventType,
   AuditSeverity
-} from '../utils/audit-logger';
-import { EventPublisher } from './event-sourcing';
+} from '../../utils/audit-logger';
+import { EventPublisher } from '../event-sourcing';
 import {
   getBrokerConfigForExternalDevice,
   getStandaloneBrokerConfig,
   buildBrokerUrl,
   formatBrokerConfigForClient
-} from '../utils/mqtt-broker-config';
+} from '../../utils/mqtt-broker-config';
 
 import { generateDefaultTargetState } from './default-target-state-generator';
-import logger from '../utils/logger';
+import logger from '../../utils/logger';
 import { configService }  from './config.service';
 import { virtualAgentDeployer } from './virtual-agent-deployer';
-import { getTenantId } from '../redis/tenant-keys';
+import { getTenantId } from '../../redis/tenant-keys';
 
 // Initialize event publisher for audit trail
 const eventPublisher = new EventPublisher();

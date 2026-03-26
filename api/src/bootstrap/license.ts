@@ -3,7 +3,7 @@
  */
 
 import logger from '../utils/logger';
-import { LicenseValidator } from '../services/license-validator';
+import { LicenseValidator } from '../services/auth/license-validator';
 
 export async function bootstrapLicense(): Promise<void> {
   logger.info('Initializing license validator...');

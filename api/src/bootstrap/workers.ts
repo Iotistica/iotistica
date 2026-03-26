@@ -5,7 +5,7 @@
 
 import logger from '../utils/logger';
 import { startTrafficFlushService } from '../services/traffic-flush.service';
-import heartbeatMonitor from '../services/heartbeat-monitor';
+import heartbeatMonitor from '../services/health/heartbeat-monitor';
 
 export async function bootstrapWorkers(): Promise<void> {
   try {

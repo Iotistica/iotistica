@@ -22,7 +22,7 @@ import { query } from '../db/connection';
 import { deviceSensorSync, prepareEndpointForCreate } from '../services/agent-devices';
 import { logger } from '../utils/logger';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { VirtualDeviceManager } from '../services/virtual-device-manager';
+import { VirtualDeviceManager } from '../services/provisioning/virtual-device-manager';
 
 export const router = express.Router();
 

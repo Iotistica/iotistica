@@ -15,7 +15,7 @@
  */
 
 import OpenAI from 'openai';
-import { aiTools, executeTool } from './ai-tools';
+import { aiTools, executeTool } from './tools';
 
 // Ollama configuration (FREE local LLM)
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';

@@ -11,7 +11,7 @@ import {
   emergencyRevokeApiKey,
   getDeviceRotationStatus,
   getDeviceRotationHistory
-} from '../services/api-key-rotation';
+} from '../services/auth/api-key-rotation';
 import { deviceAuth } from '../middleware/agent-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
 import { isAdminOrOwner } from '../middleware/permissions';

@@ -115,7 +115,7 @@ export async function processAgentStateReport(
       // Trigger cleanup (non-blocking, idempotent)
       (async () => {
         try {
-          const { virtualAgentDeployer } = await import('./virtual-agent-deployer');
+          const { virtualAgentDeployer } = await import('./provisioning/virtual-agent-deployer');
           await virtualAgentDeployer.cleanupProvisioningKey(uuid);
         } catch (error) {
           // Cleanup is idempotent - Secret might already be deleted, which is fine

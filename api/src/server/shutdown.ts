@@ -62,7 +62,7 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
 
     // Heartbeat monitor
     try {
-      const heartbeatMonitor = await import('../services/heartbeat-monitor');
+      const heartbeatMonitor = await import('../services/health/heartbeat-monitor');
       heartbeatMonitor.default.stop();
     } catch { /* ignore */ }
 

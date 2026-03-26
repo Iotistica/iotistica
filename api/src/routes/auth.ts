@@ -6,7 +6,7 @@
 
 import express, { Request, Response } from 'express';
 import crypto from 'crypto';
-import * as authService from '../services/auth.service';
+import * as authService from '../services/auth/auth.service';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import rateLimit from 'express-rate-limit';
 

@@ -4,7 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { LicenseValidator } from '../services/license-validator';
+import { LicenseValidator } from '../services/auth/license-validator';
 
 // Type for boolean feature keys only
 type BooleanFeatureKey = 'canExecuteJobs' | 'canScheduleJobs' | 'canRemoteAccess' | 'canOtaUpdates' | 'canExportData' | 'hasAdvancedAlerts' | 'hasCustomDashboards';

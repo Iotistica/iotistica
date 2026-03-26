@@ -12,10 +12,10 @@
  */
 
 import * as k8s from '@kubernetes/client-node';
-import { query } from '../db/connection.js';
-import { logger } from '../utils/logger.js';
-import { DeviceModel } from '../db/models.js';
-import { deviceSensorSync } from './agent-devices.js';
+import { query } from '../../db/connection.js';
+import { logger } from '../../utils/logger.js';
+import { DeviceModel } from '../../db/models.js';
+import { deviceSensorSync } from '../agent-devices.js';
 
 export interface VirtualDeviceConfig {
   deviceUuid: string; // Parent agent UUID

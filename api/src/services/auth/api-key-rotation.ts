@@ -13,9 +13,9 @@
 
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
-import { query } from '../db/connection';
-import { getMqttManager } from '../mqtt';
-import logger from '../utils/logger';
+import { query } from '../../db/connection';
+import { getMqttManager } from '../../mqtt';
+import logger from '../../utils/logger';
 
 export interface KeyRotationConfig {
   rotationDays: number;          // Days before expiry to rotate
