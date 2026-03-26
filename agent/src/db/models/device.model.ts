@@ -52,6 +52,20 @@ export class DeviceModel {
     return rows.map(this.parse);
   }
 
+  /**
+   * Return all devices joined with their parent endpoint UUID.
+   * Used by CloudSync to include the `devices` field in state reports so the
+   * cloud can store agent-reported devices without re-parsing endpoint metadata.
+   */
+  static async getAllWithEndpointUuid(): Promise<Array<Device & { endpoint_uuid: string }>> {
+    const knex = getKnex();
+    const rows = await knex('devices as d')
+      .join('endpoints as e', 'e.id', 'd.endpoint_id')
+      .select('d.*', 'e.uuid as endpoint_uuid')
+      .orderBy('d.name');
+    return rows.map(row => ({ ...this.parse(row), endpoint_uuid: row.endpoint_uuid }));
+  }
+
   static async getByEndpointId(endpointId: number): Promise<Device[]> {
     const knex = getKnex();
     const rows = await knex(this.table).where('endpoint_id', endpointId).select('*');

@@ -30,6 +30,7 @@ import { createHttpClient, FetchHttpClient } from '../lib/http-client.js';
 import { RetryPolicy, CircuitBreaker, AsyncLock, isAuthError } from '../utils/retry-policy';
 import { createHash } from 'crypto';
 import { MetadataModel } from '../db/models/metadata.model.js';
+import { DeviceModel } from '../db/models/device.model.js';
 import { deviceTopic } from '../mqtt/topics.js';
 
 /**
@@ -78,11 +79,22 @@ function stableStringify(obj: any): string {
 	return '{' + pairs.join(',') + '}';
 }
 
+export interface AgentDeviceReport {
+	uuid: string;
+	endpoint_uuid: string;
+	name: string;
+	protocol: string;
+	identifier: string | null;
+	enabled: boolean;
+	lastSeenAt: string | null;
+}
+
 interface DeviceStateReport {
 	[deviceUuid: string]: {
 		apps: { [appId: string]: any };
 		config?: { [key: string]: any };
 		version?: number; // Which target_state version this device has applied
+		devices?: AgentDeviceReport[];
 		cpu_usage?: number;
 		memory_usage?: number;
 		memory_total?: number;
@@ -159,6 +171,7 @@ export class CloudSync extends EventEmitter {
 	// Hash tracking for bandwidth optimization
 	private lastConfigHash?: string;
 	private lastEndpointHealthHash?: string;
+	private lastDevicesHash?: string;
 	private isFirstReport: boolean = true;
 	
 	// ETag caching for target state
@@ -1036,6 +1049,11 @@ export class CloudSync extends EventEmitter {
 			if (deviceState.local_ip !== undefined) {
 				stripped[uuid].local_ip = deviceState.local_ip;
 			}
+
+			// Copy devices list if present (small, stable — worth keeping in queue)
+			if ((deviceState as any).devices !== undefined) {
+				(stripped[uuid] as any).devices = (deviceState as any).devices;
+			}
 			
 			// Strip verbose data from apps/services
 			if (deviceState.apps) {
@@ -1157,6 +1175,20 @@ export class CloudSync extends EventEmitter {
 	const healthHash = this.calculateHash(endpointHealth);
 	// Only mark as changed if there's actual data AND hash differs (don't flag empty->empty as changed)
 	const healthChanged = hasEndpointHealthData && (healthHash !== this.lastEndpointHealthHash || this.isFirstReport);
+
+	// Collect agent devices (physical/logical devices behind endpoints) for reporting
+	const allDevices = await DeviceModel.getAllWithEndpointUuid();
+	const devicesForReport: AgentDeviceReport[] = allDevices.map(d => ({
+		uuid: d.uuid,
+		endpoint_uuid: d.endpoint_uuid,
+		name: d.name,
+		protocol: d.protocol,
+		identifier: d.identifier ?? null,
+		enabled: d.enabled,
+		lastSeenAt: d.lastSeenAt ? String(d.lastSeenAt) : null,
+	}));
+	const devicesHash = this.calculateHash(devicesForReport);
+	const devicesChanged = devicesHash !== this.lastDevicesHash || this.isFirstReport;
 	
 	// Normalize version for reporting. This prevents version=0 if polling
 	// hasn't yet loaded a valid target state version.
@@ -1205,6 +1237,16 @@ export class CloudSync extends EventEmitter {
 			includeMetrics,
 			lastHash: this.lastEndpointHealthHash?.substring(0, 8),
 			currentHash: healthHash.substring(0, 8)
+		});
+	}
+
+	// Include devices only when the list changes (hash-gated, same bandwidth pattern as health)
+	if (devicesChanged) {
+		(stateReport[deviceInfo.uuid] as any).devices = devicesForReport;
+		this.logger?.debugSync('Including devices in report', {
+			component: LogComponents.cloudSync,
+			operation: 'add-devices',
+			deviceCount: devicesForReport.length,
 		});
 	}
 	
@@ -1315,6 +1357,11 @@ export class CloudSync extends EventEmitter {
 	if ((healthChanged || includeMetrics) && (stateReport[deviceInfo.uuid] as any).endpoints_health) {
 		(stateOnlyReport[deviceInfo.uuid] as any).endpoints_health = (stateReport[deviceInfo.uuid] as any).endpoints_health;
 	}
+
+	// Include devices in state comparison if they changed
+	if (devicesChanged && (stateReport[deviceInfo.uuid] as any).devices) {
+		(stateOnlyReport[deviceInfo.uuid] as any).devices = (stateReport[deviceInfo.uuid] as any).devices;
+	}
 	
 	// Include static fields in state comparison if they were included in the report
 	if (stateReport[deviceInfo.uuid].os_version !== undefined) {
@@ -1337,7 +1384,7 @@ export class CloudSync extends EventEmitter {
 	
 	// Determine if we should report
 	// Report if: there are changes in state OR we need to send metrics OR it's first report
-		const shouldReport = Object.keys(diff).length > 0 || includeMetrics || configChanged || healthChanged || this.forceNextReport;
+		const shouldReport = Object.keys(diff).length > 0 || includeMetrics || configChanged || healthChanged || devicesChanged || this.forceNextReport;
 	
 	if (!shouldReport) {
 		// No changes to report
@@ -1362,6 +1409,11 @@ export class CloudSync extends EventEmitter {
 	// Add endpoint health only if it changed or metrics cycle
 	if (healthChanged || includeMetrics) {
 		(reportToSend[deviceInfo.uuid] as any).endpoints_health = endpointHealth;
+	}
+
+	// Add devices only when the list changed
+	if (devicesChanged) {
+		(reportToSend[deviceInfo.uuid] as any).devices = devicesForReport;
 	}
 	
 	// Add static fields only if they changed
@@ -1403,12 +1455,13 @@ export class CloudSync extends EventEmitter {
 	const hasConfig = reportToSend[deviceInfo.uuid].config !== undefined;
 	const hasApps = reportToSend[deviceInfo.uuid].apps && Object.keys(reportToSend[deviceInfo.uuid].apps).length > 0;
 	const hasEndpointHealth = (reportToSend[deviceInfo.uuid] as any).endpoints_health !== undefined;
+	const hasDevices = (reportToSend[deviceInfo.uuid] as any).devices !== undefined;
 	const hasMetrics = reportToSend[deviceInfo.uuid].cpu_usage !== undefined;
 	const hasPublishHealth = (reportToSend[deviceInfo.uuid] as any).publish_health !== undefined;
 	const hasVpnHealth = (reportToSend[deviceInfo.uuid] as any).vpn_health !== undefined;
 	
 	// Only skip if ALL fields are empty (health/metrics alone are still valuable)
-	const hasAnyData = hasConfig || hasApps || hasEndpointHealth || hasMetrics || hasPublishHealth || hasVpnHealth;
+	const hasAnyData = hasConfig || hasApps || hasEndpointHealth || hasDevices || hasMetrics || hasPublishHealth || hasVpnHealth;
 	if (!hasAnyData) {
 		this.logger?.infoSync('Skipping empty state report (no data to send)', {
 			component: LogComponents.cloudSync,
@@ -1426,6 +1479,7 @@ export class CloudSync extends EventEmitter {
 			// Update hashes after successful send (ALWAYS, even if unchanged)
 			this.lastConfigHash = configHash;
 			this.lastEndpointHealthHash = healthHash;
+			this.lastDevicesHash = devicesHash;
 			
 			// Clear first report flag
 			if (this.isFirstReport) {

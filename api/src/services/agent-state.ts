@@ -19,7 +19,7 @@ import {
 } from '../db/models';
 import { EventPublisher, objectsAreEqual } from './event-sourcing';
 import EventSourcingConfig from '../events/event-sourcing';
-import { deviceSensorSync } from './agent-devices';
+import { deviceSensorSync, syncAgentDevices } from './agent-devices';
 import { getTenantId } from '../redis/tenant-keys';
 import logger from '../utils/logger';
 
@@ -48,6 +48,15 @@ export interface DeviceStateReport {
     sensor_health?: any;
     protocol_adapters_health?: any;
     endpoints_health?: Record<string, any>; // Endpoint health from agent
+    devices?: Array<{
+      uuid: string;
+      endpoint_uuid: string;
+      name: string;
+      protocol: string;
+      identifier: string | null;
+      enabled: boolean;
+      lastSeenAt: string | null;
+    }>; // Agent-reported physical/logical devices
     provisioning_state?: string; // Provisioning state from agent (e.g., 'provisioned', 'registered')
   };
 }
@@ -158,6 +167,11 @@ export async function processAgentStateReport(
     // This runs AFTER health update to preserve health_* columns
     if (deviceState.config?.endpoints) {
         await deviceSensorSync.syncCurrentStateToTable(uuid, deviceState);
+    }
+
+    // DEVICES: Store agent-reported physical/logical devices
+    if (deviceState.devices?.length) {
+      await syncAgentDevices(uuid, deviceState.devices);
     }
 
     // EVENT SOURCING: Publish current state updated event

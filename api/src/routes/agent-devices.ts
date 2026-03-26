@@ -46,6 +46,7 @@ router.get('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
     );
 
     res.json({
+      devices: sensors,
       agents: sensors, // Keep "agents" for backward compatibility
       count: sensors.length
     });
@@ -54,6 +55,46 @@ router.get('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
     res.status(500).json({
       error: 'Failed to get sensors',
       message: error.message
+    });
+  }
+});
+
+/**
+ * List agent-reported physical/logical devices for an agent.
+ * GET /api/v1/agents/:uuid/devices
+ */
+router.get('/agents/:uuid/devices', jwtAuth, async (req, res) => {
+  try {
+    const { uuid } = req.params;
+
+    const result = await query(
+      `SELECT
+         uuid,
+         agent_uuid,
+         endpoint_uuid,
+         name,
+         protocol,
+         identifier,
+         enabled,
+         last_seen_at,
+         created_at,
+         updated_at
+       FROM agent_devices
+       WHERE agent_uuid = $1
+       ORDER BY protocol, name`,
+      [uuid]
+    );
+
+    res.json({
+      agent_uuid: uuid,
+      count: result.rows.length,
+      devices: result.rows,
+    });
+  } catch (error: any) {
+    logger.error('Error getting agent devices:', error);
+    res.status(500).json({
+      error: 'Failed to get agent devices',
+      message: error.message,
     });
   }
 });
@@ -385,6 +426,7 @@ router.get('/agents/:uuid/device-health', jwtAuth, async (req, res) => {
     res.json({
       deviceUuid: uuid,
       summary,
+      devices: agents,
       agents
     });
   } catch (error: any) {

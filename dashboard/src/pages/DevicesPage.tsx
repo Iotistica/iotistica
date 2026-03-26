@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Activity, Pencil, Plus, FileText } from 'lucide-react';
+import { Activity, ChevronDown, ChevronRight, Pencil, Plus, FileText } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -53,6 +53,7 @@ interface OPCUADataPoint {
 
 interface Sensor {
   uuid?: string; // Unique identifier for the sensor
+  configId?: string;
   name: string;
   state: string;
   healthy: boolean;
@@ -90,6 +91,20 @@ interface Sensor {
     host: string;
     port: number;
   };
+  childCount?: number;
+  children?: ChildDevice[];
+}
+
+interface ChildDevice {
+  uuid: string;
+  endpointUuid: string;
+  name: string;
+  protocol: string;
+  identifier: string | null;
+  enabled: boolean;
+  lastSeenAt: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 interface Profile {
@@ -120,6 +135,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [anomalyMetricsSummary, setAnomalyMetricsSummary] = useState<{ total: number; filtered: number }>({ total: 0, filtered: 0 });
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [expandedSensors, setExpandedSensors] = useState<Record<string, boolean>>({});
   
   // Load filter preferences from localStorage
   const getStoredFilter = (key: string, defaultValue: string[]) => {
@@ -136,7 +152,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [selectedProtocol, setSelectedProtocol] = useState<string[]>(() => getStoredFilter('protocol', []));
   const [selectedStatus, setSelectedStatus] = useState<string[]>(() => getStoredFilter('status', []));
   const [selectedType, setSelectedType] = useState<string[]>(() => getStoredFilter('type', []));
-  const { getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
+  const { getDeviceState, getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
 
   // Persist filter changes to localStorage
   useEffect(() => {
@@ -348,6 +364,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           lastDeployedAt: d.lastDeployedAt,
           deploymentError: d.deploymentError,
           deploymentAttempts: d.deploymentAttempts,
+          childCount: d.childCount || 0,
+          children: Array.isArray(d.children) ? d.children : [],
           // Health metrics
           health: health ? {
             status: health.status,
@@ -362,8 +380,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       });
 
       // Get pending devices from config (devices not yet deployed)
-      const pendingConfig = getPendingConfig(deviceUuid);
-      const rawEndpoints = pendingConfig.endpoints || [];
+      const deviceState = getDeviceState(deviceUuid);
+      const rawEndpoints = deviceState?.isDirty
+        ? (deviceState.pendingChanges?.config?.endpoints || [])
+        : [];
       
       // NOTE: Discovery parents are automatically removed from target state config by API
       // when their slaves are discovered. So we just display what's in the config.
@@ -432,7 +452,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [deviceUuid, getPendingConfig]);
+  }, [deviceUuid, getDeviceState]);
 
   useEffect(() => {
     fetchSensors();
@@ -951,6 +971,32 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     return <Badge variant="outline" className="bg-muted text-muted-foreground border-border">Unknown</Badge>;
   };
 
+  const getChildStatusBadge = (child: ChildDevice) => {
+    if (!child.enabled) {
+      return <Badge className="bg-gray-500 dark:bg-gray-600 text-white border border-gray-600 dark:border-gray-500">Disabled</Badge>;
+    }
+
+    if (!child.lastSeenAt) {
+      return <Badge variant="outline" className="bg-muted text-muted-foreground border-border">Unknown</Badge>;
+    }
+
+    const lastSeenMs = new Date(child.lastSeenAt).getTime();
+    const ageMs = Date.now() - lastSeenMs;
+
+    if (ageMs <= 5 * 60 * 1000) {
+      return <Badge className="bg-green-500 dark:bg-green-600 text-white border border-green-600 dark:border-green-500 font-semibold">Online</Badge>;
+    }
+
+    return <Badge className="bg-amber-500 dark:bg-amber-600 text-white border border-amber-600 dark:border-amber-500 font-semibold">Stale</Badge>;
+  };
+
+  const toggleExpandedSensor = (sensorId: string) => {
+    setExpandedSensors(prev => ({
+      ...prev,
+      [sensorId]: !prev[sensorId],
+    }));
+  };
+
   const getEndpointUrl = (sensor: Sensor): string | null => {
     const connection = sensor.connection;
     if (!connection || typeof connection !== 'object') {
@@ -1310,9 +1356,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
+                      <th className="w-10 py-3 px-2"></th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Status</th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Name</th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Protocol</th>
+                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Children</th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Poll Interval</th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Endpoint</th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Last Activity</th>
@@ -1332,9 +1380,28 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                         if (selectedStatus.includes('unhealthy') && !sensor.healthy && sensor.state !== 'PENDING') return true;
                         return selectedStatus.includes(sensor.state);
                       })
-                      .map((sensor) => (
-                      <tr key={sensor.name} className="border-b border-border last:border-0 hover:bg-muted">
-                        <td className="py-3 px-4">
+                      .map((sensor) => {
+                      const sensorId = sensor.uuid || sensor.configId || sensor.name;
+                      const hasChildren = (sensor.childCount || 0) > 0;
+                      const isExpanded = !!expandedSensors[sensorId];
+
+                      return (
+                      <React.Fragment key={sensorId}>
+                      <tr className="border-b border-border last:border-0 hover:bg-muted">
+                        <td className="py-3 px-2 align-top">
+                          {hasChildren ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => toggleExpandedSensor(sensorId)}
+                              aria-label={isExpanded ? 'Collapse child devices' : 'Expand child devices'}
+                            >
+                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </Button>
+                          ) : null}
+                        </td>
+                        <td className="py-3 px-4 align-top">
                           <div className="flex items-center gap-2">
                             {getStatusBadge(sensor)}
                             {(sensor.type === 'virtual' || sensor.isVirtual) && (
@@ -1344,7 +1411,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                             )}
                           </div>
                         </td>
-                        <td className="py-3 px-4 font-medium text-foreground">
+                        <td className="py-3 px-4 font-medium text-foreground align-top">
                           <div>
                             {sensor.name}
                             {sensor.lastError && sensor.state !== 'PENDING' && (
@@ -1362,44 +1429,55 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                             )}
                           </div>
                         </td>
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 align-top">
                           {sensor.protocol && (
                             <Badge variant="outline" className="text-xs">
                               {sensor.protocol.toUpperCase()}
                             </Badge>
                           )}
                         </td>
-                        <td className="py-3 px-4 text-muted-foreground">
+                        <td className="py-3 px-4 text-muted-foreground align-top">
+                          {hasChildren ? (
+                            <button
+                              type="button"
+                              className="text-left hover:text-foreground underline-offset-2 hover:underline"
+                              onClick={() => toggleExpandedSensor(sensorId)}
+                            >
+                              {sensor.childCount}
+                            </button>
+                          ) : '—'}
+                        </td>
+                        <td className="py-3 px-4 text-muted-foreground align-top">
                           {sensor.pollInterval
                             ? sensor.pollInterval >= 60000
                               ? `${sensor.pollInterval / 60000}m`
                               : `${sensor.pollInterval / 1000}s`
                             : '—'}
                         </td>
-                        <td className="py-3 px-4 text-muted-foreground">
+                        <td className="py-3 px-4 text-muted-foreground align-top">
                           <span className="block max-w-[320px] truncate" title={getEndpointUrl(sensor) || undefined}>
                             {getEndpointUrl(sensor) || '—'}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-muted-foreground">
+                        <td className="py-3 px-4 text-muted-foreground align-top">
                           {sensor.health?.lastPoll && sensor.lastActivity ? new Date(sensor.lastActivity).toLocaleString() : '—'}
                         </td>
-                        <td className="py-3 px-4 text-muted-foreground">
+                        <td className="py-3 px-4 text-muted-foreground align-top">
                           {sensor.type === 'device' && sensor.health?.lastPoll
                             ? new Date(sensor.health.lastPoll).toLocaleString()
                             : '—'}
                         </td>
-                        <td className="py-3 px-4 text-muted-foreground">
+                        <td className="py-3 px-4 text-muted-foreground align-top">
                           {sensor.type === 'device' && sensor.lastDeployedAt
                             ? new Date(sensor.lastDeployedAt).toLocaleString()
                             : '—'}
                         </td>
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 align-top">
                           {sensor.health && sensor.health.errorCount > 0
                             ? <span className="text-red-600 font-semibold">{sensor.health.errorCount}</span>
                             : <span className="text-muted-foreground">—</span>}
                         </td>
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4 align-top">
                           <Button
                             variant="outline"
                             size="sm"
@@ -1413,7 +1491,45 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                           </Button>
                         </td>
                       </tr>
-                    ))}
+                      {hasChildren && isExpanded && (
+                        <tr className="border-b border-border bg-muted/30">
+                          <td></td>
+                          <td colSpan={10} className="px-4 py-4">
+                            <div className="rounded-lg border border-border bg-background overflow-hidden">
+                              <table className="w-full text-xs sm:text-sm">
+                                <thead className="bg-muted/60">
+                                  <tr>
+                                    <th className="text-left py-2 px-3 font-semibold text-foreground">Device</th>
+                                    <th className="text-left py-2 px-3 font-semibold text-foreground">UUID</th>
+                                    <th className="text-left py-2 px-3 font-semibold text-foreground">Status</th>
+                                    <th className="text-left py-2 px-3 font-semibold text-foreground">Last Seen</th>
+                                    <th className="text-left py-2 px-3 font-semibold text-foreground">Protocol</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(sensor.children || []).map((child) => (
+                                    <tr key={child.uuid} className="border-t border-border">
+                                      <td className="py-2 px-3 font-medium text-foreground">{child.name}</td>
+                                      <td className="py-2 px-3 text-muted-foreground">{child.identifier || '—'}</td>
+                                      <td className="py-2 px-3">{getChildStatusBadge(child)}</td>
+                                      <td className="py-2 px-3 text-muted-foreground">
+                                        {child.lastSeenAt ? new Date(child.lastSeenAt).toLocaleString() : '—'}
+                                      </td>
+                                      <td className="py-2 px-3">
+                                        <Badge variant="outline" className="text-xs">
+                                          {child.protocol.toUpperCase()}
+                                        </Badge>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
+                    )})}
                   </tbody>
                 </table>
               </div>

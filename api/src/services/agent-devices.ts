@@ -35,6 +35,16 @@ export interface EndpointDeviceConfig {
   location?: string; // Physical location for Azure Digital Twins
 }
 
+export interface AgentDeviceReport {
+  uuid: string;
+  endpoint_uuid: string;
+  name: string;
+  protocol: string;
+  identifier: string | null;
+  enabled: boolean;
+  lastSeenAt: string | null;
+}
+
 export function prepareEndpointForCreate(
   deviceUuid: string,
   sensorConfig: EndpointDeviceConfig
@@ -1056,6 +1066,35 @@ export class DeviceSensorSyncService {
 
       const result = await query(sql, params);
 
+      const childDevicesResult = await query(
+        `SELECT uuid, endpoint_uuid, name, protocol, identifier, enabled, last_seen_at, created_at, updated_at
+         FROM agent_devices
+         WHERE agent_uuid = $1
+         ORDER BY protocol, name`,
+        [deviceUuid]
+      );
+
+      const childDevicesByEndpointUuid = new Map<string, any[]>();
+
+      for (const child of childDevicesResult.rows) {
+        const endpointUuid = child.endpoint_uuid;
+        if (!endpointUuid) continue;
+
+        const existing = childDevicesByEndpointUuid.get(endpointUuid) || [];
+        existing.push({
+          uuid: child.uuid,
+          endpointUuid: child.endpoint_uuid,
+          name: child.name,
+          protocol: child.protocol,
+          identifier: child.identifier,
+          enabled: child.enabled,
+          lastSeenAt: child.last_seen_at,
+          createdAt: child.created_at,
+          updatedAt: child.updated_at,
+        });
+        childDevicesByEndpointUuid.set(endpointUuid, existing);
+      }
+
       // Return sensors in API format
       return result.rows.map((row: any) => {
         // Get desired 'enabled' state from target, fallback to table value
@@ -1066,6 +1105,12 @@ export class DeviceSensorSyncService {
           : (targetSensor?.enabled !== undefined 
               ? targetSensor.enabled 
               : row.enabled);
+
+        const rawChildren = childDevicesByEndpointUuid.get(row.uuid) || [];
+        const children = rawChildren.filter((child: any) => {
+          // Suppress 1:1 protocol duplicates where the agent's devices row simply mirrors the endpoint.
+          return !(child.uuid === row.uuid && (child.identifier === null || child.identifier === undefined));
+        });
         
         logger.debug(`[getEndpoints] Device "${row.name}": target=${targetSensor?.enabled}, table=${row.enabled}, final=${enabledFromTarget}`);
         
@@ -1090,6 +1135,8 @@ export class DeviceSensorSyncService {
           updatedAt: row.updated_at,
           createdBy: row.created_by,
           updatedBy: row.updated_by,
+          childCount: children.length,
+          children,
           // Health data from agent reports (actual state)
           health: row.health_status ? {
             status: row.health_status,
@@ -1674,6 +1721,48 @@ export class DeviceSensorSyncService {
 
 // Export singleton instance
 export const deviceSensorSync = new DeviceSensorSyncService();
+
+/**
+ * Upsert agent-reported physical/logical devices into cloud table.
+ * Source of truth is the edge agent; cloud stores latest snapshot per device.
+ */
+export async function syncAgentDevices(agentUuid: string, devices: AgentDeviceReport[]): Promise<void> {
+  for (const device of devices) {
+    await query(
+      `INSERT INTO agent_devices (
+         uuid,
+         agent_uuid,
+         endpoint_uuid,
+         name,
+         protocol,
+         identifier,
+         enabled,
+         last_seen_at,
+         updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, NOW())
+       ON CONFLICT (agent_uuid, uuid)
+       DO UPDATE SET
+         endpoint_uuid = EXCLUDED.endpoint_uuid,
+         name = EXCLUDED.name,
+         protocol = EXCLUDED.protocol,
+         identifier = EXCLUDED.identifier,
+         enabled = EXCLUDED.enabled,
+         last_seen_at = EXCLUDED.last_seen_at,
+         updated_at = NOW()`,
+      [
+        device.uuid,
+        agentUuid,
+        device.endpoint_uuid,
+        device.name,
+        device.protocol,
+        device.identifier,
+        device.enabled,
+        device.lastSeenAt,
+      ]
+    );
+  }
+}
 
 // Export standalone function for backward compatibility
 export const syncTableToConfig = (deviceUuid: string, userId?: string) => 
