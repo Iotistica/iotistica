@@ -240,7 +240,6 @@ export class DeviceManager {
 				component: LogComponents.deviceManager,
 				operation: 'initialize',
 				uuid: this.deviceInfo.uuid,
-				deviceId: this.deviceInfo.deviceId,
 				provisioned: this.deviceInfo.provisioned,
 				provisioningState: this.deviceInfo.provisioningState || 'unknown',
 				hasDeviceApiKey: !!this.deviceInfo.deviceApiKey,
@@ -272,9 +271,8 @@ export class DeviceManager {
 
 			this.deviceInfo = {
 				uuid: record.uuid,
-				deviceId: record.deviceId?.toString(),
-				deviceName: record.deviceName || undefined,
-				deviceType: record.deviceType || undefined,
+				deviceName: record.name || undefined,
+				deviceType: record.type || undefined,
 				deviceApiKey: record.deviceApiKey || undefined,
 				provisioningApiKey: record.provisioningApiKey || undefined,
 				apiKey: record.apiKey || undefined, // Legacy field
@@ -317,9 +315,8 @@ export class DeviceManager {
 
 		const data = {
 			uuid: this.deviceInfo.uuid,
-			deviceId: this.deviceInfo.deviceId ? parseInt(this.deviceInfo.deviceId) : null,
-			deviceName: this.deviceInfo.deviceName || null,
-			deviceType: this.deviceInfo.deviceType || null,
+			name: this.deviceInfo.deviceName || null,
+			type: this.deviceInfo.deviceType || null,
 			deviceApiKey: this.deviceInfo.deviceApiKey || null,
 			provisioningApiKey: this.deviceInfo.provisioningApiKey || null,
 			apiKey: this.deviceInfo.apiKey || null, // Legacy (synced from deviceApiKey)
@@ -561,8 +558,7 @@ export class DeviceManager {
 					'Device Registration'
 				);
 
-				// Save server-assigned device ID, tenant ID, and credentials
-				this.deviceInfo.deviceId = response.id.toString();
+				// Save server-assigned tenant ID and credentials
 				this.deviceInfo.tenantId = response.tenantId; // Save tenant ID for MQTT topic construction
 				this.deviceInfo.mqttBrokerConfig = response.mqtt.brokerConfig;
 				this.deviceInfo.apiTlsConfig = response.api?.tlsConfig;
@@ -602,7 +598,7 @@ export class DeviceManager {
 					component: LogComponents.deviceManager,
 					operation: 'provision',
 					state: 'registered',
-					deviceId: this.deviceInfo.deviceId,
+					uuid: this.deviceInfo.uuid,
 				});
 			} else {
 				// Resume from registered state - device already exists in cloud
@@ -610,7 +606,7 @@ export class DeviceManager {
 					component: LogComponents.deviceManager,
 					operation: 'provision',
 					state: currentState,
-					deviceId: this.deviceInfo.deviceId,
+					uuid: this.deviceInfo.uuid,
 				});
 			}
 
@@ -673,7 +669,6 @@ export class DeviceManager {
 				operation: 'provision',
 				state: 'provisioned',
 				uuid: this.deviceInfo.uuid,
-				deviceId: this.deviceInfo.deviceId,
 				deviceName: this.deviceInfo.deviceName,
 				applicationId: this.deviceInfo.applicationId,
 				mqttBrokerHost: this.deviceInfo.mqttBrokerConfig?.host,
@@ -999,7 +994,6 @@ export class DeviceManager {
 		}
 
 		// Clear server-assigned values
-		this.deviceInfo.deviceId = undefined;
 		this.deviceInfo.deviceName = undefined;
 		this.deviceInfo.provisioningApiKey = undefined;
 		this.deviceInfo.apiKey = undefined;
@@ -1085,7 +1079,6 @@ export class DeviceManager {
 		// Reset device info but preserve UUID for hardware identification
 		const preservedUuid = this.deviceInfo.uuid;
 		
-		this.deviceInfo.deviceId = undefined;
 		this.deviceInfo.deviceName = undefined;
 		this.deviceInfo.deviceType = undefined;
 		this.deviceInfo.deviceApiKey = undefined; // Also clear device key for full reset

@@ -33,7 +33,7 @@ const constants = {
 	// Data paths
 	dataMountPoint,
 	databasePath:
-		checkString(process.env.DATABASE_PATH) || '/app/data/device.sqlite',
+		checkString(process.env.DATABASE_PATH) || '/app/data/agent.sqlite',
 	appsJsonPath: path.join(dataMountPoint, 'apps.json'),
 	migrationBackupFile: path.join(dataMountPoint, 'backup.tgz'),
 	// State paths

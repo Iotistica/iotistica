@@ -540,7 +540,7 @@ ORCHESTRATOR_TYPE=docker-compose
 ORCHESTRATOR_INTERVAL=30000
 DATA_DIR=/var/lib/iotistic/agent
 STATE_FILE=/var/lib/iotistic/agent/target-state.json
-DATABASE_PATH=/var/lib/iotistic/agent/device.sqlite
+DATABASE_PATH=/var/lib/iotistic/agent/agent.sqlite
 EOF
 
     # Write CI mode flag if set (for testing environments)

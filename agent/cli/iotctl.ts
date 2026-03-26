@@ -41,7 +41,7 @@ import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 
 // Configuration paths
 const CONFIG_DIR = process.env.CONFIG_DIR || '/app/data';
-const DB_PATH = join(CONFIG_DIR, 'device.sqlite');
+const DB_PATH = join(CONFIG_DIR, 'agent.sqlite');
 
 // Device API endpoint - construct from DEVICE_API_PORT or fall back to DEVICE_API_URL
 const DEVICE_API_PORT = process.env.DEVICE_API_PORT || '48484';

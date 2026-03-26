@@ -105,7 +105,7 @@ export async function down(knex) {
 		'anomaly_alerts',
 		'agent_metadata',
 		'stateSnapshot',
-		'device'
+		'agent'
 	];
 
 	for (const table of tables) {

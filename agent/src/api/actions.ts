@@ -467,7 +467,6 @@ export const provisionDevice = async (config: {
 		component: LogComponents.deviceManager,
 		operation: 'provision',
 		uuid: result.uuid,
-		deviceId: result.deviceId,
 		provisioned: result.provisioned
 	});
 
@@ -475,7 +474,6 @@ export const provisionDevice = async (config: {
 		success: true,
 		device: {
 			uuid: result.uuid,
-			deviceId: result.deviceId,
 			deviceName: result.deviceName,
 			provisioned: result.provisioned,
 			mqttBrokerUrl: result.mqttBrokerConfig ? `${result.mqttBrokerConfig.protocol}://${result.mqttBrokerConfig.host}:${result.mqttBrokerConfig.port}` : undefined
@@ -493,7 +491,6 @@ export const getProvisionStatus = async () => {
 	return {
 		provisioned: deviceInfo.provisioned,
 		uuid: deviceInfo.uuid,
-		deviceId: deviceInfo.deviceId,
 		deviceName: deviceInfo.deviceName,
 		apiEndpoint: deviceInfo.apiEndpoint,
 		hasProvisioningKey: !!deviceInfo.provisioningApiKey,

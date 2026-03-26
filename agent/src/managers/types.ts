@@ -10,7 +10,6 @@ export type ProvisioningState = 'new' | 'registering' | 'registered' | 'key-exch
 
 export interface DeviceInfo {
 	uuid: string;
-	deviceId?: string;
 	deviceName?: string;
 	deviceType?: string;
 	

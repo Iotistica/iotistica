@@ -15,9 +15,8 @@ import {
 export interface Device {
   id?: number;
   uuid: string;
-  deviceId?: number | null;
-  deviceName?: string | null;
-  deviceType?: string | null;
+  name?: string | null;
+  type?: string | null;
   deviceApiKey?: string | null;
   provisioningApiKey?: string | null;
   apiKey?: string | null;
@@ -40,7 +39,7 @@ export interface Device {
 }
 
 export class DeviceModel {
-  private static table = 'device';
+  private static table = 'agent';
   private static encryptionEnabled = false;
 
   /**

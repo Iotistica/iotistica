@@ -51,12 +51,11 @@ CREATE TABLE IF NOT EXISTS "anomaly_baselines" (
 	"updated_at"	datetime DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
-CREATE TABLE IF NOT EXISTS "device" (
+CREATE TABLE IF NOT EXISTS "agent" (
 	"id"	integer NOT NULL,
 	"uuid"	varchar(255) NOT NULL,
-	"deviceId"	varchar(255),
-	"deviceName"	varchar(255),
-	"deviceType"	varchar(255),
+	"name"	varchar(255),
+	"type"	varchar(255),
 	"apiKey"	varchar(255),
 	"apiEndpoint"	varchar(255),
 	"registeredAt"	bigint,
@@ -282,7 +281,7 @@ CREATE INDEX IF NOT EXISTS "idx_anomaly_baselines_lookup" ON "anomaly_baselines"
 	"device_state",
 	"calculated_at"
 );
-CREATE UNIQUE INDEX IF NOT EXISTS "device_uuid_unique" ON "device" (
+CREATE UNIQUE INDEX IF NOT EXISTS "agent_uuid_unique" ON "agent" (
 	"uuid"
 );
 CREATE INDEX IF NOT EXISTS "dictionary_deltas_domain" ON "dictionary_deltas" (

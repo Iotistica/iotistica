@@ -3,7 +3,7 @@
  * ========================
  * 
  * SQLite storage layer for anomaly detection alerts and baselines.
- * Uses the existing device.sqlite database with dedicated tables.
+ * Uses the existing agent.sqlite database with dedicated tables.
  */
 
 type Knex = any;

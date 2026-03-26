@@ -11,18 +11,18 @@ type DBTransactionCallback<T = any> = (trx: Knex.Transaction) => Promise<T> | T;
 export type Transaction = Knex.Transaction;
 
 // Database path - auto-detect environment
-// Docker: /app/data/device.sqlite (matches volume mount)
-// Local dev: ./data/device.sqlite (relative to project root)
+// Docker: /app/data/agent.sqlite (matches volume mount)
+// Local dev: ./data/agent.sqlite (relative to project root)
 const getDefaultDatabasePath = (): string => {
 	// RELIABLE Docker detection: /.dockerenv is created by Docker runtime
 	// Avoid fragile checks like /app/package.json (can exist in non-Docker environments)
 	const isDocker = process.env.DEPLOYMENT_TYPE === 'docker';
 	
 	if (isDocker) {
-		return '/app/data/device.sqlite';
+		return '/app/data/agent.sqlite';
 	} else {
 		// Local development - use relative path
-		return path.join(process.cwd(), 'data', 'device.sqlite');
+		return path.join(process.cwd(), 'data', 'agent.sqlite');
 	}
 };
 
@@ -302,7 +302,7 @@ export async function factoryReset(logger?: AgentLogger): Promise<void> {
 	
 	await transaction(async (trx) => {
 		// Clear all tables in order (respect foreign key constraints if any)
-		await trx('device').del();
+		await trx('agent').del();
 		await trx('message_buffer').del();
 		// Add other tables as needed
 	});

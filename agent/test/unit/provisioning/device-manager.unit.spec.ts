@@ -55,9 +55,8 @@ describe('DeviceManager - Refactored Testability', () => {
 		it('should load existing device from database', async () => {
 			const existingDevice: DeviceRecord = {
 				uuid: 'test-uuid-123',
-				deviceId: 42,
-				deviceName: 'Test Device',
-				deviceType: 'sensor',
+				name: 'Test Device',
+				type: 'sensor',
 				deviceApiKey: 'existing-api-key',
 				provisioningApiKey: null,
 				apiKey: null,
@@ -81,7 +80,6 @@ describe('DeviceManager - Refactored Testability', () => {
 
 			const deviceInfo = deviceManager.getDeviceInfo();
 			expect(deviceInfo.uuid).toBe('test-uuid-123');
-			expect(deviceInfo.deviceId).toBe('42');
 			expect(deviceInfo.deviceName).toBe('Test Device');
 			expect(deviceInfo.provisioned).toBe(true);
 			expect(mockDbClient.loadDeviceStub.callCount).toBe(1);
@@ -146,7 +144,7 @@ describe('DeviceManager - Refactored Testability', () => {
 				applicationId: 100,
 			});
 
-			expect(result.deviceId).toBe('123');
+
 		expect(result.mqttBrokerConfig?.username).toBe('device_test');
 			expect(result.provisioned).toBe(true);
 			expect(mockHttpClient.postStub.callCount).toBe(2); // register + exchange
@@ -305,11 +303,10 @@ describe('DeviceManager - Refactored Testability', () => {
 		it('should reset device (unprovision)', async () => {
 			const provisionedDevice: DeviceRecord = {
 				uuid: 'test-uuid',
-				deviceId: 123,
 				deviceApiKey: 'api-key-123',
 				provisioned: true,
-				deviceName: 'Test Device',
-				deviceType: 'sensor',
+				name: 'Test Device',
+				type: 'sensor',
 				provisioningApiKey: null,
 				apiKey: null,
 				apiEndpoint: 'http://api:3002',
@@ -333,7 +330,6 @@ describe('DeviceManager - Refactored Testability', () => {
 
 			const deviceInfo = deviceManager.getDeviceInfo();
 			expect(deviceInfo.provisioned).toBe(false);
-			expect(deviceInfo.deviceId).toBeUndefined();
 			expect(deviceInfo.uuid).toBe('test-uuid'); // UUID preserved
 			expect(deviceInfo.deviceApiKey).toBe('api-key-123'); // API key preserved
 		});

@@ -5,7 +5,7 @@
 
 import { MqttAdapter } from '../../../../src/features/adapters/mqtt/adapter';
 import { MqttAdapterConfig } from '../../../../src/features/adapters/mqtt/types';
-import { parsePayload, coerceType } from '../../../../src/features/adapters/mqtt/payload-parser';
+import { parsePayload, coerceType } from '../../../../src/features/adapters/mqtt/payload';
 
 describe('MqttAdapter', () => {
   let mockLogger: any;

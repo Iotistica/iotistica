@@ -3,7 +3,7 @@ import * as mqtt from 'mqtt';
 import * as mqttPattern from 'mqtt-pattern';
 import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
 import { MqttAdapterConfig, MqttDevice, MqttMetricConfig } from './types.js';
-import { parsePayload, coerceType } from './payload-parser.js';
+import { parsePayload, coerceType } from './payload.js';
 import { deviceTopic } from '../../../mqtt/topics.js';
 
 /**
