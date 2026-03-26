@@ -680,4 +680,18 @@ router.get('/v1/endpoints', async (req: Request, res: Response, next: NextFuncti
 	}
 });
 
+/**
+ * GET /v1/devices
+ * Get all physical/logical protocol devices
+ * Supports filtering by protocol via query parameter: ?protocol=modbus
+ */
+router.get('/v1/devices', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const devices = await actions.getDevices(req.query.protocol as string | undefined);
+		return res.status(200).json({ devices });
+	} catch (error) {
+		next(error);
+	}
+});
+
 export default router;

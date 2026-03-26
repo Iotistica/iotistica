@@ -22,7 +22,7 @@ import { MqttAdapterConfig } from './mqtt/types.js';
 import { SocketServer } from './common/socket-server.js';
 import { SensorDataPoint, SocketOutput } from './types.js';
 import { EndpointOutputModel } from '../../db/models/endpoint-outputs.model.js';
-import { DeviceEndpointModel } from '../../db/models/endpoint.model.js';
+import { EndpointModel } from '../../db/models/endpoint.model.js';
 
 // Type imports only (no runtime loading)
 import type { OPCUAAdapter } from './opcua/adapter.js';
@@ -198,7 +198,7 @@ export class SensorsFeature extends BaseFeature {
         modbusConfig = this.config.modbus!.config;
       } else {
         // Load devices from database
-        const dbDevices = await DeviceEndpointModel.getEnabled('modbus');
+        const dbDevices = await EndpointModel.getEnabled('modbus');
         
         // Create config even if no devices (adapter can discover devices)
         modbusConfig = {
@@ -323,7 +323,7 @@ export class SensorsFeature extends BaseFeature {
         opcuaDevices = this.config.opcua!.config.devices;
       } else {
         // Load devices from database
-        const dbDevices = await DeviceEndpointModel.getEnabled('opcua');
+        const dbDevices = await EndpointModel.getEnabled('opcua');
         
         // Create config even if no devices (adapter can discover devices)
         opcuaDevices = dbDevices.map(d => ({
@@ -423,7 +423,7 @@ export class SensorsFeature extends BaseFeature {
   private async startSNMPAdapter(): Promise<void> {
     try {
       // Load devices from database
-      const dbDevices = await DeviceEndpointModel.getEnabled('snmp');
+      const dbDevices = await EndpointModel.getEnabled('snmp');
       
       if (dbDevices.length === 0) {
         this.logger.info('No enabled SNMP devices found');
@@ -532,7 +532,7 @@ export class SensorsFeature extends BaseFeature {
         mqttConfig = this.config.mqtt!.config;
       } else {
         // Load devices from database
-        const dbDevices = await DeviceEndpointModel.getEnabled('mqtt');
+        const dbDevices = await EndpointModel.getEnabled('mqtt');
         
         // Start adapter even with no devices (needed for observer + discovery)
         if (dbDevices.length === 0) {
@@ -710,7 +710,7 @@ export class SensorsFeature extends BaseFeature {
 
     // Get all sensors directly from database (includes discovered devices)
     try {
-      const allSensors = await DeviceEndpointModel.getAll();
+      const allSensors = await EndpointModel.getAll();
       const stalenessThresholdMs = 24 * 60 * 60 * 1000; // 24 hours
       
       this.logger.debug(`Found ${allSensors.length} sensors in database`);
@@ -818,7 +818,7 @@ export class SensorsFeature extends BaseFeature {
         bacnetConfig = this.config.bacnet!.config;
       } else {
         // Load devices from database
-        const dbDevices = await DeviceEndpointModel.getEnabled('bacnet');
+        const dbDevices = await EndpointModel.getEnabled('bacnet');
         
         if (dbDevices.length === 0) {
           this.logger.info('BACnet ADAPTER: No BACnet devices in database - skipping adapter start');

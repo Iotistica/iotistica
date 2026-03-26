@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto';
 import { models, getKnex } from '../connection';
 import { EndpointOutputModel } from './endpoint-outputs.model';
 
-export interface DeviceEndpoint {
+export interface Endpoint {
   id?: number;
   uuid?: string; // Stable identifier for cloud/edge sync (survives name changes)
   fingerprint?: string; // Cryptographic hash of physical identity (bus+slaveId+deviceId)
@@ -23,13 +23,13 @@ export interface DeviceEndpoint {
   updated_at?: Date;
 }
 
-export class DeviceEndpointModel {
+export class EndpointModel {
   private static table = 'endpoints';
 
   /**
    * Get all protocol adapter devices
    */
-  static async getAll(protocol?: string): Promise<DeviceEndpoint[]> {
+  static async getAll(protocol?: string): Promise<Endpoint[]> {
     const query = models(this.table).select('*');
     if (protocol) {
       query.where('protocol', protocol);
@@ -48,7 +48,7 @@ export class DeviceEndpointModel {
   /**
    * Get device by name
    */
-  static async getByName(name: string): Promise<DeviceEndpoint | null> {
+  static async getByName(name: string): Promise<Endpoint | null> {
     const device = await models(this.table)
       .where('name', name)
       .first();
@@ -67,7 +67,7 @@ export class DeviceEndpointModel {
   /**
    * Get device by UUID (recommended method for cloud/edge sync)
    */
-  static async getByUuid(uuid: string): Promise<DeviceEndpoint | null> {
+  static async getByUuid(uuid: string): Promise<Endpoint | null> {
     // Guard: UUID must be defined
     if (!uuid) {
       console.warn('[WARN] getByUuid called with undefined/empty uuid');
@@ -105,7 +105,7 @@ export class DeviceEndpointModel {
    * Get device by fingerprint (cryptographic hash of physical identity)
    * This is the RECOMMENDED lookup method for discovery - survives name changes
    */
-  static async getByFingerprint(fingerprint: string): Promise<DeviceEndpoint | null> {
+  static async getByFingerprint(fingerprint: string): Promise<Endpoint | null> {
     const device = await models(this.table)
       .where('fingerprint', fingerprint)
       .first();
@@ -124,7 +124,7 @@ export class DeviceEndpointModel {
   /**
    * Get enabled devices for a protocol
    */
-  static async getEnabled(protocol: string): Promise<DeviceEndpoint[]> {
+  static async getEnabled(protocol: string): Promise<Endpoint[]> {
     const devices = await models(this.table)
       .where({ protocol, enabled: true })
       .orderBy('name');
@@ -141,7 +141,7 @@ export class DeviceEndpointModel {
   /**
    * Create new endpoint
    */
-  static async create(device: DeviceEndpoint): Promise<DeviceEndpoint> {
+  static async create(device: Endpoint): Promise<Endpoint> {
     const [id] = await models(this.table).insert({
       ...device,
       uuid: device.uuid || randomUUID(), // Generate UUID if not provided
@@ -159,9 +159,9 @@ export class DeviceEndpointModel {
    * Uses fingerprint-based lookup for stability (survives name changes)
    * Fallback to name-based lookup for legacy devices without fingerprints
    */
-  static async upsert(device: DeviceEndpoint): Promise<DeviceEndpoint> {
+  static async upsert(device: Endpoint): Promise<Endpoint> {
     // Primary: Lookup by fingerprint (if available)
-    let existing: DeviceEndpoint | null = null;
+    let existing: Endpoint | null = null;
     if (device.fingerprint) {
       existing = await this.getByFingerprint(device.fingerprint);
     }
@@ -173,7 +173,7 @@ export class DeviceEndpointModel {
     
     if (existing) {
       // Update existing device (preserve UUID)
-      return await this.updateByFingerprint(device.fingerprint || existing.fingerprint || '', device) as DeviceEndpoint;
+      return await this.updateByFingerprint(device.fingerprint || existing.fingerprint || '', device) as Endpoint;
     } else {
       // Create new device
       return await this.create(device);
@@ -183,7 +183,7 @@ export class DeviceEndpointModel {
   /**
    * Update endpoint (by name - legacy method)
    */
-  static async update(name: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
+  static async update(name: string, updates: Partial<Endpoint>): Promise<Endpoint | null> {
     const updateData: any = {
       ...updates,
       updated_at: new Date(),
@@ -212,7 +212,7 @@ export class DeviceEndpointModel {
   /**
    * Update endpoint by UUID (recommended method)
    */
-  static async updateByUuid(uuid: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
+  static async updateByUuid(uuid: string, updates: Partial<Endpoint>): Promise<Endpoint | null> {
     // Guard: UUID must be defined
     if (!uuid) {
       console.warn('[WARN] updateByUuid called with undefined/empty uuid');
@@ -247,7 +247,7 @@ export class DeviceEndpointModel {
    * Update endpoint by fingerprint (recommended method)
    * Uses fingerprint for lookup, preserves UUID and other stable fields
    */
-  static async updateByFingerprint(fingerprint: string, updates: Partial<DeviceEndpoint>): Promise<DeviceEndpoint | null> {
+  static async updateByFingerprint(fingerprint: string, updates: Partial<Endpoint>): Promise<Endpoint | null> {
     const updateData: any = {
       ...updates,
       updated_at: new Date(),
@@ -301,7 +301,7 @@ export class DeviceEndpointModel {
   /**
    * Get endpoint by ID
    */
-  private static async getById(id: number): Promise<DeviceEndpoint> {
+  private static async getById(id: number): Promise<Endpoint> {
     const device = await models(this.table)
       .where('id', id)
       .first();
@@ -319,7 +319,7 @@ export class DeviceEndpointModel {
    * Get stale endpoints (not seen in X days)
    * NEVER auto-deletes - just marks for user review
    */
-  static async getStaleDevices(daysThreshold = 7): Promise<DeviceEndpoint[]> {
+  static async getStaleDevices(daysThreshold = 7): Promise<Endpoint[]> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysThreshold);
 

@@ -253,7 +253,7 @@ export class FeatureInitializer {
     try {
       // Load sensor output configurations from database
       const { EndpointOutputModel: DeviceOutputModel } = await import('../db/models/endpoint-outputs.model.js');
-      const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
+      const { EndpointModel: EndpointModel } = await import('../db/models/endpoint.model.js');
       
       const deviceOutputs = await DeviceOutputModel.getAll();
 
@@ -266,7 +266,7 @@ export class FeatureInitializer {
       }
 
       // Get all enabled protocols
-      const allDevices = await DeviceEndpointModel.getAll();
+      const allDevices = await EndpointModel.getAll();
       const validDevices = allDevices.filter((s: any) => !!s.uuid);
       const invalidDevices = allDevices.length - validDevices.length;
 
@@ -380,11 +380,11 @@ export class FeatureInitializer {
 
   
       // Check database for enabled endpoints - this enables the protocol adapter
-      const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
+      const { EndpointModel: EndpointModel } = await import('../db/models/endpoint.model.js');
       const enabledProtocols: string[] = [];
       
       for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'mqtt']) {
-        const devices = await DeviceEndpointModel.getEnabled(protocol);
+        const devices = await EndpointModel.getEnabled(protocol);
         const validDevices = devices.filter((d: any) => !!d.uuid);
 
         if (validDevices.length > 0) {

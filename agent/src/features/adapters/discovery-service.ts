@@ -28,8 +28,8 @@ import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
-import { DeviceEndpointModel, DeviceEndpoint } from '../../db/models/endpoint.model';
-import { MetadataModel } from '../../db/models';
+import { EndpointModel, Endpoint } from '../../db/models/endpoint.model';
+import { MetadataModel, ProtocolDevicesModel } from '../../db/models';
 import type { BaseDiscoveryPlugin, DiscoveredDevice } from './base.discovery';
 import { ModbusDiscoveryPlugin } from './modbus/discovery';
 import { OPCUADiscoveryPlugin } from './opcua/discovery';
@@ -461,7 +461,7 @@ export class DiscoveryService extends EventEmitter {
                   
                   // Update validation results in database (for both new and existing devices)
                   try {
-                    await DeviceEndpointModel.update(device.name, {
+                    await EndpointModel.update(device.name, {
                       metadata: {
                         ...device.metadata,
                         dataPointValidation: pv,
@@ -965,7 +965,7 @@ export class DiscoveryService extends EventEmitter {
 
 
     // Fetch existing sensors ONCE before loop (avoid O(N²) performance)
-    const existingSensors = await DeviceEndpointModel.getAll();
+    const existingSensors = await EndpointModel.getAll();
 
     const targetEndpoints = this.configManager?.getTargetConfig().endpoints || [];
     const targetEndpointByName = new Map(
@@ -1071,7 +1071,7 @@ export class DiscoveryService extends EventEmitter {
             });
             
             // Update device with new profile config and data points
-            await DeviceEndpointModel.update(existing.name, {
+            await EndpointModel.update(existing.name, {
               data_points: sensor.dataPoints || [],
               metadata: {
                 ...existing.metadata,
@@ -1091,8 +1091,9 @@ export class DiscoveryService extends EventEmitter {
             });
             
             // Read back from database to verify persistence
-            const updatedDevice = await DeviceEndpointModel.getByName(existing.name);
+            const updatedDevice = await EndpointModel.getByName(existing.name);
             if (updatedDevice) {
+              await ProtocolDevicesModel.syncFromEndpoint(updatedDevice);
               this.logger?.infoSync(`Verified data persisted to database`, {
                 component: LogComponents.discovery,
                 traceId,
@@ -1139,7 +1140,7 @@ export class DiscoveryService extends EventEmitter {
             
           } else {
             // No profile change - just update lastSeenAt and skip
-            await DeviceEndpointModel.updateLastSeen(sensor.fingerprint);
+            await EndpointModel.updateLastSeen(sensor.fingerprint);
             
             if (configChanged) {
               this.logger?.debugSync(`Device "${sensor.name}" moved/reconfigured`, {
@@ -1208,7 +1209,7 @@ export class DiscoveryService extends EventEmitter {
           endpointEnabled = parentConn?.enabled ?? false;
         }
 
-        const deviceSensor: DeviceEndpoint = {
+        const deviceSensor: Endpoint = {
           name: sensor.name,
           protocol: sensor.protocol as 'modbus' | 'can' | 'opcua' | 'mqtt',
           enabled: endpointEnabled, // Inherit enabled state from parent connection
@@ -1263,7 +1264,8 @@ export class DiscoveryService extends EventEmitter {
           });
         }
 
-        await DeviceEndpointModel.create(deviceSensor);
+        const createdEndpoint = await EndpointModel.create(deviceSensor);
+        await ProtocolDevicesModel.syncFromEndpoint(createdEndpoint);
         saved++;
         savedDevices.push({
           name: sensor.name,
@@ -1312,7 +1314,7 @@ export class DiscoveryService extends EventEmitter {
    */
   private async checkStaleDevices(traceId: string, daysThreshold = 7): Promise<void> {
     try {
-      const staleDevices = await DeviceEndpointModel.getStaleDevices(daysThreshold);
+      const staleDevices = await EndpointModel.getStaleDevices(daysThreshold);
       
       if (staleDevices.length > 0) {
         this.logger?.warnSync(`Found ${staleDevices.length} stale devices (not seen in ${daysThreshold}+ days)`, {

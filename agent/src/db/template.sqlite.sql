@@ -103,6 +103,22 @@ CREATE TABLE IF NOT EXISTS "dictionary_metadata" (
 	"updated_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY("key")
 );
+CREATE TABLE IF NOT EXISTS "devices" (
+	"id"	integer NOT NULL,
+	"uuid"	varchar(255) NOT NULL UNIQUE,
+	"endpoint_id"	integer NOT NULL REFERENCES endpoints(id) ON DELETE CASCADE,
+	"name"	varchar(255) NOT NULL,
+	"protocol"	varchar(50) NOT NULL,
+	"enabled"	boolean NOT NULL DEFAULT '1',
+	"identifier"	varchar(255),
+	"metadata"	text,
+	"lastSeenAt"	datetime,
+	"created_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	"updated_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY("id" AUTOINCREMENT)
+);
+CREATE INDEX IF NOT EXISTS "idx_devices_endpoint_id" ON "devices" ("endpoint_id");
+CREATE INDEX IF NOT EXISTS "idx_devices_protocol" ON "devices" ("protocol");
 CREATE TABLE IF NOT EXISTS `endpoint_outputs` (`id` integer not null primary key autoincrement, `protocol` varchar(50) not null, `socket_path` varchar(500) not null, `data_format` varchar(50) not null default 'json', `delimiter` varchar(10) not null default '
 ', `include_timestamp` boolean not null default '1', `include_device_name` boolean not null default '1', `logging` text null, `created_at` datetime not null default CURRENT_TIMESTAMP, `updated_at` datetime not null default CURRENT_TIMESTAMP, `buffer_capacity` integer null);
 CREATE TABLE IF NOT EXISTS "endpoints" (

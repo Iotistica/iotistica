@@ -739,16 +739,25 @@ DISCOVERY:
 
 DEVICES (SENSORS):
 
-  devices list [protocol]           List all configured devices/sensors
-                                    Optional protocol filter: modbus, opcua, mqtt, can, snmp, bacnet
+  devices list [protocol]           List physical/logical devices discovered behind endpoints
+                                    Shows device name, UUID prefix, and last seen time
+                                    Optional protocol filter: modbus, opcua, mqtt, bacnet, snmp
                                     Examples:
                                       iotctl devices list                # All devices
-                                      iotctl devices list modbus         # Modbus devices only
+                                      iotctl devices list modbus         # Modbus slaves only
+                                      iotctl devices list opcua          # OPC-UA devices only
 
-  devices show <name>               Show detailed device information including
+  devices show <name>               Show detailed endpoint information including
                                     connection details, data points, and metadata
-                                      iotctl discover --validate         # All with validation
-                                      iotctl discover --protocol=snmp    # SNMP only
+
+ENDPOINTS (CONNECTIONS):
+
+  endpoints list [protocol]         List all configured protocol endpoints (connections)
+                                    Examples:
+                                      iotctl endpoints list              # All endpoints
+                                      iotctl endpoints list opcua        # OPC-UA endpoints only
+
+  endpoints show <name>             Show detailed endpoint information
 
 
 MQTT MANAGEMENT:
@@ -1670,6 +1679,57 @@ async function discover(protocolArg?: string): Promise<void> {
 }
 
 /**
+ * List physical/logical devices from the devices table
+ */
+async function devicesList(protocolFilter?: string): Promise<void> {
+	clearApiCache();
+	try {
+		const query = protocolFilter ? `?protocol=${protocolFilter}` : '';
+		const result = await apiRequest(`${DEVICE_API_V1}/devices${query}`);
+		const devices = result.devices || [];
+
+		if (devices.length === 0) {
+			logger.info('No devices found');
+			return;
+		}
+
+		logger.info(`Found ${devices.length} device${devices.length === 1 ? '' : 's'}${protocolFilter ? ` (${protocolFilter})` : ''}`);
+		console.log('');
+
+		// Group by protocol
+		const byProtocol = devices.reduce((acc: Record<string, any[]>, d: any) => {
+			const proto = d.protocol || 'unknown';
+			if (!acc[proto]) acc[proto] = [];
+			acc[proto].push(d);
+			return acc;
+		}, {});
+
+		for (const [protocol, protoDevices] of Object.entries(byProtocol)) {
+			console.log(`\n${protocol.toUpperCase()} Devices:`);
+			console.log('━'.repeat(60));
+
+			for (const device of protoDevices as any[]) {
+				const enabledIcon = device.enabled ? '✓' : '✗';
+				const identifierStr = device.identifier ? ` [${device.identifier}]` : '';
+				const lastSeen = device.lastSeenAt
+					? new Date(device.lastSeenAt).toLocaleString()
+					: 'never';
+
+				logger.info(`${enabledIcon} ${device.name}${identifierStr}`, {
+					uuid: device.uuid.slice(0, 8) + '...',
+					lastSeen
+				});
+			}
+		}
+
+		console.log('');
+	} catch (error) {
+		logger.error('Failed to list devices', error as Error);
+		process.exit(1);
+	}
+}
+
+/**
  * List all configured endpoints/sensors
  */
 async function endpointsList(protocolFilter?: string): Promise<void> {
@@ -2406,12 +2466,12 @@ async function main(): Promise<void> {
 			_default: discover
 		},
 		devices: {
-			list: endpointsList,
+			list: devicesList,
 			show: endpointsShow,
-			_default: endpointsList
+			_default: devicesList
 		},
 		endpoints: {
-			// Backward compatibility alias for devices
+			// Backward compatibility alias for endpoints
 			list: endpointsList,
 			show: endpointsShow,
 			_default: endpointsList

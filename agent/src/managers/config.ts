@@ -12,7 +12,7 @@
 import { EventEmitter } from 'events';
 import _ from 'lodash';
 import { models as db } from '../db/connection.js';
-import { DeviceEndpointModel, type DeviceEndpoint } from '../db/models/endpoint.model.js';
+import { EndpointModel, type Endpoint } from '../db/models/endpoint.model.js';
 import { MqttAuthModel } from '../db/models/mqtt-auth.model.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents, type LogLevel } from '../logging/types.js';
@@ -226,7 +226,7 @@ export class ConfigManager extends EventEmitter {
 	 */
 	public async getCurrentConfig(): Promise<DeviceConfig> {
 		// Get all sensors from database (includes discovered devices)
-		const allEndpoints = await DeviceEndpointModel.getAll();
+		const allEndpoints = await EndpointModel.getAll();
 		const validEndpoints = allEndpoints.filter(endpoint => !!endpoint.uuid);
 
 		if (validEndpoints.length !== allEndpoints.length) {
@@ -748,7 +748,7 @@ export class ConfigManager extends EventEmitter {
 
 		try {
 			// Get current devices from SQLite to detect deletions
-			const currentDevices = await DeviceEndpointModel.getAll();
+			const currentDevices = await EndpointModel.getAll();
 
 			// Enforce canonical identity: endpoints must have UUID.
 			// Rows without UUID cannot participate in strict target-state reconciliation.
@@ -817,7 +817,7 @@ export class ConfigManager extends EventEmitter {
 			continue;
 		}
 
-		existing = await DeviceEndpointModel.getByUuid(normalizedDevice.uuid);
+		existing = await EndpointModel.getByUuid(normalizedDevice.uuid);
 	} catch (lookupError) {
 		this.logger?.warnSync('Failed to lookup existing device, treating as new', {
 			component: LogComponents.configManager,
@@ -868,7 +868,7 @@ export class ConfigManager extends EventEmitter {
 						});
 					}
 					
-					await DeviceEndpointModel.updateByUuid(normalizedDevice.uuid, normalizedDevice);
+					await EndpointModel.updateByUuid(normalizedDevice.uuid, normalizedDevice);
 					this.logger?.infoSync('Updated endpoint in database', {
 						component: LogComponents.configManager,
 						deviceUuid: normalizedDevice.uuid,
@@ -939,12 +939,12 @@ export class ConfigManager extends EventEmitter {
 					}
 					
 					
-					await DeviceEndpointModel.create(normalizedDevice);
+					await EndpointModel.create(normalizedDevice);
 					
 					// CRITICAL: Verify what was actually saved to DB
 					let verifyInsert: any = null;
 					try {
-						verifyInsert = await DeviceEndpointModel.getByUuid(normalizedDevice.uuid);
+						verifyInsert = await EndpointModel.getByUuid(normalizedDevice.uuid);
 					} catch (verifyError) {
 						this.logger?.warnSync('Failed to verify inserted endpoint', {
 							component: LogComponents.configManager,
@@ -1201,7 +1201,7 @@ export class ConfigManager extends EventEmitter {
 
 		// Save device to SQLite sensors table
 		try {
-			const { DeviceEndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
+			const { EndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
 			
 			// Handle both connectionString and connection formats
 			let connection: Record<string, any> = {};
@@ -1231,7 +1231,7 @@ export class ConfigManager extends EventEmitter {
 			}
 			
 			// Normalize property names (camelCase → snake_case)
-			const normalizedEndpoint: Partial<DeviceEndpoint> = {
+			const normalizedEndpoint: Partial<Endpoint> = {
 				name: device.name,
 				protocol: device.protocol as any, // Accept any protocol string
 				enabled: device.enabled !== undefined ? device.enabled : true,
@@ -1242,7 +1242,7 @@ export class ConfigManager extends EventEmitter {
 			};
 			
 			// Use upsert to handle devices that may already exist (e.g., discovered devices)
-			await DeviceSensorModel.upsert(normalizedEndpoint as DeviceEndpoint);
+			await DeviceSensorModel.upsert(normalizedEndpoint as Endpoint);
 			
 			this.logger?.infoSync('Device saved to sensors table', {
 				component: LogComponents.configManager,
@@ -1295,7 +1295,7 @@ export class ConfigManager extends EventEmitter {
 
 		// Update device in SQLite sensors table (or create if doesn't exist)
 		try {
-			const { DeviceEndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
+			const { EndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
 			
 			// Handle both connectionString and connection formats
 			let connection: Record<string, any> = {};
@@ -1427,7 +1427,7 @@ if (existing) {
 
 		if (!device) {
 			try {
-				const existingEndpoint = await DeviceEndpointModel.getByUuid(deviceId);
+				const existingEndpoint = await EndpointModel.getByUuid(deviceId);
 				if (existingEndpoint) {
 					device = {
 						id: existingEndpoint.uuid,
@@ -1457,7 +1457,7 @@ if (existing) {
 		
 		// Remove device from SQLite sensors table
 		try {
-			const { DeviceEndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
+			const { EndpointModel: DeviceSensorModel } = await import('../db/models/endpoint.model.js');
 			const deleted = await DeviceSensorModel.deleteByUuid(deviceId);
 
 			if (!deleted) {

@@ -21,7 +21,7 @@ import type {
 	ProvisionResponse,
 	KeyExchangeRequest
 } from './types';
-import { DeviceModel } from '../db/models/device.model';
+import { AgentModel } from '../db/models/agent.model';
 import { buildApiEndpoint, getPackageVersion } from '../utils/api-utils';
 import { 
 	DefaultUuidGenerator, 
@@ -187,7 +187,7 @@ export class DeviceManager {
 		// CRITICAL: Absolute path required so encryption key persists across rebuilds
 		const dataDir = process.env.DATA_DIR || '/app/data';
 		
-		DeviceModel.initializeEncryption(dataDir);
+		AgentModel.initializeEncryption(dataDir);
 
 		// Initialize PoP crypto (generates keys if needed)
 		this.popCrypto = new PopCryptoManager(dataDir, this.logger);

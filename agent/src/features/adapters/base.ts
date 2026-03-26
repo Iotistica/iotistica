@@ -14,7 +14,7 @@
 
 import { EventEmitter } from 'events';
 import { SensorDataPoint, DeviceStatus, Logger } from './types.js';
-import { DeviceEndpoint } from '../../db/models/endpoint.model.js';
+import { Endpoint } from '../../db/models/endpoint.model.js';
 
 /**
  * Generic device configuration (from database)
@@ -465,10 +465,10 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
    * Load devices from database for a protocol
    */
   static async loadDevicesFromDatabase(protocol: string): Promise<GenericDeviceConfig[]> {
-    const { DeviceEndpointModel } = await import('../../db/models/endpoint.model.js');
-    const dbDevices = await DeviceEndpointModel.getEnabled(protocol);
+    const { EndpointModel: EndpointModel } = await import('../../db/models/endpoint.model.js');
+    const dbDevices = await EndpointModel.getEnabled(protocol);
 
-    return dbDevices.map((db: DeviceEndpoint) => ({
+    return dbDevices.map((db: Endpoint) => ({
       name: db.name,
       protocol: db.protocol,
       enabled: db.enabled,

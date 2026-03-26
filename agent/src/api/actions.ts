@@ -524,9 +524,18 @@ export const deprovisionDevice = async () => {
  * Used by: GET /v1/endpoints
  */
 export const getEndpoints = async (protocol?: string) => {
-	const { DeviceEndpointModel } = await import('../db/models/endpoint.model.js');
-	const endpoints = await DeviceEndpointModel.getAll(protocol);
+	const { EndpointModel: EndpointModel } = await import('../db/models/endpoint.model.js');
+	const endpoints = await EndpointModel.getAll(protocol);
 	return endpoints;
+};
+
+/**
+ * Get all protocol devices from the devices table
+ * Used by: GET /v1/devices
+ */
+export const getDevices = async (protocol?: string) => {
+	const { DeviceModel } = await import('../db/models/device.model.js');
+	return await DeviceModel.getAll(protocol);
 };
 
 /**
