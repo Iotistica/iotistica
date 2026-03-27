@@ -1207,6 +1207,7 @@ export default function App() {
           currentView={currentView}
           deviceUuid={selectedDevice?.deviceUuid}
           deviceName={selectedDevice?.name}
+          currentDeviceView={currentView}
           onHomeClick={() => handleGlobalViewChange('home')}
           onAccountClick={() => handleGlobalViewChange('account')}
           onUsersClick={() => handleGlobalViewChange('users')}

@@ -247,6 +247,8 @@ export function MetricDataCardConfigDialog({
 
   useEffect(() => {
     if (!selectedDevice) return;
+    if (loading) return;
+    if (devices.length === 0) return;
     const stillVisible = filteredDevices.some((device) => device.device_name === selectedDevice);
     if (!stillVisible) {
       setSelectedDevice('');
@@ -254,7 +256,7 @@ export function MetricDataCardConfigDialog({
       setSelectedSourceKey('');
       setAvailableMetrics([]);
     }
-  }, [selectedAgentUuid, selectedDevice, filteredDevices]);
+  }, [selectedAgentUuid, selectedDevice, filteredDevices, loading, devices.length]);
 
   const selectedDeviceData = filteredDevices.find(d => d.device_name === selectedDevice) || devices.find(d => d.device_name === selectedDevice);
   const selectedDeviceSources = Array.isArray(selectedDeviceData?.source_refs)

@@ -39,18 +39,62 @@ interface AIChatWidgetProps {
   mode: 'device' | 'dashboard';
   deviceUuid?: string;
   deviceName?: string;
+  deviceView?: string; // Current device view (metrics, logs, endpoints, etc.)
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function AIChatWidget({ mode, deviceUuid, deviceName, isOpen, onClose }: AIChatWidgetProps) {
+export function AIChatWidget({ mode, deviceUuid, deviceName, deviceView, isOpen, onClose }: AIChatWidgetProps) {
+  const getAssistantTitle = () => {
+    if (mode === 'dashboard') {
+      return 'Dashboard Assistant';
+    }
+
+    switch (deviceView?.toLowerCase()) {
+      case 'logs':
+        return 'Logs Assistant';
+      case 'devices':
+        return 'Devices Assistant';
+      case 'endpoints':
+        return 'Endpoints Assistant';
+      case 'settings':
+      case 'config':
+        return 'Settings Assistant';
+      case 'jobs':
+        return 'Jobs Assistant';
+      case 'applications':
+        return 'Applications Assistant';
+      case 'remote-access':
+        return 'Remote Access Assistant';
+      case 'metrics':
+      default:
+        return 'Metrics Assistant';
+    }
+  };
+
+  const getInitialGreeting = () => {
+    if (mode === 'dashboard') {
+      return "Hi! I'm your dashboard assistant. I can suggest dashboard layouts and metrics based on your devices. What kind of dashboard do you want?";
+    }
+    
+    // Device mode with view-specific greeting
+    const viewGreetings: Record<string, string> = {
+      logs: `Hi! I'm your IoT assistant. I can help you analyze logs for ${deviceName || 'your agent'}, find errors, and diagnose issues.`,
+      endpoints: `Hi! I'm your IoT assistant. I can check the health and status of endpoints on ${deviceName || 'your agent'}.`,
+      devices: `Hi! I'm your IoT assistant. I can review device connectivity and performance for ${deviceName || 'your agent'}.`,
+      settings: `Hi! I'm your IoT assistant. I can review and help optimize settings for ${deviceName || 'your agent'}.`,
+      metrics: `Hi! I'm your IoT assistant. I can analyze metrics for ${deviceName || 'your agent'}, identify spikes, and suggest optimizations.`,
+    };
+    
+    return viewGreetings[deviceView?.toLowerCase() || 'metrics'] || 
+      `Hi! I'm your IoT assistant. I can help you monitor and manage ${deviceName || 'your agent'}. What would you like to know?`;
+  };
+  
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: mode === 'dashboard'
-        ? "Hi! I'm your dashboard assistant. I can suggest dashboard layouts and metrics based on your devices. What kind of dashboard do you want?"
-        : "Hi! I'm your IoT assistant. I can help you monitor agents, check logs, restart containers, and more. What would you like to know?",
+      content: getInitialGreeting(),
       timestamp: new Date(),
     },
   ]);
@@ -62,6 +106,79 @@ export function AIChatWidget({ mode, deviceUuid, deviceName, isOpen, onClose }: 
   const agentIdentifier = deviceUuid
     ? (deviceName ? `agent ${deviceName} [${deviceUuid}]` : `agent [${deviceUuid}]`)
     : 'your fleet';
+  
+  // Device-specific presets based on current view
+  const getDevicePresetsForView = () => {
+    switch (deviceView?.toLowerCase()) {
+      case 'logs':
+        return [
+          {
+            label: 'Find errors',
+            prompt: `Analyze logs for ${agentIdentifier} and list the top 5 recent errors with timestamps, severity, and affected services.`,
+          },
+          {
+            label: 'Connection issues',
+            prompt: `Search logs for ${agentIdentifier} for connection-related errors and suggest fixes based on error patterns.`,
+          },
+          {
+            label: 'Performance warnings',
+            prompt: `Review logs for ${agentIdentifier} for performance degradation warnings or resource exhaustion messages.`,
+          },
+        ];
+      case 'endpoints':
+      case 'devices':
+        return [
+          {
+            label: 'Connection status',
+            prompt: `Check the connection status of all endpoints on ${agentIdentifier} and highlight any offline or degraded devices.`,
+          },
+          {
+            label: 'Response sluggish',
+            prompt: `Analyze endpoint response times on ${agentIdentifier} and suggest which ones may need attention or restart.`,
+          },
+          {
+            label: 'Device health scan',
+            prompt: `Run a health check on all connected endpoints for ${agentIdentifier} and report any anomalies.`,
+          },
+        ];
+      case 'settings':
+      case 'config':
+        return [
+          {
+            label: 'Review configuration',
+            prompt: `Summarize the current configuration for ${agentIdentifier} and highlight any non-optimal settings.`,
+          },
+          {
+            label: 'Security audit',
+            prompt: `Review the security settings for ${agentIdentifier} and suggest improvements if any.`,
+          },
+          {
+            label: 'Optimize settings',
+            prompt: `Recommended optimizations for ${agentIdentifier} based on typical usage patterns and resource limits.`,
+          },
+        ];
+      case 'metrics':
+      default:
+        return [
+          {
+            label: 'High CPU usage',
+            prompt: `${agentIdentifier} is showing high CPU. Analyze recent metrics and suggest what might be causing the spike.`,
+          },
+          {
+            label: 'Memory pressure',
+            prompt: `Check memory usage trends on ${agentIdentifier} over the past 4 hours and recommend actions if approaching limits.`,
+          },
+          {
+            label: 'Optimize performance',
+            prompt: `Suggest performance optimizations for ${agentIdentifier} based on current resource utilization and patterns.`,
+          },
+          {
+            label: 'Troubleshoot connectivity',
+            prompt: `Investigate recent connectivity drops on ${agentIdentifier} using metrics and suggest fixes.`,
+          },
+        ];
+    }
+  };
   
   const promptPresets = mode === 'dashboard'
     ? [
@@ -82,28 +199,7 @@ export function AIChatWidget({ mode, deviceUuid, deviceName, isOpen, onClose }: 
           prompt: 'Give me a compact executive dashboard with top stats, one or two main charts, and side gauges.',
         },
       ]
-    : [
-        {
-          label: 'Health snapshot',
-          prompt: `Give me a health summary for ${agentIdentifier} covering uptime, CPU, memory, and any critical alerts over the past 24 hours.`,
-        },
-        {
-          label: 'Performance spikes',
-          prompt: `Analyze ${agentIdentifier} for any CPU or memory spikes during the last 4 hours and explain likely causes with supporting metrics.`,
-        },
-        {
-          label: 'Error log digest',
-          prompt: `Review the most recent logs for ${agentIdentifier} and list the top recurring errors with timestamps and impacted services.`,
-        },
-        {
-          label: 'Container review',
-          prompt: `List all running containers on ${agentIdentifier}, highlight ones consuming the most resources, and recommend restarts if needed.`,
-        },
-        {
-          label: 'Connectivity issues',
-          prompt: `Investigate recent connectivity drops for ${agentIdentifier} and suggest remediation steps based on status history and metrics.`,
-        },
-      ];
+    : getDevicePresetsForView();
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -134,6 +230,7 @@ export function AIChatWidget({ mode, deviceUuid, deviceName, isOpen, onClose }: 
         body: JSON.stringify({
           mode,
           deviceUuid,
+          deviceView: deviceView || 'metrics',
           message: input,
           conversationHistory: messages.slice(-5), // Last 5 messages for context
           strategy: mode === 'dashboard' ? 'hybrid' : undefined,
@@ -191,7 +288,7 @@ export function AIChatWidget({ mode, deviceUuid, deviceName, isOpen, onClose }: 
         <div className="flex items-center justify-between p-4 border-b bg-primary text-primary-foreground">
           <div className="flex items-center gap-2">
             <Bot className="h-5 w-5" />
-            <h3 className="font-semibold">{mode === 'dashboard' ? 'Dashboard Assistant' : 'IoT Assistant'}</h3>
+            <h3 className="font-semibold">{getAssistantTitle()}</h3>
           </div>
           <Button
             variant="ghost"

@@ -13,6 +13,10 @@ import {
   generateDashboardSuggestions,
   getStrategy,
 } from '../services/ai/dashboard-suggestions.service';
+import {
+  generateDeviceSuggestions,
+  buildDeviceAssistantResponse,
+} from '../services/ai/device-suggestions.service';
 
 const router = Router();
 
@@ -45,7 +49,7 @@ const aiChatRateLimit = rateLimit({
  */
 router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
   try {
-    const { deviceUuid, message, conversationHistory, mode, strategy } = req.body;
+    const { deviceUuid, message, conversationHistory, mode, strategy, deviceView, deviceName } = req.body;
     const normalizedMessage = typeof message === 'string' ? message.toLowerCase() : '';
     const hasDashboardIntent = /\bdashboard\b|\bcharts?\b|\bwidgets?\b|\blayout\b/.test(normalizedMessage);
     const hasRequestedStrategy = typeof strategy === 'string' && strategy.trim().length > 0;
@@ -57,6 +61,7 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
     console.log('[AI Chat] Request received:', {
       mode: assistantMode,
       deviceUuid,
+      deviceView,
       messageLength: message?.length,
       historyLength: conversationHistory?.length,
       provider: process.env.AI_PROVIDER || 'ollama',
@@ -94,18 +99,44 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
       });
     }
 
-    const response = await processAIChat({
+    // Device mode - generate context-aware suggestions
+    const normalizedView = (deviceView || 'metrics').toLowerCase();
+    const validViews = ['metrics', 'logs', 'endpoints', 'devices', 'config', 'settings', 'jobs', 'applications'];
+    const safeView = (validViews.includes(normalizedView) ? normalizedView : 'metrics') as any;
+    
+    const deviceSuggestionsResult = await generateDeviceSuggestions({
+      context: {
+        deviceUuid,
+        deviceName: deviceName || 'Device',
+        deviceView: safeView,
+        userPrompt: message,
+      },
+      requestId: req.id || 'unknown',
+      userId: (req as any).user?.id,
+    });
+
+    const deviceResponse = buildDeviceAssistantResponse(deviceSuggestionsResult);
+    
+    // Optionally: Also get conversational response from AI service for more context
+    const conversationalResponse = await processAIChat({
       deviceUuid,
       message,
       conversationHistory: conversationHistory || [],
-    });
+    }).catch(() => deviceResponse); // Fallback to device response if AI service fails
 
-    console.log('[AI Chat] Response generated successfully:', {
-      responseLength: response?.length,
+    console.log('[AI Chat] Device suggestions generated successfully:', {
       deviceUuid,
+      view: safeView,
+      suggestionCount: deviceSuggestionsResult.suggestions.length,
     });
 
-    res.json({ response });
+    res.json({
+      response: deviceResponse,
+      deviceSuggestions: deviceSuggestionsResult.suggestions,
+      viewContext: deviceSuggestionsResult.viewContext,
+      recommendedActions: deviceSuggestionsResult.recommendedActions,
+      conversationalResponse,
+    });
   } catch (error: any) {
     console.error('[AI Chat] Error occurred:', {
       message: error.message,

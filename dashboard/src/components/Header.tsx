@@ -29,6 +29,7 @@ interface HeaderProps {
   onDigitalTwinClick?: () => void; // Callback for opening digital twin page
   userRole?: string; // User role for conditional UI
   currentView?: string;
+  currentDeviceView?: string; // Current device sub-view (metrics, logs, endpoints, etc.)
 }
 
 export function Header({
@@ -45,6 +46,7 @@ export function Header({
   onTagDefinitionsClick = () => {},
   userRole = 'viewer',
   currentView,
+  currentDeviceView,
 }: HeaderProps) {
   // AI Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -183,6 +185,7 @@ export function Header({
           mode={assistantMode}
           deviceUuid={deviceUuid}
           deviceName={deviceName}
+          deviceView={currentDeviceView}
           isOpen={isChatOpen} 
           onClose={() => setIsChatOpen(false)} 
         />
