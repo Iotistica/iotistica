@@ -126,8 +126,8 @@ export class VirtualDeviceManager {
 
     logger.info('[VirtualDeviceManager] Parent agent found', {
       agentUuid: agent.uuid,
-      agentName: agent.agent_name,
-      agentType: agent.agent_type,
+      agentName: agent.name,
+      agentType: agent.type,
       helmRelease: agent.helm_release_name,
       namespace: agent.k8s_namespace
     });

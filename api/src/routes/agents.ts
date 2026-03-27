@@ -118,8 +118,8 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
 
     // Build update object
     const updateFields = {};
-    if (deviceName) updateFields['device_name'] = deviceName;
-    if (deviceType) updateFields['device_type'] = deviceType;
+    if (deviceName) updateFields['name'] = deviceName;
+    if (deviceType) updateFields['type'] = deviceType;
     if (ipAddress) updateFields['ip_address'] = ipAddress;
     if (macAddress) updateFields['mac_address'] = macAddress;
     if (location !== undefined) updateFields['location'] = location || null;
@@ -129,7 +129,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
 
     await logAuditEvent({
       eventType: AuditEventType.DEVICE_CONFIG_UPDATE,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
         updatedFields: Object.keys(updateFields),
@@ -145,8 +145,8 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
       success: true,
       device: {
         uuid: updatedDevice.uuid,
-        deviceName: updatedDevice.agent_name,
-        deviceType: updatedDevice.agent_type,
+        deviceName: updatedDevice.name,
+        deviceType: updatedDevice.type,
         ipAddress: updatedDevice.ip_address,
         macAddress: updatedDevice.mac_address,
         location: updatedDevice.location,
@@ -265,9 +265,9 @@ router.get('/agents', jwtAuth, async (req, res) => {
         return {
           id: device.uuid,
           uuid: device.uuid,
-          name: device.agent_name,
-          device_name: device.agent_name,
-          device_type: device.agent_type,
+          name: device.name,
+          device_name: device.name,
+          device_type: device.type,
           location: device.location,
           state: device.is_online ? 'active' : 'inactive',
           provisioning_state: device.provisioning_state,
@@ -538,8 +538,8 @@ router.post('/agents', jwtAuth, async (req, res) => {
     const result = await query(
       `INSERT INTO agents (
         uuid, 
-        device_name, 
-        device_type, 
+        name, 
+        type, 
         ip_address, 
         mac_address,
         fleet_uuid,
@@ -582,7 +582,7 @@ router.post('/agents', jwtAuth, async (req, res) => {
     await logAuditEvent({
       eventType: AuditEventType.DEVICE_REGISTERED,
       severity: AuditSeverity.INFO,
-      deviceUuid: deviceUuid,
+      agentUuid: deviceUuid,
       details: {
         deviceName: uniqueDeviceName,
         originalName: deviceName,
@@ -604,8 +604,8 @@ router.post('/agents', jwtAuth, async (req, res) => {
       success: true,
       device: {
         uuid: device.uuid,
-        deviceName: device.device_name,
-        deviceType: device.device_type,
+        deviceName: device.name,
+        deviceType: device.type,
         ipAddress: device.ip_address,
         macAddress: device.mac_address,
         isOnline: device.is_online,
@@ -669,7 +669,7 @@ router.patch('/agents/:uuid/active', async (req, res) => {
     const action = is_active ? 'enabled' : 'disabled';
     logger.info(`Device ${action}`, {
       deviceId: uuid.substring(0, 8),
-      deviceName: device.agent_name,
+      deviceName: device.name,
       isActive: is_active
     });
 
@@ -679,8 +679,8 @@ router.patch('/agents/:uuid/active', async (req, res) => {
       'agent',
       uuid,
       {
-        device_name: device.agent_name,
-        device_type: device.agent_type,
+        device_name: device.name,
+        device_type: device.type,
         previous_state: device.is_active,
         new_state: is_active,
         reason: is_active ? 'administratively enabled' : 'administratively disabled',
@@ -707,11 +707,11 @@ router.patch('/agents/:uuid/active', async (req, res) => {
 
     await logAuditEvent({
       eventType: is_active ? AuditEventType.DEVICE_REGISTERED : AuditEventType.DEVICE_OFFLINE,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
         action: `device_${action}`,
-        deviceName: device.agent_name,
+        deviceName: device.name,
         previousState: device.is_active,
         newState: is_active
       }
@@ -722,7 +722,7 @@ router.patch('/agents/:uuid/active', async (req, res) => {
       message: `Device ${action}`,
       device: {
         uuid: updatedDevice.uuid,
-        device_name: updatedDevice.agent_name,
+        device_name: updatedDevice.name,
         is_active: updatedDevice.is_active,
         is_online: updatedDevice.is_online
       }
@@ -1187,7 +1187,7 @@ router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
 
     await logAuditEvent({
       eventType: AuditEventType.DEVICE_CONFIG_UPDATE,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
         action: 'deploy_app',
@@ -1276,7 +1276,7 @@ router.post('/agents/:uuid/deploy', async (req, res) => {
 
     await logAuditEvent({
       eventType: AuditEventType.DEVICE_CONFIG_UPDATE,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
         action: 'deploy',
@@ -1388,7 +1388,7 @@ router.post('/agents/:uuid/deploy/cancel', async (req, res) => {
 
     await logAuditEvent({
       eventType: AuditEventType.DEVICE_CONFIG_UPDATE,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
         action: 'cancel_deployment',
@@ -1570,7 +1570,7 @@ router.put('/agents/:uuid/broker', async (req, res) => {
     // 7. Log audit event
     await logAuditEvent({
       eventType: 'device.config.updated' as any,  // Custom event type
-      deviceUuid: uuid,
+      agentUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
         change: 'broker_assignment',
@@ -1587,7 +1587,7 @@ router.put('/agents/:uuid/broker', async (req, res) => {
       message: `Device assigned to broker: ${broker.name}`,
       device: {
         uuid: device.uuid,
-        name: device.agent_name
+        name: device.name
       },
       broker: {
         id: broker.id,
@@ -1613,7 +1613,7 @@ router.put('/agents/:uuid/broker', async (req, res) => {
     
     await logAuditEvent({
       eventType: 'device.config.update.failed' as any,  // Custom event type
-      deviceUuid: req.params.uuid,
+      agentUuid: req.params.uuid,
       severity: AuditSeverity.ERROR,
       details: {
         error: error.message,
@@ -1744,7 +1744,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
     // Log audit event
     await logAuditEvent({
       eventType: 'device.agent.update.triggered' as any,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
         version: version || 'latest',
@@ -1771,7 +1771,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
       message: 'Agent update command sent via MQTT',
       device: {
         uuid: device.uuid,
-        deviceName: device.agent_name
+        deviceName: device.name
       },
       update: {
         version: version || 'latest',
@@ -1791,7 +1791,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
 
     await logAuditEvent({
       eventType: 'device.agent.update.failed' as any,
-      deviceUuid: req.params.uuid,
+      agentUuid: req.params.uuid,
       severity: AuditSeverity.ERROR,
       details: {
         error: error.message
@@ -1946,7 +1946,7 @@ router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
       });
     }
 
-    if (device.agent_type !== 'virtual') {
+    if (device.type !== 'virtual') {
       return res.status(400).json({
         error: 'Not a virtual agent',
         message: 'This endpoint is only for virtual agents'
@@ -1958,7 +1958,7 @@ router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
 
     res.json({
       deviceUuid: uuid,
-      deviceName: device.agent_name,
+      deviceName: device.name,
       deploymentStatus: deploymentStatus.status,
       namespace: deploymentStatus.namespace,
       podName: deploymentStatus.podName,
@@ -1999,7 +1999,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
       });
     }
 
-    if (device.agent_type !== 'virtual') {
+    if (device.type !== 'virtual') {
       return res.status(400).json({
         error: 'Not a virtual agent',
         message: 'This endpoint is only for virtual agents'
@@ -2008,7 +2008,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
 
     logger.info('Destroying virtual agent (hard delete)', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.agent_name,
+      deviceName: device.name,
       namespace: device.k8s_namespace
     });
 
@@ -2029,10 +2029,10 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
 
     await logAuditEvent({
       eventType: 'device.deployment.destroyed' as any,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
-        deviceName: device.agent_name,
+        deviceName: device.name,
         namespace: device.k8s_namespace,
         hardDelete: true
       }
@@ -2041,7 +2041,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
     res.json({
       message: 'Virtual agent deleted successfully (K8s + database)',
       deviceUuid: uuid,
-      deviceName: device.agent_name
+      deviceName: device.name
     });
 
   } catch (error: any) {
@@ -2053,7 +2053,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
 
     await logAuditEvent({
       eventType: 'device.deployment.destroy_failed' as any,
-      deviceUuid: req.params.uuid,
+      agentUuid: req.params.uuid,
       severity: AuditSeverity.ERROR,
       details: {
         error: error.message
@@ -2083,7 +2083,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
       });
     }
 
-    if (device.agent_type !== 'virtual') {
+    if (device.type !== 'virtual') {
       return res.status(400).json({
         error: 'Not a virtual agent',
         message: 'This endpoint is only for virtual agents'
@@ -2092,7 +2092,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
 
     logger.info('Restarting virtual agent', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.agent_name,
+      deviceName: device.name,
       namespace: device.k8s_namespace
     });
 
@@ -2100,10 +2100,10 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
 
     await logAuditEvent({
       eventType: 'device.deployment.restarted' as any,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
-        deviceName: device.agent_name,
+        deviceName: device.name,
         namespace: device.k8s_namespace
       }
     }).catch(err => logger.error('Audit log failed', err));
@@ -2111,7 +2111,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
     res.json({
       message: 'Virtual agent restart initiated',
       deviceUuid: uuid,
-      deviceName: device.agent_name,
+      deviceName: device.name,
       namespace: device.k8s_namespace,
       note: 'Pod deleted - Kubernetes will automatically recreate it'
     });
@@ -2125,7 +2125,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
 
     await logAuditEvent({
       eventType: 'device.deployment.restart_failed' as any,
-      deviceUuid: req.params.uuid,
+      agentUuid: req.params.uuid,
       severity: AuditSeverity.ERROR,
       details: {
         error: error.message

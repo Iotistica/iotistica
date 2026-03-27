@@ -508,7 +508,7 @@ router.post('/device/:uuid/challenge', async (req, res) => {
     if (!device) {
       await logAuditEvent({
         eventType: AuditEventType.AUTHENTICATION_FAILED,
-        deviceUuid: uuid,
+        agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
@@ -526,7 +526,7 @@ router.post('/device/:uuid/challenge', async (req, res) => {
 
     logger.info('Generating new PoP challenge', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.agent_name,
+      deviceName: device.name,
       challengeLength: challenge.length,
       expiresAt: expiresAt.toISOString(),
       hasPublicKey: !!device.device_public_key,
@@ -538,13 +538,13 @@ router.post('/device/:uuid/challenge', async (req, res) => {
 
     logger.info('PoP challenge stored and issued to device', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.agent_name,
+      deviceName: device.name,
       expiresAt: expiresAt.toISOString()
     });
 
     await logAuditEvent({
       eventType: AuditEventType.KEY_EXCHANGE_SUCCESS, // Reusing event type
-      deviceUuid: uuid,
+      agentUuid: uuid,
       ipAddress,
       userAgent,
       severity: AuditSeverity.INFO,
@@ -563,7 +563,7 @@ router.post('/device/:uuid/challenge', async (req, res) => {
     
     await logAuditEvent({
       eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       ipAddress,
       userAgent,
       severity: AuditSeverity.ERROR,
@@ -655,7 +655,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
     if (!provisioningApiKey) {
       await logAuditEvent({
         eventType: AuditEventType.PROVISIONING_FAILED,
-        deviceUuid: uuid,
+        agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
@@ -741,7 +741,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     if (!authKey) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-        deviceUuid: uuid,
+        agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
@@ -756,7 +756,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     if (!isPopMode && !deviceApiKey) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-        deviceUuid: uuid,
+        agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
@@ -779,7 +779,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     if (!device) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-        deviceUuid: uuid,
+        agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
@@ -807,7 +807,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       if (!device.last_challenge || !device.last_challenge_expires_at) {
         await logAuditEvent({
           eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-          deviceUuid: uuid,
+          agentUuid: uuid,
           ipAddress,
           userAgent,
           severity: AuditSeverity.WARNING,
@@ -822,7 +822,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       if (device.last_challenge_expires_at < new Date()) {
         await logAuditEvent({
           eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-          deviceUuid: uuid,
+          agentUuid: uuid,
           ipAddress,
           userAgent,
           severity: AuditSeverity.WARNING,
@@ -862,7 +862,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           
           await logAuditEvent({
             eventType: AuditEventType.AUTHENTICATION_FAILED,
-            deviceUuid: uuid,
+            agentUuid: uuid,
             ipAddress,
             userAgent,
             severity: AuditSeverity.WARNING,
@@ -886,7 +886,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
             
             await logAuditEvent({
               eventType: AuditEventType.AUTHENTICATION_FAILED,
-              deviceUuid: uuid,
+              agentUuid: uuid,
               ipAddress,
               userAgent,
               severity: AuditSeverity.WARNING,
@@ -921,7 +921,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         if (!isValid) {
           await logAuditEvent({
             eventType: AuditEventType.AUTHENTICATION_FAILED,
-            deviceUuid: uuid,
+            agentUuid: uuid,
             ipAddress,
             userAgent,
             severity: AuditSeverity.WARNING,
@@ -945,7 +945,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         // Mark device as PoP verified
         logger.info('Marking device as PoP verified', {
           deviceUuid: uuid.substring(0, 8) + '...',
-          deviceName: device.agent_name
+          deviceName: device.name
         });
         
         await AgentModel.markPopVerified(uuid);
@@ -955,18 +955,18 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
 
         logger.info('PoP verification successful and persisted', {
           deviceUuid: uuid.substring(0, 8) + '...',
-          deviceName: device.agent_name,
+          deviceName: device.name,
           authMethod: 'proof-of-possession'
         });
 
         await logAuditEvent({
           eventType: AuditEventType.KEY_EXCHANGE_SUCCESS,
-          deviceUuid: uuid,
+          agentUuid: uuid,
           ipAddress,
           userAgent,
           severity: AuditSeverity.INFO,
           details: { 
-            deviceName: device.agent_name,
+            deviceName: device.name,
             authMethod: 'proof-of-possession'
           }
         });
@@ -977,7 +977,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           device: {
             id: device.id,
             uuid: device.uuid,
-            deviceName: device.agent_name,
+            deviceName: device.name,
           }
         });
       } catch (verifyError: any) {
@@ -985,7 +985,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         
         await logAuditEvent({
           eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-          deviceUuid: uuid,
+          agentUuid: uuid,
           ipAddress,
           userAgent,
           severity: AuditSeverity.ERROR,
@@ -1004,7 +1004,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     // ========================================================================
     logger.warn('⚠️ Using LEGACY bcrypt verification (not PoP)', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.agent_name,
+      deviceName: device.name,
       hasPublicKey: !!device.device_public_key,
       hasSignature: !!signature,
       reason: !device.device_public_key ? 'device has no public key (not PoP-enabled)' : !signature ? 'no signature provided' : 'unknown',
@@ -1014,7 +1014,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     if (!device.device_api_key_hash) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-        deviceUuid: uuid,
+        agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.ERROR,
@@ -1031,7 +1031,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     if (!keyMatches) {
       await logAuditEvent({
         eventType: AuditEventType.AUTHENTICATION_FAILED,
-        deviceUuid: uuid,
+        agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
@@ -1045,7 +1045,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
 
     logger.info('Legacy key exchange successful (bcrypt)', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.agent_name
+      deviceName: device.name
     });
     
     // Record authentication method for fleet-level policy enforcement
@@ -1054,12 +1054,12 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
 
     await logAuditEvent({
       eventType: AuditEventType.KEY_EXCHANGE_SUCCESS,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       ipAddress,
       userAgent,
       severity: AuditSeverity.INFO,
       details: { 
-        deviceName: device.agent_name,
+        deviceName: device.name,
         authMethod: 'bcrypt-fallback'
       }
     });
@@ -1070,7 +1070,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       device: {
         id: device.id,
         uuid: device.uuid,
-        deviceName: device.agent_name,
+        deviceName: device.name,
       }
     });
   } catch (error: any) {
@@ -1078,7 +1078,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     
     await logAuditEvent({
       eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-      deviceUuid: req.params.uuid,
+      agentUuid: req.params.uuid,
       ipAddress,
       userAgent,
       severity: AuditSeverity.ERROR,

@@ -1151,7 +1151,7 @@ export class WebSocketManager {
         os: device.os_version || 'Unknown',
         architecture: 'Unknown', // Not stored in DB yet
         uptime: 0, // Not stored in DB yet
-        hostname: device.agent_name || 'Unknown',
+        hostname: device.name || 'Unknown',
         ipAddress: device.ip_address || 'Unknown',
         macAddress: device.mac_address || 'Unknown',
       };

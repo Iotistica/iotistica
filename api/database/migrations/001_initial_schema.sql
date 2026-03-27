@@ -966,8 +966,8 @@ BEGIN
         COUNT(d.uuid) as total_devices,
         COUNT(d.uuid) FILTER (WHERE d.is_online = true) as online_devices,
         COUNT(d.uuid) FILTER (WHERE d.is_online = false) as offline_devices,
-        COUNT(d.uuid) FILTER (WHERE d.device_type = 'virtual') as virtual_devices,
-        COUNT(d.uuid) FILTER (WHERE d.device_type != 'virtual' OR d.device_type IS NULL) as physical_devices,
+        COUNT(d.uuid) FILTER (WHERE d.type = 'virtual') as virtual_devices,
+        COUNT(d.uuid) FILTER (WHERE d.type != 'virtual' OR d.type IS NULL) as physical_devices,
         COALESCE((
             SELECT COUNT(*) 
             FROM endpoints ds 

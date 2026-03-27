@@ -185,7 +185,7 @@ export async function deviceAuth(
     // Cache miss - fetch from database
     if (!device) {
       const result = await query(
-        `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_uuid
+        `SELECT id, uuid, name AS device_name, type AS device_type, is_active, device_api_key_hash, fleet_uuid
          FROM agents
          WHERE uuid = $1`,
         [deviceUuid]
@@ -339,7 +339,7 @@ export async function deviceAuthFromBody(
 
     // Rest of logic is same as deviceAuth
     const result = await query(
-      `SELECT id, uuid, device_name, device_type, is_active, device_api_key_hash, fleet_uuid
+      `SELECT id, uuid, name AS device_name, type AS device_type, is_active, device_api_key_hash, fleet_uuid
        FROM agents
        WHERE uuid = $1`,
       [deviceUuid]

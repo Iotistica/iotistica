@@ -464,7 +464,7 @@ router.get('/jobs/executions/:jobId', jwtAuth, async (req: Request, res: Respons
     const statusResult = await pool.query(
       `SELECT 
         djs.*,
-        d.device_name,
+        d.name,
         d.ip_address
        FROM agent_job_status djs
        LEFT JOIN agents d ON djs.agent_uuid = d.uuid

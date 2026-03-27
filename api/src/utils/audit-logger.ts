@@ -98,7 +98,7 @@ export enum AuditEventType {
 
 export interface AuditLogEntry {
   eventType: AuditEventType | string;
-  deviceUuid?: string;
+  agentUuid?: string;
   userId?: string;
   ipAddress?: string;
   userAgent?: string;
@@ -112,7 +112,7 @@ export interface AuditLogEntry {
 export async function logAuditEvent(entry: AuditLogEntry): Promise<void> {
   const {
     eventType,
-    deviceUuid,
+    agentUuid,
     userId,
     ipAddress,
     userAgent,
@@ -123,7 +123,7 @@ export async function logAuditEvent(entry: AuditLogEntry): Promise<void> {
   // Log to Winston
   const logData = {
     event: eventType,
-    deviceUuid: deviceUuid ? `${deviceUuid.substring(0, 8)}...` : undefined,
+    deviceUuid: agentUuid ? `${agentUuid.substring(0, 8)}...` : undefined,
     userId,
     ipAddress,
     severity,
@@ -149,7 +149,7 @@ export async function logAuditEvent(entry: AuditLogEntry): Promise<void> {
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         eventType,
-        deviceUuid || null,
+        agentUuid || null,
         userId || null,
         ipAddress || null,
         userAgent || null,
@@ -162,7 +162,7 @@ export async function logAuditEvent(entry: AuditLogEntry): Promise<void> {
     auditLogger.error('Failed to write audit log to database', {
       error: error instanceof Error ? error.message : String(error),
       eventType,
-      deviceUuid: deviceUuid ? `${deviceUuid.substring(0, 8)}...` : undefined
+      deviceUuid: agentUuid ? `${agentUuid.substring(0, 8)}...` : undefined
     });
   }
 }

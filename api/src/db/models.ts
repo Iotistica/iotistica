@@ -13,8 +13,8 @@ import logger from '../utils/logger';
 export interface Agent {
   id: number;
   uuid: string;
-  agent_name?: string;
-  agent_type?: string;
+  name?: string;
+  type?: string;
   provisioning_state?: string;
   status?: string;
   is_online: boolean;
@@ -146,7 +146,7 @@ export class AgentModel {
     const wasOffline = !existingDevice.is_online;
     
     // Don't auto-set online for virtual agents that haven't registered yet
-    const isVirtualAgentPending = existingDevice.agent_type === 'virtual' && 
+    const isVirtualAgentPending = existingDevice.type === 'virtual' && 
                                   existingDevice.provisioning_state === 'pending';
     
     if (isVirtualAgentPending) {
@@ -183,7 +183,7 @@ export class AgentModel {
           'agent',
           uuid,
           {
-            device_name: existingDevice.agent_name || 'Unknown',
+            name: existingDevice.name || 'Unknown',
             was_offline_at: existingDevice.modified_at,
             offline_duration_minutes: offlineDurationMin,
             came_online_at: new Date().toISOString(),
@@ -202,7 +202,7 @@ export class AgentModel {
           deviceUuid: uuid,
           severity: AuditSeverity.INFO,
           details: {
-            deviceName: existingDevice.agent_name || 'Unknown',
+            deviceName: existingDevice.name || 'Unknown',
             wasOfflineAt: existingDevice.modified_at,
             offlineDurationMinutes: offlineDurationMin,
             cameOnlineAt: new Date().toISOString()
@@ -210,7 +210,7 @@ export class AgentModel {
         });
         
         logger.info('Device came back online', {
-          deviceName: existingDevice.agent_name || uuid.substring(0, 8),
+          deviceName: existingDevice.name || uuid.substring(0, 8),
           deviceUuid: uuid,
           offlineDurationMinutes: offlineDurationMin,
           wasOfflineAt: existingDevice.modified_at,
@@ -309,7 +309,7 @@ export class AgentModel {
     console.log('[DeviceModel.upsert] About to upsert device:', {
       uuid: uuid.substring(0, 8) + '...',
       insertFields,
-      device_type: data.agent_type,
+      type: data.type,
       is_online: data.is_online,
       status: data.status,
       deployment_status: data.deployment_status,

@@ -150,13 +150,13 @@ router.get('/fleets/:id', jwtAuth, async (req, res) => {
     // Get agents in fleet (prefer fleet_uuid)
     const agents = await query(
       `SELECT 
-        d.uuid, d.device_name, d.device_type, d.is_online,
+        d.uuid, d.name, d.type, d.is_online,
         d.cpu_usage, d.memory_usage, d.memory_total,
         d.deployment_status, d.k8s_pod_name,
         (SELECT COUNT(*) FROM endpoints ds WHERE ds.agent_uuid = d.uuid) as endpoint_count
       FROM agents d
       WHERE d.fleet_uuid = $1
-      ORDER BY d.device_name`,
+      ORDER BY d.name`,
       [resolvedFleetUuid]
     );
 

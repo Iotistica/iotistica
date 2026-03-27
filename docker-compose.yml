@@ -108,8 +108,8 @@ services:
             - DB_SSL_REJECT_UNAUTHORIZED=${DB_SSL_REJECT_UNAUTHORIZED:-false} 
             - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
             - MQTT_TLS_REJECT_UNAUTHORIZED=${MQTT_TLS_REJECT_UNAUTHORIZED:-false}
-            - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
-            - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
+            - MQTT_USERNAME=${MQTT_USERNAME:-admin}
+            - MQTT_PASSWORD=${MQTT_PASSWORD:-iotistic42!}
             - MQTT_PERSIST_TO_DB=${MQTT_PERSIST_TO_DB:-true}
             - MQTT_DB_SYNC_INTERVAL=${MQTT_DB_SYNC_INTERVAL:-10000}
             - MQTT_MONITOR_ENABLED=${MQTT_MONITOR_ENABLED:-true}
@@ -410,13 +410,13 @@ services:
         container_name: sim-mqtt
         restart: unless-stopped
         environment:
-            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto:1883}
+            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
             - MQTT_USERNAME=${MQTT_SIM_USERNAME:-admin}
             - MQTT_PASSWORD=${MQTT_SIM_PASSWORD:-iotistic42!}
-            - MQTT_CLIENT_ID=${MQTT_SIM_CLIENT_ID:-iotistic-mqtt-sim}
+            - MQTT_CLIENT_ID=${MQTT_SIM_CLIENT_ID:-admin}
             - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
             - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
-            - MQTT_TOPIC=${MQTT_SIM_TOPIC:-iot/73eddd385ce8/agent/370a2c6c-d707-43b4-aefe-3de5a0b23cd9/mqtt/5d793196-b82c-4daa-a79f-c18c13a108c0}
+            - MQTT_TOPIC=${MQTT_SIM_TOPIC:-iot/73eddd385ce8/agent/5cab5a35-9f10-4325-92d8-2fa3cde38927/mqtt/a8bbda21-84d4-4d66-ae84-4eabd704ac29}
             - MQTT_METRIC_NAMES=${MQTT_SIM_METRICS:-temperature}
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}

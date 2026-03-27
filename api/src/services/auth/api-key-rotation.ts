@@ -59,7 +59,7 @@ export async function rotateDeviceApiKey(
 
   // Get device info
   const deviceResult = await query(
-    `SELECT uuid, device_name, device_api_key_hash, api_key_rotation_days
+    `SELECT uuid, name AS device_name, device_api_key_hash, api_key_rotation_days
      FROM agents
      WHERE uuid = $1 AND is_active = true`,
     [deviceUuid]
@@ -139,7 +139,7 @@ export async function rotateExpiredKeys(
 
   // Get agents needing rotation (keys expiring soon)
   const result = await query(
-    `SELECT uuid, device_name, days_until_expiry
+    `SELECT uuid, name AS device_name, days_until_expiry
      FROM agents_needing_rotation
      ORDER BY api_key_expires_at ASC`
   );

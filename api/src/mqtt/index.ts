@@ -4,7 +4,7 @@
  * Sets up MQTT manager and registers message handlers
  */
 
-import MqttManager from './mqtt-manager';
+import MqttManager from './manager';
 import logger from '../utils/logger';
 import {
   handleDeviceData,

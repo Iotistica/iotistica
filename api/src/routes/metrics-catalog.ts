@@ -63,7 +63,7 @@ router.get('/agents', jwtAuth, async (req, res) => {
                                                             AS overall_quality_percentage,
         1                                                   AS agent_count,
         ARRAY[ad.agent_uuid::text]                          AS agent_uuids,
-        ARRAY[a.device_name]                                AS agent_names,
+        ARRAY[a.name]                                AS agent_names,
         COALESCE(
           (SELECT jsonb_agg(src)
            FROM (
@@ -71,7 +71,7 @@ router.get('/agents', jwtAuth, async (req, res) => {
                'deviceUuid',   ad2.uuid::text,
                'endpointUuid', ad2.endpoint_uuid::text,
                'agentUuid',    ad2.agent_uuid::text,
-               'agentName',    a2.device_name,
+               'agentName',    a2.name,
                'endpointName', ep2.name
              ) AS src
              FROM agent_devices ad2

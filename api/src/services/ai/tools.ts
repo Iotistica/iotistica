@@ -73,7 +73,7 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         const device = await AgentModel.getByUuid(args.deviceUuid);
         if (!device) return 'Device not found';
         return JSON.stringify({
-          name: device.agent_name,
+          name: device.name,
           uuid: device.uuid,
           status: device.status,
           isOnline: device.is_online,

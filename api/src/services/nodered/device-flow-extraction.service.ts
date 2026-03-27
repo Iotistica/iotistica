@@ -148,7 +148,7 @@ export class DeviceFlowExtractionService {
     try {
       // Check if device exists
       const deviceCheck = await query(
-        'SELECT uuid, device_name FROM agents WHERE uuid = $1',
+        'SELECT uuid, name AS device_name FROM agents WHERE uuid = $1',
         [deviceSubflow.deviceUuid]
       );
 

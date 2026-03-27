@@ -772,7 +772,7 @@ export class VirtualAgentDeployer {
         };
       }
 
-      if (device.agent_type !== 'virtual') {
+      if (device.type !== 'virtual') {
         return {
           status: 'failed',
           error: 'Not a virtual agent'
@@ -780,7 +780,7 @@ export class VirtualAgentDeployer {
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.agent_name);
+      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.name);
 
       // Get deployment
       const deployment = await this.appsApi.readNamespacedDeployment({ name: deploymentName, namespace });
@@ -844,12 +844,12 @@ export class VirtualAgentDeployer {
         throw new Error('Device not found');
       }
 
-      if (device.agent_type !== 'virtual') {
+      if (device.type !== 'virtual') {
         throw new Error('Not a virtual agent');
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const name = device.helm_release_name || this.sanitizeDnsName(device.agent_name);
+      const name = device.helm_release_name || this.sanitizeDnsName(device.name);
       const secretName = `${name}-prov-key`;
 
       // OPTIMIZATION: Check if Secret exists first (cheap check)
@@ -952,12 +952,12 @@ export class VirtualAgentDeployer {
         throw new Error('Device not found');
       }
 
-      if (device.agent_type !== 'virtual') {
+      if (device.type !== 'virtual') {
         throw new Error('Not a virtual agent');
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const name = device.helm_release_name || this.sanitizeDnsName(device.agent_name);
+      const name = device.helm_release_name || this.sanitizeDnsName(device.name);
       const secretName = `${name}-prov-key`;
 
       logger.info('Destroying virtual agent', {
@@ -1037,16 +1037,16 @@ export class VirtualAgentDeployer {
         throw new Error('Device not found');
       }
 
-      if (device.agent_type !== 'virtual') {
+      if (device.type !== 'virtual') {
         throw new Error('Not a virtual agent');
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.agent_name);
+      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.name);
 
       logger.info('Restarting virtual agent', {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
-        deviceName: device.agent_name,
+        deviceName: device.name,
         namespace,
         deploymentName
       });

@@ -160,7 +160,7 @@ export class HeartbeatMonitor {
             status = 'offline'
         WHERE is_online = true 
           AND last_connectivity_event < $1
-        RETURNING uuid, device_name, last_connectivity_event
+        RETURNING uuid, name AS device_name, last_connectivity_event
       `, [this.lastCheckTime]);
 
       if (result.rows.length > 0) {
@@ -203,7 +203,7 @@ export class HeartbeatMonitor {
           
           await logAuditEvent({
             eventType: AuditEventType.DEVICE_OFFLINE,
-            deviceUuid: device.uuid,
+            agentUuid: device.uuid,
             severity: AuditSeverity.WARNING,
             details: {
               deviceName: device.device_name,
@@ -246,7 +246,7 @@ export class HeartbeatMonitor {
             status = 'offline'
         WHERE is_online = true 
           AND last_connectivity_event < NOW() - INTERVAL '${this.offlineThreshold} minutes'
-        RETURNING uuid, device_name, last_connectivity_event
+        RETURNING uuid, name AS device_name, last_connectivity_event
       `);
 
       if (result.rows.length > 0) {
@@ -289,7 +289,7 @@ export class HeartbeatMonitor {
           // Log to audit trail
           await logAuditEvent({
             eventType: AuditEventType.DEVICE_OFFLINE,
-            deviceUuid: device.uuid,
+            agentUuid: device.uuid,
             severity: AuditSeverity.WARNING,
             details: {
               deviceName: device.device_name,

@@ -5,11 +5,51 @@
  * Log queue and sensor queue workers are critical - startup exits if they fail.
  */
 
+import Redis from 'ioredis';
 import logger from '../utils/logger';
 import { redisClient } from '../redis/client';
 import { startMetricsBatchWorker } from '../workers/metrics-batch-worker';
 import { redisLogQueue } from '../services/logs-queue/redis-log-queue';
 import { redisSensorQueue } from '../services/device-queue';
+
+/**
+ * Flush the Mosquitto go-auth Redis cache (DB 1) on startup.
+ *
+ * go-auth caches both ALLOW and DENY results with a 300 s TTL. When the API
+ * container restarts, any MQTT connection attempt during the brief downtime
+ * causes go-auth to cache a DENY (backend unreachable → denied). That cached
+ * denial persists for 5 minutes, preventing re-connection even after the API
+ * is healthy again. Flushing DB 1 at startup ensures a clean slate so the
+ * first post-restart MQTT connection always hits a live auth check.
+ */
+async function flushMqttAuthCache(): Promise<void> {
+  const host = process.env.REDIS_HOST || 'localhost';
+  const port = parseInt(process.env.REDIS_PORT || '6379', 10);
+  const password = process.env.REDIS_PASSWORD || undefined;
+
+  const authCacheDb = new Redis({
+    host,
+    port,
+    password,
+    db: 1, // go-auth cache database
+    lazyConnect: true,
+    connectTimeout: 5000,
+    maxRetriesPerRequest: 1,
+  });
+
+  try {
+    await authCacheDb.connect();
+    const count = await authCacheDb.dbsize();
+    await authCacheDb.flushdb();
+    logger.info(`Flushed Mosquitto auth cache (Redis DB 1) — cleared ${count} entries`);
+  } catch (error) {
+    logger.warn('Failed to flush Mosquitto auth cache — MQTT may take up to 5 min to reconnect after restart', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    await authCacheDb.quit().catch(() => { /* ignore */ });
+  }
+}
 
 export async function bootstrapRedis(): Promise<void> {
   // Redis client - non-fatal, degrades to PostgreSQL-only mode
@@ -22,6 +62,10 @@ export async function bootstrapRedis(): Promise<void> {
       note: 'This is non-critical - metrics will use PostgreSQL only',
     });
   }
+
+  // Flush go-auth MQTT auth cache so stale DENY entries from the previous
+  // container lifecycle do not block MQTT reconnection.
+  await flushMqttAuthCache();
 
   // Metrics batch worker - non-fatal
   try {

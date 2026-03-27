@@ -28,7 +28,7 @@ router.get('/agents/:uuid/tags', async (req, res) => {
 
     // Verify device exists
     const deviceResult = await query(
-      'SELECT uuid, device_name FROM agents WHERE uuid = $1',
+      'SELECT uuid, name FROM agents WHERE uuid = $1',
       [uuid]
     );
 
@@ -286,19 +286,19 @@ router.post('/agents/query', async (req, res) => {
 
     // Fetch device details and their tags
     const agentsResult = await query(
-      `SELECT d.uuid, d.device_name, d.device_type, d.is_online,
+      `SELECT d.uuid, d.name, d.type, d.is_online,
               jsonb_object_agg(dt.key, dt.value) FILTER (WHERE dt.key IS NOT NULL) as tags
        FROM agents d
        LEFT JOIN agent_tags dt ON d.uuid = dt.agent_uuid
        WHERE d.uuid = ANY($1::uuid[])
-       GROUP BY d.uuid, d.device_name, d.device_type, d.is_online`,
+       GROUP BY d.uuid, d.name, d.type, d.is_online`,
       [deviceUuids]
     );
 
     const agents = agentsResult.rows.map(row => ({
       uuid: row.uuid,
-      deviceName: row.device_name,
-      deviceType: row.device_type,
+      deviceName: row.name,
+      deviceType: row.type,
       isOnline: row.is_online,
       tags: row.tags || {}
     }));

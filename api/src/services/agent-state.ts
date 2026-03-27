@@ -109,14 +109,14 @@ export async function processAgentStateReport(
     // Agent reports with provisioning_state = 'provisioned' after successful provisioning
     // Trigger cleanup when we receive first state report from provisioned agent
     // Cleanup is idempotent - will gracefully handle if Secret already deleted
-    const shouldCleanup = device.agent_type === 'virtual' && 
+    const shouldCleanup = device.type === 'virtual' && 
                           deviceState.provisioning_state === 'provisioned' &&
                           device.provisioning_state !== 'provisioned';
     
     if (shouldCleanup) {
       logger.info('Virtual agent just completed provisioning - triggering cleanup', {
         deviceUuid: uuid.substring(0, 8) + '...',
-        deviceName: device.agent_name,
+        deviceName: device.name,
         oldState: device.provisioning_state,
         newState: deviceState.provisioning_state
       });

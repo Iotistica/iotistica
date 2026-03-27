@@ -203,8 +203,8 @@ export class ProvisioningService {
 
       // 4. Create device record (pending deployment)
       const agentData: Partial<Agent> = {
-        agent_name: agentName,
-        agent_type: 'virtual',
+        name: agentName,
+        type: 'virtual',
         device_api_key_hash: hashedApiKey,
         fleet_uuid: virtualFleetUuid, // Assign to fleet (provided or existing "Virtual Agents")
         provisioned_by_key_id: provisioningKeyId,
@@ -252,7 +252,7 @@ export class ProvisioningService {
       try {
         await virtualAgentDeployer.deploy({
           deviceUuid: agent.uuid,
-          deviceName: agent.agent_name,
+          deviceName: agent.name,
           provisioningKey: generatedProvisioningKey, // Plaintext, injected to K8s Secret
           fleetUuid: agent.fleet_uuid,
           namespace: agent.k8s_namespace || undefined,
@@ -328,7 +328,7 @@ export class ProvisioningService {
       // 6. Audit logging
       await logAuditEvent({
         eventType: AuditEventType.DEVICE_REGISTERED,
-        deviceUuid: uuid,
+        agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.INFO,
@@ -359,8 +359,8 @@ export class ProvisioningService {
       return {
         id: agent.id,
         uuid: agent.uuid,
-        deviceName: agent.agent_name,
-        deviceType: agent.agent_type,
+        deviceName: agent.name,
+        deviceType: agent.type,
         fleetUuid: agent.fleet_uuid,
         createdAt: agent.created_at.toISOString(),
         mqtt: {
@@ -384,13 +384,13 @@ export class ProvisioningService {
     
     // Identify virtual agents by EITHER device_type='virtual' OR deployment_status is set
     const isVirtualAgent = existingDevice && 
-                           (existingDevice.agent_type === 'virtual' || !!existingDevice.deployment_status);
+                           (existingDevice.type === 'virtual' || !!existingDevice.deployment_status);
     
     if (isVirtualAgent) {
       logger.info('Virtual agent registration detected - using existing device record', {
         deviceUuid: uuid.substring(0, 8) + '...',
-        existingName: existingDevice.agent_name,
-        existingType: existingDevice.agent_type,
+        existingName: existingDevice.name,
+        existingType: existingDevice.type,
         agentProvidedName: agentName,
         deploymentStatus: existingDevice.deployment_status,
         provisioningState: existingDevice.provisioning_state
@@ -422,7 +422,7 @@ export class ProvisioningService {
       const [hashedApiKey, mqttCredentials, vpnCredentials] = await Promise.all([
         bcrypt.hash(agentApiKey, 10),
         this.generateMqttCredentials(uuid),
-        this.generateVpnCredentials(uuid, existingDevice.agent_name, ipAddress)
+        this.generateVpnCredentials(uuid, existingDevice.name, ipAddress)
       ]);
       
       // Update ONLY registration fields - preserve dashboard-created name, type, fleet, etc.
@@ -449,8 +449,8 @@ export class ProvisioningService {
       logger.info('Virtual agent registered successfully', {
         agentId: agent.id,
         agentUuid: uuid.substring(0, 8) + '...',
-        agentName: agent.agent_name,
-        agentType: agent.agent_type
+        agentName: agent.name,
+        agentType: agent.type
       });
       
       await this.createDefaultTargetState(uuid, agentVersion, keyRecord.id);
@@ -567,9 +567,9 @@ export class ProvisioningService {
     ]);
 
     // Prepare device data for physical agents
-    const deviceData: Partial<Agent> = {
-      agent_name: agentName,
-      agent_type: agentType,
+    const agentData: Partial<Agent> = {
+      name: agentName,
+      type: agentType,
       device_api_key_hash: hashedApiKey,
       fleet_uuid: fleetUuid || undefined,
       provisioned_by_key_id: keyRecord.id,
@@ -591,16 +591,16 @@ export class ProvisioningService {
       agentName: agentName,
       publicKeyLength: agentPublicKey.length
     });
-    deviceData.device_public_key = agentPublicKey;
-    deviceData.pop_verified = false;
+    agentData.device_public_key = agentPublicKey;
+    agentData.pop_verified = false;
 
-    const device = await AgentModel.upsert(uuid, deviceData);
+    const agent = await AgentModel.upsert(uuid, agentData);
     
     logger.info('Device upserted to database', {
-      agentId: device.id,
+      agentId: agent.id,
       agentUuid: uuid.substring(0, 8) + '...',
       hasPublicKey: !!agentPublicKey,
-      popVerified: device.pop_verified
+      popVerified: agent.pop_verified
     });
 
     await this.createDefaultTargetState(uuid, agentVersion, keyRecord.id);
@@ -615,8 +615,8 @@ export class ProvisioningService {
       'agent',
       uuid,
       {
-        device_name: agentName,
-        device_type: agentType,
+        name: agentName,
+        type: agentType,
         fleet_uuid: fleetUuid,
         provisioned_at: now.toISOString(),
         ip_address: ipAddress,
@@ -629,7 +629,7 @@ export class ProvisioningService {
      // Audit logging
      logAuditEvent({
       eventType: AuditEventType.DEVICE_REGISTERED,
-      deviceUuid: uuid,
+      agentUuid: uuid,
       ipAddress,
       userAgent,
       severity: AuditSeverity.INFO,
@@ -657,7 +657,7 @@ export class ProvisioningService {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
     
     logger.info('Generating PoP challenge for device', {
-      deviceUuid: uuid.substring(0, 8) + '...',
+      agentUuid: uuid.substring(0, 8) + '...',
       challengeLength: challenge.length,
       expiresAt: expiresAt.toISOString(),
       expiresInSeconds: 300
@@ -666,13 +666,13 @@ export class ProvisioningService {
     await AgentModel.storeChallenge(uuid, challenge, expiresAt);
     
     logger.info('PoP challenge stored in database', {
-      deviceUuid: uuid.substring(0, 8) + '...',
+      agentUuid: uuid.substring(0, 8) + '...',
       expiresAt: expiresAt.toISOString()
     });
 
     // Build and return provisioning response
     return this.buildProvisioningResponse(
-      device,
+      agent,
       data,
       keyRecord,
       mqttCredentials,
@@ -684,8 +684,8 @@ export class ProvisioningService {
   /**
    * Generate MQTT credentials for device
    */
-  private async generateMqttCredentials(deviceUuid: string): Promise<{ username: string; password: string }> {
-    const username = `device_${deviceUuid}`;
+  private async generateMqttCredentials(agentUuid: string): Promise<{ username: string; password: string }> {
+    const username = `agent_${agentUuid}`;
     const password = crypto.randomBytes(16).toString('base64');
     const passwordHash = await bcrypt.hash(password, 10);
 
@@ -705,7 +705,7 @@ export class ProvisioningService {
            VALUES ($1, $2, $3, 7, 0)
            ON CONFLICT DO NOTHING`,
         // Tenant-aware ACL pattern: iot/{tenantId}/agent/${deviceUuid}/#
-        [username, username, `iot/${getTenantId()}/agent/${deviceUuid}/#`]
+        [username, username, `iot/${getTenantId()}/agent/${agentUuid}/#`]
       )
     ]);
 
@@ -718,32 +718,32 @@ export class ProvisioningService {
    * Generate Tailscale VPN credentials for device
    */
   private async generateVpnCredentials(
-    deviceUuid: string,
-    deviceName: string,
+    agentUuid: string,
+    agentName: string,
     ipAddress?: string
   ): Promise<{ type: 'tailscale'; tailscale: any } | undefined> {
-  logger.info(`Generating Tailscale VPN credentials for device: ${deviceUuid.substring(0,8)}...`, {
-    deviceUuid,
-    deviceName,
+  logger.info(`Generating Tailscale VPN credentials for device: ${agentUuid.substring(0,8)}...`, {
+    deviceUuid: agentUuid,
+    deviceName: agentName,
     tailscaleEnabled: tailscaleService.isEnabled()
   });
   
   // Use Tailscale VPN (only option)
   if (!tailscaleService.isEnabled()) {
-    logger.warn(`Tailscale VPN is not enabled - device ${deviceUuid.substring(0,8)}... will provision without VPN`);
+    logger.warn(`Tailscale VPN is not enabled - device ${agentUuid.substring(0,8)}... will provision without VPN`);
     return undefined;
   }
 
   try {
     // Use default IoT security options from tailscaleService (ephemeral, 30min expiry, shields up)
     const tailscaleCredentials = await tailscaleService.createAuthKey(
-      deviceUuid,
-      deviceName
+      agentUuid,
+      agentName
       // No options = use secure defaults from tailscaleService
     );
-    logger.info(`Tailscale VPN credentials created for device: ${deviceUuid.substring(0,8)}...`, {
-      deviceUuid,
-      deviceName,
+    logger.info(`Tailscale VPN credentials created for device: ${agentUuid.substring(0,8)}...`, {
+      agentUuid: agentUuid,
+      agentName: agentName,
       authKey: tailscaleCredentials.authKey ? `${tailscaleCredentials.authKey.substring(0, 20)}...` : 'none',
       tailnetName: tailscaleCredentials.tailnetName,
       shieldsUp: tailscaleCredentials.shieldsUp,
@@ -755,12 +755,12 @@ export class ProvisioningService {
       tailscale: tailscaleCredentials
     };
   } catch (error: any) {
-    logger.error(`Tailscale credential creation failed for device ${deviceUuid}: ${error.message}`);
+    logger.error(`Tailscale credential creation failed for device ${agentUuid}: ${error.message}`);
     
     // Fire-and-forget audit log
     logAuditEvent({
       eventType: AuditEventType.PROVISIONING_FAILED,
-      deviceUuid,
+      agentUuid: agentUuid,
       ipAddress,
       severity: AuditSeverity.WARNING,
       details: { reason: 'Tailscale credential creation failed', error: error.message }
@@ -849,7 +849,7 @@ export class ProvisioningService {
     const { uuid, agentName: deviceName, agentType: deviceType } = data;
 
     // Detect virtual agents FIRST (before checking broker config)
-    const isVirtual = agent.device_type === 'virtual';
+    const isVirtual = agent.type === 'virtual';
     
     // Fetch broker configuration based on agent type
     let brokerConfig;
@@ -857,7 +857,7 @@ export class ProvisioningService {
       // Virtual agents: Use env variable (K8s internal DNS for low-latency)
       brokerConfig = await getBrokerConfigForExternalDevice(agent.uuid);
       logger.info('Virtual agent: Using env variable or database config', {
-        deviceType: agent.device_type,
+        deviceType: agent.type,
         hasConfig: !!brokerConfig,
         source: brokerConfig?.id === 0 ? 'environment' : 'database'
       });
@@ -865,7 +865,7 @@ export class ProvisioningService {
       // Standalone agents: Skip env variables, use database config for public URL
       brokerConfig = await getStandaloneBrokerConfig();
       logger.info('Standalone agent: Using database config (skipping env variables)', {
-        deviceType: agent.device_type,
+        deviceType: agent.type,
         hasConfig: !!brokerConfig,
         brokerUrl: brokerConfig ? buildBrokerUrl(brokerConfig) : 'none'
       });
@@ -874,12 +874,12 @@ export class ProvisioningService {
     if (brokerConfig) {
       logger.info(`Using MQTT broker for device: ${brokerConfig.name} (${buildBrokerUrl(brokerConfig)})`, {
         source: brokerConfig.id === 0 ? 'environment' : 'database',
-        deviceType: agent.device_type,
+        deviceType: agent.type,
         isVirtual
       });
     } else {
       logger.warn('No MQTT broker configured - device will not receive broker credentials', {
-        deviceType: agent.device_type,
+        deviceType: agent.type,
         isVirtual
       });
     }
@@ -906,7 +906,7 @@ export class ProvisioningService {
       if (finalBrokerConfig.host === 'localhost' || finalBrokerConfig.host === '127.0.0.1') {
         finalBrokerConfig.host = 'host.docker.internal';
         logger.info('Virtual agent: Overriding localhost broker host to host.docker.internal', {
-          deviceType: agent.device_type,
+          deviceType: agent.type,
           deploymentStatus: agent.deployment_status,
           originalHost: brokerConfig.host,
           newHost: finalBrokerConfig.host
@@ -926,7 +926,7 @@ export class ProvisioningService {
         : 'Standalone agent provisioning failed: No MQTT broker in database (check mqtt_broker_config table)';
       
       logger.error(errorMsg, {
-        deviceType: agent.device_type,
+        deviceType: agent.type,
         isVirtual,
         uuid: agent.uuid
       });

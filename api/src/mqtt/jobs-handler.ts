@@ -5,7 +5,7 @@
  * Handles the server-side of the AWS IoT Jobs MQTT protocol.
  */
 
-import type { MqttManager } from './mqtt-manager';
+import type { MqttManager } from './manager';
 import { pool } from '../db/connection';
 import { EventPublisher } from '../services/event-sourcing';
 import logger from '../utils/logger';
