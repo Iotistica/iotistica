@@ -64,6 +64,33 @@ export const aiTools = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_dashboard_cards',
+      description: 'Suggest dashboard cards for IoT devices',
+      parameters: {
+        type: 'object',
+        properties: {
+          cards: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                deviceId: { type: 'string' },
+                metric: { type: 'string' },
+                chart: { type: 'string' },
+                bin: { type: 'string' },
+                title: { type: 'string' },
+              },
+              required: ['deviceId', 'metric', 'chart', 'bin'],
+            },
+          },
+        },
+        required: ['cards'],
+      },
+    },
+  },
 ] as const;
 
 export async function executeTool(toolName: string, args: any): Promise<string> {
@@ -119,6 +146,11 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           .join('\n');
 
         return `Recent logs (showing ${Math.min(20, logs.length)} of ${logs.length}):\n${formattedLogs}`;
+      }
+
+      case 'generate_dashboard_cards': {
+        const cards = Array.isArray(args?.cards) ? args.cards : [];
+        return JSON.stringify({ cards });
       }
 
       default:

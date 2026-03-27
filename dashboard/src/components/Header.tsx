@@ -28,6 +28,7 @@ interface HeaderProps {
   onTagDefinitionsClick?: () => void; // Callback for opening tag definitions page
   onDigitalTwinClick?: () => void; // Callback for opening digital twin page
   userRole?: string; // User role for conditional UI
+  currentView?: string;
 }
 
 export function Header({
@@ -42,7 +43,8 @@ export function Header({
   onUsersClick = () => {},
   onProfileClick = () => {},
   onTagDefinitionsClick = () => {},
-  userRole = 'viewer'
+  userRole = 'viewer',
+  currentView,
 }: HeaderProps) {
   // AI Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -67,6 +69,8 @@ export function Header({
   }, [deviceUuid]);
 
   const displayVersion = window.env?.APP_VERSION || __APP_VERSION__;
+  const assistantMode = currentView === 'dashboard' ? 'dashboard' : 'device';
+  const canUseAiAssistant = assistantMode === 'dashboard' || !!deviceUuid;
   
   return (
     <header className="bg-card border-b border-border sticky top-0 z-50">
@@ -87,7 +91,7 @@ export function Header({
           {isAuthenticated ? (
             <>
               {/* AI Chat Button */}
-              {deviceUuid && (
+              {canUseAiAssistant && (
                 <Button
                   onClick={() => setIsChatOpen(true)}
                   size="lg"
@@ -174,8 +178,9 @@ export function Header({
       </div>
       
       {/* AI Chat Widget */}
-      {deviceUuid && (
+      {canUseAiAssistant && (
         <AIChatWidget 
+          mode={assistantMode}
           deviceUuid={deviceUuid}
           deviceName={deviceName}
           isOpen={isChatOpen} 

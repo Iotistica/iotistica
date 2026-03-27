@@ -8,6 +8,11 @@ import rateLimit from 'express-rate-limit';
 import { processAIChat } from '../services/ai/chat.service';
 import { logger } from '../utils/logger';
 import { jwtAuth } from '../middleware/jwt-auth';
+import {
+  buildDashboardAssistantSummary,
+  generateDashboardSuggestions,
+  getStrategy,
+} from '../services/ai/dashboard-suggestions.service';
 
 const router = Router();
 
@@ -40,9 +45,17 @@ const aiChatRateLimit = rateLimit({
  */
 router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
   try {
-    const { deviceUuid, message, conversationHistory } = req.body;
+    const { deviceUuid, message, conversationHistory, mode, strategy } = req.body;
+    const normalizedMessage = typeof message === 'string' ? message.toLowerCase() : '';
+    const hasDashboardIntent = /\bdashboard\b|\bcharts?\b|\bwidgets?\b|\blayout\b/.test(normalizedMessage);
+    const hasRequestedStrategy = typeof strategy === 'string' && strategy.trim().length > 0;
+    const assistantMode =
+      mode === 'dashboard' || (!mode && (hasDashboardIntent || hasRequestedStrategy))
+        ? 'dashboard'
+        : 'device';
 
     console.log('[AI Chat] Request received:', {
+      mode: assistantMode,
       deviceUuid,
       messageLength: message?.length,
       historyLength: conversationHistory?.length,
@@ -50,10 +63,34 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
       hasOpenAiKey: !!process.env.OPENAI_API_KEY,
     });
 
-    if (!deviceUuid || !message) {
-      console.error('[AI Chat] Missing required fields:', { deviceUuid: !!deviceUuid, message: !!message });
+    if (!message || (assistantMode === 'device' && !deviceUuid)) {
+      console.error('[AI Chat] Missing required fields:', {
+        mode: assistantMode,
+        deviceUuid: !!deviceUuid,
+        message: !!message,
+      });
       return res.status(400).json({
-        error: 'Missing required fields: deviceUuid, message',
+        error: assistantMode === 'device'
+          ? 'Missing required fields: deviceUuid, message'
+          : 'Missing required fields: message',
+      });
+    }
+
+    if (assistantMode === 'dashboard') {
+      const result = await generateDashboardSuggestions({
+        strategy: getStrategy(strategy ?? 'hybrid'),
+        requestId: req.id || 'unknown',
+        userId: (req as any).user?.id,
+        userPrompt: message,
+      });
+
+      const response = buildDashboardAssistantSummary(result.cards);
+      return res.json({
+        response,
+        dashboardSuggestions: result.cards,
+        source: result.source,
+        strategyRequested: result.strategyRequested,
+        fallbackReason: result.fallbackReason,
       });
     }
 

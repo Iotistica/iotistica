@@ -1204,6 +1204,7 @@ export default function App() {
           onLogout={handleLogout}
           userEmail={user?.email || ''}
           userName={user?.name || user?.email || ''}
+          currentView={currentView}
           deviceUuid={selectedDevice?.deviceUuid}
           deviceName={selectedDevice?.name}
           onHomeClick={() => handleGlobalViewChange('home')}

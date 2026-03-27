@@ -185,6 +185,7 @@ interface AiSuggestedCard {
   bin: AiSuggestedBin;
   score: number;
   metricClass: string;
+  title?: string;
 }
 
 interface AiSuggestedCardsResponse {
@@ -265,7 +266,7 @@ function buildAiWidgetsFromCards(cards: AiSuggestedCard[]): DashboardWidget[] {
     const widgetType: DashboardWidget['type'] =
       card.chart === 'line' || card.chart === 'bar' ? 'METRIC_DATA' : 'METRIC_VALUE';
     const widgetId = `ai-${card.id}`;
-    const title = `${card.deviceName} - ${card.metric}`;
+    const title = card.title || `${card.deviceName} - ${card.metric}`;
 
     let x = 0;
     let y = 0;
@@ -405,7 +406,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const fetchAiWidgets = async () => {
     try {
       setIsLoadingAiWidgets(true);
-      const response = await fetch(buildApiUrl('/api/v1/dashboard/ai-cards'), {
+      const response = await fetch(buildApiUrl('/api/v1/dashboard/ai-cards?strategy=hybrid'), {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
         },
@@ -431,6 +432,25 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
     fetchAiWidgets();
   }, [showAI, aiWidgets.length, isLoadingAiWidgets]);
+
+  useEffect(() => {
+    const handleAiSuggestionsGenerated = (event: Event) => {
+      const customEvent = event as CustomEvent<{ cards?: AiSuggestedCard[] }>;
+      const cards = customEvent.detail?.cards;
+      if (!Array.isArray(cards) || cards.length === 0) {
+        return;
+      }
+
+      setAiWidgets(buildAiWidgetsFromCards(cards));
+      setShowAI(true);
+      setIsLoadingAiWidgets(false);
+    };
+
+    window.addEventListener('dashboard-ai-suggestions-generated', handleAiSuggestionsGenerated as EventListener);
+    return () => {
+      window.removeEventListener('dashboard-ai-suggestions-generated', handleAiSuggestionsGenerated as EventListener);
+    };
+  }, []);
 
   const syncMetricAnomalyFromWidgetConfig = (config: MetricDataCardConfig) => {
     const deviceUuid = config.deviceUuid;

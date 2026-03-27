@@ -19,21 +19,38 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  dashboardSuggestions?: DashboardSuggestion[];
+}
+
+interface DashboardSuggestion {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  metric: string;
+  unit?: string;
+  chart: 'line' | 'bar' | 'gauge' | 'stat';
+  bin: 'top' | 'main' | 'side' | 'bottom';
+  score: number;
+  metricClass: string;
+  title: string;
 }
 
 interface AIChatWidgetProps {
-  deviceUuid: string;
+  mode: 'device' | 'dashboard';
+  deviceUuid?: string;
   deviceName?: string;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function AIChatWidget({ deviceUuid, deviceName, isOpen, onClose }: AIChatWidgetProps) {
+export function AIChatWidget({ mode, deviceUuid, deviceName, isOpen, onClose }: AIChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: "Hi! I'm your IoT assistant. I can help you monitor agents, check logs, restart containers, and more. What would you like to know?",
+      content: mode === 'dashboard'
+        ? "Hi! I'm your dashboard assistant. I can suggest dashboard layouts and metrics based on your devices. What kind of dashboard do you want?"
+        : "Hi! I'm your IoT assistant. I can help you monitor agents, check logs, restart containers, and more. What would you like to know?",
       timestamp: new Date(),
     },
   ]);
@@ -42,30 +59,51 @@ export function AIChatWidget({ deviceUuid, deviceName, isOpen, onClose }: AIChat
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // Format agent identifier for display
-  const agentIdentifier = deviceName ? `agent ${deviceName} [${deviceUuid}]` : `agent [${deviceUuid}]`;
+  const agentIdentifier = deviceUuid
+    ? (deviceName ? `agent ${deviceName} [${deviceUuid}]` : `agent [${deviceUuid}]`)
+    : 'your fleet';
   
-  const promptPresets = [
-    {
-      label: 'Health snapshot',
-      prompt: `Give me a health summary for ${agentIdentifier} covering uptime, CPU, memory, and any critical alerts over the past 24 hours.`,
-    },
-    {
-      label: 'Performance spikes',
-      prompt: `Analyze ${agentIdentifier} for any CPU or memory spikes during the last 4 hours and explain likely causes with supporting metrics.`,
-    },
-    {
-      label: 'Error log digest',
-      prompt: `Review the most recent logs for ${agentIdentifier} and list the top recurring errors with timestamps and impacted services.`,
-    },
-    {
-      label: 'Container review',
-      prompt: `List all running containers on ${agentIdentifier}, highlight ones consuming the most resources, and recommend restarts if needed.`,
-    },
-    {
-      label: 'Connectivity issues',
-      prompt: `Investigate recent connectivity drops for ${agentIdentifier} and suggest remediation steps based on status history and metrics.`,
-    },
-  ];
+  const promptPresets = mode === 'dashboard'
+    ? [
+        {
+          label: 'Ops dashboard',
+          prompt: 'Build me an operations dashboard with the most important charts for health, performance, and battery metrics.',
+        },
+        {
+          label: 'Energy dashboard',
+          prompt: 'Create a dashboard focused on power, voltage, current, and battery related metrics.',
+        },
+        {
+          label: 'Temperature trends',
+          prompt: 'Suggest a dashboard centered on temperature and humidity trends across devices.',
+        },
+        {
+          label: 'Executive summary',
+          prompt: 'Give me a compact executive dashboard with top stats, one or two main charts, and side gauges.',
+        },
+      ]
+    : [
+        {
+          label: 'Health snapshot',
+          prompt: `Give me a health summary for ${agentIdentifier} covering uptime, CPU, memory, and any critical alerts over the past 24 hours.`,
+        },
+        {
+          label: 'Performance spikes',
+          prompt: `Analyze ${agentIdentifier} for any CPU or memory spikes during the last 4 hours and explain likely causes with supporting metrics.`,
+        },
+        {
+          label: 'Error log digest',
+          prompt: `Review the most recent logs for ${agentIdentifier} and list the top recurring errors with timestamps and impacted services.`,
+        },
+        {
+          label: 'Container review',
+          prompt: `List all running containers on ${agentIdentifier}, highlight ones consuming the most resources, and recommend restarts if needed.`,
+        },
+        {
+          label: 'Connectivity issues',
+          prompt: `Investigate recent connectivity drops for ${agentIdentifier} and suggest remediation steps based on status history and metrics.`,
+        },
+      ];
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -87,14 +125,18 @@ export function AIChatWidget({ deviceUuid, deviceName, isOpen, onClose }: AIChat
     setIsLoading(true);
 
     try {
-      // Call your AI endpoint
       const response = await fetch(buildApiUrl('/api/v1/ai/chat'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+        },
         body: JSON.stringify({
+          mode,
           deviceUuid,
           message: input,
           conversationHistory: messages.slice(-5), // Last 5 messages for context
+          strategy: mode === 'dashboard' ? 'hybrid' : undefined,
         }),
       });
 
@@ -105,6 +147,7 @@ export function AIChatWidget({ deviceUuid, deviceName, isOpen, onClose }: AIChat
         role: 'assistant',
         content: data.response,
         timestamp: new Date(),
+        dashboardSuggestions: Array.isArray(data.dashboardSuggestions) ? data.dashboardSuggestions : undefined,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -120,6 +163,14 @@ export function AIChatWidget({ deviceUuid, deviceName, isOpen, onClose }: AIChat
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const previewDashboardSuggestions = (suggestions: DashboardSuggestion[]) => {
+    window.dispatchEvent(new CustomEvent('dashboard-ai-suggestions-generated', {
+      detail: {
+        cards: suggestions,
+      },
+    }));
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -140,7 +191,7 @@ export function AIChatWidget({ deviceUuid, deviceName, isOpen, onClose }: AIChat
         <div className="flex items-center justify-between p-4 border-b bg-primary text-primary-foreground">
           <div className="flex items-center gap-2">
             <Bot className="h-5 w-5" />
-            <h3 className="font-semibold">IoT Assistant</h3>
+            <h3 className="font-semibold">{mode === 'dashboard' ? 'Dashboard Assistant' : 'IoT Assistant'}</h3>
           </div>
           <Button
             variant="ghost"
@@ -192,6 +243,16 @@ export function AIChatWidget({ deviceUuid, deviceName, isOpen, onClose }: AIChat
                     minute: '2-digit',
                   })}
                 </span>
+                {mode === 'dashboard' && message.dashboardSuggestions && message.dashboardSuggestions.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-3"
+                    onClick={() => previewDashboardSuggestions(message.dashboardSuggestions!)}
+                  >
+                    Preview Suggested Dashboard
+                  </Button>
+                )}
               </div>
 
               {message.role === 'user' && (
@@ -222,7 +283,7 @@ export function AIChatWidget({ deviceUuid, deviceName, isOpen, onClose }: AIChat
         <div className="p-4 border-t">
           <div className="flex gap-2">
             <Input
-              placeholder="Ask about your devices..."
+              placeholder={mode === 'dashboard' ? 'Ask for a dashboard layout...' : 'Ask about your devices...'}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
