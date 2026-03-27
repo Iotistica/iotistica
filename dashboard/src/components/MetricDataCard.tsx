@@ -1,4 +1,4 @@
-import { useState, useEffect, memo } from 'react';
+import { useState, useEffect, useRef, useMemo, memo } from 'react';
 import { Badge } from './ui/badge';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import {
@@ -18,6 +18,11 @@ import {
 import { buildApiUrl } from '@/config/api';
 import { metricsRequestQueue } from '@/utils/metricsRequestQueue';
 import { detectGaps, createGapDotRenderer } from '@/utils/chartGapDetection';
+import { useGlobalNow } from '../hooks/useGlobalNow';
+
+const VISUAL_DRIFT_MS = 5000;
+const MAX_VISIBLE_GAP_LINES = 50;
+const Y_DOMAIN_SHRINK_LERP = 0.08;
 
 export interface ThresholdLine {
   value: number;
@@ -81,15 +86,104 @@ interface TimeSeriesResponse {
   data: TimeSeriesDataPoint[];
 }
 
+function getTimeRangeMs(timeRange: MetricDataCardConfig['timeRange']): number {
+  switch (timeRange) {
+    case '1m':
+      return 60 * 1000;
+    case '1h':
+      return 60 * 60 * 1000;
+    case '6h':
+      return 6 * 60 * 60 * 1000;
+    case '12h':
+      return 12 * 60 * 60 * 1000;
+    case '24h':
+      return 24 * 60 * 60 * 1000;
+    case '7d':
+      return 7 * 24 * 60 * 60 * 1000;
+    case '30d':
+      return 30 * 24 * 60 * 60 * 1000;
+    default:
+      return 60 * 60 * 1000;
+  }
+}
+
+function pointsEqual(a: TimeSeriesDataPoint, b: TimeSeriesDataPoint): boolean {
+  return (
+    a.time === b.time &&
+    a.avg_value === b.avg_value &&
+    a.min_value === b.min_value &&
+    a.max_value === b.max_value &&
+    a.sample_count === b.sample_count &&
+    a.quality_ratio === b.quality_ratio
+  );
+}
+
+function mergeTimeSeriesResponse(
+  previous: TimeSeriesResponse | null,
+  next: TimeSeriesResponse,
+  timeRange: MetricDataCardConfig['timeRange']
+): { merged: TimeSeriesResponse; changed: boolean } {
+  if (!previous || previous.metric.metricName !== next.metric.metricName || previous.metric.deviceName !== next.metric.deviceName) {
+    return { merged: next, changed: true };
+  }
+
+  const mergedByTime = new Map(previous.data.map((point) => [point.time, point] as const));
+
+  for (const point of next.data) {
+    const prevPoint = mergedByTime.get(point.time);
+    if (prevPoint && pointsEqual(prevPoint, point)) {
+      mergedByTime.set(point.time, prevPoint);
+      continue;
+    }
+
+    mergedByTime.set(point.time, point);
+  }
+
+  const referenceEnd = next.data.length > 0
+    ? new Date(next.data[next.data.length - 1].time).getTime()
+    : Date.now();
+  const cutoff = referenceEnd - getTimeRangeMs(timeRange);
+
+  const mergedPoints = Array.from(mergedByTime.values())
+    .filter((point) => new Date(point.time).getTime() >= cutoff)
+    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+  const hasDataChange =
+    mergedPoints.length !== previous.data.length ||
+    mergedPoints.some((point, idx) => point !== previous.data[idx]);
+
+  const hasMetadataChange =
+    previous.metadata.sampleCount !== next.metadata.sampleCount ||
+    previous.metadata.startTime !== next.metadata.startTime ||
+    previous.metadata.endTime !== next.metadata.endTime ||
+    previous.metadata.aggregationLevel !== next.metadata.aggregationLevel ||
+    previous.metadata.timeRange !== next.metadata.timeRange ||
+    previous.metadata.qualityPercentage !== next.metadata.qualityPercentage;
+
+  const changed = hasDataChange || hasMetadataChange;
+
+  return {
+    merged: changed ? { ...next, data: mergedPoints } : previous,
+    changed,
+  };
+}
+
 function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger, onDataLoaded }: MetricDataCardProps) {
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const now = useGlobalNow();
+  const latestDataRef = useRef<TimeSeriesResponse | null>(null);
+  const yDomainRef = useRef<[number, number] | null>(null);
 
-  // Debug: Log config changes
-  console.log('MetricDataCard config:', config);
-  console.log('Thresholds:', config.thresholds);
+  useEffect(() => {
+    latestDataRef.current = data;
+  }, [data]);
+
+  useEffect(() => {
+    yDomainRef.current = null;
+  }, [config.deviceUuid, config.metricName, config.timeRange]);
 
   const fetchData = async () => {
     try {
@@ -108,10 +202,12 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
         requestKey,
         async () => {
           const params = new URLSearchParams({
-            deviceUuid: config.deviceUuid,
             metricName: config.metricName,
             timeRange: config.timeRange,
           });
+          if (config.deviceUuid) {
+            params.set('deviceUuid', config.deviceUuid);
+          }
           if (config.agentUuid) {
             params.set('agentUuid', config.agentUuid);
           }
@@ -141,10 +237,12 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
         },
         cacheTtlMs
       );
-      setData(result);
+      const { merged } = mergeTimeSeriesResponse(latestDataRef.current, result, config.timeRange);
+      setData(merged);
+      latestDataRef.current = merged;
       setError(null);
       setLastRefreshed(new Date());
-      onDataLoaded?.(result);
+      onDataLoaded?.(merged);
     } catch (err: any) {
       console.error('Error fetching metric data:', err);
       if (err?.status === 429) {
@@ -188,6 +286,160 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
   const formatTimeLabel = (timeValue: number) => formatTimeValue(timeValue);
 
+  const timeRangeMs = useMemo(() => getTimeRangeMs(config.timeRange), [config.timeRange]);
+  const rawData = useMemo(() => data?.data ?? [], [data]);
+
+  const baseChartData = useMemo(() => {
+    return rawData.map((point) => {
+      const timeValue = new Date(point.time).getTime();
+      return {
+        time: timeValue,
+        timeValue,
+        timeLabel: formatTimeLabel(timeValue),
+        value: point.avg_value,
+        min: point.min_value,
+        max: point.max_value,
+      };
+    });
+  }, [rawData]);
+
+  const dedupedChartData = useMemo(() => {
+    const pointByTime = new Map<number, (typeof baseChartData)[number]>();
+    for (const point of baseChartData) {
+      pointByTime.set(point.timeValue, point);
+    }
+
+    const points = Array.from(pointByTime.values());
+
+    let isSorted = true;
+    for (let i = 1; i < points.length; i += 1) {
+      if (points[i].timeValue < points[i - 1].timeValue) {
+        isSorted = false;
+        break;
+      }
+    }
+
+    return isSorted ? points : points.sort((a, b) => a.timeValue - b.timeValue);
+  }, [baseChartData]);
+
+  const visibleChartData = useMemo(() => {
+    if (dedupedChartData.length === 0) {
+      return dedupedChartData;
+    }
+
+    const visibleWindowStart = now - VISUAL_DRIFT_MS - timeRangeMs;
+    return dedupedChartData.filter((point) => point.timeValue >= visibleWindowStart);
+  }, [dedupedChartData, now, timeRangeMs]);
+
+  const chartDataWithGaps = useMemo(() => {
+    if (visibleChartData.length === 0) {
+      return [] as ReturnType<typeof detectGaps>;
+    }
+
+    return detectGaps(visibleChartData);
+  }, [visibleChartData]);
+
+  const smoothedChartData = useMemo(() => {
+    if (chartDataWithGaps.length < 2) {
+      return chartDataWithGaps;
+    }
+
+    const lastIndex = chartDataWithGaps.length - 1;
+    const previousPoint = chartDataWithGaps[lastIndex - 1];
+    const currentPoint = chartDataWithGaps[lastIndex];
+
+    if (previousPoint.isGap || currentPoint.isGap) {
+      return chartDataWithGaps;
+    }
+
+    const timeSpan = currentPoint.timeValue - previousPoint.timeValue;
+    if (timeSpan <= 0) {
+      return chartDataWithGaps;
+    }
+
+    const progress = Math.min((now - previousPoint.timeValue) / timeSpan, 1);
+
+    return chartDataWithGaps.map((point, index) => {
+      if (index !== lastIndex) {
+        return point;
+      }
+
+      return {
+        ...point,
+        value: previousPoint.value + (currentPoint.value - previousPoint.value) * progress,
+        isEstimated: progress < 1,
+      };
+    });
+  }, [chartDataWithGaps, now]);
+
+  const chartState = useMemo(() => {
+    if (!data || smoothedChartData.length === 0) {
+      return null;
+    }
+
+    const gapTimes = smoothedChartData
+      .filter((point) => point.isGap)
+      .map((point) => point.timeValue)
+      .slice(-MAX_VISIBLE_GAP_LINES);
+
+    const dataValues = smoothedChartData
+      .map((point) => point.value)
+      .filter((value) => Number.isFinite(value));
+
+    const yDomain: [number, number] = (() => {
+      let domainMin = 0;
+      let domainMax = 100;
+
+      if (dataValues.length > 0) {
+        const dataMin = Math.min(...dataValues);
+        const dataMax = Math.max(...dataValues);
+
+        domainMin = dataMin;
+        domainMax = dataMax;
+
+        if (config.thresholdsEnabled && config.thresholds && config.thresholds.length > 0) {
+          const thresholdValues = config.thresholds.map((threshold) => threshold.value);
+          domainMin = Math.min(dataMin, ...thresholdValues);
+          domainMax = Math.max(dataMax, ...thresholdValues);
+        }
+
+        const range = domainMax - domainMin;
+        const padding = range > 0 ? range * 0.1 : Math.max(Math.abs(domainMax) * 0.1, 1);
+        domainMin -= padding;
+        domainMax += padding;
+      }
+
+      const previousDomain = yDomainRef.current;
+      if (!previousDomain) {
+        const initialDomain: [number, number] = [domainMin, domainMax];
+        yDomainRef.current = initialDomain;
+        return initialDomain;
+      }
+
+      const [prevMin, prevMax] = previousDomain;
+      const stabilizedMin = domainMin < prevMin
+        ? domainMin
+        : prevMin + (domainMin - prevMin) * Y_DOMAIN_SHRINK_LERP;
+      const stabilizedMax = domainMax > prevMax
+        ? domainMax
+        : prevMax + (domainMax - prevMax) * Y_DOMAIN_SHRINK_LERP;
+      const stabilizedDomain: [number, number] = [stabilizedMin, stabilizedMax];
+
+      yDomainRef.current = stabilizedDomain;
+      return stabilizedDomain;
+    })();
+
+    const domainEnd = now - VISUAL_DRIFT_MS;
+    const xDomain: [number, number] = [domainEnd - timeRangeMs, domainEnd];
+
+    return {
+      chartDataWithGaps: smoothedChartData,
+      gapTimes,
+      yDomain,
+      xDomain,
+    };
+  }, [config.thresholds, config.thresholdsEnabled, data, now, smoothedChartData, timeRangeMs]);
+
   const calculateStats = () => {
     if (!data || data.data.length === 0) return null;
 
@@ -205,61 +457,17 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   };
 
   const renderChart = () => {
-    if (!data || data.data.length === 0) return null;
+    const currentData = data;
 
-    const chartData = data.data.map(point => {
-      const timeValue = new Date(point.time).getTime();
-      return {
-        time: timeValue,
-        timeValue,
-        timeLabel: formatTimeLabel(timeValue),
-        value: point.avg_value,
-        min: point.min_value,
-        max: point.max_value,
-      };
-    });
+    if (!chartState || !currentData) return null;
 
-    // Deduplicate by timeValue to prevent duplicate keys in charts
-    const uniqueChartData = chartData.reduce((acc, curr) => {
-      if (!acc.find(item => item.timeValue === curr.timeValue)) {
-        acc.push(curr);
-      }
-      return acc;
-    }, [] as typeof chartData);
+    const { chartDataWithGaps, gapTimes, yDomain, xDomain } = chartState;
+    const unit = currentData.metric.unit ?? '';
 
-    const chartDataWithGaps = detectGaps(uniqueChartData);
-    const gapTimes = chartDataWithGaps.filter(point => point.isGap).map(point => point.timeValue);
-    const gapDotRenderer = createGapDotRenderer({ color: '#ef4444' });
-
-    // Calculate Y-axis domain to include both data and thresholds
-    const calculateYDomain = (): [number, number] => {
-      // Get min/max from data (excluding gaps)
-      const dataValues = chartDataWithGaps
-        .map(d => d.value)
-        .filter(value => Number.isFinite(value));
-      if (dataValues.length === 0) return [0, 100];
-      
-      const dataMin = Math.min(...dataValues);
-      const dataMax = Math.max(...dataValues);
-
-      // Include threshold values if they exist and are enabled
-      let domainMin = dataMin;
-      let domainMax = dataMax;
-
-      if (config.thresholdsEnabled && config.thresholds && config.thresholds.length > 0) {
-        const thresholdValues = config.thresholds.map(t => t.value);
-        domainMin = Math.min(dataMin, ...thresholdValues);
-        domainMax = Math.max(dataMax, ...thresholdValues);
-      }
-
-      // Add 10% padding to ensure thresholds are clearly visible
-      const range = domainMax - domainMin;
-      const padding = range * 0.1;
-      
-      return [domainMin - padding, domainMax + padding];
+    const formatTooltipMetricValue = (value: number, payload?: { payload?: { isEstimated?: boolean } }) => {
+      const estimatedSuffix = payload?.payload?.isEstimated ? ' (Estimated live)' : '';
+      return [formatValue(value) + (unit ? ` ${unit}` : '') + estimatedSuffix, 'Value'];
     };
-
-    const yDomain = calculateYDomain();
 
     const commonProps = {
       data: chartDataWithGaps,
@@ -267,19 +475,20 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     };
 
     const color = config.color || '#3b82f6'; // Use config color or default blue-500
+    const gapDotRenderer = createGapDotRenderer({ color: '#ef4444' });
 
     switch (config.chartType) {
       case 'area':
         return (
-          <ResponsiveContainer width="100%" height={200} key={`area-${config.widgetId}`}>
-            <AreaChart key={`chart-${config.widgetId}`} {...commonProps}>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis 
                 id={`xaxis-${config.widgetId}`}
                 dataKey="timeValue"
                 type="number"
                 scale="time"
-                domain={['dataMin', 'dataMax']}
+                domain={xDomain}
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={(value: number) => formatTimeValue(value)}
@@ -301,7 +510,9 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   color: 'white'
                 }}
                 labelFormatter={(label: number) => formatTimeValue(label)}
-                formatter={(value: number) => [formatValue(value) + (data.metric.unit ? ` ${data.metric.unit}` : ''), 'Value']}
+                formatter={(value: number, _name: string, payload: { payload?: { isEstimated?: boolean } }) =>
+                  formatTooltipMetricValue(value, payload)
+                }
               />
               <Area 
                 yAxisId="left"
@@ -311,6 +522,10 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 fill={color}
                 fillOpacity={0.3}
                 dot={gapDotRenderer}
+                isAnimationActive={false}
+                animationBegin={0}
+                animationDuration={350}
+                animationEasing="linear"
               />
               {gapTimes.map((gapTime, idx) => (
                 <ReferenceLine
@@ -345,15 +560,15 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
       case 'bar':
         return (
-          <ResponsiveContainer width="100%" height={200} key={`bar-${config.widgetId}`}>
-            <BarChart key={`chart-${config.widgetId}`} {...commonProps}>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis 
                 id={`xaxis-${config.widgetId}`}
                 dataKey="timeValue"
                 type="number"
                 scale="time"
-                domain={['dataMin', 'dataMax']}
+                domain={xDomain}
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={(value: number) => formatTimeValue(value)}
@@ -375,12 +590,18 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   color: 'white'
                 }}
                 labelFormatter={(label: number) => formatTimeValue(label)}
-                formatter={(value: number) => [formatValue(value) + (data.metric.unit ? ` ${data.metric.unit}` : ''), 'Value']}
+                formatter={(value: number, _name: string, payload: { payload?: { isEstimated?: boolean } }) =>
+                  formatTooltipMetricValue(value, payload)
+                }
               />
               <Bar 
                 yAxisId="left"
                 dataKey="value" 
                 fill={color}
+                isAnimationActive={false}
+                animationBegin={0}
+                animationDuration={350}
+                animationEasing="linear"
               />
               {gapTimes.map((gapTime, idx) => (
                 <ReferenceLine
@@ -415,15 +636,15 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
       default: // line
         return (
-          <ResponsiveContainer width="100%" height={200} key={`line-${config.widgetId}`}>
-            <LineChart key={`chart-${config.widgetId}`} {...commonProps}>
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart {...commonProps}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
               <XAxis 
                 id={`xaxis-${config.widgetId}`}
                 dataKey="timeValue"
                 type="number"
                 scale="time"
-                domain={['dataMin', 'dataMax']}
+                domain={xDomain}
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={(value: number) => formatTimeValue(value)}
@@ -445,7 +666,9 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   color: 'white'
                 }}
                 labelFormatter={(label: number) => formatTimeValue(label)}
-                formatter={(value: number) => [formatValue(value) + (data.metric.unit ? ` ${data.metric.unit}` : ''), 'Value']}
+                formatter={(value: number, _name: string, payload: { payload?: { isEstimated?: boolean } }) =>
+                  formatTooltipMetricValue(value, payload)
+                }
               />
               <Line 
                 yAxisId="left"
@@ -454,6 +677,10 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 stroke={color}
                 strokeWidth={2}
                 dot={gapDotRenderer}
+                isAnimationActive={false}
+                animationBegin={0}
+                animationDuration={350}
+                animationEasing="linear"
               />
               {gapTimes.map((gapTime, idx) => (
                 <ReferenceLine
@@ -538,11 +765,34 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
             <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
               <span>{data.metadata.sampleCount} points • {data.metadata.aggregationLevel} aggregation</span>
-              {lastRefreshed && (
-                <span className="text-right">
-                  Updated {lastRefreshed.toLocaleTimeString()}
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex items-center gap-1 text-xs"
+                  style={{ color: refreshInterval > 0 ? '#22c55e' : '#9ca3af' }}
+                >
+                  <span
+                    className="relative inline-flex h-2.5 w-2.5 shrink-0"
+                    aria-hidden="true"
+                  >
+                    {refreshInterval > 0 && (
+                      <span
+                        className="absolute inline-flex h-full w-full rounded-full animate-ping opacity-75"
+                        style={{ backgroundColor: '#22c55e' }}
+                      />
+                    )}
+                    <span
+                      className="relative inline-flex h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: refreshInterval > 0 ? '#22c55e' : '#9ca3af' }}
+                    />
+                  </span>
+                  {refreshInterval > 0 ? 'Live' : 'Paused'}
+                </div>
+                {lastRefreshed && (
+                  <span className="text-right">
+                    Updated {lastRefreshed.toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
             </div>
           </>
         )}

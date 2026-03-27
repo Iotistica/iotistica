@@ -28,6 +28,18 @@ function firstString(...values: unknown[]): string | undefined {
 	return undefined;
 }
 
+function firstStringOrNumber(...values: unknown[]): string | undefined {
+	for (const value of values) {
+		if (typeof value === 'string' && value.trim()) {
+			return value.trim();
+		}
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			return String(value);
+		}
+	}
+	return undefined;
+}
+
 /**
  * Validate MQTT user credentials
  * Called by mosquitto-go-auth HTTP backend for CONNECT
@@ -135,6 +147,14 @@ router.get('/api/mqtt/auth/acl', async (req: Request, res: Response, next: NextF
 			req.body?.access,
 			req.body?.acl
 		);
+		const normalizedAcc = firstStringOrNumber(
+			req.query.acc,
+			req.query.access,
+			req.query.acl,
+			req.body?.acc,
+			req.body?.access,
+			req.body?.acl
+		);
 
 		if (!username) {
 			console.warn('MQTT ACL auth missing username', {
@@ -158,19 +178,19 @@ router.get('/api/mqtt/auth/acl', async (req: Request, res: Response, next: NextF
 		}
 
 		// Validate query parameters
-		if (!topic || !accStr) {
+		if (!topic || !normalizedAcc) {
 			console.warn('MQTT ACL auth missing parameters', {
 				queryKeys: Object.keys(req.query || {}),
 				hasBody: !!req.body,
 				bodyKeys: req.body ? Object.keys(req.body) : [],
 				usernamePresent: true,
 				topicPresent: !!topic,
-				accPresent: !!accStr,
+				accPresent: !!normalizedAcc,
 			});
 			return res.status(401).json({ error: 'Missing username, topic, or acc' });
 		}
 
-		const acc = parseInt(accStr, 10);
+		const acc = parseInt(normalizedAcc, 10);
 		if (isNaN(acc) || ![1, 2, 3].includes(acc)) {
 			return res.status(400).json({ error: 'Invalid access level (must be 1, 2, or 3)' });
 		}

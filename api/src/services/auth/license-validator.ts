@@ -6,7 +6,7 @@
 
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
-import { SystemConfigModel } from '../../db/system-config-model';
+import { SystemConfigModel } from '../../db/models';
 import logger from '../../utils/logger';
 
 export interface LicenseData {

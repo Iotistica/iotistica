@@ -38,6 +38,7 @@ import anomalyIncidentsRoutes from '../routes/anomaly-incidents';
 import anomalyAlertsRoutes from '../routes/anomaly-alerts';
 import profileRoutes from '../routes/profiles';
 import aiChatRoutes from '../routes/ai-chat';
+import dashboardAiRoutes from '../routes/dashboard-ai';
 import licenseRoutes from '../routes/license';
 import billingRoutes from '../routes/billing';
 import fleetRoutes from '../routes/fleets';
@@ -65,6 +66,7 @@ const PATHS = {
   admin:              '/admin',
   profiles:           '/profiles',
   dashboardLayouts:   '/dashboard-layouts',
+  dashboard:          '/dashboard',
   metricsCatalog:     '/metrics',
 } as const;
 
@@ -155,6 +157,7 @@ export function mountRoutes(app: express.Application): void {
   // Fixed sub-path prefix routes (cannot use the forEach pattern above)
   api.use(PATHS.profiles, profileRoutes);
   api.use(PATHS.dashboardLayouts, dashboardLayoutsRoutes);
+  api.use(PATHS.dashboard, dashboardAiRoutes);
   api.use(PATHS.metricsCatalog, metricsCatalogRoutes);
 
   // Mount the versioned sub-router once

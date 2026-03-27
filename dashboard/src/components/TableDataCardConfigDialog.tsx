@@ -34,6 +34,12 @@ interface AgentOption {
   name: string;
 }
 
+interface RegisteredAgent {
+  uuid: string;
+  name: string;
+  isOnline: boolean;
+}
+
 export function TableDataCardConfigDialog({ 
   open, 
   onClose, 
@@ -41,6 +47,7 @@ export function TableDataCardConfigDialog({
   initialConfig 
 }: TableDataCardConfigDialogProps) {
   const [devices, setDevices] = useState<EndpointDevice[]>([]);
+  const [registeredAgents, setRegisteredAgents] = useState<RegisteredAgent[]>([]);
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
   const [selectedAgentUuid, setSelectedAgentUuid] = useState('');
   const [selectedAgentName, setSelectedAgentName] = useState('');
@@ -128,17 +135,43 @@ export function TableDataCardConfigDialog({
   const fetchDevices = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const url = buildApiUrl('/api/v1/metrics/agents');
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setDevices(data.agents || []);
+      const [metricsResponse, agentsResponse] = await Promise.all([
+        fetch(buildApiUrl('/api/v1/metrics/agents'), {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }),
+        fetch(buildApiUrl('/api/v1/agents?limit=1000'), {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        })
+      ]);
+
+      if (metricsResponse.ok) {
+        const metricsData = await metricsResponse.json();
+        setDevices(metricsData.agents || []);
       } else {
-        console.error('Failed to fetch devices:', response.status, response.statusText);
+        setDevices([]);
+        console.error('Failed to fetch metric devices:', metricsResponse.status, metricsResponse.statusText);
+      }
+
+      if (agentsResponse.ok) {
+        const devicesData = await agentsResponse.json();
+        const registryAgents = Array.isArray(devicesData.agents)
+          ? devicesData.agents
+          : (Array.isArray(devicesData.devices) ? devicesData.devices : []);
+        setRegisteredAgents(
+          registryAgents
+            .filter((d: any) => d?.uuid)
+            .map((d: any) => ({
+              uuid: d.uuid,
+              name: (d.name || '').trim() || `Agent ${String(d.uuid).slice(0, 8)}`,
+              isOnline: Boolean(d.is_online),
+            }))
+        );
+      } else {
+        setRegisteredAgents([]);
       }
     } catch (error) {
       console.error('Error fetching devices:', error);
@@ -162,8 +195,19 @@ export function TableDataCardConfigDialog({
         });
       });
       return acc;
-    }, new Map<string, AgentOption>()).values()
-  ).sort((a, b) => a.name.localeCompare(b.name));
+    }, new Map<string, AgentOption>(
+      registeredAgents.map((agent) => [agent.uuid, { uuid: agent.uuid, name: agent.name }])
+    )).values()
+  );
+
+  const agentStatusByUuid = new Map(registeredAgents.map((agent) => [agent.uuid, agent.isOnline]));
+
+  agentOptions.sort((a, b) => {
+    const aOnline = Boolean(agentStatusByUuid.get(a.uuid));
+    const bOnline = Boolean(agentStatusByUuid.get(b.uuid));
+    if (aOnline !== bOnline) return aOnline ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
 
   const filteredDevices = selectedAgentUuid
     ? devices.filter((device) => {
@@ -191,7 +235,7 @@ export function TableDataCardConfigDialog({
       deviceName: selectedDevice,
       metricName: selectedMetric,
       timeRange,
-      title: title || undefined,
+      title: title || '',
       columns,
       pageSize: parseInt(pageSize, 10)
     };
@@ -210,20 +254,25 @@ export function TableDataCardConfigDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
-          <div className="grid gap-2">
+          <div className="grid gap-2 w-fit">
             <Label htmlFor="agent">Agent</Label>
             <Select
               value={selectedAgentUuid || 'all'}
               onValueChange={(value) => setSelectedAgentUuid(value === 'all' ? '' : value)}
             >
-              <SelectTrigger id="agent">
+              <SelectTrigger id="agent" className="w-[320px]">
                 <SelectValue placeholder="All agents" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All agents</SelectItem>
                 {agentOptions.map((agent) => (
                   <SelectItem key={agent.uuid} value={agent.uuid}>
-                    {agent.name}
+                    <div className="flex items-center justify-between w-full gap-2">
+                      <span>{agent.name}</span>
+                      <span className={agentStatusByUuid.get(agent.uuid) ? 'text-xs text-green-600' : 'text-xs text-gray-500'}>
+                        {agentStatusByUuid.get(agent.uuid) ? 'Online' : 'Offline'}
+                      </span>
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>

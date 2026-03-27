@@ -46,72 +46,53 @@ router.get('/agents', jwtAuth, async (req, res) => {
     const validatedProtocol = protocolSchema.parse(protocol);
     const validatedAgentUuid = uuidSchema.parse(agentUuid);
     
-    // Query agent_devices (live table) with a metric_catalog rollup and
-    // a fallback rollup directly from readings for resilience.
+    // Query endpoint_devices materialized view so discovered endpoint devices
+    // (including MQTT/individual devices not present in agent_devices) are included.
     let sql = `
       SELECT
-        ad.uuid::text                                       AS device_uuid,
-        ad.name                                             AS device_name,
-        ad.protocol,
-        COALESCE(mc_rollup.last_seen, live_rollup.last_seen, ad.last_seen_at)
-                                                            AS last_seen,
-        COALESCE(mc_rollup.metric_count, live_rollup.metric_count, 0)
-                                                            AS metric_count,
-        COALESCE(mc_rollup.available_metrics, live_rollup.available_metrics, ARRAY[]::text[])
-                                                            AS available_metrics,
-        COALESCE(mc_rollup.overall_quality_percentage, live_rollup.overall_quality_percentage, 0)
-                                                            AS overall_quality_percentage,
-        1                                                   AS agent_count,
-        ARRAY[ad.agent_uuid::text]                          AS agent_uuids,
-        ARRAY[a.name]                                AS agent_names,
+        ed.device_uuid::text                                AS device_uuid,
+        COALESCE(NULLIF(ed.device_name, ''), 'Unknown device')
+                                                            AS device_name,
+        ed.protocol,
+        MAX(ed.last_seen)                                   AS last_seen,
+        COALESCE((
+          SELECT COUNT(DISTINCT metric)
+          FROM endpoint_devices edm
+          CROSS JOIN LATERAL unnest(COALESCE(edm.available_metrics, ARRAY[]::text[])) AS metric
+          WHERE edm.device_uuid = ed.device_uuid
+            AND edm.protocol = ed.protocol
+        ), 0)::int                                          AS metric_count,
+        COALESCE((
+          SELECT array_agg(DISTINCT metric ORDER BY metric)
+          FROM endpoint_devices edm
+          CROSS JOIN LATERAL unnest(COALESCE(edm.available_metrics, ARRAY[]::text[])) AS metric
+          WHERE edm.device_uuid = ed.device_uuid
+            AND edm.protocol = ed.protocol
+        ), ARRAY[]::text[])                                 AS available_metrics,
+        COALESCE(AVG(ed.overall_quality_percentage), 0)     AS overall_quality_percentage,
+        COUNT(DISTINCT ed.agent_uuid)::int                  AS agent_count,
+        ARRAY_AGG(DISTINCT ed.agent_uuid::text ORDER BY ed.agent_uuid::text)
+                                                            AS agent_uuids,
+        ARRAY_AGG(
+          DISTINCT COALESCE(NULLIF(a.name, ''), NULLIF(ed.agent_name, ''), ('Agent ' || left(ed.agent_uuid::text, 8)))
+          ORDER BY COALESCE(NULLIF(a.name, ''), NULLIF(ed.agent_name, ''), ('Agent ' || left(ed.agent_uuid::text, 8)))
+        )                                                   AS agent_names,
         COALESCE(
-          (SELECT jsonb_agg(src)
-           FROM (
-             SELECT DISTINCT jsonb_build_object(
-               'deviceUuid',   ad2.uuid::text,
-               'endpointUuid', ad2.endpoint_uuid::text,
-               'agentUuid',    ad2.agent_uuid::text,
-               'agentName',    a2.name,
-               'endpointName', ep2.name
-             ) AS src
-             FROM agent_devices ad2
-             JOIN  agents    a2  ON a2.uuid  = ad2.agent_uuid
-             LEFT JOIN endpoints ep2 ON ep2.uuid = ad2.endpoint_uuid
-             WHERE ad2.uuid     = ad.uuid
-               AND ad2.protocol = ad.protocol
-               AND ad2.enabled  = true
-           ) AS srcs),
+          jsonb_agg(
+            DISTINCT jsonb_build_object(
+              'deviceUuid',   ed.device_uuid::text,
+              'endpointUuid', ed.endpoint_uuid::text,
+              'agentUuid',    ed.agent_uuid::text,
+              'agentName',    COALESCE(NULLIF(a.name, ''), NULLIF(ed.agent_name, ''), ('Agent ' || left(ed.agent_uuid::text, 8))),
+              'endpointName', ep.name
+            )
+          ) FILTER (WHERE ed.endpoint_uuid IS NOT NULL),
           '[]'::jsonb
         )                                                   AS source_refs
-      FROM agent_devices ad
-      JOIN  agents a  ON a.uuid  = ad.agent_uuid
-      LEFT JOIN LATERAL (
-        SELECT
-          MAX(mc.last_seen)                                       AS last_seen,
-          COUNT(DISTINCT mc.metric_name)::int                     AS metric_count,
-          array_agg(DISTINCT mc.metric_name ORDER BY mc.metric_name)
-                                                                 AS available_metrics,
-          AVG(mc.quality_percentage)                              AS overall_quality_percentage
-        FROM metric_catalog mc
-        WHERE mc.device_uuid = ad.uuid
-          AND mc.agent_uuid  = ad.agent_uuid
-          AND mc.protocol    = ad.protocol
-      ) mc_rollup ON true
-      LEFT JOIN LATERAL (
-        SELECT
-          MAX(r.time)                                              AS last_seen,
-          COUNT(DISTINCT r.metric_name)::int                       AS metric_count,
-          array_agg(DISTINCT r.metric_name ORDER BY r.metric_name)
-                                                                   AS available_metrics,
-          (SUM(CASE WHEN r.quality = 'good' THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0) * 100)
-                                                                   AS overall_quality_percentage
-        FROM readings r
-        WHERE r.agent_uuid = ad.agent_uuid
-          AND r.protocol   = ad.protocol
-          AND COALESCE(NULLIF(r.extra->>'device_uuid', ''), NULLIF(r.extra->>'deviceUuid', '')) = ad.uuid::text
-          AND r.time > NOW() - INTERVAL '7 days'
-      ) live_rollup ON true
-      WHERE ad.enabled = true
+      FROM endpoint_devices ed
+      LEFT JOIN agents a ON a.uuid = ed.agent_uuid
+      LEFT JOIN endpoints ep ON ep.uuid = ed.endpoint_uuid
+      WHERE ed.device_uuid IS NOT NULL
     `;
 
     const params: any[] = [];
@@ -120,15 +101,16 @@ router.get('/agents', jwtAuth, async (req, res) => {
     if (validatedProtocol) {
       params.push(validatedProtocol);
       paramIndex++;
-      sql += ` AND ad.protocol = $${paramIndex}`;
+      sql += ` AND ed.protocol = $${paramIndex}`;
     }
 
     if (validatedAgentUuid) {
       params.push(validatedAgentUuid);
       paramIndex++;
-      sql += ` AND ad.agent_uuid = $${paramIndex}`;
+      sql += ` AND ed.agent_uuid = $${paramIndex}`;
     }
 
+    sql += ` GROUP BY ed.device_uuid, COALESCE(NULLIF(ed.device_name, ''), 'Unknown device'), ed.protocol`;
     sql += ` ORDER BY last_seen DESC NULLS LAST`;
     
     const result = await query(sql, params);

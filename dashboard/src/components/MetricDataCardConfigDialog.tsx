@@ -57,6 +57,12 @@ interface AgentOption {
   name: string;
 }
 
+interface RegisteredAgent {
+  uuid: string;
+  name: string;
+  isOnline: boolean;
+}
+
 interface EndpointDevice {
   device_name: string;
   protocol: string;
@@ -77,6 +83,7 @@ export function MetricDataCardConfigDialog({
   initialConfig,
 }: MetricDataCardConfigDialogProps) {
   const [devices, setDevices] = useState<EndpointDevice[]>([]);
+  const [agentOpen, setAgentOpen] = useState(false);
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<string>(initialConfig?.deviceName || '');
   const [selectedSourceKey, setSelectedSourceKey] = useState<string>(
@@ -103,6 +110,7 @@ export function MetricDataCardConfigDialog({
   );
   const [showStats, setShowStats] = useState<boolean>(initialConfig?.showStats ?? true);
   const [registeredDevices, setRegisteredDevices] = useState<Map<string, { isOnline: boolean }>>(new Map());
+  const [registeredAgents, setRegisteredAgents] = useState<RegisteredAgent[]>([]);
 
   const getSourceKey = (sourceRef: MetricSourceRef) => `${sourceRef.deviceUuid}:${sourceRef.endpointUuid}`;
 
@@ -173,8 +181,19 @@ export function MetricDataCardConfigDialog({
         acc.set(refAgentUuid, { uuid: refAgentUuid, name: fallbackName });
       });
       return acc;
-    }, new Map<string, AgentOption>()).values()
-  ).sort((a, b) => a.name.localeCompare(b.name));
+    }, new Map<string, AgentOption>(
+      registeredAgents.map((agent) => [agent.uuid, { uuid: agent.uuid, name: agent.name || `Agent ${agent.uuid.slice(0, 8)}` }])
+    )).values()
+  );
+
+  const agentStatusByUuid = new Map(registeredAgents.map((agent) => [agent.uuid, agent.isOnline]));
+
+  agentOptions.sort((a, b) => {
+    const aOnline = Boolean(agentStatusByUuid.get(a.uuid));
+    const bOnline = Boolean(agentStatusByUuid.get(b.uuid));
+    if (aOnline !== bOnline) return aOnline ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
 
   const filteredDevices = selectedAgentUuid
     ? devices.filter((device) => {
@@ -292,6 +311,7 @@ export function MetricDataCardConfigDialog({
       if (devicesResponse.ok) {
         const devicesData = await devicesResponse.json();
         const deviceMap = new Map();
+        const liveAgents: RegisteredAgent[] = [];
         const registryAgents = Array.isArray(devicesData.agents)
           ? devicesData.agents
           : (Array.isArray(devicesData.devices) ? devicesData.devices : []);
@@ -299,8 +319,16 @@ export function MetricDataCardConfigDialog({
           deviceMap.set(d.uuid, {
             isOnline: d.is_online || false
           });
+          if (d.uuid) {
+            liveAgents.push({
+              uuid: d.uuid,
+              name: (d.name || '').trim() || `Agent ${String(d.uuid).slice(0, 8)}`,
+              isOnline: Boolean(d.is_online),
+            });
+          }
         });
         setRegisteredDevices(deviceMap);
+        setRegisteredAgents(liveAgents);
       }
     } catch (err) {
       console.error('Error fetching devices:', err);
@@ -354,24 +382,86 @@ export function MetricDataCardConfigDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
-          <div className="grid gap-2">
+          <div className="grid gap-2 w-fit">
             <Label htmlFor="agent">Agent</Label>
-            <Select
-              value={selectedAgentUuid || 'all'}
-              onValueChange={(value) => setSelectedAgentUuid(value === 'all' ? '' : value)}
-            >
-              <SelectTrigger id="agent">
-                <SelectValue placeholder="All agents" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All agents</SelectItem>
-                {agentOptions.map((agent) => (
-                  <SelectItem key={agent.uuid} value={agent.uuid}>
-                    {agent.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Popover open={agentOpen} onOpenChange={setAgentOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={agentOpen}
+                  className="w-[320px] justify-between"
+                >
+                  {selectedAgentUuid
+                    ? agentOptions.find((agent) => agent.uuid === selectedAgentUuid)?.name || `Agent ${selectedAgentUuid.slice(0, 8)}`
+                    : 'All agents'}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[320px] p-0">
+                <Command>
+                  <CommandInput placeholder="Search agents..." />
+                  <CommandList>
+                    <CommandEmpty>No agents found.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value="all agents"
+                        onSelect={() => {
+                          setSelectedAgentUuid('');
+                          setAgentOpen(false);
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            'mr-2 h-4 w-4',
+                            selectedAgentUuid === '' ? 'opacity-100' : 'opacity-0'
+                          )}
+                        />
+                        <span>All agents</span>
+                      </CommandItem>
+                      {agentOptions.map((agent) => {
+                        const isKnownAgent = agentStatusByUuid.has(agent.uuid);
+                        const isOnline = isKnownAgent ? Boolean(agentStatusByUuid.get(agent.uuid)) : false;
+                        const isDeleted = registeredAgents.length > 0 && !isKnownAgent;
+                        const isOffline = isKnownAgent && !isOnline;
+
+                        return (
+                          <CommandItem
+                            key={agent.uuid}
+                            value={`${agent.name} ${agent.uuid}`}
+                            onSelect={() => {
+                              setSelectedAgentUuid(agent.uuid === selectedAgentUuid ? '' : agent.uuid);
+                              setAgentOpen(false);
+                            }}
+                            className={isDeleted || isOffline ? 'opacity-50' : ''}
+                          >
+                            <Check
+                              className={cn(
+                                'mr-2 h-4 w-4',
+                                selectedAgentUuid === agent.uuid ? 'opacity-100' : 'opacity-0'
+                              )}
+                            />
+                            <div className="flex items-center justify-between w-full gap-2">
+                              <span>{agent.name}</span>
+                              {isDeleted && (
+                                <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200">
+                                  Deleted
+                                </Badge>
+                              )}
+                              {!isDeleted && isOffline && (
+                                <Badge variant="outline" className="text-xs bg-gray-100 text-gray-600 border-gray-300">
+                                  Offline
+                                </Badge>
+                              )}
+                            </div>
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="grid gap-2">

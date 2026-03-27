@@ -166,12 +166,23 @@ function expandFormat2(entry: SensorDataEntry, protocol: string, ingestedAt: Dat
 
 // Format 3: single reading (legacy)
 function expandFormat3(entry: SensorDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
+  if (entry.data && typeof entry.data === 'object' && !Array.isArray(entry.data)) {
+    const normalized = normalizeReading(entry.data, entry, protocol, ingestedAt, undefined, entry.data);
+    if (normalized) {
+      return [normalized];
+    }
+  }
+
   const value = typeof entry.data === 'object'
     ? (entry.data.value ?? entry.data.rawValue ?? null)
     : entry.data;
   return [{
     agent_uuid: entry.deviceUuid,
-    metric_name: entry.sensorName,
+    metric_name:
+      (entry.data && typeof entry.data === 'object'
+        ? (entry.data.metric || entry.data.nodeName || entry.data.name)
+        : null)
+      || entry.sensorName,
     value: typeof value === 'number' ? value : null,
     quality: normalizeQuality(entry.data?.quality),
     unit: entry.data?.unit || null,

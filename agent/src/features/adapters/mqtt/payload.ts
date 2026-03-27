@@ -45,6 +45,11 @@ export function parsePayload(payload: Buffer): unknown {
  * @throws Error if coercion results in NaN for numeric types
  */
 export function coerceType(value: any, dataType: string): number | boolean | string {
+  const valueForError =
+    typeof value === 'object' && value !== null
+      ? JSON.stringify(value)
+      : String(value);
+
   switch (dataType) {
     case 'number':  // Broad category from discovery
     case 'float':
@@ -53,7 +58,7 @@ export function coerceType(value: any, dataType: string): number | boolean | str
       const n = parseFloat(value);
       // Production fix: Detect NaN and throw error
       if (Number.isNaN(n)) {
-        throw new Error(`Numeric coercion resulted in NaN for value: "${value}"`);
+        throw new Error(`Numeric coercion resulted in NaN for value: "${valueForError}"`);
       }
       return n;
     }
@@ -64,7 +69,7 @@ export function coerceType(value: any, dataType: string): number | boolean | str
       const n = parseInt(value, 10);
       // Production fix: Detect NaN and throw error
       if (Number.isNaN(n)) {
-        throw new Error(`Numeric coercion resulted in NaN for value: "${value}"`);
+        throw new Error(`Numeric coercion resulted in NaN for value: "${valueForError}"`);
       }
       return n;
     }
@@ -73,7 +78,7 @@ export function coerceType(value: any, dataType: string): number | boolean | str
       const n = Math.abs(parseInt(value, 10));
       // Production fix: Detect NaN and throw error
       if (Number.isNaN(n)) {
-        throw new Error(`Numeric coercion resulted in NaN for value: "${value}"`);
+        throw new Error(`Numeric coercion resulted in NaN for value: "${valueForError}"`);
       }
       return n;
     }

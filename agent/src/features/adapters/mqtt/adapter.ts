@@ -765,17 +765,55 @@ export class MqttAdapter extends EventEmitter {
 
       // Backward-compatible fallback: single metric per message.
       if (points.length === 0) {
-        const singleSource =
-          typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) && (parsed as any).value !== undefined
-            ? (parsed as any).value
-            : parsed;
+        let singleMetric = device.metric || topic;
+        let singleType = device.dataType;
+        let singleSource: unknown = parsed;
+
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          const parsedObj = parsed as Record<string, unknown>;
+
+          if (parsedObj.value !== undefined && (parsedObj.value === null || typeof parsedObj.value !== 'object')) {
+            singleSource = parsedObj.value;
+          } else {
+            const metadataKeys = new Set([
+              'timestamp', 'ts', 'time', 'name', 'unit',
+              'deviceId', 'device_id', 'device_uuid', 'topic',
+            ]);
+
+            const primitiveEntries = Object.entries(parsedObj).filter(([key, value]) => {
+              if (metadataKeys.has(key)) {
+                return false;
+              }
+              return value === null || ['string', 'number', 'boolean'].includes(typeof value);
+            });
+
+            if (primitiveEntries.length > 0) {
+              const [metricName, metricValue] = primitiveEntries[0];
+              singleMetric = metricName;
+              singleSource = metricValue;
+
+              if (primitiveEntries.length > 1) {
+                this.logger.debug('MQTT single-metric fallback picked first primitive field from object payload', {
+                  topic,
+                  deviceName: device.name,
+                  chosenField: metricName,
+                  availableFields: primitiveEntries.map(([k]) => k),
+                });
+              }
+            } else {
+              // No scalar field to coerce; preserve payload as JSON text.
+              singleSource = JSON.stringify(parsedObj);
+              singleType = 'json';
+            }
+          }
+        }
 
         points.push(this.buildMetricPoint(
           device,
-          device.metric || topic,
+          singleMetric,
           singleSource,
           device.unit || '',
-          device.dataType,
+          singleType,
           resolvedDeviceId,
           topic,
           payloadTimestamp,
