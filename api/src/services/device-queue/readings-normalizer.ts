@@ -59,13 +59,21 @@ export function extractDeviceIdentity(reading: any): DeviceIdentity {
     return UUID_REGEX.test(trimmed) ? trimmed : undefined;
   };
 
-  const deviceName = typeof reading?.deviceName === 'string' ? reading.deviceName.trim() || undefined : undefined;
+  const deviceNameRaw =
+    typeof reading?.deviceName === 'string'
+      ? reading.deviceName
+      : (typeof reading?.device_name === 'string' ? reading.device_name : undefined);
+  const deviceName = typeof deviceNameRaw === 'string' ? deviceNameRaw.trim() || undefined : undefined;
+
+  const explicitEndpointUuid = pickUuid(reading?.endpoint_uuid) ?? pickUuid(reading?.endpointUuid);
+  const explicitDeviceUuid =
+    pickUuid(reading?.device_uuid)
+    ?? pickUuid(reading?.deviceUuid)
+    ?? pickUuid(reading?.asset_uuid);
 
   return {
-    // Adapters send the endpoint UUID as agent_uuid (via enrichWithEndpointUuid).
-    // Fall back to agent_uuid when endpoint_uuid is not explicitly present.
-    endpointUuid: pickUuid(reading?.endpoint_uuid) ?? pickUuid(reading?.agent_uuid),
-    deviceUuid: pickUuid(reading?.agent_uuid),
+    endpointUuid: explicitEndpointUuid,
+    deviceUuid: explicitDeviceUuid,
     deviceName,
   };
 }
@@ -81,7 +89,7 @@ export function buildExtraPayload(
 
   const extra = {
     endpoint_uuid: endpointUuid ?? null,
-    agent_uuid: deviceUuid ?? null,
+    device_uuid: deviceUuid ?? null,
     device_name: deviceName ?? null,
     ingested_at: ingestedAt.toISOString(),
   };

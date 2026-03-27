@@ -1,4 +1,4 @@
-import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
+import { AgentModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
 
 export const aiTools = [
   {
@@ -70,10 +70,10 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
   try {
     switch (toolName) {
       case 'get_device_info': {
-        const device = await DeviceModel.getByUuid(args.deviceUuid);
+        const device = await AgentModel.getByUuid(args.deviceUuid);
         if (!device) return 'Device not found';
         return JSON.stringify({
-          name: device.device_name,
+          name: device.agent_name,
           uuid: device.uuid,
           status: device.status,
           isOnline: device.is_online,

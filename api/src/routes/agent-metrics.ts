@@ -22,7 +22,7 @@
 import express from 'express';
 import { query } from '../db/connection';
 import {
-  DeviceModel,
+  AgentModel,
   DeviceMetricsModel,
 } from '../db/models';
 
@@ -93,7 +93,7 @@ router.get('/agents/:uuid/processes', async (req, res) => {
     const { uuid } = req.params;
 
     // Get device to check if it exists and get latest processes
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -125,7 +125,7 @@ router.get('/agents/:uuid/network-interfaces', async (req, res) => {
     const { uuid } = req.params;
 
     // Get device to check if it exists and get network interfaces
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',

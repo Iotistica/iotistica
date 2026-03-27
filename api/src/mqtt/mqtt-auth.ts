@@ -32,9 +32,6 @@ const router = Router();
  * - + : Single-level wildcard (matches exactly one level)
  * - # : Multi-level wildcard (matches zero or more levels, must be last)
  * 
- * Examples:
- * - sensor/+ matches sensor/temperature but not sensor/room/temperature
- * - sensor/# matches sensor/temperature AND sensor/room/temperature
  * 
  * @param topic - The actual MQTT topic to check
  * @param pattern - The pattern with wildcards to match against

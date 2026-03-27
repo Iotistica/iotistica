@@ -500,7 +500,8 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
       if (response.ok) {
         const data = await response.json();
-        if (data.widgets && Array.isArray(data.widgets) && data.widgets.length > 0) {
+        if (data.id && Array.isArray(data.widgets)) {
+          // A real saved layout was found — always trust the server, even if widgets is []
           setWidgets(sanitizeWidgets(data.widgets));
           setCurrentLayoutId(data.id || null);
           setCurrentLayoutName(data.layoutName || 'Default');
@@ -512,6 +513,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             shareToken: data.shareToken || null
           });
         } else {
+          // No saved layout exists yet — try cache, then hardcoded default
           if (!loadCachedLayout()) {
             loadDefaultLayout();
           }
@@ -579,6 +581,14 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       if (data.id) {
         setCurrentLayoutId(data.id);
       }
+
+      // Keep cache in sync so a stale cache never overrides the saved state on reload
+      saveCachedLayout({
+        widgets: widgetsToSave,
+        id: data.id ?? currentLayoutId,
+        layoutName: currentLayoutName,
+        shareToken: currentShareToken
+      });
 
       if (showFeedback) {
         console.log('Global layout saved to server successfully');
@@ -879,7 +889,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           ? { 
               ...w, 
               metricConfig: config, 
-              title: config.title || [config.agentName, config.endpointName, config.deviceName, config.metricName].filter(Boolean).join(' - '),
+              title: config.title || [config.deviceName, config.metricName].filter(Boolean).join(' - '),
               _refreshTrigger: Date.now() // Trigger re-render to show threshold changes
             }
           : w
@@ -897,7 +907,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         minW: widgetConfig.minW,
         minH: widgetConfig.minH,
         type: 'METRIC_DATA',
-        title: config.title || [config.agentName, config.endpointName, config.deviceName, config.metricName].filter(Boolean).join(' - '),
+        title: config.title || [config.deviceName, config.metricName].filter(Boolean).join(' - '),
         metricConfig: config
       };
       setWidgets([...widgets, newWidget]);
@@ -921,7 +931,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           ? { 
               ...w, 
               metricValueConfig: config, 
-              title: config.title || `${config.metricName} - ${config.deviceName}`,
+              title: config.title || [config.deviceName, config.metricName].filter(Boolean).join(' - '),
               _refreshTrigger: Date.now() // Trigger re-render to show threshold changes
             }
           : w
@@ -939,7 +949,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         minW: widgetConfig.minW,
         minH: widgetConfig.minH,
         type: 'METRIC_VALUE',
-        title: config.title || `${config.metricName} - ${config.deviceName}`,
+        title: config.title || [config.deviceName, config.metricName].filter(Boolean).join(' - '),
         metricValueConfig: config
       };
       setWidgets([...widgets, newWidget]);
@@ -961,7 +971,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           ? { 
               ...w, 
               tableConfig: config, 
-              title: config.title || `${config.metricName} - Table`,
+              title: config.title || [config.agentName, config.endpointName, config.deviceName, config.metricName].filter(Boolean).join(' - '),
               _refreshTrigger: Date.now() // Trigger re-render to show config changes
             }
           : w
@@ -979,7 +989,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         minW: widgetConfig.minW,
         minH: widgetConfig.minH,
         type: 'TABLE',
-        title: config.title || `${config.metricName} - Metrics Table`,
+        title: config.title || [config.agentName, config.endpointName, config.deviceName, config.metricName].filter(Boolean).join(' - '),
         tableConfig: config
       };
       setWidgets([...widgets, newWidget]);
@@ -987,6 +997,52 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
     setHasUnsavedChanges(true);
     setConfiguringWidgetId(null);
+  };
+
+  const buildMetricPathTitle = (config: {
+    agentName?: string;
+    endpointName?: string;
+    deviceName?: string;
+    metricName?: string;
+  }) => [config.agentName, config.endpointName, config.deviceName, config.metricName].filter(Boolean).join(' - ');
+
+  const buildDeviceMetricTitle = (config: {
+    deviceName?: string;
+    metricName?: string;
+  }) => [config.deviceName, config.metricName].filter(Boolean).join(' - ');
+
+  const getDisplayWidgetTitle = (widget: DashboardWidget) => {
+    if (widget.type === 'METRIC_DATA' && widget.metricConfig) {
+      const cfg = widget.metricConfig;
+      const deviceMetricTitle = buildDeviceMetricTitle(cfg);
+      const pathTitle = buildMetricPathTitle(cfg);
+      if (!widget.title || widget.title === pathTitle) {
+        return deviceMetricTitle || widget.title;
+      }
+      return widget.title;
+    }
+
+    if (widget.type === 'METRIC_VALUE' && widget.metricValueConfig) {
+      const cfg = widget.metricValueConfig;
+      const deviceMetricTitle = buildDeviceMetricTitle(cfg);
+      const pathTitle = buildMetricPathTitle(cfg);
+      const legacyTitle = `${cfg.metricName} - ${cfg.deviceName}`;
+      if (!widget.title || widget.title === legacyTitle || widget.title === pathTitle) {
+        return deviceMetricTitle || widget.title;
+      }
+    }
+
+    if (widget.type === 'TABLE' && widget.tableConfig) {
+      const cfg = widget.tableConfig;
+      const pathTitle = buildMetricPathTitle(cfg);
+      const legacyTitleA = `${cfg.metricName} - Table`;
+      const legacyTitleB = `${cfg.metricName} - Metrics Table`;
+      if (!widget.title || widget.title === legacyTitleA || widget.title === legacyTitleB) {
+        return pathTitle || widget.title;
+      }
+    }
+
+    return widget.title;
   };
 
   const renderWidget = (widget: DashboardWidget) => {
@@ -1008,7 +1064,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                 <div className="flex-1 min-w-0">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <WidgetIcon className="w-4 h-4 flex-shrink-0" />
-                    <span className="truncate">{widget.title}</span>
+                    <span className="truncate">{getDisplayWidgetTitle(widget)}</span>
                     {isMetricWidget && metricData && (
                       <>
                         <span className="text-muted-foreground mx-1">·</span>

@@ -10,11 +10,11 @@ import { DeviceSensorSyncService } from '../services/agent-devices';
 import logger from '../utils/logger';
 
 // Types
-export interface Device {
+export interface Agent {
   id: number;
   uuid: string;
-  device_name?: string;
-  device_type?: string;
+  agent_name?: string;
+  agent_type?: string;
   provisioning_state?: string;
   status?: string;
   is_online: boolean;
@@ -122,14 +122,14 @@ export interface DeviceMetrics {
 /**
  * Device Model
  */
-export class DeviceModel {
+export class AgentModel {
   /**
    * Get or mark device online by UUID
    * NOTE: Does NOT create device if it doesn't exist (prevents empty device records)
    * Device creation must happen through proper registration flows
    * Also logs when a device comes back online after being offline
    */
-  static async getOrCreate(uuid: string): Promise<Device | null> {
+  static async getOrCreate(uuid: string): Promise<Agent | null> {
     // First, check if device exists and was offline
     const existingDevice = await this.getByUuid(uuid);
     
@@ -146,7 +146,7 @@ export class DeviceModel {
     const wasOffline = !existingDevice.is_online;
     
     // Don't auto-set online for virtual agents that haven't registered yet
-    const isVirtualAgentPending = existingDevice.device_type === 'virtual' && 
+    const isVirtualAgentPending = existingDevice.agent_type === 'virtual' && 
                                   existingDevice.provisioning_state === 'pending';
     
     if (isVirtualAgentPending) {
@@ -155,7 +155,7 @@ export class DeviceModel {
     }
     
     // Mark existing device as online
-    const result = await query<Device>(
+    const result = await query<Agent>(
       `UPDATE agents SET
          is_online = true,
          last_connectivity_event = CURRENT_TIMESTAMP
@@ -183,7 +183,7 @@ export class DeviceModel {
           'agent',
           uuid,
           {
-            device_name: existingDevice.device_name || 'Unknown',
+            device_name: existingDevice.agent_name || 'Unknown',
             was_offline_at: existingDevice.modified_at,
             offline_duration_minutes: offlineDurationMin,
             came_online_at: new Date().toISOString(),
@@ -202,7 +202,7 @@ export class DeviceModel {
           deviceUuid: uuid,
           severity: AuditSeverity.INFO,
           details: {
-            deviceName: existingDevice.device_name || 'Unknown',
+            deviceName: existingDevice.agent_name || 'Unknown',
             wasOfflineAt: existingDevice.modified_at,
             offlineDurationMinutes: offlineDurationMin,
             cameOnlineAt: new Date().toISOString()
@@ -210,7 +210,7 @@ export class DeviceModel {
         });
         
         logger.info('Device came back online', {
-          deviceName: existingDevice.device_name || uuid.substring(0, 8),
+          deviceName: existingDevice.agent_name || uuid.substring(0, 8),
           deviceUuid: uuid,
           offlineDurationMinutes: offlineDurationMin,
           wasOfflineAt: existingDevice.modified_at,
@@ -225,8 +225,8 @@ export class DeviceModel {
   /**
    * Get device by UUID
    */
-  static async getByUuid(uuid: string): Promise<Device | null> {
-    const result = await query<Device>(
+  static async getByUuid(uuid: string): Promise<Agent | null> {
+    const result = await query<Agent>(
       'SELECT * FROM agents WHERE uuid = $1',
       [uuid]
     );
@@ -239,7 +239,7 @@ export class DeviceModel {
   static async list(filters: {
     isOnline?: boolean;
     isActive?: boolean;
-  } = {}): Promise<Device[]> {
+  } = {}): Promise<Agent[]> {
     let sql = 'SELECT * FROM agents WHERE 1=1';
     const params: any[] = [];
 
@@ -255,14 +255,14 @@ export class DeviceModel {
 
     sql += ' ORDER BY created_at DESC';
 
-    const result = await query<Device>(sql, params);
+    const result = await query<Agent>(sql, params);
     return result.rows;
   }
 
   /**
    * Update device info
    */
-  static async update(uuid: string, data: Partial<Device>): Promise<Device> {
+  static async update(uuid: string, data: Partial<Agent>): Promise<Agent> {
     const fields: string[] = [];
     const values: any[] = [];
     let paramIndex = 1;
@@ -277,7 +277,7 @@ export class DeviceModel {
 
     values.push(uuid);
 
-    const result = await query<Device>(
+    const result = await query<Agent>(
       `UPDATE agents SET ${fields.join(', ')} WHERE uuid = $${paramIndex} RETURNING *`,
       values
     );
@@ -288,7 +288,7 @@ export class DeviceModel {
   /**
    * Upsert device - insert or update with all fields atomically
    */
-  static async upsert(uuid: string, data: Partial<Device>): Promise<Device> {
+  static async upsert(uuid: string, data: Partial<Agent>): Promise<Agent> {
     const insertFields: string[] = ['uuid'];
     const insertPlaceholders: string[] = ['$1'];
     const updateFields: string[] = [];
@@ -309,14 +309,14 @@ export class DeviceModel {
     console.log('[DeviceModel.upsert] About to upsert device:', {
       uuid: uuid.substring(0, 8) + '...',
       insertFields,
-      device_type: data.device_type,
+      device_type: data.agent_type,
       is_online: data.is_online,
       status: data.status,
       deployment_status: data.deployment_status,
       provisioning_state: data.provisioning_state
     });
 
-    const result = await query<Device>(
+    const result = await query<Agent>(
       `INSERT INTO agents (${insertFields.join(', ')})
        VALUES (${insertPlaceholders.join(', ')})
        ON CONFLICT (uuid) DO UPDATE SET
@@ -456,7 +456,7 @@ export class DeviceTargetStateModel {
     needsDeployment: boolean = false // Default to false for initial setup
   ): Promise<DeviceTargetState> {
     // Ensure device exists (don't auto-create)
-    const device = await DeviceModel.getOrCreate(deviceUuid);
+    const device = await AgentModel.getOrCreate(deviceUuid);
     if (!device) {
       throw new Error(`Device ${deviceUuid} not found - cannot set target state`);
     }
@@ -589,7 +589,7 @@ export class DeviceCurrentStateModel {
     version?: number
   ): Promise<DeviceCurrentState> {
     // Ensure device exists (don't auto-create)
-    const device = await DeviceModel.getOrCreate(deviceUuid);
+    const device = await AgentModel.getOrCreate(deviceUuid);
     if (!device) {
       throw new Error(`Device ${deviceUuid} not found - cannot update current state`);
     }
@@ -639,14 +639,14 @@ export class DeviceMetricsModel {
     );
 
     // Also update device table with latest metrics
-    await DeviceModel.update(deviceUuid, {
+    await AgentModel.update(deviceUuid, {
       cpu_usage: metrics.cpu_usage,
       cpu_temp: metrics.cpu_temp,
       memory_usage: metrics.memory_usage,
       memory_total: metrics.memory_total,
       storage_usage: metrics.storage_usage,
       storage_total: metrics.storage_total,
-    } as Partial<Device>);
+    } as Partial<Agent>);
   }
 
   /**
@@ -983,7 +983,7 @@ export class DeviceLogsModel {
 }
 
 export default {
-  DeviceModel,
+  AgentModel,
   DeviceTargetStateModel,
   DeviceCurrentStateModel,
   DeviceMetricsModel,

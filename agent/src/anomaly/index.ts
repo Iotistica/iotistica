@@ -10,7 +10,7 @@ import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import type { MqttManager } from '../mqtt/manager';
 import { createJsonPayload } from '../mqtt/manager';
-import { deviceTopic } from '../mqtt/topics.js';
+import { agentTopic } from '../mqtt/topics.js';
 import type {
 	DataPoint,
 	AnomalyConfig,
@@ -611,7 +611,7 @@ export class AnomalyDetectionService {
 		}
 		
 		// TypeScript now knows this.deviceUuid is definitely a string
-		const topic = deviceTopic(this.deviceUuid, 'events', 'anomaly');
+		const topic = agentTopic(this.deviceUuid, 'events', 'anomaly');
 		const msgIdGen = this.mqttManager.getMessageIdGenerator();
 		const payload = createJsonPayload(event, msgIdGen);
 		

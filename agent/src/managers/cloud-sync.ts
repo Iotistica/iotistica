@@ -31,7 +31,7 @@ import { RetryPolicy, CircuitBreaker, AsyncLock, isAuthError } from '../utils/re
 import { createHash } from 'crypto';
 import { MetadataModel } from '../db/models/metadata.model.js';
 import { DeviceModel } from '../db/models/device.model.js';
-import { deviceTopic } from '../mqtt/topics.js';
+import { agentTopic } from '../mqtt/topics.js';
 
 /**
  * Stable JSON stringify - sorts object keys recursively to ensure deterministic output
@@ -1569,18 +1569,16 @@ export class CloudSync extends EventEmitter {
 	 */
 	private async sendReport(report: DeviceStateReport): Promise<'mqtt' | 'http'> {
 		const deviceInfo = this.deviceManager.getDeviceInfo();
-		const legacyTopic = `iot/device/${deviceInfo.uuid}/state`;
-		let topic = legacyTopic;
+		let topic: string | null = null;
 
-		// Prefer tenant-scoped topic to match API subscriptions: iot/{tenantId}/device/{uuid}/state
+		// Tenant-scoped topic is required for MQTT state reporting.
 		try {
-			topic = deviceTopic(deviceInfo.uuid, 'state');
+			topic = agentTopic(deviceInfo.uuid, 'state');
 		} catch (error) {
-			this.logger?.warnSync('Tenant ID missing for MQTT topic, using legacy topic format', {
+			this.logger?.warnSync('Tenant ID missing for MQTT topic, skipping MQTT publish and using HTTP', {
 				component: LogComponents.cloudSync,
-				operation: 'mqtt-topic-fallback',
+				operation: 'mqtt-topic-missing-tenant-id',
 				error: error instanceof Error ? error.message : String(error),
-				legacyTopic,
 			});
 		}
 		
@@ -1588,7 +1586,7 @@ export class CloudSync extends EventEmitter {
 		const mqttHealthy = this.mqttManager?.isConnected() ?? false;
 		
 		// Try MQTT first if manager is available AND healthy
-		if (mqttHealthy) {
+		if (mqttHealthy && topic) {
 			try {
 				const payload = stableStringify(report);
 				const payloadSize = Buffer.byteLength(payload, 'utf8');

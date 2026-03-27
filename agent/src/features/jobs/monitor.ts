@@ -23,7 +23,7 @@ import { BaseFeature, FeatureConfig } from '../base-feature.js';
 import { AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
 import { MqttManager } from '../../mqtt/manager.js';
-import { deviceTopic } from '../../mqtt/topics.js';
+import { agentTopic } from '../../mqtt/topics.js';
 import { JobEngine } from './engine.js';
 import { JobDocument, JobStatus, JobExecutionData } from './types.js';
 import { normalizeApiEndpoint, getApiVersion } from '../../utils/api-utils.js';
@@ -338,7 +338,7 @@ export class JobsFeature extends BaseFeature {
       this.logger.debug(`Initializing MQTT job notifications (primary)`);
 
       // Subscribe to job notification topic
-      const notifyTopic = deviceTopic(this.deviceUuid, 'jobs', 'notify-next');
+      const notifyTopic = agentTopic(this.deviceUuid, 'jobs', 'notify-next');
       
       await mqttManager.subscribe(notifyTopic, { qos: 1 }, async (topic: string, payload: Buffer) => {
         try {
@@ -426,7 +426,7 @@ export class JobsFeature extends BaseFeature {
   private async unsubscribeFromMqtt(): Promise<void> {
     try {
       const mqttManager = MqttManager.getInstance();
-      const notifyTopic = deviceTopic(this.deviceUuid, 'jobs', 'notify-next');
+      const notifyTopic = agentTopic(this.deviceUuid, 'jobs', 'notify-next');
       await mqttManager.unsubscribe(notifyTopic);
       this.mqttSubscribed = false;
       this.logger.info(`Unsubscribed from MQTT job notifications`);
@@ -549,7 +549,7 @@ export class JobsFeature extends BaseFeature {
     // Try MQTT first (primary method)
     if (mqttHealthy) {
       try {
-        const updateTopic = deviceTopic(this.deviceUuid, 'jobs', jobId, 'update');
+        const updateTopic = agentTopic(this.deviceUuid, 'jobs', jobId, 'update');
         
         this.logger.debug(`Updating job status via MQTT: ${updateTopic}`, { status: update.status });
         

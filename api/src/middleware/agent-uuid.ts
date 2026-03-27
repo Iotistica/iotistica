@@ -9,7 +9,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { DeviceModel } from '../db/models';
+import { AgentModel } from '../db/models';
 import logger from '../utils/logger';
 
 /**
@@ -32,7 +32,7 @@ export async function checkUuidImmutability(
     }
 
     // Check if device exists and is already registered
-    const existingDevice = await DeviceModel.getByUuid(uuid);
+    const existingDevice = await AgentModel.getByUuid(uuid);
 
     if (existingDevice && existingDevice.provisioning_state === 'registered') {
       logger.warn(`Re-provisioning attempt for registered device: ${uuid.substring(0, 8)}...`);
@@ -72,7 +72,7 @@ export async function optionalUuidImmutabilityCheck(
     const { uuid } = req.body;
     if (!uuid) return next();
 
-    const existingDevice = await DeviceModel.getByUuid(uuid);
+    const existingDevice = await AgentModel.getByUuid(uuid);
     if (existingDevice?.provisioning_state === 'registered') {
       res.status(409).json({
         error: 'Device already registered',

@@ -14,7 +14,7 @@
 import * as k8s from '@kubernetes/client-node';
 import { query } from '../../db/connection.js';
 import { logger } from '../../utils/logger.js';
-import { DeviceModel } from '../../db/models.js';
+import { AgentModel } from '../../db/models.js';
 import { deviceSensorSync } from '../agent-devices.js';
 
 export interface VirtualDeviceConfig {
@@ -116,7 +116,7 @@ export class VirtualDeviceManager {
     });
 
     // 1. Validate parent device exists
-    const agent = await DeviceModel.getByUuid(config.deviceUuid);
+    const agent = await AgentModel.getByUuid(config.deviceUuid);
     if (!agent) {
       logger.error('[VirtualDeviceManager] Parent agent not found', {
         deviceUuid: config.deviceUuid
@@ -126,8 +126,8 @@ export class VirtualDeviceManager {
 
     logger.info('[VirtualDeviceManager] Parent agent found', {
       agentUuid: agent.uuid,
-      agentName: agent.device_name,
-      agentType: agent.device_type,
+      agentName: agent.agent_name,
+      agentType: agent.agent_type,
       helmRelease: agent.helm_release_name,
       namespace: agent.k8s_namespace
     });
@@ -419,7 +419,7 @@ export class VirtualDeviceManager {
    */
   async deleteVirtualDevice(deviceUuid: string, sensorUuid: string): Promise<void> {
     // Get parent device info before deletion
-    const agent = await DeviceModel.getByUuid(deviceUuid);
+    const agent = await AgentModel.getByUuid(deviceUuid);
     
     // Use standard deleteEndpoint flow (soft delete with reconciliation)
     await deviceSensorSync.deleteEndpoint(deviceUuid, sensorUuid, 'virtual-device-manager');

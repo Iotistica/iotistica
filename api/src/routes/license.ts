@@ -5,7 +5,7 @@
 
 import express from 'express';
 import { LicenseValidator } from '../services/auth/license-validator';
-import { DeviceModel } from '../db/models';
+import { AgentModel } from '../db/models';
 import { logger } from '../utils/logger';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 
@@ -21,7 +21,7 @@ router.get('/license', jwtAuth, requireRole('admin'), async (req, res) => {
   try {
     const license = LicenseValidator.getInstance();
     const licenseData = license.getLicense();
-    const agents = await DeviceModel.list({ isActive: true });
+    const agents = await AgentModel.list({ isActive: true });
     
     res.json({
       customer: {

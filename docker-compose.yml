@@ -245,50 +245,48 @@ services:
         networks:
             - iotistica-net
 
-    # mosquitto-agent:
-    #     image: iegomez/mosquitto-go-auth
-    #     restart: unless-stopped
-    #     container_name: iotistic-mosquitto-agent
-    #     ports:
-    #       - "${AGENT_MOSQUITTO_PORT_EXT:-5884}:1883"     # Dedicated MQTT for agent traffic
-    #       - "${AGENT_MOSQUITTO_WS_PORT_EXT:-59003}:9001" # Dedicated MQTT WebSocket for agent traffic
-    #     environment:
-    #         - AGENT_API_HOST=${AGENT_API_HOST:-host.docker.internal}
-    #     volumes:
-    #       - ./mosquitto/mosquitto-agent.conf:/etc/mosquitto/mosquitto.conf:ro
-    #     healthcheck:
-    #         test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
-    #         interval: 30s
-    #         timeout: 10s
-    #         retries: 3
-    #         start_period: 10s
-    #     depends_on:
-    #         api:
-    #             condition: service_healthy
-    #         redis:
-    #             condition: service_healthy
-    #     networks:
-    #         - iotistica-net
+    mosquitto-agent:
+        image: iegomez/mosquitto-go-auth
+        restart: unless-stopped
+        container_name: iotistic-mosquitto-agent
+        ports:
+          - "${AGENT_MOSQUITTO_PORT_EXT:-5884}:1883"     # Dedicated MQTT for agent traffic
+          - "${AGENT_MOSQUITTO_WS_PORT_EXT:-59003}:9001" # Dedicated MQTT WebSocket for agent traffic
+        volumes:
+          - ./mosquitto/mosquitto-agent.conf:/etc/mosquitto/mosquitto.conf:ro
+        healthcheck:
+            test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
+        depends_on:
+            api:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        networks:
+            - iotistica-net
 
-    # emqx:
-    #     image: emqx/emqx:latest
-    #     container_name: iotistic-emqx
-    #     restart: unless-stopped
-    #     ports:
-    #         - "${EMQX_MQTT_PORT_EXT:-1884}:1883"   # EMQX MQTT
-    #         - "${EMQX_WS_PORT_EXT:-8084}:8083"     # EMQX WebSocket
-    #         - "${EMQX_DASHBOARD_PORT_EXT:-18084}:18083"  # EMQX Dashboard
-    #     environment:
-    #         - EMQX_DASHBOARD__DEFAULT_USERNAME=${EMQX_DASHBOARD_USER:-admin}
-    #         - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD:-public}
-    #     volumes:
-    #         - ./emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
-    #         - emqx-data:/opt/emqx/data
-    #     depends_on:
-    #         api:
-    #             condition: service_healthy
-    #     networks:
-    #         - iotistica-net
+    emqx:
+        image: emqx/emqx:latest
+        container_name: iotistic-emqx
+        restart: unless-stopped
+        ports:
+            - "${EMQX_MQTT_PORT_EXT:-1884}:1883"   # EMQX MQTT
+            - "${EMQX_WS_PORT_EXT:-8084}:8083"     # EMQX WebSocket
+            - "${EMQX_DASHBOARD_PORT_EXT:-18084}:18083"  # EMQX Dashboard
+        environment:
+            - EMQX_DASHBOARD__DEFAULT_USERNAME=${EMQX_DASHBOARD_USER:-admin}
+            - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD:-public}
+        volumes:
+            - ./emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
+            - emqx-data:/opt/emqx/data
+        depends_on:
+            api:
+                condition: service_healthy
+        networks:
+            - iotistica-net
     
 
     # VPN Services - Commented out until TypeScript code is complete
@@ -412,21 +410,19 @@ services:
         container_name: sim-mqtt
         restart: unless-stopped
         environment:
-            - PROFILE=${MQTT_PROFILE:-Generic}
-            - API_URL=http://api:3002
-            - API_KEY=${MQTT_API_KEY}
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto:1883}
-            - MQTT_USERNAME=${MQTT_SIM_USERNAME}
-            - MQTT_PASSWORD=${MQTT_SIM_PASSWORD}
-            - MQTT_AUTH_USERNAME=${MQTT_SIM_USERNAME}
-            - MQTT_AUTH_PASSWORD=${MQTT_SIM_PASSWORD}
+            - MQTT_USERNAME=${MQTT_SIM_USERNAME:-admin}
+            - MQTT_PASSWORD=${MQTT_SIM_PASSWORD:-iotistic42!}
             - MQTT_CLIENT_ID=${MQTT_SIM_CLIENT_ID:-iotistic-mqtt-sim}
             - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
+            - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
+            - MQTT_TOPIC=${MQTT_SIM_TOPIC:-iot/73eddd385ce8/agent/370a2c6c-d707-43b4-aefe-3de5a0b23cd9/mqtt/5d793196-b82c-4daa-a79f-c18c13a108c0}
+            - MQTT_METRIC_NAMES=${MQTT_SIM_METRICS:-temperature}
+            - MQTT_QOS=${MQTT_SIM_QOS:-0}
+            - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
             - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
         depends_on:
-            api:
-                condition: service_healthy
             mosquitto:
                 condition: service_started
         networks:

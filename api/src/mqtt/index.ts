@@ -210,7 +210,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
         const tenantId = getTenantId();
         topics.push('meta');
         logger.info('✅ Dictionary sync enabled - subscribing to meta topic', {
-          topic: `iot/${tenantId}/device/+/meta/#`,
+          topic: `iot/${tenantId}/agent/+/meta/#`,
           useKeyCompaction,
           timestamp: new Date().toISOString()
         });
@@ -221,7 +221,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       
       logger.info('✅ All MQTT subscriptions active', {
         topics,
-        wildcardPattern: `iot/${getTenantId()}/device/+/{topic}/#`,
+        wildcardPattern: `iot/${getTenantId()}/agent/+/{topic}/#`,
         timestamp: new Date().toISOString()
       });
     } else {

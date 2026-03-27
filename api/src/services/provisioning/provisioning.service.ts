@@ -13,9 +13,9 @@ import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import { query } from '../../db/connection';
 import {
-  DeviceModel,
+  AgentModel,
   DeviceTargetStateModel,
-  Device,
+  Agent,
 } from '../../db/models';
 import {
   validateProvisioningKey,
@@ -50,10 +50,10 @@ const eventPublisher = new EventPublisher();
 
 export interface RegistrationRequest {
   uuid: string;
-  deviceName: string;
-  deviceType: string;
-  deviceApiKey: string;
-  devicePublicKey?: string; // Ed25519/P-256 public key for PoP
+  agentName: string;
+  agentType: string;
+  agentApiKey: string;
+  agentPublicKey?: string; // Ed25519/P-256 public key for PoP
   provisioningApiKey: string;
   macAddress?: string;
   osVersion?: string;
@@ -125,7 +125,7 @@ export class ProvisioningService {
     ipAddress?: string,
     userAgent?: string
   ): Promise<ProvisioningResponse> {
-    const { uuid, deviceName, deviceType, deviceApiKey, devicePublicKey, provisioningApiKey, macAddress, osVersion, agentVersion } = data;
+    const { uuid, agentName, agentType, agentApiKey, agentPublicKey, provisioningApiKey, macAddress, osVersion, agentVersion } = data;
 
     const now = new Date();
 
@@ -133,7 +133,7 @@ export class ProvisioningService {
     await checkProvisioningRateLimit(ipAddress!);
 
     // PoP is mandatory for all agents.
-    if (!devicePublicKey) {
+    if (!agentPublicKey) {
       await logProvisioningAttempt(
         ipAddress!,
         uuid,
@@ -148,11 +148,11 @@ export class ProvisioningService {
     // ============================================================
     // VIRTUAL AGENT PATH (Server-side provisioning key generation)
     // ============================================================
-    if (deviceType === 'virtual') {
+    if (agentType === 'virtual') {
       logger.info('Processing virtual agent registration', {
-        deviceUuid: uuid.substring(0, 8) + '...',
-        deviceName,
-        deviceType,
+        agentUuid: uuid.substring(0, 8) + '...',
+        agentName: agentName,
+        agentType: agentType,
         hasFleetUuid: !!data.fleet_uuid
       });
 
@@ -184,7 +184,7 @@ export class ProvisioningService {
         virtualFleetUuid,
         1, // max_agents: 1 (one-time use for this specific virtual agent)
         1, // expires_in_days: 1 (short-lived for security)
-        `Auto-generated for virtual agent: ${deviceName}`,
+        `Auto-generated for virtual agent: ${agentName}`,
         'system' // created_by
       );
 
@@ -196,15 +196,15 @@ export class ProvisioningService {
       });
 
       // 2. Hash device API key
-      const hashedApiKey = await bcrypt.hash(deviceApiKey, 10);
+      const hashedApiKey = await bcrypt.hash(agentApiKey, 10);
 
       // 3. Determine namespace: use fleet namespace if provided, otherwise use default
       let targetNamespace = (data as any).namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
 
       // 4. Create device record (pending deployment)
-      const deviceData: Partial<Device> = {
-        device_name: deviceName,
-        device_type: 'virtual',
+      const agentData: Partial<Agent> = {
+        agent_name: agentName,
+        agent_type: 'virtual',
         device_api_key_hash: hashedApiKey,
         fleet_uuid: virtualFleetUuid, // Assign to fleet (provided or existing "Virtual Agents")
         provisioned_by_key_id: provisioningKeyId,
@@ -221,14 +221,7 @@ export class ProvisioningService {
       };
 
       // Upsert device
-      const device = await DeviceModel.upsert(uuid, deviceData);
-
-      logger.info('Virtual agent device record created', {
-        deviceId: device.id,
-        deviceUuid: uuid.substring(0, 8) + '...',
-        deploymentStatus: 'pending',
-        namespace: device.k8s_namespace
-      });
+      const agent = await AgentModel.upsert(uuid, agentData);
 
       // 5. Create default target state (needed for when pod comes online)
       await this.createDefaultTargetState(uuid, agentVersion, provisioningKeyId);
@@ -236,14 +229,14 @@ export class ProvisioningService {
       // Log deployment start (Event Sourcing)
       
       await eventPublisher.publish(
-        'device.deployment.started',
+        'agent.deployment.started',
         'agent',
         uuid,
         {
-          device_name: deviceName,
-          device_type: 'virtual',
-          fleet_uuid: device.fleet_uuid,
-          namespace: device.k8s_namespace,
+          agent_name: agentName,
+          agent_type: 'virtual',
+          fleet_uuid: agent.fleet_uuid,
+          namespace: agent.k8s_namespace,
           initiated_at: new Date().toISOString()
         },
         {
@@ -258,27 +251,27 @@ export class ProvisioningService {
       // 6. Deploy to K8s with plaintext provisioning key
       try {
         await virtualAgentDeployer.deploy({
-          deviceUuid: device.uuid,
-          deviceName: device.device_name,
+          deviceUuid: agent.uuid,
+          deviceName: agent.agent_name,
           provisioningKey: generatedProvisioningKey, // Plaintext, injected to K8s Secret
-          fleetUuid: device.fleet_uuid,
-          namespace: device.k8s_namespace || undefined,
+          fleetUuid: agent.fleet_uuid,
+          namespace: agent.k8s_namespace || undefined,
           metadata: (data as any).metadata, // OPC UA profile metadata
           endpoints: (data as any).endpoints // Protocol endpoints
         });
 
-        await DeviceModel.update(uuid, { deployment_status: 'deploying' });
+        await AgentModel.update(uuid, { deployment_status: 'deploying' });
         
         // Log successful K8s deployment creation (Event Sourcing)
         await eventPublisher.publish(
-          'device.deployed',
+          'agent.deployed',
           'agent',
           uuid,
           {
-            device_name: deviceName,
-            device_type: 'virtual',
-            namespace: device.k8s_namespace,
-            deployment_name: device.helm_release_name,
+            agent_name: agentName,
+            agent_type: 'virtual',
+            namespace: agent.k8s_namespace,
+            deployment_name: agent.helm_release_name,
             completed_at: new Date().toISOString()
           },
           {
@@ -291,32 +284,32 @@ export class ProvisioningService {
         );
         
         logger.info('Virtual agent deployment initiated', {
-          deviceUuid: uuid.substring(0, 8) + '...',
-          namespace: device.k8s_namespace
+          agentUuid: uuid.substring(0, 8) + '...',
+          namespace: agent.k8s_namespace
         });
       } catch (deployError) {
         logger.error('Virtual agent deployment failed', {
-          deviceUuid: uuid,
+          agentUuid: uuid,
           error: deployError instanceof Error ? deployError.message : String(deployError)
         });
 
         // Update device status to failed
         const errorMsg = deployError instanceof Error ? deployError.message : String(deployError);
-        await DeviceModel.update(device.uuid, {
+        await AgentModel.update(agent.uuid, {
           deployment_status: 'failed',
           status: 'offline'
         });
         
         // Log deployment failure (Event Sourcing)
         await eventPublisher.publish(
-          'device.deployment.failed',
+          'agent.deployment.failed',
           'agent',
           uuid,
           {
-            device_name: deviceName,
-            device_type: 'virtual',
+            agent_name: agentName,
+            agent_type: 'virtual',
             error: errorMsg,
-            namespace: device.k8s_namespace,
+            namespace: agent.k8s_namespace,
             failed_at: new Date().toISOString()
           },
           {
@@ -340,36 +333,36 @@ export class ProvisioningService {
         userAgent,
         severity: AuditSeverity.INFO,
         details: {
-          deviceName,
+          deviceName: agentName,
           deviceType: 'virtual',
-          fleetUuid: device.fleet_uuid,
-          namespace: device.k8s_namespace,
+          fleetUuid: agent.fleet_uuid,
+          namespace: agent.k8s_namespace,
           deploymentStatus: 'deploying'
         }
       }).catch(err => logger.error('audit failed', err));
 
       // 7. Event publishing
       await eventPublisher.publish(
-        'device.virtual-agent.deployed',
+        'agent.virtual-agent.deployed',
         'agent',
         uuid,
         {
-          device_name: deviceName,
-          device_type: 'virtual',
-          fleet_uuid: device.fleet_uuid,
-          namespace: device.k8s_namespace,
+          agent_name: agentName,
+          agent_type: 'virtual',
+          fleet_uuid: agent.fleet_uuid,
+          namespace: agent.k8s_namespace,
           created_at: now.toISOString()
         }
       ).catch(err => logger.error('event publish failed', err));
 
       // 8. Return minimal response (NO provisioning key sent to client!)
       return {
-        id: device.id,
-        uuid: device.uuid,
-        deviceName: device.device_name,
-        deviceType: device.device_type,
-        fleetUuid: device.fleet_uuid,
-        createdAt: device.created_at.toISOString(),
+        id: agent.id,
+        uuid: agent.uuid,
+        deviceName: agent.agent_name,
+        deviceType: agent.agent_type,
+        fleetUuid: agent.fleet_uuid,
+        createdAt: agent.created_at.toISOString(),
         mqtt: {
           username: '',
           password: '',
@@ -387,18 +380,18 @@ export class ProvisioningService {
     // ============================================================
     
     // Check if device already exists - critical for virtual agents
-    const existingDevice = await DeviceModel.getByUuid(uuid);
+    const existingDevice = await AgentModel.getByUuid(uuid);
     
     // Identify virtual agents by EITHER device_type='virtual' OR deployment_status is set
     const isVirtualAgent = existingDevice && 
-                           (existingDevice.device_type === 'virtual' || !!existingDevice.deployment_status);
+                           (existingDevice.agent_type === 'virtual' || !!existingDevice.deployment_status);
     
     if (isVirtualAgent) {
       logger.info('Virtual agent registration detected - using existing device record', {
         deviceUuid: uuid.substring(0, 8) + '...',
-        existingName: existingDevice.device_name,
-        existingType: existingDevice.device_type,
-        agentProvidedName: deviceName,
+        existingName: existingDevice.agent_name,
+        existingType: existingDevice.agent_type,
+        agentProvidedName: agentName,
         deploymentStatus: existingDevice.deployment_status,
         provisioningState: existingDevice.provisioning_state
       });
@@ -427,13 +420,13 @@ export class ProvisioningService {
       
       // Generate credentials
       const [hashedApiKey, mqttCredentials, vpnCredentials] = await Promise.all([
-        bcrypt.hash(deviceApiKey, 10),
+        bcrypt.hash(agentApiKey, 10),
         this.generateMqttCredentials(uuid),
-        this.generateVpnCredentials(uuid, existingDevice.device_name, ipAddress)
+        this.generateVpnCredentials(uuid, existingDevice.agent_name, ipAddress)
       ]);
       
       // Update ONLY registration fields - preserve dashboard-created name, type, fleet, etc.
-      const deviceData: Partial<Device> = {
+      const deviceData: Partial<Agent> = {
         device_api_key_hash: hashedApiKey,
         mqtt_username: mqttCredentials.username,
         vpn_enabled: !!vpnCredentials,
@@ -448,16 +441,16 @@ export class ProvisioningService {
         provisioning_state: 'registered'
       };
       
-      deviceData.device_public_key = devicePublicKey;
+      deviceData.device_public_key = agentPublicKey;
       deviceData.pop_verified = false;
       
-      const device = await DeviceModel.upsert(uuid, deviceData);
+      const agent = await AgentModel.upsert(uuid, deviceData);
       
       logger.info('Virtual agent registered successfully', {
-        deviceId: device.id,
-        deviceUuid: uuid.substring(0, 8) + '...',
-        deviceName: device.device_name,
-        deviceType: device.device_type
+        agentId: agent.id,
+        agentUuid: uuid.substring(0, 8) + '...',
+        agentName: agent.agent_name,
+        agentType: agent.agent_type
       });
       
       await this.createDefaultTargetState(uuid, agentVersion, keyRecord.id);
@@ -467,11 +460,11 @@ export class ProvisioningService {
       let challenge: string | undefined;
       challenge = crypto.randomBytes(32).toString('base64url');
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-      await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
+      await AgentModel.storeChallenge(uuid, challenge, expiresAt);
       
       // Use same response builder as physical agents
       return this.buildProvisioningResponse(
-        device,
+        agent,
         data,
         keyRecord,
         mqttCredentials,
@@ -568,15 +561,15 @@ export class ProvisioningService {
       mqttCredentials,
       vpnCredentials
     ] = await Promise.all([
-      bcrypt.hash(deviceApiKey, 10),
+      bcrypt.hash(agentApiKey, 10),
       this.generateMqttCredentials(uuid),
-      this.generateVpnCredentials(uuid, deviceName, ipAddress)
+      this.generateVpnCredentials(uuid, agentName, ipAddress)
     ]);
 
     // Prepare device data for physical agents
-    const deviceData: Partial<Device> = {
-      device_name: deviceName,
-      device_type: deviceType,
+    const deviceData: Partial<Agent> = {
+      agent_name: agentName,
+      agent_type: agentType,
       device_api_key_hash: hashedApiKey,
       fleet_uuid: fleetUuid || undefined,
       provisioned_by_key_id: keyRecord.id,
@@ -594,19 +587,19 @@ export class ProvisioningService {
     };
 
     logger.info('Device registration includes public key for PoP', {
-      deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName,
-      publicKeyLength: devicePublicKey.length
+      agentUuid: uuid.substring(0, 8) + '...',
+      agentName: agentName,
+      publicKeyLength: agentPublicKey.length
     });
-    deviceData.device_public_key = devicePublicKey;
+    deviceData.device_public_key = agentPublicKey;
     deviceData.pop_verified = false;
 
-    const device = await DeviceModel.upsert(uuid, deviceData);
+    const device = await AgentModel.upsert(uuid, deviceData);
     
     logger.info('Device upserted to database', {
-      deviceId: device.id,
-      deviceUuid: uuid.substring(0, 8) + '...',
-      hasPublicKey: !!devicePublicKey,
+      agentId: device.id,
+      agentUuid: uuid.substring(0, 8) + '...',
+      hasPublicKey: !!agentPublicKey,
       popVerified: device.pop_verified
     });
 
@@ -622,8 +615,8 @@ export class ProvisioningService {
       'agent',
       uuid,
       {
-        device_name: deviceName,
-        device_type: deviceType,
+        device_name: agentName,
+        device_type: agentType,
         fleet_uuid: fleetUuid,
         provisioned_at: now.toISOString(),
         ip_address: ipAddress,
@@ -641,7 +634,7 @@ export class ProvisioningService {
       userAgent,
       severity: AuditSeverity.INFO,
       details: {
-        deviceName,
+        deviceName: agentName,
         macAddress,
         fleetUuid: fleetUuid,
         mqttUsername: mqttCredentials.username
@@ -670,7 +663,7 @@ export class ProvisioningService {
       expiresInSeconds: 300
     });
     
-    await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
+    await AgentModel.storeChallenge(uuid, challenge, expiresAt);
     
     logger.info('PoP challenge stored in database', {
       deviceUuid: uuid.substring(0, 8) + '...',
@@ -711,8 +704,8 @@ export class ProvisioningService {
         `INSERT INTO mqtt_acls (clientid, username, topic, access, priority)
            VALUES ($1, $2, $3, 7, 0)
            ON CONFLICT DO NOTHING`,
-        // Tenant-aware ACL pattern: iot/{tenantId}/device/${deviceUuid}/#
-        [username, username, `iot/${getTenantId()}/device/${deviceUuid}/#`]
+        // Tenant-aware ACL pattern: iot/{tenantId}/agent/${deviceUuid}/#
+        [username, username, `iot/${getTenantId()}/agent/${deviceUuid}/#`]
       )
     ]);
 
@@ -846,25 +839,25 @@ export class ProvisioningService {
    * Build provisioning response
    */
   private async buildProvisioningResponse(
-    device: any,
+    agent: any,
     data: RegistrationRequest,
     provisioningKeyRecord: any,
     mqttCredentials: { username: string; password: string },
     vpnCredentials?: { type: 'tailscale'; tailscale: any },
     challenge?: string
   ): Promise<ProvisioningResponse> {
-    const { uuid, deviceName, deviceType } = data;
+    const { uuid, agentName: deviceName, agentType: deviceType } = data;
 
     // Detect virtual agents FIRST (before checking broker config)
-    const isVirtual = device.device_type === 'virtual';
+    const isVirtual = agent.device_type === 'virtual';
     
     // Fetch broker configuration based on agent type
     let brokerConfig;
     if (isVirtual) {
       // Virtual agents: Use env variable (K8s internal DNS for low-latency)
-      brokerConfig = await getBrokerConfigForExternalDevice(device.uuid);
+      brokerConfig = await getBrokerConfigForExternalDevice(agent.uuid);
       logger.info('Virtual agent: Using env variable or database config', {
-        deviceType: device.device_type,
+        deviceType: agent.device_type,
         hasConfig: !!brokerConfig,
         source: brokerConfig?.id === 0 ? 'environment' : 'database'
       });
@@ -872,7 +865,7 @@ export class ProvisioningService {
       // Standalone agents: Skip env variables, use database config for public URL
       brokerConfig = await getStandaloneBrokerConfig();
       logger.info('Standalone agent: Using database config (skipping env variables)', {
-        deviceType: device.device_type,
+        deviceType: agent.device_type,
         hasConfig: !!brokerConfig,
         brokerUrl: brokerConfig ? buildBrokerUrl(brokerConfig) : 'none'
       });
@@ -881,12 +874,12 @@ export class ProvisioningService {
     if (brokerConfig) {
       logger.info(`Using MQTT broker for device: ${brokerConfig.name} (${buildBrokerUrl(brokerConfig)})`, {
         source: brokerConfig.id === 0 ? 'environment' : 'database',
-        deviceType: device.device_type,
+        deviceType: agent.device_type,
         isVirtual
       });
     } else {
       logger.warn('No MQTT broker configured - device will not receive broker credentials', {
-        deviceType: device.device_type,
+        deviceType: agent.device_type,
         isVirtual
       });
     }
@@ -913,8 +906,8 @@ export class ProvisioningService {
       if (finalBrokerConfig.host === 'localhost' || finalBrokerConfig.host === '127.0.0.1') {
         finalBrokerConfig.host = 'host.docker.internal';
         logger.info('Virtual agent: Overriding localhost broker host to host.docker.internal', {
-          deviceType: device.device_type,
-          deploymentStatus: device.deployment_status,
+          deviceType: agent.device_type,
+          deploymentStatus: agent.deployment_status,
           originalHost: brokerConfig.host,
           newHost: finalBrokerConfig.host
         });
@@ -933,9 +926,9 @@ export class ProvisioningService {
         : 'Standalone agent provisioning failed: No MQTT broker in database (check mqtt_broker_config table)';
       
       logger.error(errorMsg, {
-        deviceType: device.device_type,
+        deviceType: agent.device_type,
         isVirtual,
-        uuid: device.uuid
+        uuid: agent.uuid
       });
       
       throw new Error(errorMsg);
@@ -945,14 +938,14 @@ export class ProvisioningService {
     const apiTlsConfig = await configService.get('api.tls');
 
     const response: ProvisioningResponse = {
-      id: device.id,
-      uuid: device.uuid,
+      id: agent.id,
+      uuid: agent.uuid,
       deviceName,
       deviceType,
       tenantId: getTenantId(), // Pass tenant ID to agent for topic construction
-      fleetUuid: device.fleet_uuid, // Use the resolved UUID from device
+      fleetUuid: agent.fleet_uuid, // Use the resolved UUID from device
       ...(challenge && { challenge }), // Include challenge if PoP enabled
-      createdAt: device.created_at.toISOString(),
+      createdAt: agent.created_at.toISOString(),
       mqtt: {
         // Legacy fields for backward compatibility (deprecated)
         username: mqttCredentials.username,
@@ -962,8 +955,8 @@ export class ProvisioningService {
         brokerConfig: finalBrokerConfig,
         // Tenant-aware topic patterns
         topics: {
-          publish: [`iot/${getTenantId()}/device/${device.uuid}/#`],
-          subscribe: [`iot/${getTenantId()}/device/${device.uuid}/#`]
+          publish: [`iot/${getTenantId()}/agent/${agent.uuid}/#`],
+          subscribe: [`iot/${getTenantId()}/agent/${agent.uuid}/#`]
         }
       },
       ...(apiTlsConfig?.caCert && {
@@ -984,7 +977,7 @@ export class ProvisioningService {
         tailscale: vpnCredentials.tailscale
       };
       logger.info(`Tailscale VPN configuration added to provisioning response`, {
-        deviceUuid: device.uuid,
+        deviceUuid: agent.uuid,
         vpnType: 'tailscale',
         hasAuthKey: !!vpnCredentials.tailscale?.authKey,
         tailnetName: vpnCredentials.tailscale?.tailnetName,

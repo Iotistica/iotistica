@@ -26,7 +26,7 @@ export interface ReadingInsert {
   quality?: string;
   unit?: string;
   protocol: string;
-  extra?: ReadingExtra;  // endpoint_uuid, agent_uuid (asset), device_name, protocol metadata
+  extra?: ReadingExtra;  // endpoint_uuid, device_uuid (asset), device_name, protocol metadata
   time?: Date;
   anomaly_score?: number;
   anomaly_threshold?: number;
@@ -36,7 +36,7 @@ export interface ReadingInsert {
 
 export interface ReadingExtra {
   endpoint_uuid?: string;      // Endpoint/sensor UUID (connection point)
-  agent_uuid?: string;        // Stable device/asset UUID (business entity)
+  device_uuid?: string;        // Stable device/asset UUID (business entity)
   device_name?: string;        // Device/asset name
   ingested_at?: string;        // ISO timestamp when ingested
   [key: string]: any;          // Protocol-specific metadata (slave_id, location, scale, etc)
@@ -45,7 +45,7 @@ export interface ReadingExtra {
 export interface TimeSeriesQuery {
   agent_uuid?: string;        // Agent UUID (infrastructure entity)
   endpoint_uuid?: string;    // Endpoint UUID (connection point)
-  asset_uuid?: string;       // Asset UUID (business entity, stored in extra.agent_uuid)
+  asset_uuid?: string;       // Asset UUID (business entity, stored in extra.device_uuid)
   metric_name?: string;
   protocol?: string;
   start_time?: Date;
@@ -164,8 +164,12 @@ export class ReadingsService {
       insertedTotal += result.rowCount || 0;
     }
 
-    // Refresh metric catalog if readings contain deviceName (new agents detected)
-    const hasDeviceNames = readings.some(r => r.extra?.deviceName);
+    // Refresh metric catalog if readings include device identity metadata.
+    // Accept both snake_case and camelCase during transition.
+    const hasDeviceNames = readings.some(r => {
+      const extra = r.extra as any;
+      return Boolean(extra?.device_name || extra?.deviceName);
+    });
     if (hasDeviceNames && insertedTotal > 0) {
       // Fire-and-forget (don't block on refresh)
       this.refreshMetricCatalog().catch(err => 

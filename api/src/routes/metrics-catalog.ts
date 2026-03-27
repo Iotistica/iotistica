@@ -20,6 +20,7 @@ export const router = express.Router();
 // Validation schemas
 const protocolSchema = z.string().min(1).max(50).regex(/^[a-zA-Z0-9_\-]+$/, 'Invalid protocol format').optional();
 const uuidSchema = z.string().uuid('Invalid UUID format').optional();
+const requiredUuidSchema = z.string().uuid('Invalid UUID format');
 const deviceNameSchema = z.string().min(1).max(255).regex(/^[a-zA-Z0-9_\-\.\s]+$/, 'Invalid device name format');
 const metricNameSchema = z.string().min(1).max(100).regex(/^[a-zA-Z0-9_\-\.]+$/, 'Invalid metric name format');
 const timeRangeSchema = z.enum(['1m', '1h', '6h', '12h', '24h', '7d', '30d']).default('1h');
@@ -45,68 +46,90 @@ router.get('/agents', jwtAuth, async (req, res) => {
     const validatedProtocol = protocolSchema.parse(protocol);
     const validatedAgentUuid = uuidSchema.parse(agentUuid);
     
-    // Group by device_name to get unique agents across all agents while preserving
-    // exact source references (asset_uuid, endpoint_uuid) for widget configs that need stable IDs.
+    // Query agent_devices (live table) with a metric_catalog rollup and
+    // a fallback rollup directly from readings for resilience.
     let sql = `
-      WITH unnested AS (
+      SELECT
+        ad.uuid::text                                       AS device_uuid,
+        ad.name                                             AS device_name,
+        ad.protocol,
+        COALESCE(mc_rollup.last_seen, live_rollup.last_seen, ad.last_seen_at)
+                                                            AS last_seen,
+        COALESCE(mc_rollup.metric_count, live_rollup.metric_count, 0)
+                                                            AS metric_count,
+        COALESCE(mc_rollup.available_metrics, live_rollup.available_metrics, ARRAY[]::text[])
+                                                            AS available_metrics,
+        COALESCE(mc_rollup.overall_quality_percentage, live_rollup.overall_quality_percentage, 0)
+                                                            AS overall_quality_percentage,
+        1                                                   AS agent_count,
+        ARRAY[ad.agent_uuid::text]                          AS agent_uuids,
+        ARRAY[a.device_name]                                AS agent_names,
+        COALESCE(
+          (SELECT jsonb_agg(src)
+           FROM (
+             SELECT DISTINCT jsonb_build_object(
+               'deviceUuid',   ad2.uuid::text,
+               'endpointUuid', ad2.endpoint_uuid::text,
+               'agentUuid',    ad2.agent_uuid::text,
+               'agentName',    a2.device_name,
+               'endpointName', ep2.name
+             ) AS src
+             FROM agent_devices ad2
+             JOIN  agents    a2  ON a2.uuid  = ad2.agent_uuid
+             LEFT JOIN endpoints ep2 ON ep2.uuid = ad2.endpoint_uuid
+             WHERE ad2.uuid     = ad.uuid
+               AND ad2.protocol = ad.protocol
+               AND ad2.enabled  = true
+           ) AS srcs),
+          '[]'::jsonb
+        )                                                   AS source_refs
+      FROM agent_devices ad
+      JOIN  agents a  ON a.uuid  = ad.agent_uuid
+      LEFT JOIN LATERAL (
         SELECT
-          ed.device_name,
-          ed.protocol,
-          ed.last_seen,
-          ed.agent_uuid,
-          ed.agent_name,
-          ed.overall_quality_percentage,
-          ed.agent_uuid,
-          ed.endpoint_uuid,
-          ep.name AS endpoint_name,
-          unnest(ed.available_metrics) as metric_name
-        FROM endpoint_agents ed
-        LEFT JOIN endpoints ep ON ep.uuid::text = ed.endpoint_uuid
-          AND ep.agent_uuid = ed.agent_uuid
-        WHERE 1=1
+          MAX(mc.last_seen)                                       AS last_seen,
+          COUNT(DISTINCT mc.metric_name)::int                     AS metric_count,
+          array_agg(DISTINCT mc.metric_name ORDER BY mc.metric_name)
+                                                                 AS available_metrics,
+          AVG(mc.quality_percentage)                              AS overall_quality_percentage
+        FROM metric_catalog mc
+        WHERE mc.device_uuid = ad.uuid
+          AND mc.agent_uuid  = ad.agent_uuid
+          AND mc.protocol    = ad.protocol
+      ) mc_rollup ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          MAX(r.time)                                              AS last_seen,
+          COUNT(DISTINCT r.metric_name)::int                       AS metric_count,
+          array_agg(DISTINCT r.metric_name ORDER BY r.metric_name)
+                                                                   AS available_metrics,
+          (SUM(CASE WHEN r.quality = 'good' THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*), 0) * 100)
+                                                                   AS overall_quality_percentage
+        FROM readings r
+        WHERE r.agent_uuid = ad.agent_uuid
+          AND r.protocol   = ad.protocol
+          AND COALESCE(NULLIF(r.extra->>'device_uuid', ''), NULLIF(r.extra->>'deviceUuid', '')) = ad.uuid::text
+          AND r.time > NOW() - INTERVAL '7 days'
+      ) live_rollup ON true
+      WHERE ad.enabled = true
     `;
-    
+
     const params: any[] = [];
     let paramIndex = 0;
-    
+
     if (validatedProtocol) {
       params.push(validatedProtocol);
       paramIndex++;
-      sql += ` AND protocol = $${paramIndex}`;
+      sql += ` AND ad.protocol = $${paramIndex}`;
     }
-    
+
     if (validatedAgentUuid) {
       params.push(validatedAgentUuid);
       paramIndex++;
-      sql += ` AND agent_uuid = $${paramIndex}`;
+      sql += ` AND ad.agent_uuid = $${paramIndex}`;
     }
-    
-    sql += `
-      )
-      SELECT
-        device_name,
-        protocol,
-        MAX(last_seen) as last_seen,
-        COUNT(DISTINCT metric_name) as metric_count,
-        array_agg(DISTINCT metric_name ORDER BY metric_name) as available_metrics,
-        AVG(overall_quality_percentage) as overall_quality_percentage,
-        COUNT(DISTINCT agent_uuid) as agent_count,
-        array_agg(DISTINCT agent_uuid::text) as agent_uuids,
-        array_agg(DISTINCT agent_name ORDER BY agent_name) as agent_names,
-        COALESCE(
-          jsonb_agg(DISTINCT jsonb_build_object(
-            'deviceUuid', agent_uuid,
-            'endpointUuid', endpoint_uuid,
-            'agentUuid', agent_uuid::text,
-            'agentName', agent_name,
-            'endpointName', endpoint_name
-          )) FILTER (WHERE agent_uuid IS NOT NULL),
-          '[]'::jsonb
-        ) as source_refs
-      FROM unnested
-      GROUP BY device_name, protocol
-      ORDER BY last_seen DESC
-    `;
+
+    sql += ` ORDER BY last_seen DESC NULLS LAST`;
     
     const result = await query(sql, params);
     
@@ -130,7 +153,7 @@ router.get('/agents', jwtAuth, async (req, res) => {
  * GET /api/v1/metrics/catalog
  * 
  * Query params:
- * - deviceName: filter by device name (from extra.deviceName)
+ * - deviceUuid: filter by device UUID
  * - protocol: filter by protocol
  * - agentUuid: filter by agent UUID
  * - metricName: filter by metric name
@@ -139,11 +162,11 @@ router.get('/agents', jwtAuth, async (req, res) => {
  */
 router.get('/catalog', jwtAuth, async (req, res) => {
   try {
-    const { deviceName, protocol, agentUuid, metricName } = req.query;
+    const { deviceUuid, protocol, agentUuid, metricName } = req.query;
     const requestId = (req as any).id || 'unknown';
     
     // Validate inputs
-    const validatedDeviceName = deviceName ? deviceNameSchema.parse(deviceName) : undefined;
+    const validatedDeviceUuid = uuidSchema.parse(deviceUuid);
     const validatedProtocol = protocolSchema.parse(protocol);
     const validatedAgentUuid = uuidSchema.parse(agentUuid);
     const validatedMetricName = metricName ? metricNameSchema.parse(metricName) : undefined;
@@ -152,8 +175,8 @@ router.get('/catalog', jwtAuth, async (req, res) => {
       SELECT
         agent_uuid,
         agent_name,
+        device_uuid,
         device_name,
-        agent_uuid,
         endpoint_uuid,
         protocol,
         metric_name,
@@ -176,10 +199,10 @@ router.get('/catalog', jwtAuth, async (req, res) => {
     const params: any[] = [];
     let paramIndex = 0;
     
-    if (validatedDeviceName) {
-      params.push(validatedDeviceName);
+    if (validatedDeviceUuid) {
+      params.push(validatedDeviceUuid);
       paramIndex++;
-      sql += ` AND device_name = $${paramIndex}`;
+      sql += ` AND device_uuid = $${paramIndex}`;
     }
     
     if (validatedProtocol) {
@@ -200,7 +223,7 @@ router.get('/catalog', jwtAuth, async (req, res) => {
       sql += ` AND metric_name = $${paramIndex}`;
     }
     
-    sql += ` ORDER BY device_name, metric_name`;
+    sql += ` ORDER BY device_uuid, metric_name`;
     
     const result = await query(sql, params);
     
@@ -224,7 +247,7 @@ router.get('/catalog', jwtAuth, async (req, res) => {
  * GET /api/v1/metrics/latest
  * 
  * Query params:
- * - deviceName: device name (required)
+ * - deviceUuid: device UUID (required)
  * - metricName: specific metric (optional, returns all if omitted)
  * - agentUuid: agent UUID (optional)
  * 
@@ -232,17 +255,18 @@ router.get('/catalog', jwtAuth, async (req, res) => {
  */
 router.get('/latest', jwtAuth, async (req, res) => {
   try {
-    const { deviceName, metricName, agentUuid } = req.query;
+    const { deviceUuid, metricName, agentUuid } = req.query;
     const requestId = (req as any).id || 'unknown';
     
     // Validate required params
-    const validatedDeviceName = deviceNameSchema.parse(deviceName);
+    const validatedDeviceUuid = requiredUuidSchema.parse(deviceUuid);
     const validatedMetricName = metricName ? metricNameSchema.parse(metricName) : undefined;
     const validatedAgentUuid = uuidSchema.parse(agentUuid);
     
     let sql = `
       SELECT 
         agent_uuid,
+        device_uuid,
         device_name,
         metric_name,
         time,
@@ -258,10 +282,10 @@ router.get('/latest', jwtAuth, async (req, res) => {
         agent_name,
         agent_is_online
       FROM latest_readings
-      WHERE device_name = $1
+      WHERE device_uuid = $1
     `;
     
-    const params: any[] = [validatedDeviceName];
+    const params: any[] = [validatedDeviceUuid];
     let paramIndex = 1;
     
     if (validatedMetricName) {
@@ -300,7 +324,7 @@ router.get('/latest', jwtAuth, async (req, res) => {
  * GET /api/v1/metrics/timeseries
  * 
  * Query params (required):
- * - deviceName: device name (from extra.deviceName)
+ * - deviceUuid: device UUID
  * - metricName: metric name
  * 
  * Query params (optional):
@@ -312,11 +336,11 @@ router.get('/latest', jwtAuth, async (req, res) => {
  */
 router.get('/timeseries', jwtAuth, async (req, res) => {
   try {
-    const { deviceName, metricName, timeRange, agentUuid, aggregation } = req.query;
+    const { deviceUuid, metricName, timeRange, agentUuid, aggregation } = req.query;
     const requestId = (req as any).id || 'unknown';
     
     // Validate required params
-    const validatedDeviceName = deviceNameSchema.parse(deviceName);
+    const validatedDeviceUuid = requiredUuidSchema.parse(deviceUuid);
     const validatedMetricName = metricNameSchema.parse(metricName);
     const validatedTimeRange = timeRangeSchema.parse(timeRange);
     const validatedAggregation = aggregationSchema.parse(aggregation);
@@ -395,6 +419,7 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
       SELECT
         bucket as time,
         agent_uuid,
+        device_uuid,
         endpoint_uuid,
         avg_value,
         min_value,
@@ -402,11 +427,11 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
         sample_count,
         ${qualityCol}
       FROM ${viewName}
-      WHERE device_name = $1
+      WHERE device_uuid = $1
         AND metric_name = $2
     `;
     
-    const params: any[] = [validatedDeviceName, validatedMetricName];
+    const params: any[] = [validatedDeviceUuid, validatedMetricName];
     let paramIndex = 2;
     
     // Add time range filter - SAFE: Using parameterized make_interval() with validated number
@@ -428,16 +453,16 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
     const metadataResult = await query(
       `SELECT unit, protocol, quality_percentage 
        FROM metric_catalog 
-       WHERE device_name = $1 AND metric_name = $2
+       WHERE device_uuid = $1 AND metric_name = $2
        LIMIT 1`,
-      [validatedDeviceName, validatedMetricName]
+      [validatedDeviceUuid, validatedMetricName]
     );
     
     const metadata = metadataResult.rows[0] || {};
     
     res.json({
       metric: {
-        deviceName: validatedDeviceName,
+        deviceUuid: validatedDeviceUuid,
         metricName: validatedMetricName,
         unit: metadata.unit,
         protocol: metadata.protocol
@@ -496,7 +521,7 @@ router.post('/refresh', jwtAuth, async (req, res) => {
         sql = 'SELECT refresh_metric_catalog()';
         break;
       case 'agents':
-        sql = 'SELECT refresh_endpoint_agents()';
+        sql = 'SELECT refresh_endpoint_devices()';
         break;
       case 'latest':
         sql = 'SELECT refresh_latest_readings()';

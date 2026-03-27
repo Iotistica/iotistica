@@ -29,10 +29,13 @@
 
 import path from 'path';
 import { PipelineService } from './pipeline.service.js';
+import { agentTopic, setTenantId } from '../../mqtt/topics.js';
 
 const FLOWS_FILE =
   process.env['FLOWS'] ??
   path.join(__dirname, 'flows', 'example-enrich.flows.json');
+
+setTenantId(process.env['MQTT_TENANT_ID'] ?? 'demo-tenant');
 
 // ── Simple console logger ────────────────────────────────────────────────────
 const logger = {
@@ -61,7 +64,7 @@ const testMessages = isOpcuaFlow
             { timestamp: new Date().toISOString(), deviceName: 'plc-001', metric: 'humidity',        value: 65,     unit: '%',   quality: 'bad'  },
           ],
         },
-        topic: 'iot/device/abc/endpoints/plc-001',
+        topic: agentTopic('abc', 'endpoints', 'plc-001'),
         deviceId: 'plc-001',
       },
       // All-bad batch → should be dropped
@@ -73,7 +76,7 @@ const testMessages = isOpcuaFlow
             { timestamp: new Date().toISOString(), deviceName: 'plc-002', metric: 'vibration', value: 0, quality: 'bad' },
           ],
         },
-        topic: 'iot/device/abc/endpoints/plc-002',
+        topic: agentTopic('abc', 'endpoints', 'plc-002'),
         deviceId: 'plc-002',
       },
     ]

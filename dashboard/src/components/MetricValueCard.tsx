@@ -10,6 +10,10 @@ export interface MetricValueCardConfig {
   widgetId: string;
   title?: string;
   agentUuid?: string;
+  agentName?: string;
+  endpointName?: string;
+  deviceUuid?: string;
+  endpointUuid?: string;
   deviceName: string;
   metricName: string;
   timeRange: '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
@@ -59,7 +63,8 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   const fetchData = async () => {
-    if (!config.deviceName || !config.metricName) return;
+    if (!config.deviceUuid && !config.deviceName) return;
+    if (!config.metricName) return;
 
     try {
       setIsRefreshing(true);
@@ -67,10 +72,14 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
 
       const token = localStorage.getItem('accessToken');
       const params = new URLSearchParams({
-        deviceName: config.deviceName,
         metricName: config.metricName,
         timeRange: config.timeRange,
       });
+      if (config.deviceUuid) {
+        params.set('deviceUuid', config.deviceUuid);
+      } else {
+        params.set('deviceName', config.deviceName);
+      }
       if (config.agentUuid) {
         params.set('agentUuid', config.agentUuid);
       }
@@ -106,14 +115,14 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
 
   useEffect(() => {
     fetchData();
-  }, [config.deviceName, config.metricName, config.timeRange, refreshTrigger]);
+  }, [config.deviceUuid, config.deviceName, config.metricName, config.timeRange, refreshTrigger]);
 
   useEffect(() => {
     if (refreshInterval > 0) {
       const interval = setInterval(fetchData, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [refreshInterval, config.deviceName, config.metricName, config.timeRange]);
+  }, [refreshInterval, config.deviceUuid, config.deviceName, config.metricName, config.timeRange]);
 
   const formatValue = (value: number): string => {
     if (Math.abs(value) >= 1000000) {

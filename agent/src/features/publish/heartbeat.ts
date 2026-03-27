@@ -1,5 +1,5 @@
 import { createJsonPayload, serializePayload } from '../../mqtt/manager.js';
-import { deviceTopic } from '../../mqtt/topics.js';
+import { agentTopic } from '../../mqtt/topics.js';
 import type { DeviceConfig, DeviceStats, MqttConnection, Logger } from './types.js';
 import { DeviceState } from './types.js';
 
@@ -41,7 +41,7 @@ export class HeartbeatManager {
 
     const name = this.config.name || 'unknown';
     try {
-      const topic = deviceTopic(this.deviceUuid, 'endpoints', this.config.mqttHeartbeatTopic);
+      const topic = agentTopic(this.deviceUuid, 'endpoints', this.config.mqttHeartbeatTopic);
       const data = {
         endpoint: name,
         timestamp: new Date().toISOString(),

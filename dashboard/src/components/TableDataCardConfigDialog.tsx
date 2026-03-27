@@ -18,6 +18,7 @@ interface TableDataCardConfigDialogProps {
 interface EndpointDevice {
   agent_uuid: string;
   agent_name: string;
+  device_uuid: string;
   device_name: string;
   protocol: string;
   metric_count: string;
@@ -25,6 +26,7 @@ interface EndpointDevice {
   agent_count?: number;
   agent_uuids?: string[];
   agent_names?: string[];
+  source_refs?: Array<{ deviceUuid: string; endpointUuid: string; agentUuid?: string; agentName?: string; }>;
 }
 
 interface AgentOption {
@@ -41,7 +43,10 @@ export function TableDataCardConfigDialog({
   const [devices, setDevices] = useState<EndpointDevice[]>([]);
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
   const [selectedAgentUuid, setSelectedAgentUuid] = useState('');
+  const [selectedAgentName, setSelectedAgentName] = useState('');
+  const [selectedEndpointName, setSelectedEndpointName] = useState('');
   const [selectedDevice, setSelectedDevice] = useState('');
+  const [selectedDeviceUuid, setSelectedDeviceUuid] = useState('');
   const [selectedMetric, setSelectedMetric] = useState('');
   const [timeRange, setTimeRange] = useState('1h');
   const [title, setTitle] = useState('');
@@ -67,7 +72,10 @@ export function TableDataCardConfigDialog({
   useEffect(() => {
     if (open && initialConfig) {
       setSelectedAgentUuid(initialConfig.agentUuid || '');
+      setSelectedAgentName((initialConfig as any).agentName || '');
+      setSelectedEndpointName((initialConfig as any).endpointName || '');
       setSelectedDevice(initialConfig.deviceName || '');
+      setSelectedDeviceUuid((initialConfig as any).deviceUuid || '');
       setSelectedMetric(initialConfig.metricName || '');
       setTimeRange(initialConfig.timeRange || '1h');
       setTitle(initialConfig.title || '');
@@ -83,7 +91,10 @@ export function TableDataCardConfigDialog({
     } else if (open && !initialConfig) {
       // Reset for new widget
       setSelectedAgentUuid('');
+      setSelectedAgentName('');
+      setSelectedEndpointName('');
       setSelectedDevice('');
+      setSelectedDeviceUuid('');
       setSelectedMetric('');
       setTimeRange('1h');
       setTitle('');
@@ -105,16 +116,19 @@ export function TableDataCardConfigDialog({
       const device = devices.find(d => d.device_name === selectedDevice);
       if (device) {
         setAvailableMetrics(device.available_metrics || []);
+        const uuid = device.device_uuid || device.source_refs?.[0]?.deviceUuid || '';
+        setSelectedDeviceUuid(uuid);
       }
     } else {
       setAvailableMetrics([]);
+      setSelectedDeviceUuid('');
     }
   }, [selectedDevice, devices]);
 
   const fetchDevices = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const url = buildApiUrl('/api/v1/metrics/devices');
+      const url = buildApiUrl('/api/v1/metrics/agents');
       const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -122,7 +136,7 @@ export function TableDataCardConfigDialog({
       });
       if (response.ok) {
         const data = await response.json();
-        setDevices(data.devices || []);
+        setDevices(data.agents || []);
       } else {
         console.error('Failed to fetch devices:', response.status, response.statusText);
       }
@@ -171,10 +185,13 @@ export function TableDataCardConfigDialog({
   const handleSave = () => {
     const config: TableDataCardConfig = {
       agentUuid: selectedAgentUuid || undefined,
+      agentName: selectedAgentName || undefined,
+      endpointName: selectedEndpointName || undefined,
+      deviceUuid: selectedDeviceUuid || undefined,
       deviceName: selectedDevice,
       metricName: selectedMetric,
       timeRange,
-      title: title || `${selectedMetric} - Metrics Table`,
+      title: title || undefined,
       columns,
       pageSize: parseInt(pageSize, 10)
     };

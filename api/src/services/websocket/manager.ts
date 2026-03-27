@@ -51,7 +51,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server as HTTPServer } from 'http';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import { z } from 'zod';
-import { DeviceModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
+import { AgentModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
 import logger from '../../utils/logger';
 import fetch from 'node-fetch';
 import { sessionManager } from '../auth/session-manager';
@@ -1144,14 +1144,14 @@ export class WebSocketManager {
 
   private async fetchSystemInfo(deviceUuid: string): Promise<any> {
     try {
-      const device = await DeviceModel.getByUuid(deviceUuid);
+      const device = await AgentModel.getByUuid(deviceUuid);
       if (!device) return null;
 
       return {
         os: device.os_version || 'Unknown',
         architecture: 'Unknown', // Not stored in DB yet
         uptime: 0, // Not stored in DB yet
-        hostname: device.device_name || 'Unknown',
+        hostname: device.agent_name || 'Unknown',
         ipAddress: device.ip_address || 'Unknown',
         macAddress: device.mac_address || 'Unknown',
       };
@@ -1163,7 +1163,7 @@ export class WebSocketManager {
 
   private async fetchProcesses(deviceUuid: string): Promise<any> {
     try {
-      const device = await DeviceModel.getByUuid(deviceUuid);
+      const device = await AgentModel.getByUuid(deviceUuid);
       if (!device) return null;
 
       return {
@@ -1238,7 +1238,7 @@ export class WebSocketManager {
   private async fetchNetworkInterfaces(deviceUuid: string): Promise<any> {
     try {
       // Use same logic as HTTP endpoint /api/v1/agents/:uuid/network-interfaces
-      const device = await DeviceModel.getByUuid(deviceUuid);
+      const device = await AgentModel.getByUuid(deviceUuid);
       if (!device) return null;
 
       let interfaces = [];

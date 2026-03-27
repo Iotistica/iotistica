@@ -31,6 +31,7 @@ interface MetricValueCardConfigDialogProps {
 interface EndpointDevice {
   agent_uuid: string;
   agent_name: string;
+  device_uuid: string;
   device_name: string;
   protocol: string;
   available_metrics: string[];
@@ -39,6 +40,7 @@ interface EndpointDevice {
   agent_count?: number;
   agent_uuids?: string[];
   agent_names?: string[];
+  source_refs?: Array<{ deviceUuid: string; endpointUuid: string; agentUuid?: string; agentName?: string; }>;
 }
 
 interface AgentOption {
@@ -53,7 +55,10 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
   initialConfig,
 }) => {
   const [selectedDevice, setSelectedDevice] = useState('');
+  const [selectedDeviceUuid, setSelectedDeviceUuid] = useState('');
   const [selectedAgentUuid, setSelectedAgentUuid] = useState('');
+  const [selectedAgentName, setSelectedAgentName] = useState('');
+  const [selectedEndpointName, setSelectedEndpointName] = useState('');
   const [selectedMetric, setSelectedMetric] = useState('');
   const [timeRange, setTimeRange] = useState<'1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d'>('1h');
   const [title, setTitle] = useState('');
@@ -80,7 +85,16 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
       const device = devices.find(d => d.device_name === selectedDevice);
       if (device) {
         setAvailableMetrics(device.available_metrics);
+        const ref = device.source_refs?.[0];
+        const uuid = device.device_uuid || ref?.deviceUuid || '';
+        setSelectedDeviceUuid(uuid);
+        setSelectedEndpointName(ref?.agentName || device.agent_name || '');
+        setSelectedAgentName(ref?.agentName || device.agent_name || '');
       }
+    } else {
+      setSelectedDeviceUuid('');
+      setSelectedAgentName('');
+      setSelectedEndpointName('');
     }
   }, [selectedDevice, devices]);
 
@@ -88,7 +102,10 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
   useEffect(() => {
     if (open && initialConfig) {
       setSelectedAgentUuid(initialConfig.agentUuid || '');
+      setSelectedAgentName(initialConfig.agentName || '');
+      setSelectedEndpointName(initialConfig.endpointName || '');
       setSelectedDevice(initialConfig.deviceName || '');
+      setSelectedDeviceUuid(initialConfig.deviceUuid || '');
       setSelectedMetric(initialConfig.metricName || '');
       setTimeRange(initialConfig.timeRange || '1h');
       setTitle(initialConfig.title || '');
@@ -100,7 +117,10 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
     } else if (open && !initialConfig) {
       // Reset form for new widget
       setSelectedAgentUuid('');
+      setSelectedAgentName('');
+      setSelectedEndpointName('');
       setSelectedDevice('');
+      setSelectedDeviceUuid('');
       setSelectedMetric('');
       setTimeRange('1h');
       setTitle('');
@@ -116,13 +136,13 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
     setLoadingDevices(true);
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl('/api/v1/metrics/devices'), {
+      const response = await fetch(buildApiUrl('/api/v1/metrics/agents'), {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
       const data = await response.json();
-      setDevices(data.devices || []);
+      setDevices(data.agents || []);
     } catch (error) {
       console.error('Error fetching devices:', error);
     } finally {
@@ -177,6 +197,9 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
     const config: MetricValueCardConfig = {
       widgetId: initialConfig?.widgetId || `metric-value-${Date.now()}`,
       agentUuid: selectedAgentUuid || undefined,
+      agentName: selectedAgentName || undefined,
+      endpointName: selectedEndpointName || undefined,
+      deviceUuid: selectedDeviceUuid || undefined,
       deviceName: selectedDevice,
       metricName: selectedMetric,
       timeRange,

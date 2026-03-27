@@ -93,16 +93,22 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
   const fetchData = async () => {
     try {
+      if (!config.deviceUuid) {
+        setError('Widget is missing device UUID. Please edit and re-save this widget.');
+        setLoading(false);
+        return;
+      }
+
       const cacheTtlMs = refreshInterval > 0
         ? Math.min(Math.max(refreshInterval * 1000, 5000), 60000)
         : 15000;
-      const requestKey = `${config.agentUuid || 'all'}|${config.deviceName}|${config.metricName}|${config.timeRange}`;
+      const requestKey = `${config.agentUuid || 'all'}|${config.deviceUuid}|${config.metricName}|${config.timeRange}`;
 
       const result: TimeSeriesResponse = await metricsRequestQueue.enqueue(
         requestKey,
         async () => {
           const params = new URLSearchParams({
-            deviceName: config.deviceName,
+            deviceUuid: config.deviceUuid,
             metricName: config.metricName,
             timeRange: config.timeRange,
           });
@@ -159,7 +165,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       const interval = setInterval(fetchData, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [config.deviceName, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
+  }, [config.deviceUuid, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
 
   const formatTimeValue = (timeValue: number) => {
     const date = new Date(timeValue);

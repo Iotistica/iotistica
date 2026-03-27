@@ -1,6 +1,6 @@
 import msgpack from 'msgpack-lite';
 import { DictionaryModel } from '../db/models/index.js';
-import { deviceTopic } from '../mqtt/topics.js';
+import { agentTopic } from '../mqtt/topics.js';
 
 /**
  * MQTT Message Dictionary Manager
@@ -1617,7 +1617,7 @@ export class DictionaryManager {
     };
 
     await this.mqttManager.publish(
-      deviceTopic(this.deviceUuid, 'meta', 'dictionary'),
+      agentTopic(this.deviceUuid, 'meta', 'dictionary'),
       { format: 'json', data: payload },
       { qos: 1, retain: true }
     );
@@ -1645,7 +1645,7 @@ export class DictionaryManager {
       fields: fields.length,
       domainBreakdown: this.metrics.domainStats,
       deviceUuid: this.deviceUuid,
-      topic: deviceTopic(this.deviceUuid, 'meta', 'dictionary'),
+      topic: agentTopic(this.deviceUuid, 'meta', 'dictionary'),
       qos: 1,
       retain: true
     });
@@ -1727,7 +1727,7 @@ export class DictionaryManager {
       });
       
       await this.mqttManager.publish(
-        deviceTopic(this.deviceUuid, 'meta', 'dictionary', 'delta'),
+        agentTopic(this.deviceUuid, 'meta', 'dictionary', 'delta'),
         { format: 'json', data: payload },
         { qos: 1, retain: false }
       );

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { getHeapStatistics } from 'v8';
-import { deviceTopic } from '../../mqtt/topics.js';
+import { agentTopic } from '../../mqtt/topics.js';
 import type { PipelineService } from '../pipeline/index.js';
 import type { AnomalyDetectionService } from '../../anomaly/index.js';
 import type { Protocol } from '../../anomaly/types.js';
@@ -207,7 +207,7 @@ export class PublishManager extends EventEmitter {
     try {
 
       const name = this.config.name || 'unknown';
-      const topic = deviceTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
+      const topic = agentTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
       const messageCount = this.batcher.messageCount;
       const batchBytes = this.batcher.totalBytes;
         const messages = [...this.batcher.messages];

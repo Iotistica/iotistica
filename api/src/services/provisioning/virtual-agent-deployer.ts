@@ -13,7 +13,7 @@
 
 import * as k8s from '@kubernetes/client-node';
 import logger from '../../utils/logger';
-import { DeviceModel } from '../../db/models';
+import { AgentModel } from '../../db/models';
 
 export interface VirtualAgentConfig {
   deviceUuid: string;
@@ -291,7 +291,7 @@ export class VirtualAgentDeployer {
       await this.checkDeploymentErrors(namespace, name, config.deviceUuid);
 
       // 4. Update device status in database
-      await DeviceModel.update(config.deviceUuid, {
+      await AgentModel.update(config.deviceUuid, {
         deployment_status: 'deploying',
         k8s_namespace: namespace,
         k8s_pod_name: null, // Will be set when pod is running
@@ -316,7 +316,7 @@ export class VirtualAgentDeployer {
       });
 
       // Update device status to failed
-      await DeviceModel.update(config.deviceUuid, {
+      await AgentModel.update(config.deviceUuid, {
         deployment_status: 'failed',
         status: 'offline'
       }).catch(dbError => {
@@ -727,7 +727,7 @@ export class VirtualAgentDeployer {
           });
           
           // Update device with error details
-          await DeviceModel.update(deviceUuid, {
+          await AgentModel.update(deviceUuid, {
             deployment_status: 'failed',
             status: 'offline'
           }).catch(() => {});
@@ -764,7 +764,7 @@ export class VirtualAgentDeployer {
    */
   async getStatus(deviceUuid: string): Promise<DeploymentStatus> {
     try {
-      const device = await DeviceModel.getByUuid(deviceUuid);
+      const device = await AgentModel.getByUuid(deviceUuid);
       if (!device) {
         return {
           status: 'failed',
@@ -772,7 +772,7 @@ export class VirtualAgentDeployer {
         };
       }
 
-      if (device.device_type !== 'virtual') {
+      if (device.agent_type !== 'virtual') {
         return {
           status: 'failed',
           error: 'Not a virtual agent'
@@ -780,7 +780,7 @@ export class VirtualAgentDeployer {
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.device_name);
+      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.agent_name);
 
       // Get deployment
       const deployment = await this.appsApi.readNamespacedDeployment({ name: deploymentName, namespace });
@@ -839,17 +839,17 @@ export class VirtualAgentDeployer {
    */
   async cleanupProvisioningKey(deviceUuid: string): Promise<void> {
     try {
-      const device = await DeviceModel.getByUuid(deviceUuid);
+      const device = await AgentModel.getByUuid(deviceUuid);
       if (!device) {
         throw new Error('Device not found');
       }
 
-      if (device.device_type !== 'virtual') {
+      if (device.agent_type !== 'virtual') {
         throw new Error('Not a virtual agent');
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const name = device.helm_release_name || this.sanitizeDnsName(device.device_name);
+      const name = device.helm_release_name || this.sanitizeDnsName(device.agent_name);
       const secretName = `${name}-prov-key`;
 
       // OPTIMIZATION: Check if Secret exists first (cheap check)
@@ -947,17 +947,17 @@ export class VirtualAgentDeployer {
    */
   async destroy(deviceUuid: string): Promise<void> {
     try {
-      const device = await DeviceModel.getByUuid(deviceUuid);
+      const device = await AgentModel.getByUuid(deviceUuid);
       if (!device) {
         throw new Error('Device not found');
       }
 
-      if (device.device_type !== 'virtual') {
+      if (device.agent_type !== 'virtual') {
         throw new Error('Not a virtual agent');
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const name = device.helm_release_name || this.sanitizeDnsName(device.device_name);
+      const name = device.helm_release_name || this.sanitizeDnsName(device.agent_name);
       const secretName = `${name}-prov-key`;
 
       logger.info('Destroying virtual agent', {
@@ -1005,7 +1005,7 @@ export class VirtualAgentDeployer {
       }
 
       // Update device status
-      await DeviceModel.update(deviceUuid, {
+      await AgentModel.update(deviceUuid, {
         deployment_status: 'terminated',
         status: 'offline',
         is_online: false,
@@ -1032,21 +1032,21 @@ export class VirtualAgentDeployer {
    */
   async restart(deviceUuid: string): Promise<void> {
     try {
-      const device = await DeviceModel.getByUuid(deviceUuid);
+      const device = await AgentModel.getByUuid(deviceUuid);
       if (!device) {
         throw new Error('Device not found');
       }
 
-      if (device.device_type !== 'virtual') {
+      if (device.agent_type !== 'virtual') {
         throw new Error('Not a virtual agent');
       }
 
       const namespace = device.k8s_namespace || this.defaultNamespace;
-      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.device_name);
+      const deploymentName = device.helm_release_name || this.sanitizeDnsName(device.agent_name);
 
       logger.info('Restarting virtual agent', {
         deviceUuid: deviceUuid.substring(0, 8) + '...',
-        deviceName: device.device_name,
+        deviceName: device.agent_name,
         namespace,
         deploymentName
       });
@@ -1082,7 +1082,7 @@ export class VirtualAgentDeployer {
         }
 
         // Update device status to deploying (will be updated by agent when it comes back online)
-        await DeviceModel.update(deviceUuid, {
+        await AgentModel.update(deviceUuid, {
           deployment_status: 'deploying',
           status: 'offline'
         });

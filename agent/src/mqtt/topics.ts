@@ -1,7 +1,12 @@
 /**
  * Agent MQTT topic helpers.
- * Topic convention: iot/{tenantId}/device/{deviceUuid}/...
+ * Topic convention: iot/{tenantId}/agent/{agentUuid}/...
  */
+
+export const MQTT_TOPIC_PATTERNS = {
+  tenantScopedRoot: 'iot/{tenantId}/agent/{agentUuid}/...',
+  tenantScopedEndpoints: 'iot/{tenantId}/agent/{agentUuid}/endpoints/{topic}'
+} as const;
 
 let cachedTenantId: string | null = null;
 
@@ -38,6 +43,6 @@ export function resetTenantIdCache(): void {
   cachedTenantId = null;
 }
 
-export function deviceTopic(deviceUuid: string, ...segments: string[]): string {
-  return ['iot', getTenantId(), 'device', deviceUuid, ...segments].join('/');
+export function agentTopic(agentUuid: string, ...segments: string[]): string {
+  return ['iot', getTenantId(), 'agent', agentUuid, ...segments].join('/');
 }

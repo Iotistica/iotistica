@@ -22,7 +22,7 @@
 import express from 'express';
 import { query } from '../db/connection';
 import {
-  DeviceModel,
+  AgentModel,
   DeviceLogsModel,
 } from '../db/models';
 import { logger } from '../utils/logger';
@@ -161,7 +161,7 @@ router.post('/device/:uuid/logs',
     }
     
     // Ensure device exists (lightweight check, don't auto-create)
-    const device = await DeviceModel.getOrCreate(uuid);
+    const device = await AgentModel.getOrCreate(uuid);
     if (!device) {
       logger.warn('Log upload from unregistered device - rejecting', {
         deviceUuid: uuid.substring(0, 8) + '...',

@@ -13,8 +13,6 @@ from urllib.parse import urlparse
 
 import paho.mqtt.client as mqtt
 
-from profile_loader import load_mqtt_profiles
-
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -73,12 +71,16 @@ class DataPointPublisher:
 
 class MqttSimulator:
     def __init__(self):
-        self.profile_name = os.environ["PROFILE"]
         self.broker_url = os.environ["MQTT_BROKER_URL"]
-        self.username = os.environ.get("MQTT_USERNAME") or os.environ.get("MQTT_AUTH_USERNAME")
-        self.password = os.environ.get("MQTT_PASSWORD") or os.environ.get("MQTT_AUTH_PASSWORD")
+        self.username = os.environ.get("MQTT_USERNAME") 
+        self.password = os.environ.get("MQTT_PASSWORD") 
         self.client_id = os.environ.get("MQTT_CLIENT_ID", "iotistic-mqtt-simulator")
         self.device_id = os.environ.get("MQTT_DEVICE_ID", self.client_id)
+        self.publish_topic = os.environ.get("MQTT_TOPIC", "sensor/temperature")
+        metric_names_raw = os.environ.get("MQTT_METRIC_NAMES", "temperature")
+        self.metric_names = [name.strip() for name in metric_names_raw.split(",") if name.strip()]
+        self.default_qos = int(os.environ.get("MQTT_QOS", "0"))
+        self.default_retain = os.environ.get("MQTT_RETAIN", "false").lower() == "true"
         self.publish_interval_ms = int(os.environ.get("PUBLISH_INTERVAL_MS", "1000"))
         self.payload_mode = os.environ.get("MQTT_PAYLOAD_MODE", "multi").lower()
         self.timestamp_field = os.environ.get("MQTT_TIMESTAMP_FIELD", "ts")
@@ -91,8 +93,14 @@ class MqttSimulator:
         if self.publish_interval_ms < 100:
             raise ValueError("PUBLISH_INTERVAL_MS must be >= 100")
 
+        if not self.metric_names:
+            raise ValueError("MQTT_METRIC_NAMES must contain at least one metric name")
+
         if self.payload_mode not in ("single", "multi"):
             raise ValueError("MQTT_PAYLOAD_MODE must be one of: single, multi")
+
+        if self.default_qos not in (0, 1, 2):
+            raise ValueError("MQTT_QOS must be one of: 0, 1, 2")
 
         if self.timestamp_format not in ("epoch_ms", "iso"):
             raise ValueError("MQTT_TIMESTAMP_FORMAT must be one of: epoch_ms, iso")
@@ -106,15 +114,30 @@ class MqttSimulator:
         self.host = parsed.hostname
         self.port = parsed.port
 
-        profiles = load_mqtt_profiles()
-        if self.profile_name not in profiles:
-            available = ", ".join(profiles.keys())
-            raise ValueError(f"Profile '{self.profile_name}' not found. Available: {available}")
+        datapoints = []
+        metric_defaults = {
+            "temperature": {"unit": "C", "base": 23.0, "min": -20.0, "max": 80.0},
+            "humidity": {"unit": "%", "base": 45.0, "min": 0.0, "max": 100.0},
+            "pressure": {"unit": "kPa", "base": 101.3, "min": 90.0, "max": 110.0},
+            "vibration": {"unit": "mm/s", "base": 5.0, "min": 0.0, "max": 30.0},
+        }
 
-        profile = profiles[self.profile_name]
-        datapoints = profile.get("dataPoints", [])
-        if not isinstance(datapoints, list) or len(datapoints) == 0:
-            raise ValueError(f"Profile '{self.profile_name}' has no dataPoints")
+        for metric_name in self.metric_names:
+            defaults = metric_defaults.get(metric_name.lower(), {"unit": "", "base": 50.0})
+            datapoints.append({
+                "name": metric_name,
+                "topic": self.publish_topic,
+                "qos": self.default_qos,
+                "retain": self.default_retain,
+                "dataType": "float",
+                "unit": defaults.get("unit", ""),
+                "base": defaults.get("base", 50.0),
+                "noise_pct": 0.02,
+                "min": defaults.get("min"),
+                "max": defaults.get("max"),
+                "period_s": 30.0,
+                "device_uuid": os.environ.get("MQTT_DEVICE_UUID", ""),
+            })
 
         self.publishers = [DataPointPublisher(dp) for dp in datapoints]
         self.publishers_by_topic = defaultdict(list)
@@ -219,8 +242,9 @@ class MqttSimulator:
 
     def run(self):
         logger.info(
-            "Starting MQTT simulator profile=%s datapoints=%d mode=%s topics=%d",
-            self.profile_name,
+            "Starting MQTT simulator topic=%s metrics=%s datapoints=%d mode=%s topics=%d",
+            self.publish_topic,
+            ",".join(self.metric_names),
             len(self.publishers),
             self.payload_mode,
             len(self.publishers_by_topic),

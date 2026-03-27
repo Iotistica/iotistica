@@ -5,6 +5,9 @@ import { buildApiUrl } from '../config/api';
 
 export interface TableDataCardConfig {
   agentUuid?: string;
+  agentName?: string;
+  endpointName?: string;
+  deviceUuid?: string;
   deviceName: string;
   metricName: string;
   timeRange: string; // '1h', '6h', '12h', '24h'
@@ -66,7 +69,11 @@ function TableDataCardComponent({
       return;
     }
     
-    if (!config.deviceName || !config.metricName || !config.timeRange) {
+    if (!config.deviceUuid && !config.deviceName) {
+      setError('Missing configuration');
+      return;
+    }
+    if (!config.metricName || !config.timeRange) {
       setError('Missing configuration');
       return;
     }
@@ -77,10 +84,14 @@ function TableDataCardComponent({
     try {
       const token = localStorage.getItem('accessToken');
       const params = new URLSearchParams({
-        deviceName: config.deviceName,
         metricName: config.metricName,
         timeRange: config.timeRange,
       });
+      if (config.deviceUuid) {
+        params.set('deviceUuid', config.deviceUuid);
+      } else {
+        params.set('deviceName', config.deviceName);
+      }
       if (config.agentUuid) {
         params.set('agentUuid', config.agentUuid);
       }
@@ -127,7 +138,7 @@ function TableDataCardComponent({
       const interval = setInterval(fetchData, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [config.deviceName, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
+  }, [config.deviceUuid, config.deviceName, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
 
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {

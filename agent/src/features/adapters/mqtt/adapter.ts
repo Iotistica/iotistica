@@ -4,7 +4,7 @@ import * as mqttPattern from 'mqtt-pattern';
 import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
 import { MqttAdapterConfig, MqttDevice, MqttMetricConfig } from './types.js';
 import { parsePayload, coerceType } from './payload.js';
-import { deviceTopic } from '../../../mqtt/topics.js';
+import { agentTopic } from '../../../mqtt/topics.js';
 
 /**
  * MQTT Adapter
@@ -331,7 +331,7 @@ export class MqttAdapter extends EventEmitter {
     }
 
     try {
-      return deviceTopic(this.deviceUuid, 'agent', 'broker');
+      return agentTopic(this.deviceUuid, 'agent', 'broker');
     } catch {
       // Tenant ID not yet initialized (pre-provisioning). Topic will remain null until reconnect.
       this.logger.debug('Broker status topic skipped: tenant ID not yet initialized');

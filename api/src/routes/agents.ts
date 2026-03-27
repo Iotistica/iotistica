@@ -15,7 +15,7 @@ import express from 'express';
 import { query } from '../db/connection';
 import { z } from 'zod';
 import {
-  DeviceModel,
+  AgentModel,
   DeviceTargetStateModel,
   DeviceCurrentStateModel,
 } from '../db/models';
@@ -108,7 +108,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
       }
     }
 
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -125,7 +125,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
     if (location !== undefined) updateFields['location'] = location || null;
     updateFields['modified_at'] = new Date();
 
-    const updatedDevice = await DeviceModel.update(uuid, updateFields);
+    const updatedDevice = await AgentModel.update(uuid, updateFields);
 
     await logAuditEvent({
       eventType: AuditEventType.DEVICE_CONFIG_UPDATE,
@@ -145,8 +145,8 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
       success: true,
       device: {
         uuid: updatedDevice.uuid,
-        deviceName: updatedDevice.device_name,
-        deviceType: updatedDevice.device_type,
+        deviceName: updatedDevice.agent_name,
+        deviceType: updatedDevice.agent_type,
         ipAddress: updatedDevice.ip_address,
         macAddress: updatedDevice.mac_address,
         location: updatedDevice.location,
@@ -231,7 +231,7 @@ router.get('/agents', jwtAuth, async (req, res) => {
     const filter = (req.query.filter as string)?.toLowerCase() || 'all';
     const includeTags = req.query.includeTags === 'true';
 
-    const agents = await DeviceModel.list({ isOnline });
+    const agents = await AgentModel.list({ isOnline });
 
     // Apply filter based on provisioning_state or is_online
     let filteredDevices = agents;
@@ -265,9 +265,9 @@ router.get('/agents', jwtAuth, async (req, res) => {
         return {
           id: device.uuid,
           uuid: device.uuid,
-          name: device.device_name,
-          device_name: device.device_name,
-          device_type: device.device_type,
+          name: device.agent_name,
+          device_name: device.agent_name,
+          device_type: device.agent_type,
           location: device.location,
           state: device.is_online ? 'active' : 'inactive',
           provisioning_state: device.provisioning_state,
@@ -353,7 +353,7 @@ router.get('/agents/:uuid', async (req, res) => {
   try {
     const { uuid } = req.params;
 
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -496,9 +496,9 @@ router.post('/agents', jwtAuth, async (req, res) => {
       const provisioningResponse = await provisioningService.registerDevice(
         {
           uuid: deviceUuid,
-          deviceName: uniqueDeviceName,
-          deviceType: 'virtual',
-          deviceApiKey,
+          agentName: uniqueDeviceName,
+          agentType: 'virtual',
+          agentApiKey: deviceApiKey,
           provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
           namespace: targetNamespace,
           fleet_uuid: fleet_uuid || undefined, // Pass fleet_uuid if provided
@@ -656,7 +656,7 @@ router.patch('/agents/:uuid/active', async (req, res) => {
       });
     }
 
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -664,12 +664,12 @@ router.patch('/agents/:uuid/active', async (req, res) => {
       });
     }
 
-    const updatedDevice = await DeviceModel.update(uuid, { is_active });
+    const updatedDevice = await AgentModel.update(uuid, { is_active });
 
     const action = is_active ? 'enabled' : 'disabled';
     logger.info(`Device ${action}`, {
       deviceId: uuid.substring(0, 8),
-      deviceName: device.device_name,
+      deviceName: device.agent_name,
       isActive: is_active
     });
 
@@ -679,8 +679,8 @@ router.patch('/agents/:uuid/active', async (req, res) => {
       'agent',
       uuid,
       {
-        device_name: device.device_name,
-        device_type: device.device_type,
+        device_name: device.agent_name,
+        device_type: device.agent_type,
         previous_state: device.is_active,
         new_state: is_active,
         reason: is_active ? 'administratively enabled' : 'administratively disabled',
@@ -711,7 +711,7 @@ router.patch('/agents/:uuid/active', async (req, res) => {
       severity: AuditSeverity.INFO,
       details: {
         action: `device_${action}`,
-        deviceName: device.device_name,
+        deviceName: device.agent_name,
         previousState: device.is_active,
         newState: is_active
       }
@@ -722,7 +722,7 @@ router.patch('/agents/:uuid/active', async (req, res) => {
       message: `Device ${action}`,
       device: {
         uuid: updatedDevice.uuid,
-        device_name: updatedDevice.device_name,
+        device_name: updatedDevice.agent_name,
         is_active: updatedDevice.is_active,
         is_online: updatedDevice.is_online
       }
@@ -749,7 +749,7 @@ router.delete('/agents/:uuid', deviceAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -757,7 +757,7 @@ router.delete('/agents/:uuid', deviceAuth, async (req, res) => {
       });
     }
 
-    await DeviceModel.delete(uuid);
+    await AgentModel.delete(uuid);
 
     logger.info('Device deleted (deprovisioned)', { 
       deviceId: uuid.substring(0, 8),
@@ -845,7 +845,7 @@ router.post('/agents/:uuid/apps', async (req, res) => {
     // else: use the provided appName for ad-hoc deployment
 
     // Verify device exists
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Not found',
@@ -1155,7 +1155,7 @@ router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
     });
 
     // Verify device exists
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -1246,7 +1246,7 @@ router.post('/agents/:uuid/deploy', async (req, res) => {
     });
 
     // Verify device exists
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -1330,7 +1330,7 @@ router.post('/agents/:uuid/deploy/cancel', async (req, res) => {
     logger.info('Canceling pending deployment', { deviceId: uuid.substring(0, 8) });
 
     // Verify device exists
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -1450,7 +1450,7 @@ router.put('/agents/:uuid/broker', async (req, res) => {
     });
 
     // 1. Verify device exists
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -1587,7 +1587,7 @@ router.put('/agents/:uuid/broker', async (req, res) => {
       message: `Device assigned to broker: ${broker.name}`,
       device: {
         uuid: device.uuid,
-        name: device.device_name
+        name: device.agent_name
       },
       broker: {
         id: broker.id,
@@ -1647,7 +1647,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
     }
 
     // Check if device exists
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -1771,7 +1771,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
       message: 'Agent update command sent via MQTT',
       device: {
         uuid: device.uuid,
-        deviceName: device.device_name
+        deviceName: device.agent_name
       },
       update: {
         version: version || 'latest',
@@ -1873,9 +1873,9 @@ router.post('/agents/virtual', jwtAuth, async (req, res) => {
     const provisioningResponse = await provisioningService.registerDevice(
       {
         uuid: deviceUuid,
-        deviceName,
-        deviceType: 'virtual',
-        deviceApiKey,
+        agentName: deviceName,
+        agentType: 'virtual',
+        agentApiKey: deviceApiKey,
         provisioningApiKey: 'virtual-agent-auto-generated', // Will be server-generated
         namespace: targetNamespace,
         fleet_uuid: fleetId || undefined // Pass fleet_uuid if provided
@@ -1938,7 +1938,7 @@ router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -1946,7 +1946,7 @@ router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
       });
     }
 
-    if (device.device_type !== 'virtual') {
+    if (device.agent_type !== 'virtual') {
       return res.status(400).json({
         error: 'Not a virtual agent',
         message: 'This endpoint is only for virtual agents'
@@ -1958,7 +1958,7 @@ router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
 
     res.json({
       deviceUuid: uuid,
-      deviceName: device.device_name,
+      deviceName: device.agent_name,
       deploymentStatus: deploymentStatus.status,
       namespace: deploymentStatus.namespace,
       podName: deploymentStatus.podName,
@@ -1991,7 +1991,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -1999,7 +1999,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
       });
     }
 
-    if (device.device_type !== 'virtual') {
+    if (device.agent_type !== 'virtual') {
       return res.status(400).json({
         error: 'Not a virtual agent',
         message: 'This endpoint is only for virtual agents'
@@ -2008,7 +2008,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
 
     logger.info('Destroying virtual agent (hard delete)', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.device_name,
+      deviceName: device.agent_name,
       namespace: device.k8s_namespace
     });
 
@@ -2024,7 +2024,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
     }
 
     // 2. Delete device record from database
-    await DeviceModel.delete(uuid);
+    await AgentModel.delete(uuid);
     logger.info('Device record deleted from database', { deviceUuid: uuid.substring(0, 8) + '...' });
 
     await logAuditEvent({
@@ -2032,7 +2032,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
       deviceUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
-        deviceName: device.device_name,
+        deviceName: device.agent_name,
         namespace: device.k8s_namespace,
         hardDelete: true
       }
@@ -2041,7 +2041,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
     res.json({
       message: 'Virtual agent deleted successfully (K8s + database)',
       deviceUuid: uuid,
-      deviceName: device.device_name
+      deviceName: device.agent_name
     });
 
   } catch (error: any) {
@@ -2075,7 +2075,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     if (!device) {
       return res.status(404).json({
         error: 'Device not found',
@@ -2083,7 +2083,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
       });
     }
 
-    if (device.device_type !== 'virtual') {
+    if (device.agent_type !== 'virtual') {
       return res.status(400).json({
         error: 'Not a virtual agent',
         message: 'This endpoint is only for virtual agents'
@@ -2092,7 +2092,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
 
     logger.info('Restarting virtual agent', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.device_name,
+      deviceName: device.agent_name,
       namespace: device.k8s_namespace
     });
 
@@ -2103,7 +2103,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
       deviceUuid: uuid,
       severity: AuditSeverity.INFO,
       details: {
-        deviceName: device.device_name,
+        deviceName: device.agent_name,
         namespace: device.k8s_namespace
       }
     }).catch(err => logger.error('Audit log failed', err));
@@ -2111,7 +2111,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
     res.json({
       message: 'Virtual agent restart initiated',
       deviceUuid: uuid,
-      deviceName: device.device_name,
+      deviceName: device.agent_name,
       namespace: device.k8s_namespace,
       note: 'Pod deleted - Kubernetes will automatically recreate it'
     });

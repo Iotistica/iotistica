@@ -22,7 +22,7 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import {
-  DeviceModel,
+  AgentModel,
   DeviceTargetStateModel,
   DeviceCurrentStateModel,
   DeviceMetricsModel,
@@ -278,7 +278,7 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
     const ifNoneMatch = req.headers['if-none-match'];
 
     // Check if device exists (don't auto-create)
-    const device = await DeviceModel.getOrCreate(uuid);
+    const device = await AgentModel.getOrCreate(uuid);
     if (!device) {
       logger.warn('Device not registered - rejecting state poll', {
         deviceUuid: uuid.substring(0, 8) + '...',

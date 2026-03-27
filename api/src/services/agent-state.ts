@@ -13,7 +13,7 @@
 
 import { query } from '../db/connection';
 import {
-  DeviceModel,
+  AgentModel,
   DeviceCurrentStateModel,
   DeviceMetricsModel,
 } from '../db/models';
@@ -97,7 +97,7 @@ export async function processAgentStateReport(
     });
     
     // Ensure device exists and mark as online
-    const device = await DeviceModel.getOrCreate(uuid);
+    const device = await AgentModel.getOrCreate(uuid);
     if (!device) {
       logger.warn('Agent state report from unregistered device - skipping', {
         deviceUuid: uuid.substring(0, 8) + '...',
@@ -109,14 +109,14 @@ export async function processAgentStateReport(
     // Agent reports with provisioning_state = 'provisioned' after successful provisioning
     // Trigger cleanup when we receive first state report from provisioned agent
     // Cleanup is idempotent - will gracefully handle if Secret already deleted
-    const shouldCleanup = device.device_type === 'virtual' && 
+    const shouldCleanup = device.agent_type === 'virtual' && 
                           deviceState.provisioning_state === 'provisioned' &&
                           device.provisioning_state !== 'provisioned';
     
     if (shouldCleanup) {
       logger.info('Virtual agent just completed provisioning - triggering cleanup', {
         deviceUuid: uuid.substring(0, 8) + '...',
-        deviceName: device.device_name,
+        deviceName: device.agent_name,
         oldState: device.provisioning_state,
         newState: deviceState.provisioning_state
       });
@@ -227,7 +227,7 @@ export async function processAgentStateReport(
     if (deviceState.agent_version) updateFields.agent_version = deviceState.agent_version;
     
     if (Object.keys(updateFields).length > 0) {
-      await DeviceModel.update(uuid, updateFields);
+      await AgentModel.update(uuid, updateFields);
     }
 
     // Record metrics if provided

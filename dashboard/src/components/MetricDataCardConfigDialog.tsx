@@ -267,7 +267,7 @@ export function MetricDataCardConfigDialog({
       setLoading(true);
       
       // Fetch devices with metric data
-      const metricsUrl = buildApiUrl('/api/v1/metrics/devices');
+      const metricsUrl = buildApiUrl('/api/v1/metrics/agents');
       const metricsResponse = await fetch(metricsUrl, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
@@ -279,7 +279,7 @@ export function MetricDataCardConfigDialog({
       }
 
       const metricsResult = await metricsResponse.json();
-      setDevices(metricsResult.devices || []);
+      setDevices(metricsResult.agents || []);
       
       // Fetch registered devices to check status
       const devicesUrl = buildApiUrl('/api/v1/agents?limit=1000');
@@ -292,7 +292,10 @@ export function MetricDataCardConfigDialog({
       if (devicesResponse.ok) {
         const devicesData = await devicesResponse.json();
         const deviceMap = new Map();
-        devicesData.devices?.forEach((d: any) => {
+        const registryAgents = Array.isArray(devicesData.agents)
+          ? devicesData.agents
+          : (Array.isArray(devicesData.devices) ? devicesData.devices : []);
+        registryAgents.forEach((d: any) => {
           deviceMap.set(d.uuid, {
             isOnline: d.is_online || false
           });
@@ -396,6 +399,7 @@ export function MetricDataCardConfigDialog({
                     </CommandEmpty>
                     <CommandGroup>
                       {filteredDevices.map((device) => {
+                        const hasRegistryData = registeredDevices.size > 0;
                         // Check if any of the device's agents are registered and online
                         const hasOnlineAgent = device.agent_uuids?.some(uuid => {
                           const deviceInfo = registeredDevices.get(uuid);
@@ -406,7 +410,7 @@ export function MetricDataCardConfigDialog({
                           registeredDevices.has(uuid)
                         );
                         
-                        const isDeleted = !hasRegisteredAgent;
+                        const isDeleted = hasRegistryData && !hasRegisteredAgent;
                         const isOffline = hasRegisteredAgent && !hasOnlineAgent;
                         
                         return (

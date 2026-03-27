@@ -18,7 +18,7 @@ import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { query } from '../db/connection';
 import {
-  DeviceModel,
+  AgentModel,
   DeviceTargetStateModel,
 } from '../db/models';
 import {
@@ -503,7 +503,7 @@ router.post('/device/:uuid/challenge', async (req, res) => {
 
   try {
     // Verify device exists
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     
     if (!device) {
       await logAuditEvent({
@@ -526,7 +526,7 @@ router.post('/device/:uuid/challenge', async (req, res) => {
 
     logger.info('Generating new PoP challenge', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.device_name,
+      deviceName: device.agent_name,
       challengeLength: challenge.length,
       expiresAt: expiresAt.toISOString(),
       hasPublicKey: !!device.device_public_key,
@@ -534,11 +534,11 @@ router.post('/device/:uuid/challenge', async (req, res) => {
     });
 
     // Store challenge for verification
-    await DeviceModel.storeChallenge(uuid, challenge, expiresAt);
+    await AgentModel.storeChallenge(uuid, challenge, expiresAt);
 
     logger.info('PoP challenge stored and issued to device', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.device_name,
+      deviceName: device.agent_name,
       expiresAt: expiresAt.toISOString()
     });
 
@@ -671,10 +671,10 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
     const response = await provisioningService.registerDevice(
       {
         uuid,
-        deviceName,
-        deviceType,
-        deviceApiKey,
-        devicePublicKey,
+        agentName: deviceName,
+        agentType: deviceType,
+        agentApiKey: deviceApiKey,
+        agentPublicKey: devicePublicKey,
         provisioningApiKey,
         macAddress,
         osVersion,
@@ -774,7 +774,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     });
 
     // Verify device exists
-    const device = await DeviceModel.getByUuid(uuid);
+    const device = await AgentModel.getByUuid(uuid);
     
     if (!device) {
       await logAuditEvent({
@@ -940,22 +940,22 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           reason: 'single-use challenge enforcement'
         });
         
-        await DeviceModel.storeChallenge(uuid, null, new Date()); // Expire challenge immediately
+        await AgentModel.storeChallenge(uuid, null, new Date()); // Expire challenge immediately
 
         // Mark device as PoP verified
         logger.info('Marking device as PoP verified', {
           deviceUuid: uuid.substring(0, 8) + '...',
-          deviceName: device.device_name
+          deviceName: device.agent_name
         });
         
-        await DeviceModel.markPopVerified(uuid);
+        await AgentModel.markPopVerified(uuid);
         
         // Record authentication method for fleet-level policy enforcement
-        await DeviceModel.recordAuthMethod(uuid, 'pop');
+        await AgentModel.recordAuthMethod(uuid, 'pop');
 
         logger.info('PoP verification successful and persisted', {
           deviceUuid: uuid.substring(0, 8) + '...',
-          deviceName: device.device_name,
+          deviceName: device.agent_name,
           authMethod: 'proof-of-possession'
         });
 
@@ -966,7 +966,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           userAgent,
           severity: AuditSeverity.INFO,
           details: { 
-            deviceName: device.device_name,
+            deviceName: device.agent_name,
             authMethod: 'proof-of-possession'
           }
         });
@@ -977,7 +977,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           device: {
             id: device.id,
             uuid: device.uuid,
-            deviceName: device.device_name,
+            deviceName: device.agent_name,
           }
         });
       } catch (verifyError: any) {
@@ -1004,7 +1004,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     // ========================================================================
     logger.warn('⚠️ Using LEGACY bcrypt verification (not PoP)', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.device_name,
+      deviceName: device.agent_name,
       hasPublicKey: !!device.device_public_key,
       hasSignature: !!signature,
       reason: !device.device_public_key ? 'device has no public key (not PoP-enabled)' : !signature ? 'no signature provided' : 'unknown',
@@ -1045,12 +1045,12 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
 
     logger.info('Legacy key exchange successful (bcrypt)', {
       deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.device_name
+      deviceName: device.agent_name
     });
     
     // Record authentication method for fleet-level policy enforcement
     // This allows future enforcement of PoP-only policies for high-security fleets
-    await DeviceModel.recordAuthMethod(uuid, 'bcrypt');
+    await AgentModel.recordAuthMethod(uuid, 'bcrypt');
 
     await logAuditEvent({
       eventType: AuditEventType.KEY_EXCHANGE_SUCCESS,
@@ -1059,7 +1059,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       userAgent,
       severity: AuditSeverity.INFO,
       details: { 
-        deviceName: device.device_name,
+        deviceName: device.agent_name,
         authMethod: 'bcrypt-fallback'
       }
     });
@@ -1070,7 +1070,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       device: {
         id: device.id,
         uuid: device.uuid,
-        deviceName: device.device_name,
+        deviceName: device.agent_name,
       }
     });
   } catch (error: any) {

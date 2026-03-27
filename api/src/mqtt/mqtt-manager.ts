@@ -136,14 +136,6 @@ export interface MetricsData {
   network?: any;
 }
 
-export interface ParsedTopic {
-  tenantId: string;
-  deviceUuid: string;
-  messageType: string;
-  subTopic?: string;
-  rest: string[];
-}
-
 export interface StateMessage {
   tenantId?: string;
   deviceUuid: string;
@@ -160,7 +152,7 @@ export interface AgentMessage {
 export interface UnknownMessage {
   topic: string;
   tenantId?: string;
-  deviceUuid: string;
+  agentUuid: string;
   messageType: string;
   data: any;
 }
@@ -974,31 +966,6 @@ export class MqttManager extends EventEmitter {
   }
 
   /**
-   * Parse MQTT topic into structured components
-   * Expected format: iot/{tenantId}/device/{uuid}/{type}/[subTopic]
-   * 
-   * @returns Parsed topic structure or null if invalid
-   */
-  private parseTopic(topic: string): ParsedTopic | null {
-    const parsed = parseMqttTopic(topic);
-    if (!parsed) {
-      logger.warn('Invalid MQTT topic format', { topic });
-      return null;
-    }
-    
-    // Add subTopic field for backward compatibility
-    const subTopic = parsed.rest.length > 0 ? parsed.rest[0] : undefined;
-    
-    return {
-      tenantId: parsed.tenantId,
-      deviceUuid: parsed.deviceUuid,
-      messageType: parsed.messageType,
-      subTopic,
-      rest: parsed.rest
-    };
-  }
-
-  /**
    * Handle incoming MQTT messages
    */
   private async handleMessage(topic: string, payload: Buffer): Promise<void> {
@@ -1006,13 +973,14 @@ export class MqttManager extends EventEmitter {
     this.lastMessageTimestamp = Date.now();
     
     try {
-      // Parse topic
-      const parsed = this.parseTopic(topic);
+      // Parse topic — format defined in topics.ts parseMqttTopic()
+      const parsed = parseMqttTopic(topic);
       if (!parsed) {
-        return; // Invalid topic, already logged
+        logger.warn('Invalid MQTT topic format', { topic });
+        return;
       }
 
-      const { deviceUuid, messageType, subTopic, rest } = parsed;
+      const { agentUuid, messageType, subTopic, rest } = parsed;
       
 
       // Parse payload (auto-detects msgpack or JSON) - pass Buffer directly
@@ -1026,7 +994,7 @@ export class MqttManager extends EventEmitter {
           try {
             // Log compacted message structure
             logger.info('Compacted message received', {
-              deviceUuid: deviceUuid.substring(0, 8),
+              deviceUuid: agentUuid.substring(0, 8),
               version: data.v,
               indicesCount: data.i?.length,
               valuesCount: data.d?.length,
@@ -1035,12 +1003,12 @@ export class MqttManager extends EventEmitter {
 
             // Use concurrency limiter to prevent event loop backpressure during bursts
             const expanded = await this.expansionLimit(() => 
-              this.cloudDictionaryManager!.expandMessage(deviceUuid, data)
+              this.cloudDictionaryManager!.expandMessage(agentUuid, data)
             );
             
             // Log expanded message
             logger.info('Message expanded using dictionary', {
-              deviceUuid: deviceUuid.substring(0, 8),
+              deviceUuid: agentUuid.substring(0, 8),
               version: data.v,
               compactedSize: payload.length,
               expandedFields: Object.keys(expanded).length,
@@ -1051,9 +1019,9 @@ export class MqttManager extends EventEmitter {
           } catch (error) {
             // Dictionary not available yet - buffer in Redis for retry
             if (error instanceof Error && error.message.includes('no dictionary')) {
-              await this.bufferPendingMessage(deviceUuid, topic, payload, data.v);
+              await this.bufferPendingMessage(agentUuid, topic, payload, data.v);
               logger.warn('Message buffered - waiting for dictionary', {
-                deviceUuid: deviceUuid.substring(0, 8),
+                agentUuid: agentUuid.substring(0, 8),
                 version: data.v,
                 topic
               });
@@ -1061,7 +1029,7 @@ export class MqttManager extends EventEmitter {
             }
             
             logger.error('Failed to expand compacted message', {
-              deviceUuid: deviceUuid.substring(0, 8),
+              deviceUuid: agentUuid.substring(0, 8),
               error: error instanceof Error ? error.message : String(error),
               topic
             });
@@ -1070,7 +1038,7 @@ export class MqttManager extends EventEmitter {
         } else {
           // Message is not compacted (legacy format or compaction disabled)
           logger.info('Uncompacted message received', {
-            deviceUuid: deviceUuid.substring(0, 8),
+            deviceUuid: agentUuid.substring(0, 8),
             messageType,
             subTopic,
             payloadSize: payload.length,
@@ -1080,7 +1048,7 @@ export class MqttManager extends EventEmitter {
       } else if (messageType === 'endpoints') {
         // Dictionary manager not initialized, log original message
         logger.info('Message received (dictionary manager disabled)', {
-          deviceUuid: deviceUuid.substring(0, 8),
+          deviceUuid: agentUuid.substring(0, 8),
           messageType,
           subTopic,
           payloadSize: payload.length,
@@ -1095,7 +1063,7 @@ export class MqttManager extends EventEmitter {
           logger.debug('Duplicate message detected, skipping processing', {
             msgId: data.msgId,
             topic,
-            deviceUuid: deviceUuid.substring(0, 8) + '...'
+            deviceUuid: agentUuid.substring(0, 8) + '...'
           });
           return; // Skip duplicate
         }
@@ -1104,14 +1072,14 @@ export class MqttManager extends EventEmitter {
       // Dispatch to appropriate handler
       const handler = this.messageHandlers[messageType];
       if (handler) {
-        handler(deviceUuid, subTopic, data, rest);
+        handler(agentUuid, subTopic, data, rest);
       } else {
         logger.warn('Unknown message type', {
           operation: 'mqtt-message',
           messageType,
           topic
         });
-        this.emitTyped('unknown', { topic, deviceUuid, messageType, data });
+        this.emitTyped('unknown', { topic, agentUuid, messageType, data });
       }
 
     } catch (error) {
@@ -1151,8 +1119,8 @@ export class MqttManager extends EventEmitter {
    * Handle jobs message
    */
   private handleJobsMessage(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
-    // Reconstruct original topic: iot/device/{uuid}/jobs/{jobId}/{action}
-    const topicParts = ['iot', 'device', deviceUuid, 'jobs'];
+    // Reconstruct original topic: iot/{tenantId}/agent/{uuid}/jobs/{jobId}/{action}
+    const topicParts = ['iot', getTenantId(), 'agent', deviceUuid, 'jobs'];
     if (subTopic) topicParts.push(subTopic);
     topicParts.push(...rest);
     const topic = topicParts.join('/');

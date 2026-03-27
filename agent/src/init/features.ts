@@ -18,6 +18,7 @@ import type { PipelineService } from '../features/pipeline/index.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { MqttManager } from '../mqtt/manager.js';
+import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
 import { StateManager } from '../managers/state.js';
 import { getPackageVersion } from '../utils/api-utils.js';
 
@@ -349,7 +350,7 @@ export class FeatureInitializer {
         pipeCount: devices.length,
         enabledProtocols: Array.from(enabledDevices),
         pipes: devices.map(s => s.addr),
-        mqttTopicPattern: 'iot/device/{deviceUuid}/endpoints/{topic}'
+        mqttTopicPattern: MQTT_TOPIC_PATTERNS.tenantScopedEndpoints
       });
     } catch (error) {
       logger.errorSync('Failed to initialize Device Publish Feature', error as Error, {

@@ -32,13 +32,13 @@ export function requireFeature(feature: BooleanFeatureKey) {
 /**
  * Middleware to check device limit
  */
-export async function checkDeviceLimit(req: Request, res: Response, next: NextFunction) {
+export async function checkAgentLimit(req: Request, res: Response, next: NextFunction) {
   const license = LicenseValidator.getInstance();
   const maxDevices = license.getLicense().features.maxDevices;
   
   // Count current agents
-  const { DeviceModel } = await import('../db/models');
-  const agents = await DeviceModel.list({ isActive: true });
+  const { AgentModel: AgentModel } = await import('../db/models');
+  const agents = await AgentModel.list({ isActive: true });
   
   if (agents.length >= maxDevices) {
     return res.status(403).json({

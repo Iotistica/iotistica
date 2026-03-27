@@ -147,7 +147,7 @@ export async function handleAgentState(payload: StateMessage): Promise<void> {
     const tenantId = getTenantId();
     await processAgentStateReport(stateReport, {
       source: 'mqtt',
-      topic: `iot/${tenantId}/device/+/state`
+      topic: `iot/${tenantId}/agent/+/state`
     });
 
     // Publish to Redis for real-time distribution (MQTT-specific, non-blocking)
