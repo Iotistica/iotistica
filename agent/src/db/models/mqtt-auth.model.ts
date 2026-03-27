@@ -1,4 +1,5 @@
 import { getKnex } from '../connection';
+import bcrypt from 'bcrypt';
 
 interface EndpointMqttAuthConfig {
   protocol?: string;
@@ -15,12 +16,13 @@ interface EndpointMqttAuthConfig {
   };
 }
 
-interface DesiredMqttUser {
+interface MqttUser {
   username: string;
   password_hash: string;
+  is_superuser: boolean;
 }
 
-interface DesiredMqttAcl {
+interface MqttAcl {
   username: string;
   clientid: string;
   topic: string;
@@ -32,8 +34,21 @@ export class MqttAuthModel {
   static async syncFromTargetEndpoints(endpoints: EndpointMqttAuthConfig[]): Promise<{ users: number; acls: number }> {
     const knex = getKnex();
 
-    const usersByName = new Map<string, DesiredMqttUser>();
-    const acls: DesiredMqttAcl[] = [];
+    const usersByName = new Map<string, MqttUser>();
+    const acls: MqttAcl[] = [];
+
+    // Always keep an initial bootstrap superuser so the local agent MQTT client
+    // can authenticate before cloud endpoint manifests are present.
+    const bootstrapUsername = process.env.MQTT_USERNAME?.trim();
+    const bootstrapPassword = process.env.MQTT_PASSWORD?.trim();
+    if (bootstrapUsername && bootstrapPassword) {
+      const passwordHash = await bcrypt.hash(bootstrapPassword, 10);
+      usersByName.set(bootstrapUsername, {
+        username: bootstrapUsername,
+        password_hash: passwordHash,
+        is_superuser: true,
+      });
+    }
 
     for (const endpoint of endpoints || []) {
       if (endpoint?.protocol !== 'mqtt') {
@@ -64,6 +79,7 @@ export class MqttAuthModel {
       usersByName.set(username, {
         username,
         password_hash: passwordHash,
+        is_superuser: false,
       });
 
       acls.push({
@@ -85,7 +101,7 @@ export class MqttAuthModel {
           users.map((u) => ({
             username: u.username,
             password_hash: u.password_hash,
-            is_superuser: false,
+            is_superuser: u.is_superuser,
             is_active: true,
             created_at: trx.fn.now(),
             updated_at: trx.fn.now(),

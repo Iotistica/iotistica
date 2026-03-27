@@ -19,6 +19,15 @@ import * as crypto from 'crypto';
 
 export const router = express.Router();
 
+function firstString(...values: unknown[]): string | undefined {
+	for (const value of values) {
+		if (typeof value === 'string' && value.trim()) {
+			return value.trim();
+		}
+	}
+	return undefined;
+}
+
 /**
  * Validate MQTT user credentials
  * Called by mosquitto-go-auth HTTP backend for CONNECT
@@ -32,11 +41,29 @@ export const router = express.Router();
  */
 router.get('/api/mqtt/auth/user', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const username = req.query.username as string;
-		const password = req.query.password as string;
+		const username = firstString(
+			req.query.username,
+			req.query.user,
+			req.query.u,
+			req.body?.username,
+			req.body?.user
+		);
+		const password = firstString(
+			req.query.password,
+			req.query.pass,
+			req.query.pw,
+			req.body?.password,
+			req.body?.pass,
+			req.body?.pw
+		);
 
 		// Validate query parameters
 		if (!username || !password) {
+			console.warn('MQTT user auth missing credentials', {
+				queryKeys: Object.keys(req.query || {}),
+				hasBody: !!req.body,
+				bodyKeys: req.body ? Object.keys(req.body) : [],
+			});
 			return res.status(401).json({ error: 'Missing username or password' });
 		}
 
@@ -87,29 +114,65 @@ router.get('/api/mqtt/auth/user', async (req: Request, res: Response, next: Next
  */
 router.get('/api/mqtt/auth/acl', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const username = req.query.username as string;
-		const topic = req.query.topic as string;
-		const accStr = req.query.acc as string;
+		const username = firstString(
+			req.query.username,
+			req.query.user,
+			req.query.u,
+			req.body?.username,
+			req.body?.user
+		);
+		const topic = firstString(
+			req.query.topic,
+			req.query.t,
+			req.body?.topic,
+			req.body?.t
+		);
+		const accStr = firstString(
+			req.query.acc,
+			req.query.access,
+			req.query.acl,
+			req.body?.acc,
+			req.body?.access,
+			req.body?.acl
+		);
 
-		// Validate query parameters
-		if (!username || !topic || !accStr) {
-			return res.status(401).json({ error: 'Missing username, topic, or acc' });
-		}
-
-		const acc = parseInt(accStr, 10);
-		if (isNaN(acc) || ![1, 2, 3].includes(acc)) {
-			return res.status(400).json({ error: 'Invalid access level (must be 1, 2, or 3)' });
+		if (!username) {
+			console.warn('MQTT ACL auth missing username', {
+				queryKeys: Object.keys(req.query || {}),
+				hasBody: !!req.body,
+				bodyKeys: req.body ? Object.keys(req.body) : [],
+			});
+			return res.status(401).json({ error: 'Missing username' });
 		}
 
 		const knex = getKnex();
 
-		// Check if user is a superuser (can access all topics)
+		// Superusers bypass topic-specific ACL checks and may be queried
+		// without topic/acc fields depending on broker/plugin behavior.
 		const superuser = await knex('mqtt_users')
 			.where({ username, is_superuser: true, is_active: true })
 			.first();
 
 		if (superuser) {
 			return res.status(200).send('OK');
+		}
+
+		// Validate query parameters
+		if (!topic || !accStr) {
+			console.warn('MQTT ACL auth missing parameters', {
+				queryKeys: Object.keys(req.query || {}),
+				hasBody: !!req.body,
+				bodyKeys: req.body ? Object.keys(req.body) : [],
+				usernamePresent: true,
+				topicPresent: !!topic,
+				accPresent: !!accStr,
+			});
+			return res.status(401).json({ error: 'Missing username, topic, or acc' });
+		}
+
+		const acc = parseInt(accStr, 10);
+		if (isNaN(acc) || ![1, 2, 3].includes(acc)) {
+			return res.status(400).json({ error: 'Invalid access level (must be 1, 2, or 3)' });
 		}
 
 		// Check ACL for this user/topic/access combination

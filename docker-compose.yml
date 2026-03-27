@@ -416,7 +416,7 @@ services:
             - MQTT_CLIENT_ID=${MQTT_SIM_CLIENT_ID:-admin}
             - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
             - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
-            - MQTT_TOPIC=${MQTT_SIM_TOPIC:-iot/73eddd385ce8/agent/5cab5a35-9f10-4325-92d8-2fa3cde38927/mqtt/a8bbda21-84d4-4d66-ae84-4eabd704ac29}
+            - MQTT_TOPIC=${MQTT_SIM_TOPIC}
             - MQTT_METRIC_NAMES=${MQTT_SIM_METRICS:-temperature}
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}

@@ -43,7 +43,7 @@ import {
   formatBrokerConfigForClient
 } from '../utils/mqtt-broker-config';
 import { getVpnConfigForDevice, formatVpnConfigForDevice } from '../utils/vpn-config';
-import { SystemConfigModel } from '../db/system-config-model';
+import { SystemConfigModel } from '../db/models';
 import { generateDefaultTargetState } from '../services/provisioning/default-target-state-generator.js';
 import { provisioningService } from '../services/provisioning/provisioning.service';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';

@@ -170,6 +170,11 @@ export class ConfigManager extends EventEmitter {
 		
 		// Load current config from database (persisted reconciled state)
 		await this.loadCurrentConfigFromDB();
+
+		// Ensure local MQTT auth tables are initialized immediately at startup.
+		// This guarantees bootstrap MQTT credentials exist before endpoint-driven
+		// reconciliation runs.
+		await this.syncMqttAuthToDatabase(this.currentConfig.endpoints || []);
 	}
 
 	/**

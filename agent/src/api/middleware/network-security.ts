@@ -39,17 +39,30 @@ const PRIVATE_RANGES = [
 ];
 
 /**
+ * Normalize IP for comparisons.
+ * Express may report IPv4 addresses as IPv6-mapped form (e.g. ::ffff:172.18.0.13).
+ */
+function normalizeIP(ip: string): string {
+	if (ip.startsWith('::ffff:')) {
+		return ip.substring(7);
+	}
+	return ip;
+}
+
+/**
  * Check if IP is localhost
  */
 function isLocalhost(ip: string): boolean {
-	return LOCALHOST_IPS.includes(ip);
+	const normalized = normalizeIP(ip);
+	return LOCALHOST_IPS.includes(ip) || LOCALHOST_IPS.includes(normalized);
 }
 
 /**
  * Check if IP is in private network range
  */
 function isPrivateNetwork(ip: string): boolean {
-	return PRIVATE_RANGES.some(range => range.test(ip));
+	const normalized = normalizeIP(ip);
+	return PRIVATE_RANGES.some(range => range.test(normalized));
 }
 
 /**
@@ -68,6 +81,14 @@ function getClientIP(req: Request): string {
 }
 
 /**
+ * Check if request is an internal MQTT broker auth callback.
+ * These routes are called by mosquitto-go-auth from the broker container.
+ */
+function isMqttAuthCallback(path: string): boolean {
+	return path === '/api/mqtt/auth/user' || path === '/api/mqtt/auth/acl';
+}
+
+/**
  * Network-based security middleware
  */
 export default function networkSecurity(req: Request, res: Response, next: NextFunction) {
@@ -81,6 +102,12 @@ export default function networkSecurity(req: Request, res: Response, next: NextF
 	
 	switch (SECURITY_MODE) {
 		case 'LOCALHOST_ONLY':
+			// Allow broker auth callbacks from private network addresses (e.g. Docker bridge).
+			// Keep all other routes localhost-only in this mode.
+			if (isMqttAuthCallback(path) && isPrivateNetwork(clientIP)) {
+				break;
+			}
+
 			if (!isLocalhost(clientIP)) {
 				logger?.warnSync('Blocked non-localhost API access', {
 					component: LogComponents.agent,
@@ -137,14 +164,6 @@ export default function networkSecurity(req: Request, res: Response, next: NextF
 				error: 'Invalid security configuration' 
 			});
 	}
-	
-	// Log allowed access
-	logger?.debugSync('API access allowed', {
-		component: LogComponents.agent,
-		clientIP,
-		path,
-		mode: SECURITY_MODE
-	});
 	
 	next();
 }

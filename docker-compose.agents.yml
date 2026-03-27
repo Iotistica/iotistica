@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-03-26 21:59:16
+# Generated: 2026-03-26 23:49:38
 # Agents: 1 to 1
 # Ports: 48481 to 48481
 
@@ -31,7 +31,7 @@ services:
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=1f7246dbf60329eec76c270f8a218b839393f3484faa53be997c26205f01fba4
+      - PROVISIONING_KEY=8f66c043a3a752e68551dbc21e8ae4fff7a638b06d188def5c334721b2fabef5
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
