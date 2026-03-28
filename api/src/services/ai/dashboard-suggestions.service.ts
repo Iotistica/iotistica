@@ -47,6 +47,12 @@ interface CandidateCard {
   title?: string;
 }
 
+interface FeedbackAggregate {
+  shown: number;
+  accepted: number;
+  removed: number;
+}
+
 const ALLOWED_CHARTS: ChartType[] = ['line', 'bar', 'gauge', 'stat'];
 const ALLOWED_BINS: Bin[] = ['top', 'main', 'side', 'bottom'];
 
@@ -110,6 +116,90 @@ export interface DashboardSuggestionResult {
   fallbackReason: string | null;
   generatedAt: string;
   limits: Record<Bin, number>;
+}
+
+function buildSuggestionSignature(deviceId: string, metric: string, chart: ChartType, bin: Bin): string {
+  return `${deviceId.trim().toLowerCase()}::${metric.trim().toLowerCase()}::${chart}::${bin}`;
+}
+
+async function loadFeedbackAggregates(options: {
+  customerId?: string;
+  userId?: string | number;
+}): Promise<Map<string, FeedbackAggregate>> {
+  const customerId = options.customerId?.trim();
+  const userId = options.userId !== undefined && options.userId !== null ? String(options.userId) : null;
+
+  if (!customerId && !userId) {
+    return new Map();
+  }
+
+  let whereClause = 'customer_id = $1';
+  const params: string[] = [customerId || ''];
+
+  // Prefer per-user feedback when identity is available so a user's delete action
+  // immediately influences their own recommendations.
+  if (userId) {
+    whereClause = 'user_id = $1';
+    params[0] = userId;
+  } else if (!customerId) {
+    return new Map();
+  }
+
+  const result = await query<{
+    suggestion_signature: string;
+    shown_count: string;
+    accepted_count: string;
+    removed_count: string;
+  }>(
+    `
+    SELECT
+      suggestion_signature,
+      SUM(CASE WHEN event_type = 'suggestion_shown' THEN 1 ELSE 0 END)::text AS shown_count,
+      SUM(CASE WHEN event_type = 'suggestion_accepted' THEN 1 ELSE 0 END)::text AS accepted_count,
+      SUM(CASE WHEN event_type = 'widget_removed' THEN 1 ELSE 0 END)::text AS removed_count
+    FROM dashboard_ai_feedback_events
+    WHERE ${whereClause}
+    GROUP BY suggestion_signature
+    `,
+    params,
+  );
+
+  const aggregates = new Map<string, FeedbackAggregate>();
+  for (const row of result.rows) {
+    aggregates.set(row.suggestion_signature, {
+      shown: Number(row.shown_count || 0),
+      accepted: Number(row.accepted_count || 0),
+      removed: Number(row.removed_count || 0),
+    });
+  }
+
+  return aggregates;
+}
+
+function applyFeedbackScores(cards: CandidateCard[], feedback: Map<string, FeedbackAggregate>): CandidateCard[] {
+  if (feedback.size === 0) {
+    return cards;
+  }
+
+  const rescored = cards.map((card) => {
+    const signature = buildSuggestionSignature(card.deviceId, card.metric, card.chart, card.bin);
+    const aggregate = feedback.get(signature);
+    if (!aggregate || aggregate.shown < 10) {
+      return card;
+    }
+
+    const acceptanceRate = aggregate.accepted / Math.max(aggregate.shown, 1);
+    const removalRate = aggregate.removed / Math.max(aggregate.accepted, 1);
+    const feedbackDelta = (acceptanceRate - removalRate) * 4;
+
+    return {
+      ...card,
+      score: card.score + feedbackDelta,
+    };
+  });
+
+  rescored.sort((a, b) => b.score - a.score);
+  return rescored;
 }
 
 export function getStrategy(rawValue: unknown): Strategy {
@@ -335,7 +425,7 @@ function normalizeLlmCards(rawCards: SuggestedCard[], rows: MetricCatalogRow[]):
       bin: ALLOWED_BINS.includes(card.bin as Bin) ? (card.bin as Bin) : 'main',
       score: scoreMetric(metricClass),
       metricClass,
-      title: card.title?.trim() || `${metricInfo.deviceName} - ${metricInfo.metricName}`,
+      title: `${metricInfo.deviceName} - ${metricInfo.metricName}`,
     });
   }
 
@@ -372,7 +462,7 @@ function toResponseCards(cards: CandidateCard[]): DashboardSuggestionCard[] {
     bin: card.bin,
     score: card.score,
     metricClass: card.metricClass,
-    title: card.title || `${card.deviceName} - ${card.metric}`,
+    title: `${card.deviceName} - ${card.metric}`,
   }));
 }
 
@@ -500,11 +590,18 @@ export async function generateDashboardSuggestions(options: {
   strategy?: Strategy;
   requestId?: string;
   userId?: string | number;
+  customerId?: string;
   userPrompt?: string;
 } = {}): Promise<DashboardSuggestionResult> {
   const strategy = options.strategy || 'rules';
   const rows = await loadMetricCatalogRows();
-  const baselineCandidates = applyBinLimits(createRuleCandidates(rows));
+  const feedbackAggregates = await loadFeedbackAggregates({
+    customerId: options.customerId,
+    userId: options.userId,
+  });
+  const baselineCandidates = applyBinLimits(
+    applyFeedbackScores(createRuleCandidates(rows), feedbackAggregates)
+  );
 
   let cards = baselineCandidates;
   let source: DashboardSuggestionResult['source'] = 'rules';
@@ -516,7 +613,9 @@ export async function generateDashboardSuggestions(options: {
         baselineCards: strategy === 'hybrid' ? baselineCandidates : undefined,
         userPrompt: options.userPrompt,
       });
-      const llmCandidates = applyBinLimits(normalizeLlmCards(llmRawCards, rows));
+      const llmCandidates = applyBinLimits(
+        applyFeedbackScores(normalizeLlmCards(llmRawCards, rows), feedbackAggregates)
+      );
 
       if (strategy === 'llm') {
         if (llmCandidates.length > 0) {
@@ -526,7 +625,9 @@ export async function generateDashboardSuggestions(options: {
           fallbackReason = 'llm_empty_after_normalization';
         }
       } else if (llmCandidates.length > 0) {
-        cards = applyBinLimits(attachTitlesAndLayout(baselineCandidates, llmCandidates));
+        cards = applyBinLimits(
+          applyFeedbackScores(attachTitlesAndLayout(baselineCandidates, llmCandidates), feedbackAggregates)
+        );
         source = 'hybrid';
       } else {
         fallbackReason = 'llm_empty_after_normalization';

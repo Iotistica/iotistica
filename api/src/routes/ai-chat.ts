@@ -86,6 +86,7 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
         strategy: getStrategy(strategy ?? 'hybrid'),
         requestId: req.id || 'unknown',
         userId: (req as any).user?.id,
+        customerId: (req as any).user?.customerId,
         userPrompt: message,
       });
 

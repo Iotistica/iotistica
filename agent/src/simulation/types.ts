@@ -19,6 +19,7 @@ export type SimulationPattern =
 	| 'cyclic'        // Repeating cycles
 	| 'noisy'         // Random noise added
 	| 'faulty'        // Intermittent failures
+	| 'alert'         // High-impact deviation intended to trigger anomaly detection quickly
 	| 'extreme'       // Edge case values
 	| 'random';       // Completely random
 
@@ -45,11 +46,17 @@ export interface MemoryLeakSimulationConfig {
  */
 export interface AnomalySimulationConfig {
 	enabled: boolean;
+	mode?: 'inject' | 'intercept';      // inject: synthetic points, intercept: mutate real endpoint data
 	metrics: string[];                    // Which metrics to inject anomalies into
 	pattern: SimulationPattern;           // How to generate anomalies
 	intervalMs: number;                   // How often to inject
 	severity: SimulationSeverity;         // Severity level
 	magnitude: number;                    // Multiplier for deviation (1-10)
+	valueSource?: 'static' | 'baseline';  // Use hardcoded bases or learned anomaly baselines
+	strictBaseline?: boolean;             // If true, skip injection when baseline is unavailable
+	baselineMinSamples?: number;          // Minimum samples required for baseline usage
+	baselineDeviceId?: string;            // Optional device scope for baseline lookup
+	baselineDeviceState?: 'running' | 'idle' | 'fault' | 'unknown'; // Optional state scope for lookup
 }
 
 /**
@@ -183,11 +190,17 @@ export const DEFAULT_MEMORY_LEAK_CONFIG: MemoryLeakSimulationConfig = {
  */
 export const DEFAULT_ANOMALY_CONFIG: AnomalySimulationConfig = {
 	enabled: false,
+	mode: 'inject',
 	metrics: ['cpu_usage', 'memory_percent', 'cpu_temp'],
 	pattern: 'spike',
 	intervalMs: 60000,
 	severity: 'warning',
 	magnitude: 3,
+	valueSource: 'static',
+	strictBaseline: false,
+	baselineMinSamples: 10,
+	baselineDeviceId: 'unknown-device',
+	baselineDeviceState: 'unknown',
 };
 
 /**

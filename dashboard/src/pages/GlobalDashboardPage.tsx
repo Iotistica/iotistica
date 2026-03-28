@@ -160,6 +160,11 @@ interface DashboardWidget extends Layout {
   tableConfig?: TableDataCardConfig; // For table widgets
   _metricData?: any; // Runtime data for badge rendering
   _refreshTrigger?: number; // Timestamp to trigger manual refresh
+  _aiFeedback?: {
+    suggestionId?: string;
+    suggestionSignature: string;
+    source: 'rules' | 'llm' | 'hybrid';
+  };
 }
 
 interface DashboardLayout {
@@ -191,6 +196,19 @@ interface AiSuggestedCard {
 interface AiSuggestedCardsResponse {
   count: number;
   cards: AiSuggestedCard[];
+  source?: 'rules' | 'llm' | 'hybrid';
+}
+
+interface AiFeedbackEvent {
+  eventType: 'suggestion_shown' | 'suggestion_accepted' | 'widget_removed';
+  suggestionId?: string;
+  suggestionSignature: string;
+  deviceId?: string;
+  metric: string;
+  chart: AiSuggestedChart;
+  bin: AiSuggestedBin;
+  source: 'rules' | 'llm' | 'hybrid';
+  metadata?: Record<string, unknown>;
 }
 
 interface GlobalDashboardPageProps {
@@ -234,7 +252,10 @@ function getExpectedRangeFromMetricConfig(config: MetricDataCardConfig): [number
   return [Math.min(...values), Math.max(...values)];
 }
 
-function buildAiWidgetsFromCards(cards: AiSuggestedCard[]): DashboardWidget[] {
+function buildAiWidgetsFromCards(
+  cards: AiSuggestedCard[],
+  source: 'rules' | 'llm' | 'hybrid' = 'hybrid'
+): DashboardWidget[] {
   const binIndexes: Record<AiSuggestedBin, number> = {
     top: 0,
     main: 0,
@@ -306,6 +327,11 @@ function buildAiWidgetsFromCards(cards: AiSuggestedCard[]): DashboardWidget[] {
       type: widgetType,
       title,
       deviceId: card.deviceId,
+      _aiFeedback: {
+        suggestionId: card.id,
+        suggestionSignature: `${card.deviceId.toLowerCase()}::${card.metric.toLowerCase()}::${card.chart}::${card.bin}`,
+        source,
+      },
     };
 
     if (widgetType === 'METRIC_DATA') {
@@ -333,6 +359,81 @@ function buildAiWidgetsFromCards(cards: AiSuggestedCard[]): DashboardWidget[] {
 
     return baseWidget;
   });
+}
+
+async function trackAiFeedbackEvents(events: AiFeedbackEvent[]): Promise<void> {
+  if (!Array.isArray(events) || events.length === 0) {
+    return;
+  }
+
+  try {
+    const token = localStorage.getItem('accessToken');
+    if (!token) {
+      console.warn('Skipping AI feedback tracking: no auth token available');
+      return;
+    }
+
+    const response = await fetch(buildApiUrl('/api/v1/dashboard/ai-feedback'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ events }),
+      keepalive: true,
+    });
+
+    if (!response.ok) {
+      let body = '';
+      try {
+        body = await response.text();
+      } catch {
+        body = '';
+      }
+      console.warn('AI feedback tracking failed', {
+        status: response.status,
+        statusText: response.statusText,
+        body,
+      });
+    }
+  } catch (error) {
+    console.warn('Failed to track AI feedback events', error);
+  }
+}
+
+function toAiFeedbackEvent(
+  eventType: AiFeedbackEvent['eventType'],
+  card: AiSuggestedCard,
+  source: 'rules' | 'llm' | 'hybrid',
+  metadata?: Record<string, unknown>
+): AiFeedbackEvent {
+  return {
+    eventType,
+    suggestionId: card.id,
+    suggestionSignature: `${card.deviceId.toLowerCase()}::${card.metric.toLowerCase()}::${card.chart}::${card.bin}`,
+    deviceId: card.deviceId,
+    metric: card.metric,
+    chart: card.chart,
+    bin: card.bin,
+    source,
+    metadata,
+  };
+}
+
+function parseSuggestionSignature(signature: string): { chart: AiSuggestedChart; bin: AiSuggestedBin } {
+  const parts = signature.split('::');
+  const chart = parts[2];
+  const bin = parts[3];
+
+  if (chart !== 'line' && chart !== 'bar' && chart !== 'gauge' && chart !== 'stat') {
+    throw new Error(`Invalid suggestion signature chart: ${signature}`);
+  }
+
+  if (bin !== 'top' && bin !== 'main' && bin !== 'side' && bin !== 'bottom') {
+    throw new Error(`Invalid suggestion signature bin: ${signature}`);
+  }
+
+  return { chart, bin };
 }
 
 export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboardPageProps) {
@@ -417,7 +518,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       }
 
       const data: AiSuggestedCardsResponse = await response.json();
-      setAiWidgets(buildAiWidgetsFromCards(data.cards || []));
+      const source = data.source || 'hybrid';
+      const cards = data.cards || [];
+      setAiWidgets(buildAiWidgetsFromCards(cards, source));
+
+      void trackAiFeedbackEvents(cards.map((card) =>
+        toAiFeedbackEvent('suggestion_shown', card, source, { origin: 'dashboard_toggle' })
+      ));
     } catch (error) {
       console.error('Failed to load AI suggested widgets:', error);
     } finally {
@@ -435,15 +542,20 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
   useEffect(() => {
     const handleAiSuggestionsGenerated = (event: Event) => {
-      const customEvent = event as CustomEvent<{ cards?: AiSuggestedCard[] }>;
+      const customEvent = event as CustomEvent<{ cards?: AiSuggestedCard[]; source?: 'rules' | 'llm' | 'hybrid' }>;
       const cards = customEvent.detail?.cards;
+      const source = customEvent.detail?.source || 'hybrid';
       if (!Array.isArray(cards) || cards.length === 0) {
         return;
       }
 
-      setAiWidgets(buildAiWidgetsFromCards(cards));
+      setAiWidgets(buildAiWidgetsFromCards(cards, source));
       setShowAI(true);
       setIsLoadingAiWidgets(false);
+
+      void trackAiFeedbackEvents(cards.map((card) =>
+        toAiFeedbackEvent('suggestion_shown', card, source, { origin: 'chat_preview' })
+      ));
     };
 
     window.addEventListener('dashboard-ai-suggestions-generated', handleAiSuggestionsGenerated as EventListener);
@@ -1059,7 +1171,34 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   };
 
   const removeWidget = (id: string) => {
+    const removedWidget = widgets.find(w => w.i === id);
     setWidgets(widgets.filter(w => w.i !== id));
+
+    if (removedWidget?._aiFeedback) {
+      const { chart, bin } = parseSuggestionSignature(removedWidget._aiFeedback.suggestionSignature);
+      const metric = removedWidget.metricConfig?.metricName
+        || removedWidget.metricValueConfig?.metricName
+        || 'unknown';
+      const deviceId = removedWidget.metricConfig?.deviceUuid
+        || removedWidget.metricValueConfig?.deviceUuid
+        || removedWidget.deviceId
+        || undefined;
+
+      void trackAiFeedbackEvents([
+        {
+          eventType: 'widget_removed',
+          suggestionId: removedWidget._aiFeedback.suggestionId,
+          suggestionSignature: removedWidget._aiFeedback.suggestionSignature,
+          deviceId,
+          metric,
+          chart,
+          bin,
+          source: removedWidget._aiFeedback.source,
+          metadata: { origin: 'dashboard_remove' },
+        },
+      ]);
+    }
+
     setHasUnsavedChanges(true);
     setShowDeleteConfirmDialog(false);
     setWidgetToDelete(null);
@@ -1254,6 +1393,31 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const addAiWidgetToDashboard = (widget: DashboardWidget) => {
     if (!showAI) return;
     if (isDuplicateAiWidget(widget)) return;
+
+    if (widget._aiFeedback) {
+      const { chart, bin } = parseSuggestionSignature(widget._aiFeedback.suggestionSignature);
+      const metric = widget.metricConfig?.metricName
+        || widget.metricValueConfig?.metricName
+        || 'unknown';
+      const deviceId = widget.metricConfig?.deviceUuid
+        || widget.metricValueConfig?.deviceUuid
+        || widget.deviceId
+        || undefined;
+
+      void trackAiFeedbackEvents([
+        {
+          eventType: 'suggestion_accepted',
+          suggestionId: widget._aiFeedback.suggestionId,
+          suggestionSignature: widget._aiFeedback.suggestionSignature,
+          deviceId,
+          metric,
+          chart,
+          bin,
+          source: widget._aiFeedback.source,
+          metadata: { origin: 'dashboard_add_button' },
+        },
+      ]);
+    }
 
     const newId = crypto.randomUUID();
     const baseCopiedWidget: DashboardWidget = {

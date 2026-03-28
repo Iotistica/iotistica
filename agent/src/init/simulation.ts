@@ -2,6 +2,7 @@ import { LogComponents } from '../logging/types.js';
 import { MqttManager } from '../mqtt/manager.js';
 import { PublishManager } from '../features/publish/manager.js';
 import { SimulationOrchestrator, loadSimulationConfig } from '../simulation/index.js';
+import { BaselineLiveInterceptor } from '../simulation/interceptor.js';
 import type { AgentInitContext } from './context.js';
 
 export async function initializeSimulationMode(ctx: AgentInitContext): Promise<void> {
@@ -90,20 +91,54 @@ export async function initializeSimulationMode(ctx: AgentInitContext): Promise<v
 			logger: ctx.agentLogger,
 			anomalyService: ctx.anomalyService,
 			publishToDeviceFeature: async (endpointTopic, message) => {
+				// First try to route through a real configured Device Publish endpoint.
 				const sensorPublish = ctx.featureInitializer?.getFeatures()?.sensorPublish;
-				if (!sensorPublish) {
-					const virtualPublisher = getVirtualPublisher(endpointTopic);
-					if (!virtualPublisher) {
-						return false;
+				if (sensorPublish) {
+					const routed = sensorPublish.publishSimulationMessage(endpointTopic, message);
+					if (routed) {
+						return true;
 					}
-
-					virtualPublisher.injectSimulationMessage(message);
-					return true;
+					// Real sensorPublish exists but has no endpoint matching this topic.
+					// Fall through to virtual publisher below.
 				}
 
-				return sensorPublish.publishSimulationMessage(endpointTopic, message);
+				// No sensorPublish or no matching endpoint — use a virtual publisher so
+				// simulated data still goes through the same batching/MQTT pipeline.
+				const virtualPublisher = getVirtualPublisher(endpointTopic);
+				if (!virtualPublisher) {
+					return false;
+				}
+
+				virtualPublisher.injectSimulationMessage(message);
+				return true;
 			},
 		});
+
+		const anomalyConfig = config.scenarios?.anomaly_injection;
+		if (anomalyConfig?.enabled && anomalyConfig.mode === 'intercept') {
+			const featureInitializer = ctx.featureInitializer;
+			const sensorPublish = featureInitializer?.getFeatures()?.sensorPublish;
+			if (featureInitializer) {
+				const liveInterceptor = new BaselineLiveInterceptor(anomalyConfig, ctx.anomalyService, ctx.agentLogger);
+				featureInitializer.setLiveDataInterceptor(async (messages, endpointName) => {
+					return liveInterceptor.apply(messages, { endpointName });
+				});
+
+				ctx.agentLogger?.infoSync(sensorPublish
+					? 'Enabled baseline live-data interception in Device Publish pipeline'
+					: 'Configured baseline live-data interception for deferred Device Publish initialization', {
+					component: LogComponents.metrics,
+					mode: anomalyConfig.mode,
+					metrics: anomalyConfig.metrics,
+					pattern: anomalyConfig.pattern,
+					valueSource: anomalyConfig.valueSource || 'static',
+				});
+			} else {
+				ctx.agentLogger?.warnSync('Anomaly intercept mode requested but Device Publish feature is unavailable', {
+					component: LogComponents.metrics,
+				});
+			}
+		}
 
 		await ctx.simulationOrchestrator.start();
 	} catch (error) {

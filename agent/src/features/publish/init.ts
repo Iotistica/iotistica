@@ -24,6 +24,7 @@ export class DevicePublishFeature extends BaseFeature {
   private readonly useDeflatePoc: boolean;
   private anomalyService?: any;
   private pipelineService?: PipelineService;
+  private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
 
   constructor(
     config: DevicePublishConfig & { enabled: boolean },
@@ -71,6 +72,18 @@ export class DevicePublishFeature extends BaseFeature {
 
     this.logger.debug('Updated pipeline service binding for Device Publish Feature', {
       hasPipelineService: !!pipeline,
+      sensorCount: this.sensors.length,
+    });
+  }
+
+  public setLiveDataInterceptor(interceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[]): void {
+    this.liveDataInterceptor = interceptor;
+    for (const sensor of this.sensors) {
+      sensor.setLiveDataInterceptor(interceptor);
+    }
+
+    this.logger.debug('Updated live data interceptor for Device Publish Feature', {
+      hasInterceptor: !!interceptor,
       sensorCount: this.sensors.length,
     });
   }
@@ -138,6 +151,7 @@ export class DevicePublishFeature extends BaseFeature {
 
       const device = this.createDeviceManager(config, i, deviceConfig.endpoints.length);
       if (this.pipelineService) device.setPipelineService(this.pipelineService);
+      if (this.liveDataInterceptor) device.setLiveDataInterceptor(this.liveDataInterceptor);
       this.attachDeviceEventHandlers(device, config.name!);
       this.sensors.push(device);
       await this.startDeviceManager(device, config);

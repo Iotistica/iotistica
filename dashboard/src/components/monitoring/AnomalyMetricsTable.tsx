@@ -279,16 +279,31 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
 
   const fetchDevices = async () => {
     try {
-      const response = await fetch(buildApiUrl('/api/v1/agents?limit=100'));
+      const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
+      const response = await fetch(buildApiUrl('/api/v1/agents?limit=100'), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load agents: ${response.status} ${response.statusText}`);
+      }
+
       const data = await response.json();
-      if (data.devices) {
-        // Filter online devices
-        const onlineDevices = data.devices.filter((d: Device) => d.is_online === true);
-        setDevices(onlineDevices);
-        
-        // Auto-select first device if none selected
-        if (!selectedDeviceUuid && onlineDevices.length > 0) {
-          setSelectedDeviceUuid(onlineDevices[0].uuid);
+      const agentList: Device[] = Array.isArray(data.agents)
+        ? data.agents
+        : (Array.isArray(data.devices) ? data.devices : []);
+
+      // Prefer online agents, but fall back to all agents so the selector is never empty.
+      const onlineAgents = agentList.filter((d: Device) => d.is_online === true);
+      const availableAgents = onlineAgents.length > 0 ? onlineAgents : agentList;
+
+      setDevices(availableAgents);
+
+      // Keep scoped selection when valid; otherwise choose first available.
+      if (availableAgents.length > 0) {
+        const hasSelected = availableAgents.some((d) => d.uuid === selectedDeviceUuid);
+        if (!hasSelected) {
+          setSelectedDeviceUuid(availableAgents[0].uuid);
         }
       }
     } catch (err: any) {
@@ -301,19 +316,51 @@ export const AnomalyMetricsTable: React.FC<AnomalyMetricsTableProps> = ({
     setMetricDevicesLoading(true);
     try {
       const token = localStorage.getItem('accessToken') || localStorage.getItem('token');
-      const response = await fetch(buildApiUrl('/api/v1/metrics/devices'), {
+      const metricsAgentsUrl = selectedDeviceUuid
+        ? buildApiUrl(`/api/v1/metrics/agents?agentUuid=${encodeURIComponent(selectedDeviceUuid)}`)
+        : buildApiUrl('/api/v1/metrics/agents');
+
+      let response = await fetch(metricsAgentsUrl, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
+
+      // Backward compatibility for older API variants
+      if (!response.ok) {
+        response = await fetch(buildApiUrl('/api/v1/metrics/devices'), {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+      }
+
+      if (!response.ok) {
+        throw new Error(`Failed to load metric devices: ${response.status} ${response.statusText}`);
+      }
+
       const data = await response.json();
-      const fetchedDevices = data.devices || [];
-      setMetricDevices(fetchedDevices);
+      const fetchedDevices = Array.isArray(data.agents)
+        ? data.agents
+        : (Array.isArray(data.devices) ? data.devices : []);
+      const normalizedDevices = fetchedDevices.length > 0
+        ? fetchedDevices
+        : [{
+            device_name: 'System',
+            protocol: 'system',
+            available_metrics: ['cpu_usage', 'memory_percent', 'cpu_temp', 'disk_usage'],
+            metric_count: 4,
+            last_seen: '',
+            agent_uuid: selectedDeviceUuid || undefined,
+            agent_uuids: selectedDeviceUuid ? [selectedDeviceUuid] : [],
+            agent_names: [],
+            source_refs: [],
+          }];
+
+      setMetricDevices(normalizedDevices);
 
       // Only auto-select a default device when adding (not editing) to avoid overwriting the restored selection
       if (!preserveDeviceSelection) {
-        const scopedDevices = fetchedDevices.filter((d: MetricDevice) =>
+        const scopedDevices = normalizedDevices.filter((d: MetricDevice) =>
           isMetricDeviceForAgent(d, selectedDeviceUuid)
         );
-        const defaultDevice = scopedDevices[0] || fetchedDevices[0];
+        const defaultDevice = scopedDevices[0] || normalizedDevices[0];
         setSelectedMetricDevice(defaultDevice?.device_name || '');
       }
     } catch (err: any) {

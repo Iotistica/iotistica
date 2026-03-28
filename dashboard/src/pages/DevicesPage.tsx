@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Activity, ChevronDown, ChevronRight, Pencil, Plus, FileText } from 'lucide-react';
+import { Activity, ChevronDown, ChevronRight, Pencil, Plus, FileText, Copy } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -152,7 +152,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [selectedProtocol, setSelectedProtocol] = useState<string[]>(() => getStoredFilter('protocol', []));
   const [selectedStatus, setSelectedStatus] = useState<string[]>(() => getStoredFilter('status', []));
   const [selectedType, setSelectedType] = useState<string[]>(() => getStoredFilter('type', []));
-  const { getDeviceState, getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
+  const { getDeviceState, updatePendingSensor, addPendingSensor } = useDeviceState();
 
   // Persist filter changes to localStorage
   useEffect(() => {
@@ -1052,6 +1052,15 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     return base;
   };
 
+  const copyEndpointToClipboard = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success('Endpoint copied');
+    } catch {
+      toast.error('Failed to copy endpoint');
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex-1 bg-background overflow-auto">
@@ -1109,19 +1118,17 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             >
               Devices
             </TabsTrigger>
-            {getPendingConfig(deviceUuid)?.features?.enableAnomalyDetection && (
-              <TabsTrigger
-                value="anomaly"
-                className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-base leading-none font-normal data-[state=active]:font-medium"
-                style={
-                  activeTab === 'anomaly'
-                    ? { color: 'hsl(var(--foreground))', fontWeight: 700, textDecoration: 'underline', textUnderlineOffset: '8px', textDecorationThickness: '2px', textDecorationColor: 'hsl(var(--foreground))' }
-                    : { color: 'hsl(var(--foreground))', textDecoration: 'none' }
-                }
-              >
-                Anomaly Detection
-              </TabsTrigger>
-            )}
+            <TabsTrigger
+              value="anomaly"
+              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-base leading-none font-normal data-[state=active]:font-medium"
+              style={
+                activeTab === 'anomaly'
+                  ? { color: 'hsl(var(--foreground))', fontWeight: 700, textDecoration: 'underline', textUnderlineOffset: '8px', textDecorationThickness: '2px', textDecorationColor: 'hsl(var(--foreground))' }
+                  : { color: 'hsl(var(--foreground))', textDecoration: 'none' }
+              }
+            >
+              Anomaly Detection
+            </TabsTrigger>
           </TabsList>
 
           {/* Devices Tab */}
@@ -1384,6 +1391,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                       const sensorId = sensor.uuid || sensor.configId || sensor.name;
                       const hasChildren = (sensor.childCount || 0) > 0;
                       const isExpanded = !!expandedSensors[sensorId];
+                      const endpointUrl = getEndpointUrl(sensor);
 
                       return (
                       <React.Fragment key={sensorId}>
@@ -1454,10 +1462,25 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                               : `${sensor.pollInterval / 1000}s`
                             : '—'}
                         </td>
-                        <td className="py-3 px-4 text-muted-foreground align-top">
-                          <span className="block max-w-[320px] truncate" title={getEndpointUrl(sensor) || undefined}>
-                            {getEndpointUrl(sensor) || '—'}
-                          </span>
+                        <td className="py-3 px-4 text-muted-foreground align-top w-[360px] min-w-[360px] max-w-[360px]">
+                          <div className="flex items-start gap-2">
+                            <span className="block flex-1 truncate" title={endpointUrl || undefined}>
+                              {endpointUrl || '—'}
+                            </span>
+                            {endpointUrl && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0"
+                                onClick={() => copyEndpointToClipboard(endpointUrl)}
+                                title="Copy full endpoint"
+                                aria-label="Copy full endpoint"
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-muted-foreground align-top">
                           {sensor.health?.lastPoll && sensor.lastActivity ? new Date(sensor.lastActivity).toLocaleString() : '—'}
@@ -1539,8 +1562,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           </TabsContent>
 
           {/* Anomaly Detection Tab */}
-          {getPendingConfig(deviceUuid)?.features?.enableAnomalyDetection && (
-            <TabsContent value="anomaly" className="space-y-6">
+          <TabsContent value="anomaly" className="space-y-6">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <Select value={anomalyFilterDevice} onValueChange={setAnomalyFilterDevice}>
@@ -1605,7 +1627,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                 </CardContent>
               </Card>
             </TabsContent>
-          )}
 
           {false && (
           <TabsContent value="profiles" className="space-y-6">

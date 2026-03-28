@@ -39,6 +39,7 @@ export interface FeatureContext {
   discoveryService?: any; // Discovery service for endpoint auto-reload
   dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
   pipelineService?: PipelineService; // Node-RED payload transform pipeline (optional)
+  liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
 }
 
 export interface InitializedFeatures {
@@ -126,6 +127,11 @@ export class FeatureInitializer {
   public setPipelineService(pipeline?: PipelineService): void {
     this.context.pipelineService = pipeline;
     this.features.sensorPublish?.setPipelineService?.(pipeline);
+  }
+
+  public setLiveDataInterceptor(interceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[]): void {
+    this.context.liveDataInterceptor = interceptor;
+    this.features.sensorPublish?.setLiveDataInterceptor?.(interceptor);
   }
 
   private isDevicePublishEnabled(): boolean {
@@ -341,6 +347,10 @@ export class FeatureInitializer {
 
       if (this.context.pipelineService) {
         this.features.sensorPublish.setPipelineService(this.context.pipelineService);
+      }
+
+      if (this.context.liveDataInterceptor) {
+        this.features.sensorPublish.setLiveDataInterceptor(this.context.liveDataInterceptor);
       }
 
       await this.features.sensorPublish.start();

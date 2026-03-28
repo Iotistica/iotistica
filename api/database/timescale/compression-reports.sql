@@ -42,7 +42,7 @@ SELECT
 FROM timescaledb_information.hypertables
 ORDER BY hypertable_name;
 
--- Expected: device_logs, mqtt_topic_metrics, mqtt_broker_stats, readings all show compression_enabled = true
+-- Expected: agent_logs, mqtt_topic_metrics, mqtt_broker_stats, readings all show compression_enabled = true
 
 -- ============================================================================
 -- 4. HYPERTABLE DETAILED SIZES (Includes Internal Chunks)
@@ -61,7 +61,7 @@ FROM (
         hypertable_name,
         (hypertable_detailed_size(format('%I.%I', hypertable_schema, hypertable_name)::regclass)).*
     FROM timescaledb_information.hypertables
-    WHERE hypertable_name IN ('device_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+    WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
 ) AS sizes
 ORDER BY total_bytes DESC;
 
@@ -69,7 +69,7 @@ ORDER BY total_bytes DESC;
 -- readings: ~16 MB total
 -- mqtt_broker_stats: ~4 MB total
 -- mqtt_topic_metrics: ~40 KB total
--- device_logs: ~100 KB total
+-- agent_logs: ~100 KB total
 
 -- ============================================================================
 -- 5. COMPRESSION POLICIES STATUS
@@ -107,7 +107,7 @@ SELECT
         100 * (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)::numeric),
         2
     ) AS compression_ratio_percent
-FROM hypertable_compression_stats('device_logs');
+FROM hypertable_compression_stats('agent_logs');
 
 -- MQTT topic metrics compression stats
 SELECT 
@@ -143,7 +143,7 @@ SELECT
 FROM hypertable_compression_stats('readings');
 
 -- Expected compression ratios:
--- device_logs: 98%+
+-- agent_logs: 98%+
 -- mqtt_topic_metrics: 98%+
 -- mqtt_broker_stats: 89%+
 -- readings: 96%+
@@ -161,7 +161,7 @@ SELECT
          THEN ROUND(100 * (1 - after_compression_total_bytes::numeric / before_compression_total_bytes::numeric), 1)
          ELSE NULL 
     END AS compression_percent
-FROM chunk_compression_stats('device_logs')
+FROM chunk_compression_stats('agent_logs')
 ORDER BY chunk_name;
 
 -- MQTT topic metrics chunks
@@ -211,11 +211,11 @@ ORDER BY d.range_start DESC;
 -- Count compressed vs uncompressed chunks per hypertable
 -- Using chunk_compression_stats function to identify compressed chunks
 SELECT 
-    'device_logs' AS hypertable_name,
-    (SELECT COUNT(*) FROM chunk_compression_stats('device_logs')) AS compressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'device_logs') - 
-        (SELECT COUNT(*) FROM chunk_compression_stats('device_logs')) AS uncompressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'device_logs') AS total_chunks
+    'agent_logs' AS hypertable_name,
+    (SELECT COUNT(*) FROM chunk_compression_stats('agent_logs')) AS compressed_chunks,
+    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs') - 
+        (SELECT COUNT(*) FROM chunk_compression_stats('agent_logs')) AS uncompressed_chunks,
+    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs') AS total_chunks
 UNION ALL
 SELECT 
     'mqtt_topic_metrics' AS hypertable_name,
@@ -282,35 +282,35 @@ ORDER BY j.job_id;
 -- Generate a summary report showing current size and compression savings
 -- Shows all hypertables regardless of compression status
 SELECT 
-    'device_logs' AS hypertable_name,
+    'agent_logs' AS hypertable_name,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'device_logs') 
-        THEN pg_size_pretty(COALESCE((SELECT (hypertable_detailed_size('device_logs'::regclass)).total_bytes), 0))
+        WHEN EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs') 
+        THEN pg_size_pretty(COALESCE((SELECT (hypertable_detailed_size('agent_logs'::regclass)).total_bytes), 0))
         ELSE 'Not created yet'
     END AS current_size,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('device_logs')) 
-        THEN pg_size_pretty((SELECT before_compression_total_bytes FROM hypertable_compression_stats('device_logs')))
+        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs')) 
+        THEN pg_size_pretty((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')))
         ELSE 'N/A'
     END AS original_size_before_compression,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('device_logs'))
-        THEN pg_size_pretty((SELECT after_compression_total_bytes FROM hypertable_compression_stats('device_logs')))
+        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs'))
+        THEN pg_size_pretty((SELECT after_compression_total_bytes FROM hypertable_compression_stats('agent_logs')))
         ELSE 'N/A'
     END AS compressed_size,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('device_logs'))
-        THEN pg_size_pretty((SELECT before_compression_total_bytes - after_compression_total_bytes FROM hypertable_compression_stats('device_logs')))
+        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs'))
+        THEN pg_size_pretty((SELECT before_compression_total_bytes - after_compression_total_bytes FROM hypertable_compression_stats('agent_logs')))
         ELSE 'N/A'
     END AS space_saved,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('device_logs'))
-        THEN ROUND(100 * (SELECT (before_compression_total_bytes - after_compression_total_bytes)::numeric / NULLIF(before_compression_total_bytes, 0)::numeric FROM hypertable_compression_stats('device_logs')), 1)
+        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs'))
+        THEN ROUND(100 * (SELECT (before_compression_total_bytes - after_compression_total_bytes)::numeric / NULLIF(before_compression_total_bytes, 0)::numeric FROM hypertable_compression_stats('agent_logs')), 1)
         ELSE 0
     END AS compression_ratio_percent,
     CASE 
-        WHEN NOT EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'device_logs') THEN 'Table not created yet'
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('device_logs')) THEN 'Compressed'
+        WHEN NOT EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs') THEN 'Table not created yet'
+        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs')) THEN 'Compressed'
         ELSE 'Not compressed yet'
     END AS status
 UNION ALL
@@ -417,24 +417,24 @@ ORDER BY hypertable_name;
 -- Calculate total savings across all hypertables
 SELECT 
     pg_size_pretty(
-        COALESCE((SELECT (hypertable_detailed_size('device_logs'::regclass)).total_bytes WHERE EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'device_logs')), 0) +
+        COALESCE((SELECT (hypertable_detailed_size('agent_logs'::regclass)).total_bytes WHERE EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs')), 0) +
         COALESCE((SELECT (hypertable_detailed_size('mqtt_topic_metrics'::regclass)).total_bytes WHERE EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_topic_metrics')), 0) +
         COALESCE((SELECT (hypertable_detailed_size('mqtt_broker_stats'::regclass)).total_bytes WHERE EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_broker_stats')), 0) +
         COALESCE((SELECT (hypertable_detailed_size('readings'::regclass)).total_bytes WHERE EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'readings')), 0)
     ) AS current_total_size,
     CASE 
         WHEN (
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('device_logs')), 0) +
+            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
             COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
             COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
             COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)
         ) > 0 THEN 
             pg_size_pretty(
-                (COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('device_logs')), 0) +
+                (COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
                  COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
                  COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
                  COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)) -
-                (COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('device_logs')), 0) +
+                (COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
                  COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
                  COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
                  COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('readings')), 0))
@@ -443,23 +443,23 @@ SELECT
     END AS total_space_saved,
     CASE 
         WHEN (
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('device_logs')), 0) +
+            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
             COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
             COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
             COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)
         ) > 0 THEN 
             ROUND(
                 100 * (
-                    ((COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('device_logs')), 0) +
+                    ((COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
                       COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
                       COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
                       COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)) -
-                     (COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('device_logs')), 0) +
+                     (COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
                       COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
                       COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
                       COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)))::numeric /
                     NULLIF(
-                        (COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('device_logs')), 0) +
+                        (COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
                          COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
                          COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
                          COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)),
@@ -471,10 +471,10 @@ SELECT
         ELSE 0
     END AS total_compression_ratio_percent,
     CASE 
-        WHEN NOT EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name IN ('device_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings'))
+        WHEN NOT EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings'))
             THEN 'No target hypertables found - run migration first'
         WHEN (
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('device_logs')), 0) +
+            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
             COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
             COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
             COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)
@@ -512,13 +512,13 @@ FROM storage_costs;
 -- Test query performance on compressed data (should be fast for recent data)
 EXPLAIN ANALYZE
 SELECT 
-    device_uuid,
+    agent_uuid,
     metric_name,
     AVG(value) AS avg_value,
     COUNT(*) AS sample_count
 FROM readings
 WHERE time > NOW() - INTERVAL '1 hour'
-GROUP BY device_uuid, metric_name;
+GROUP BY agent_uuid, metric_name;
 
 -- Recent data (uncompressed) should query quickly
 -- Older compressed data transparently decompresses on read
@@ -544,19 +544,19 @@ SELECT
     ) AS active_compression_policies,
     (
         SELECT 
-            (SELECT COUNT(*) FROM chunk_compression_stats('device_logs')) +
+            (SELECT COUNT(*) FROM chunk_compression_stats('agent_logs')) +
             (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_topic_metrics')) +
             (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_broker_stats')) +
             (SELECT COUNT(*) FROM chunk_compression_stats('readings'))
     ) AS total_compressed_chunks,
     (
         SELECT 
-            COALESCE((SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'device_logs'), 0) +
+            COALESCE((SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs'), 0) +
             COALESCE((SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_topic_metrics'), 0) +
             COALESCE((SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_broker_stats'), 0) +
             COALESCE((SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'readings'), 0) -
             (SELECT 
-                (SELECT COUNT(*) FROM chunk_compression_stats('device_logs')) +
+                (SELECT COUNT(*) FROM chunk_compression_stats('agent_logs')) +
                 (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_topic_metrics')) +
                 (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_broker_stats')) +
                 (SELECT COUNT(*) FROM chunk_compression_stats('readings'))
@@ -610,9 +610,9 @@ SELECT
     NOW() - range_end AS age,
     'Uncompressed' AS status
 FROM timescaledb_information.chunks
-WHERE hypertable_name IN ('device_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
 AND chunk_name NOT IN (
-    SELECT chunk_name FROM chunk_compression_stats('device_logs')
+    SELECT chunk_name FROM chunk_compression_stats('agent_logs')
     UNION ALL
     SELECT chunk_name FROM chunk_compression_stats('mqtt_topic_metrics')
     UNION ALL

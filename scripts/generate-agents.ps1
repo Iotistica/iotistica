@@ -105,6 +105,15 @@ param(
     
     # Simulation Control
     [switch]$EnableSimulation = $false,
+    [string]$SimulationAnomalyMetrics = "",
+    [string]$SimulationAnomalyExcludeMetrics = "",
+    [string]$SimulationAnomalyValueSource = "",
+    [string]$SimulationAnomalyPattern = "",
+    [string]$SimulationAnomalyMode = "",
+    [string]$SimulationAnomalyStrictBaseline = "",
+    [int]$SimulationAnomalyBaselineMinSamples = 0,
+    [string]$SimulationAnomalyBaselineDeviceId = "",
+    [string]$SimulationAnomalyBaselineDeviceState = "",
 
     
     # Container Resources
@@ -124,27 +133,15 @@ $ErrorActionPreference = "Stop"
 # Use these as a quick template when manually setting environment variables.
 $SimulationSampleVariables = @{
     SIMULATION_MODE = "true"
-    SIMULATION_PROFILE = "baseline-realistic"
+    SIMULATION_PROFILE = "intercept-custom"
     SIMULATION_CONFIG = (
         @{
             scenarios = @{
                 anomaly_injection = @{
                     enabled = $true
-                    metrics = @("cpu_temp", "memory_percent")
+                    mode = "intercept"
+                    metrics = @("8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature")
                     pattern = "spike"
-                    intervalMs = 60000
-                    severity = "warning"
-                    magnitude = 2
-                }
-                sensor_data = @{
-                    enabled = $true
-                    pattern = "realistic"
-                    publishIntervalMs = 10000
-                    devices = @(
-                        @{ endpointTopic = "modbus"; metric = "temperature"; protocol = "modbus"; unit = "C"; baseValue = 23.0; variance = 2.0; min = 15; max = 35 },
-                        @{ endpointTopic = "snmp"; metric = "humidity"; protocol = "snmp"; unit = "%"; baseValue = 55.0; variance = 10.0; min = 30; max = 80 },
-                        @{ endpointTopic = "opcua"; metric = "pressure"; protocol = "opcua"; unit = "hPa"; baseValue = 1013.25; variance = 5.0; min = 980; max = 1050 }
-                    )
                 }
             }
         } | ConvertTo-Json -Depth 10 -Compress
@@ -550,6 +547,15 @@ function New-SimulationSensorDevices {
                 @{ endpointTopic = 'opcua'; metric = 'pressure'; protocol = 'opcua'; unit = 'hPa'; baseValue = 1013.25; variance = 5.0; min = 980; max = 1050 }
             )
         }
+        'production-collected' {
+            # Real baselines from agent DB (8602805f-50b1-40cb-acdc-3f4eb084bfcf)
+            return @(
+                @{ endpointTopic = 'system'; metric = 'cpu_usage'; protocol = 'system'; unit = '%'; baseValue = 7.7; variance = 8.546; min = 3.0; max = 100 },
+                @{ endpointTopic = 'system'; metric = 'memory_percent'; protocol = 'system'; unit = '%'; baseValue = 53.095; variance = 0.770; min = 53.0; max = 54.0 },
+                @{ endpointTopic = 'mqtt'; metric = 'temperature'; protocol = 'mqtt'; unit = 'C'; baseValue = 23.043974; variance = 0.393; min = 22.6968; max = 23.43 },
+                @{ endpointTopic = 'mqtt'; metric = 'humidity'; protocol = 'mqtt'; unit = '%'; baseValue = 45.078735; variance = 0.871; min = 44.5244; max = 45.7729 }
+            )
+        }
         'high-frequency' {
             return @(
                 @{ endpointTopic = 'modbus'; metric = 'temperature'; protocol = 'modbus'; unit = 'C'; baseValue = 24.5; variance = 1.5; min = 18; max = 32 },
@@ -590,14 +596,229 @@ function New-SimulationProfile {
     return @{
         name = $ProfileName
         enabled = 'true'
-        config = (@{ scenarios = $Scenarios } | ConvertTo-Json -Depth 10 -Compress)
+        config = (Convert-SimulationScenariosToJson -Scenarios $Scenarios)
+        configObject = @{ scenarios = $Scenarios }
         scenarioNames = @($Scenarios.Keys | Sort-Object)
     }
 }
 
+function Convert-SimulationScenariosToJson {
+    param(
+        [hashtable]$Scenarios
+    )
+
+    $exportScenarios = @{}
+
+    foreach ($entry in $Scenarios.GetEnumerator()) {
+        $exportScenarios[$entry.Key] = $entry.Value
+    }
+
+    $anomalyConfig = $exportScenarios['anomaly_injection']
+    $sensorConfig = $exportScenarios['sensor_data']
+
+    if ($anomalyConfig -and $anomalyConfig.enabled -and $anomalyConfig.mode -eq 'intercept') {
+        $compactAnomaly = @{
+            enabled = $true
+            mode = 'intercept'
+            metrics = @($anomalyConfig.metrics)
+            pattern = $anomalyConfig.pattern
+        }
+
+        if ($anomalyConfig.ContainsKey('magnitude') -and $anomalyConfig.magnitude -ne 3) {
+            $compactAnomaly.magnitude = $anomalyConfig.magnitude
+        }
+        if ($anomalyConfig.ContainsKey('baselineDeviceId') -and -not [string]::IsNullOrWhiteSpace($anomalyConfig.baselineDeviceId) -and $anomalyConfig.baselineDeviceId -ne 'unknown-device') {
+            $compactAnomaly.baselineDeviceId = $anomalyConfig.baselineDeviceId
+        }
+        if ($anomalyConfig.ContainsKey('baselineDeviceState') -and -not [string]::IsNullOrWhiteSpace($anomalyConfig.baselineDeviceState) -and $anomalyConfig.baselineDeviceState -ne 'unknown') {
+            $compactAnomaly.baselineDeviceState = $anomalyConfig.baselineDeviceState
+        }
+
+        $exportScenarios['anomaly_injection'] = $compactAnomaly
+
+        if ($sensorConfig -and $sensorConfig.enabled -eq $false) {
+            $exportScenarios.Remove('sensor_data')
+        }
+    }
+
+    return (@{ scenarios = $exportScenarios } | ConvertTo-Json -Depth 10 -Compress)
+}
+
+function ConvertTo-StringList {
+    param(
+        [string]$InputValue
+    )
+
+    if ([string]::IsNullOrWhiteSpace($InputValue)) {
+        return @()
+    }
+
+    return @(
+        $InputValue.Split(',; ') |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { $_.Trim() }
+    )
+}
+
+function ConvertTo-NullableBool {
+    param(
+        [string]$RawValue
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RawValue)) {
+        return $null
+    }
+
+    switch ($RawValue.Trim().ToLowerInvariant()) {
+        'true' { return $true }
+        '1' { return $true }
+        'yes' { return $true }
+        'y' { return $true }
+        'false' { return $false }
+        '0' { return $false }
+        'no' { return $false }
+        'n' { return $false }
+        default {
+            Write-Warning "Invalid boolean value '$RawValue' for simulation override. Expected true/false."
+            return $null
+        }
+    }
+}
+
+function Apply-AnomalySimulationOverrides {
+    param(
+        [hashtable]$SimulationProfile,
+        [string]$Metrics,
+        [string]$ExcludeMetrics,
+        [string]$ValueSource,
+        [string]$Pattern,
+        [string]$Mode,
+        [string]$StrictBaseline,
+        [int]$BaselineMinSamples,
+        [string]$BaselineDeviceId,
+        [string]$BaselineDeviceState
+    )
+
+    if (-not $SimulationProfile.enabled -or $SimulationProfile.enabled -ne 'true') {
+        return $SimulationProfile
+    }
+
+    $scenarios = $SimulationProfile.configObject.scenarios
+    if (-not $scenarios -or -not $scenarios.ContainsKey('anomaly_injection')) {
+        return $SimulationProfile
+    }
+
+    $anomalyConfig = $scenarios.anomaly_injection
+    if (-not $anomalyConfig) {
+        return $SimulationProfile
+    }
+
+    $includeList = ConvertTo-StringList -InputValue $Metrics
+    if ($includeList.Count -gt 0) {
+        $anomalyConfig.metrics = $includeList
+    }
+
+    $excludeList = ConvertTo-StringList -InputValue $ExcludeMetrics
+    if ($excludeList.Count -gt 0) {
+        $excluded = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($metric in $excludeList) {
+            [void]$excluded.Add($metric)
+        }
+
+        $anomalyConfig.metrics = @($anomalyConfig.metrics | Where-Object { -not $excluded.Contains($_) })
+    }
+
+    $modeNorm = ""
+    if (-not [string]::IsNullOrWhiteSpace($Mode)) {
+        $modeNorm = $Mode.Trim().ToLowerInvariant()
+    }
+
+    # Intercept mode is intended to run against real live data with baseline-driven adjustments.
+    # If the caller did not explicitly provide these values, apply sensible defaults.
+    if ($modeNorm -eq 'intercept') {
+        if ([string]::IsNullOrWhiteSpace($ValueSource)) {
+            $ValueSource = 'baseline'
+        }
+        if ([string]::IsNullOrWhiteSpace($StrictBaseline)) {
+            $StrictBaseline = 'true'
+        }
+        if ($BaselineMinSamples -le 0) {
+            $BaselineMinSamples = 10
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ValueSource)) {
+        $source = $ValueSource.Trim().ToLowerInvariant()
+        if ($source -eq 'static' -or $source -eq 'baseline') {
+            $anomalyConfig.valueSource = $source
+        } else {
+            Write-Warning "Invalid SimulationAnomalyValueSource '$ValueSource'. Expected static|baseline."
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Pattern)) {
+        $patternNorm = $Pattern.Trim().ToLowerInvariant()
+        if (@('spike', 'drift', 'cyclic', 'noisy', 'extreme', 'random', 'realistic', 'alert') -contains $patternNorm) {
+            $anomalyConfig.pattern = $patternNorm
+        } else {
+            Write-Warning "Invalid SimulationAnomalyPattern '$Pattern'. Expected spike|drift|cyclic|noisy|extreme|random|realistic|alert."
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Mode)) {
+        if ($modeNorm -eq 'inject' -or $modeNorm -eq 'intercept') {
+            $anomalyConfig.mode = $modeNorm
+            # Intercept mode works on real live data — disable synthetic sensor_data generation.
+            if ($modeNorm -eq 'intercept' -and $scenarios.ContainsKey('sensor_data')) {
+                $scenarios.sensor_data.enabled = $false
+            }
+        } else {
+            Write-Warning "Invalid SimulationAnomalyMode '$Mode'. Expected inject|intercept."
+        }
+    }
+
+    $strictBool = ConvertTo-NullableBool -RawValue $StrictBaseline
+    if ($null -ne $strictBool) {
+        $anomalyConfig.strictBaseline = $strictBool
+    }
+
+    if ($BaselineMinSamples -gt 0) {
+        $anomalyConfig.baselineMinSamples = $BaselineMinSamples
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($BaselineDeviceId)) {
+        $anomalyConfig.baselineDeviceId = $BaselineDeviceId.Trim()
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($BaselineDeviceState)) {
+        $candidateState = $BaselineDeviceState.Trim().ToLowerInvariant()
+        if (@('running', 'idle', 'fault', 'unknown') -contains $candidateState) {
+            $anomalyConfig.baselineDeviceState = $candidateState
+        } else {
+            Write-Warning "Invalid SimulationAnomalyBaselineDeviceState '$BaselineDeviceState'. Expected running|idle|fault|unknown."
+        }
+    }
+
+    $SimulationProfile.config = (Convert-SimulationScenariosToJson -Scenarios $scenarios)
+    $SimulationProfile.configObject = @{ scenarios = $scenarios }
+    return $SimulationProfile
+}
+
 # Get simulation configuration based on agent index (varied scenario profiles)
 function Get-SimulationConfig {
-    param([int]$Index, [bool]$SimulationEnabled)
+    param(
+        [int]$Index,
+        [bool]$SimulationEnabled,
+        [string]$AnomalyMetrics,
+        [string]$AnomalyExcludeMetrics,
+        [string]$AnomalyValueSource,
+        [string]$AnomalyPattern,
+        [string]$AnomalyMode,
+        [string]$AnomalyStrictBaseline,
+        [int]$AnomalyBaselineMinSamples,
+        [string]$AnomalyBaselineDeviceId,
+        [string]$AnomalyBaselineDeviceState
+    )
     
     # If simulation is disabled globally, return disabled config
     if (-not $SimulationEnabled) {
@@ -605,6 +826,7 @@ function Get-SimulationConfig {
             name = 'disabled'
             enabled = "false"
             config = '{}'
+            configObject = @{ scenarios = @{} }
             scenarioNames = @()
         }
     }
@@ -614,6 +836,7 @@ function Get-SimulationConfig {
             name = 'normal-operation'
             enabled = 'false'
             config = '{}'
+            configObject = @{ scenarios = @{} }
             scenarioNames = @()
         },
         (New-SimulationProfile -ProfileName 'baseline-realistic' -Scenarios @{
@@ -624,6 +847,11 @@ function Get-SimulationConfig {
                 intervalMs = 60000
                 severity = 'warning'
                 magnitude = 2
+                valueSource = 'static'
+                strictBaseline = $false
+                baselineMinSamples = 10
+                baselineDeviceId = 'unknown-device'
+                baselineDeviceState = 'unknown'
             }
             sensor_data = @{
                 enabled = $true
@@ -640,6 +868,11 @@ function Get-SimulationConfig {
                 intervalMs = 120000
                 severity = 'warning'
                 magnitude = 4
+                valueSource = 'static'
+                strictBaseline = $false
+                baselineMinSamples = 10
+                baselineDeviceId = 'unknown-device'
+                baselineDeviceState = 'unknown'
             }
             sensor_data = @{
                 enabled = $true
@@ -656,6 +889,11 @@ function Get-SimulationConfig {
                 intervalMs = 30000
                 severity = 'critical'
                 magnitude = 5
+                valueSource = 'static'
+                strictBaseline = $false
+                baselineMinSamples = 10
+                baselineDeviceId = 'unknown-device'
+                baselineDeviceState = 'unknown'
             }
             sensor_data = @{
                 enabled = $true
@@ -678,28 +916,46 @@ function Get-SimulationConfig {
                 publishIntervalMs = 15000
                 devices = (New-SimulationSensorDevices -ProfileName 'cyclic')
             }
+        }),
+        (New-SimulationProfile -ProfileName 'production-collected' -Scenarios @{
+            anomaly_injection = @{
+                enabled = $true
+                mode = 'intercept'
+                metrics = @('cpu_usage', 'memory_percent', 'temperature', 'humidity')
+                pattern = 'realistic'
+                intervalMs = 45000
+                severity = 'warning'
+                magnitude = 1.5
+                valueSource = 'baseline'
+                strictBaseline = $true
+                baselineMinSamples = 10
+                baselineDeviceId = '8602805f-50b1-40cb-acdc-3f4eb084bfcf'
+                baselineDeviceState = 'running'
+            }
+            sensor_data = @{
+                enabled = $false
+                pattern = 'realistic'
+                publishIntervalMs = 12000
+                devices = (New-SimulationSensorDevices -ProfileName 'production-collected')
+            }
         })
     )
 
     $mode = $Index % $profiles.Count
+    $selected = $profiles[$mode]
 
-    switch ($mode) {
-        0 {
-            return $profiles[0]
-        }
-        1 {
-            return $profiles[1]
-        }
-        2 {
-            return $profiles[2]
-        }
-        3 {
-            return $profiles[3]
-        }
-        4 {
-            return $profiles[4]
-        }
-    }
+    $selected = Apply-AnomalySimulationOverrides -SimulationProfile $selected `
+        -Metrics $AnomalyMetrics `
+        -ExcludeMetrics $AnomalyExcludeMetrics `
+        -ValueSource $AnomalyValueSource `
+        -Pattern $AnomalyPattern `
+        -Mode $AnomalyMode `
+        -StrictBaseline $AnomalyStrictBaseline `
+        -BaselineMinSamples $AnomalyBaselineMinSamples `
+        -BaselineDeviceId $AnomalyBaselineDeviceId `
+        -BaselineDeviceState $AnomalyBaselineDeviceState
+
+    return $selected
 }
 
 # Execute cleanup or generation based on mode
@@ -710,7 +966,7 @@ if ($Cleanup) {
 
 Write-Host "Generating $Count agents (indices $StartIndex to $($StartIndex + $Count - 1))..." -ForegroundColor Cyan
 if ($EnableSimulation) {
-    Write-Host "Simulation profiles: normal-operation, baseline-realistic, high-frequency-drift, stress-spike, cyclic-memory" -ForegroundColor Gray
+    Write-Host "Simulation profiles: normal-operation, baseline-realistic, high-frequency-drift, stress-spike, cyclic-memory, production-collected" -ForegroundColor Gray
 } else {
     Write-Host "Simulation: DISABLED (all agents in normal operation mode)" -ForegroundColor Gray
 }
@@ -735,7 +991,16 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $provisioningKeys += "${agentName}: $apiKey"
     
     $volumeName = "$agentName-data"
-    $simConfig = Get-SimulationConfig -Index $i -SimulationEnabled ([bool]$EnableSimulation)
+    $simConfig = Get-SimulationConfig -Index $i -SimulationEnabled ([bool]$EnableSimulation) `
+        -AnomalyMetrics $SimulationAnomalyMetrics `
+        -AnomalyExcludeMetrics $SimulationAnomalyExcludeMetrics `
+        -AnomalyValueSource $SimulationAnomalyValueSource `
+        -AnomalyPattern $SimulationAnomalyPattern `
+        -AnomalyMode $SimulationAnomalyMode `
+        -AnomalyStrictBaseline $SimulationAnomalyStrictBaseline `
+        -AnomalyBaselineMinSamples $SimulationAnomalyBaselineMinSamples `
+        -AnomalyBaselineDeviceId $SimulationAnomalyBaselineDeviceId `
+        -AnomalyBaselineDeviceState $SimulationAnomalyBaselineDeviceState
 
     if ($simConfig.enabled -eq 'true') {
         Write-Host "    Simulation profile: $($simConfig.name) [$($simConfig.scenarioNames -join ', ')]" -ForegroundColor DarkGray

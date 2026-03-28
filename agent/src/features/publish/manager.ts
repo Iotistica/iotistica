@@ -40,6 +40,7 @@ export class PublishManager extends EventEmitter {
   private publishing = false;
   private connectionHandlersAttached = false;
   private pipelineService?: PipelineService;
+  private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
 
   private readonly onConnected = (): void => {
     if (this.needStop) return;
@@ -109,6 +110,10 @@ export class PublishManager extends EventEmitter {
 
   public setPipelineService(service?: PipelineService): void {
     this.pipelineService = service;
+  }
+
+  public setLiveDataInterceptor(interceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[]): void {
+    this.liveDataInterceptor = interceptor;
   }
 
   async start(): Promise<void> {
@@ -210,7 +215,18 @@ export class PublishManager extends EventEmitter {
       const topic = agentTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
       const messageCount = this.batcher.messageCount;
       const batchBytes = this.batcher.totalBytes;
-        const messages = [...this.batcher.messages];
+        let messages = [...this.batcher.messages];
+
+        if (this.liveDataInterceptor) {
+          try {
+            const intercepted = await this.liveDataInterceptor(messages, name);
+            if (Array.isArray(intercepted)) {
+              messages = intercepted;
+            }
+          } catch (err) {
+            this.logger?.warn(`Live data interceptor failed for endpoint '${name}', continuing with original payload`, err);
+          }
+        }
 
         const enriched = this.processAnomaly(messages, name);
       if (this.needStop) return;

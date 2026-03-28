@@ -73,13 +73,21 @@ export class SimulationOrchestrator {
 				...DEFAULT_ANOMALY_CONFIG,
 				...this.config.scenarios.anomaly_injection,
 			};
-			
-			const scenario = new AnomalyInjectionSimulation(
-				anomalyConfig,
-				this.dependencies.anomalyService,
-				this.logger
-			);
-			this.scenarios.set('anomaly_injection', scenario);
+
+			if (anomalyConfig.mode !== 'intercept') {
+				const scenario = new AnomalyInjectionSimulation(
+					anomalyConfig,
+					this.dependencies.anomalyService,
+					this.logger
+				);
+				this.scenarios.set('anomaly_injection', scenario);
+			} else {
+				this.logger?.infoSync('Anomaly simulation configured in intercept mode (no synthetic injection scenario)', {
+					component: LogComponents.agent,
+					metrics: anomalyConfig.metrics,
+					pattern: anomalyConfig.pattern,
+				});
+			}
 		}
 		
 		// Sensor data simulation
@@ -304,6 +312,13 @@ export function loadSimulationConfig(): Partial<SimulationConfig> {
 		try {
 			const parsed = parseSimulationEnvJson(configStr);
 			config = { enabled: true, ...parsed };
+
+			const anomalyConfig = config.scenarios?.anomaly_injection;
+			if (anomalyConfig?.mode === 'intercept') {
+				anomalyConfig.valueSource = anomalyConfig.valueSource || 'baseline';
+				anomalyConfig.strictBaseline = anomalyConfig.strictBaseline ?? true;
+				anomalyConfig.baselineMinSamples = anomalyConfig.baselineMinSamples ?? 10;
+			}
 		} catch (error) {
 			console.error('Failed to parse SIMULATION_CONFIG:', error);
 		}
