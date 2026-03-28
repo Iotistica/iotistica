@@ -353,6 +353,22 @@ export class AnomalyStorageService {
 	}
 
 	/**
+	 * Get the latest baseline for a metric by metric name only, ignoring device_id and device_state.
+	 * Used by live simulation interceptor to look up baselines using the full canonical metric key.
+	 */
+	async getBaselineForMetric(
+		metric: string,
+		minimumSamples: number = 10,
+	): Promise<AnomalyBaselineRecord | null> {
+		const result = await this.db('anomaly_baselines')
+			.where({ metric })
+			.where('sample_count', '>=', minimumSamples)
+			.orderBy('calculated_at', 'desc')
+			.first();
+		return result ?? null;
+	}
+
+	/**
 	 * Get latest baseline for a metric and time slot
 	 * Falls back to overall baseline (-1) if seasonal baseline not found or has insufficient data
 	 * Backward compatible: falls back to old schema if time_slot column doesn't exist

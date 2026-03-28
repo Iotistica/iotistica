@@ -23,12 +23,24 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 		managerFeatures
 	});
 
+	// SIMULATION_MODE is an env var known at process start — no network round-trip needed.
+	// If simulation is requested, anomaly detection must run regardless of the cloud feature
+	// flag, which may be unavailable during the features phase (before the first cloud poll).
+	const simulationForceEnabled = process.env.SIMULATION_MODE === 'true';
+
 	if (!features.enableAnomalyDetection) {
-		ctx.agentLogger?.infoSync('Anomaly Detection disabled by configuration', {
-			component: LogComponents.agent,
-			features
-		});
-		return;
+		if (simulationForceEnabled) {
+			ctx.agentLogger?.warnSync('Anomaly Detection force-enabled for simulation mode', {
+				component: LogComponents.agent,
+				note: 'SIMULATION_MODE=true requires anomaly detection regardless of cloud config',
+			});
+		} else {
+			ctx.agentLogger?.infoSync('Anomaly Detection disabled by configuration', {
+				component: LogComponents.agent,
+				features
+			});
+			return;
+		}
 	}
 
 	if (ctx.anomalyService) {

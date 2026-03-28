@@ -30,6 +30,14 @@ export function setupConfigEventListeners(ctx: AgentInitContext): void {
 				});
 				const { initAnomalyDetection } = await import('./ai.js');
 				await initAnomalyDetection(ctx);
+
+				// Simulation init runs before target state is available (in features.ts).
+				// Now that anomaly detection is up, re-run simulation init so it can
+				// attach to the anomaly service correctly.
+				if (ctx.anomalyService && !ctx.simulationOrchestrator) {
+					const { initSimulationMode } = await import('./simulation.js');
+					await initSimulationMode(ctx);
+				}
 			} else if (!change.new.enableAnomalyDetection && ctx.anomalyService) {
 				logger?.infoSync('Stopping Anomaly Detection Service (dynamically disabled)', {
 					component: LogComponents.agent

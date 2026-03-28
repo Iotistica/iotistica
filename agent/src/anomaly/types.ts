@@ -5,6 +5,8 @@
  * Edge-appropriate anomaly detection for IoT sensor data and system metrics
  */
 
+import type { AgentLogger } from '../logging/agent-logger';
+
 /**
  * Protocol types for data sources
  */
@@ -14,6 +16,17 @@ export type Protocol = 'modbus' | 'opcua' | 'bacnet' | 'mqtt' | 'system';
  * Canonical device operational states used across all protocols
  */
 export type CanonicalDeviceState = 'running' | 'idle' | 'fault' | 'unknown';
+
+/**
+ * Metadata attached to data points injected by the simulation subsystem.
+ * Presence of this field signals to detection that the anomaly is intentional.
+ */
+export interface SimulationMeta {
+	simulatedAnomaly: boolean;
+	scenarioId?: string;   // e.g. 'anomaly_injection'
+	injectedAt?: number;   // Unix timestamp (ms)
+	pattern?: string;      // Simulation pattern used (spike, drift, alert, etc.)
+}
 
 /**
  * Unified data point for all monitored values
@@ -30,6 +43,7 @@ export interface DataPoint {
 	deviceId?: string;        // For multi-sensor scenarios
 	quality?: 'GOOD' | 'BAD' | 'UNCERTAIN';
 	tags?: Record<string, string>;  // Additional metadata
+	simulationMeta?: SimulationMeta; // Present when data was injected by simulation
 }
 
 /**
@@ -43,12 +57,126 @@ export type DetectionMethod =
 	| 'rate_change'   // Rate of change (velocity/acceleration)
 	| 'ewma'          // Exponentially Weighted Moving Average
 	| 'correlation'   // Correlation between metrics
-	| 'fusion';       // Ensemble detector combining multiple methods
+	| 'fusion'        // Ensemble detector combining multiple methods
+	| 'simulation';   // Ground-truth fast-path for simulated anomalies
 
 /**
  * Anomaly severity levels
  */
 export type AnomalySeverity = 'info' | 'warning' | 'critical';
+
+/**
+ * Simulation pattern types for anomaly injection scenarios
+ */
+export type SimulationPattern =
+	| 'realistic'     // Mimics real-world behavior
+	| 'spike'         // Sudden spikes/jumps
+	| 'drift'         // Gradual drift over time
+	| 'recovery'      // Return toward baseline after alert/fault
+	| 'cyclic'        // Repeating cycles
+	| 'noisy'         // Random noise added
+	| 'faulty'        // Intermittent failures
+	| 'alert'         // High-impact deviation intended to trigger anomaly detection quickly
+	| 'extreme'       // Edge case values
+	| 'random';       // Completely random
+
+/**
+ * Simulation severity for anomaly injection
+ */
+export type SimulationSeverity = AnomalySeverity;
+
+/**
+ * Anomaly injection simulation configuration
+ */
+export interface AnomalySimulationConfig {
+	enabled: boolean;
+	mode?: 'inject' | 'intercept';      // inject: synthetic points, intercept: mutate real endpoint data
+	metrics: string[];                  // Which metrics to inject anomalies into
+	pattern: SimulationPattern;         // How to generate anomalies
+	intervalMs: number;                 // How often to inject
+	burstCount?: number;                // Number of points injected per cycle
+	alertDirection?: 'high' | 'low' | 'auto'; // Direction used by alert pattern
+	severity: SimulationSeverity;       // Severity level
+	magnitude: number;                  // Multiplier for deviation (1-10)
+}
+
+/**
+ * Complete simulation configuration
+ */
+export interface SimulationConfig {
+	enabled: boolean;                   // Master enable flag
+	scenarios: {
+		anomaly_injection?: AnomalySimulationConfig;
+	};
+	logLevel?: 'debug' | 'info' | 'warn'; // Simulation logging verbosity
+	warningInterval?: number;             // How often to log simulation warning (ms)
+}
+
+/**
+ * Simulation scenario status
+ */
+export interface SimulationScenarioStatus {
+	name: string;
+	enabled: boolean;
+	running: boolean;
+	startedAt?: number;
+	stats?: Record<string, any>;
+	error?: string;
+}
+
+/**
+ * Simulation scenario interface
+ */
+export interface SimulationScenario {
+	name: string;
+	description: string;
+	enabled: boolean;
+	start(): Promise<void>;
+	stop(): Promise<void>;
+	getStatus(): SimulationScenarioStatus;
+	updateConfig?(config: any): Promise<void>;
+}
+
+/**
+ * Anomaly service contract used by simulation components
+ */
+export interface AnomalySimulationService {
+	processDataPoint(dataPoint: DataPoint): void;
+	getStorage?(): any;
+}
+
+/**
+ * Simulation orchestrator dependencies
+ */
+export interface SimulationDependencies {
+	logger?: AgentLogger;
+	anomalyService?: AnomalySimulationService;
+}
+
+/**
+ * Default simulation configuration
+ */
+export const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
+	enabled: false,
+	scenarios: {},
+	logLevel: 'info',
+	warningInterval: 300000, // 5 minutes
+};
+
+/**
+ * Default anomaly simulation
+ */
+export const DEFAULT_ANOMALY_CONFIG: AnomalySimulationConfig = {
+	enabled: false,
+	mode: 'inject',
+	metrics: ['cpu_usage', 'memory_percent', 'cpu_temp'],
+	pattern: 'spike',
+	intervalMs: 60000,
+	burstCount: 1,
+	alertDirection: 'high',
+	severity: 'warning',
+	magnitude: 3,
+};
 
 /**
  * Trend direction

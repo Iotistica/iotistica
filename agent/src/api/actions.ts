@@ -8,7 +8,7 @@ import type { DeviceManager } from '../managers';
 import type { CloudSync } from '../managers/cloud-sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../anomaly';
-import type { SimulationOrchestrator } from '../simulation';
+import type { SimulationOrchestrator } from '../anomaly/simulator';
 import type { SensorsFeature } from '../features/adapters';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/health-arbiter';

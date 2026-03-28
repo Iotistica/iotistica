@@ -953,8 +953,14 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 
 	await initializer.initSensorFeatures();
 	await initializer.initJobsFeature();
-  const { initializeSimulationMode } = await import('./simulation.js');
-  await initializeSimulationMode(ctx);
+
+	// Anomaly detection must be initialized before simulation so producer-mode scenarios can feed the shared pipeline.
+  const { initAnomalyDetection } = await import('./ai.js');
+  await initAnomalyDetection(ctx);
+
+  const { initSimulationMode } = await import('./simulation.js');
+  await initSimulationMode(ctx);
+
 	await initializer.initSupportingFeatures();
 
 	const initializedFeatures = initializer.getFeatures();

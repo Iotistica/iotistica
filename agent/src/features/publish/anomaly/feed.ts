@@ -31,12 +31,6 @@ export class AnomalyFeed {
     const hasService = !!service;
     const hasConfiguredMetrics = !!service?.hasConfiguredMetrics();
 
-    this.logger?.debug('processBatch entry', {
-      deviceName,
-      messageCount: messages.length,
-      hasService,
-      hasConfiguredMetrics,
-    });
 
     if (!hasService) {
       this.logger?.debug('Endpoint batch skipped: anomaly service unavailable', {
@@ -114,12 +108,12 @@ export class AnomalyFeed {
         : (deviceName || 'unknown');
     const metricKey = `${this.deviceUuid}_${identifier}_${fieldName}`;
 
-    this.logger?.debug('Built metricKey', {
-      metricKey,
-      deviceName,
-      deviceIdentifier: identifier,
-      fieldName,
-    });
+    // this.logger?.debug('Built metricKey', {
+    //   metricKey,
+    //   deviceName,
+    //   deviceIdentifier: identifier,
+    //   fieldName,
+    // });
 
     return metricKey;
   }
@@ -142,10 +136,10 @@ export class AnomalyFeed {
     if (!service) return false;
     const configured = service.isMetricConfigured(metricKey);
 
-    this.logger?.debug('Config gate check', {
-      metricKey,
-      configured,
-    });
+    // this.logger?.debug('Config gate check', {
+    //   metricKey,
+    //   configured,
+    // });
 
     if (!configured) {
       this.batchSkippedMetrics.add(metricKey);

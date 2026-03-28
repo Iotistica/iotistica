@@ -1,150 +1,59 @@
 import { LogComponents } from '../logging/types.js';
-import { MqttManager } from '../mqtt/manager.js';
-import { PublishManager } from '../features/publish/manager.js';
-import { SimulationOrchestrator, loadSimulationConfig } from '../simulation/index.js';
-import { BaselineLiveInterceptor } from '../simulation/interceptor.js';
+import { SimulationOrchestrator, loadSimulationConfig } from '../anomaly/simulator.js';
 import type { AgentInitContext } from './context.js';
 
-export async function initializeSimulationMode(ctx: AgentInitContext): Promise<void> {
-	try {
-		const config = loadSimulationConfig();
-		if (!config.enabled) {
-			return;
-		}
+export async function initSimulationMode(ctx: AgentInitContext): Promise<void> {
+	const config = loadSimulationConfig();
 
-		const isProvisioned = ctx.deviceInfo?.provisioned && ctx.deviceInfo?.mqttBrokerConfig;
-		const isDevMode = process.env.NODE_ENV === 'development' || process.env.FORCE_SIMULATION === 'true';
-
-		if (!isProvisioned && !isDevMode) {
-			ctx.agentLogger?.warnSync('Simulation Mode disabled - device not provisioned', {
-				component: LogComponents.agent,
-				note: 'Provision device first, or set FORCE_SIMULATION=true for testing',
-			});
-			return;
-		}
-
-		ctx.agentLogger?.warnSync('Initializing Simulation Mode - FOR TESTING ONLY', {
-			component: LogComponents.agent,
-			provisioned: isProvisioned,
-			devMode: isDevMode,
-		});
-
-		const virtualPublishers = new Map<string, PublishManager>();
-		const mqttManager = MqttManager.getInstance();
-		const simulationDevices = config.scenarios?.sensor_data?.devices ?? [];
-		const useMsgpackPoc = process.env.USE_MSGPACK_POC === 'true';
-		const useKeyCompactionPoc = process.env.USE_KEY_COMPACTION_POC === 'true';
-		const useDeflatePoc = process.env.USE_DEFLATE_COMPRESSION === 'true';
-
-		const getVirtualPublisher = (endpointTopic: string): PublishManager | undefined => {
-			const existing = virtualPublishers.get(endpointTopic);
-			if (existing) {
-				return existing;
-			}
-
-			const simulationDevice = simulationDevices.find(device => device.endpointTopic === endpointTopic);
-			if (!simulationDevice || !ctx.deviceInfo?.uuid) {
-				return undefined;
-			}
-
-			const publisher = new PublishManager(
-				{
-					name: `${endpointTopic}-simulation`,
-					enabled: true,
-					addr: `simulation://${endpointTopic}`,
-					addrPollSec: 10,
-					publishInterval: 10000,
-					eomDelimiter: '\n',
-					mqttTopic: endpointTopic,
-					heartbeatTimeSec: 300,
-					bufferCapacity: 256 * 1024,
-					bufferSize: 1,
-					bufferTimeMs: 0,
-				},
-				mqttManager,
-				undefined,
-				ctx.deviceInfo.uuid,
-				ctx.dictionaryManager,
-				useMsgpackPoc,
-				useKeyCompactionPoc,
-				useDeflatePoc,
-				undefined,
-				ctx.anomalyService,
-			);
-
-			if (ctx.pipelineService) {
-				publisher.setPipelineService(ctx.pipelineService);
-			}
-
-			virtualPublishers.set(endpointTopic, publisher);
-			ctx.agentLogger?.infoSync('Initialized virtual simulation endpoint publisher', {
-				component: LogComponents.sensorPublish,
-				endpointTopic,
-				mqttTopic: endpointTopic,
-				note: 'Used when no Device Publish endpoint is currently configured',
-			});
-
-			return publisher;
-		};
-
-		ctx.simulationOrchestrator = new SimulationOrchestrator(config, {
-			logger: ctx.agentLogger,
-			anomalyService: ctx.anomalyService,
-			publishToDeviceFeature: async (endpointTopic, message) => {
-				// First try to route through a real configured Device Publish endpoint.
-				const sensorPublish = ctx.featureInitializer?.getFeatures()?.sensorPublish;
-				if (sensorPublish) {
-					const routed = sensorPublish.publishSimulationMessage(endpointTopic, message);
-					if (routed) {
-						return true;
-					}
-					// Real sensorPublish exists but has no endpoint matching this topic.
-					// Fall through to virtual publisher below.
-				}
-
-				// No sensorPublish or no matching endpoint — use a virtual publisher so
-				// simulated data still goes through the same batching/MQTT pipeline.
-				const virtualPublisher = getVirtualPublisher(endpointTopic);
-				if (!virtualPublisher) {
-					return false;
-				}
-
-				virtualPublisher.injectSimulationMessage(message);
-				return true;
-			},
-		});
-
-		const anomalyConfig = config.scenarios?.anomaly_injection;
-		if (anomalyConfig?.enabled && anomalyConfig.mode === 'intercept') {
-			const featureInitializer = ctx.featureInitializer;
-			const sensorPublish = featureInitializer?.getFeatures()?.sensorPublish;
-			if (featureInitializer) {
-				const liveInterceptor = new BaselineLiveInterceptor(anomalyConfig, ctx.anomalyService, ctx.agentLogger);
-				featureInitializer.setLiveDataInterceptor(async (messages, endpointName) => {
-					return liveInterceptor.apply(messages, { endpointName });
-				});
-
-				ctx.agentLogger?.infoSync(sensorPublish
-					? 'Enabled baseline live-data interception in Device Publish pipeline'
-					: 'Configured baseline live-data interception for deferred Device Publish initialization', {
-					component: LogComponents.metrics,
-					mode: anomalyConfig.mode,
-					metrics: anomalyConfig.metrics,
-					pattern: anomalyConfig.pattern,
-					valueSource: anomalyConfig.valueSource || 'static',
-				});
-			} else {
-				ctx.agentLogger?.warnSync('Anomaly intercept mode requested but Device Publish feature is unavailable', {
-					component: LogComponents.metrics,
-				});
-			}
-		}
-
-		await ctx.simulationOrchestrator.start();
-	} catch (error) {
-		ctx.agentLogger?.errorSync('Failed to initialize Simulation Mode', error as Error, {
+	if (!config.enabled) {
+		ctx.agentLogger?.debugSync('Simulation mode disabled by environment', {
 			component: LogComponents.agent,
 		});
 		ctx.simulationOrchestrator = undefined;
+		return;
 	}
+
+	if (!ctx.anomalyService) {
+		ctx.agentLogger?.warnSync('Simulation mode requested but anomaly service is unavailable', {
+			component: LogComponents.agent,
+			note: 'Simulation requires anomaly detection to be initialized first',
+		});
+		ctx.simulationOrchestrator = undefined;
+		return;
+	}
+
+	if (ctx.simulationOrchestrator) {
+		ctx.agentLogger?.infoSync('Stopping existing simulation orchestrator before reinitializing', {
+			component: LogComponents.agent,
+		});
+		await ctx.simulationOrchestrator.stop();
+		ctx.simulationOrchestrator = undefined;
+	}
+
+	ctx.agentLogger?.warnSync('Initializing simulation mode', {
+		component: LogComponents.agent,
+		enabled: config.enabled,
+		scenarios: Object.keys(config.scenarios || {}),
+		anomalyInjection: config.scenarios?.anomaly_injection
+			? {
+				mode: config.scenarios.anomaly_injection.mode || 'inject',
+				pattern: config.scenarios.anomaly_injection.pattern,
+				metrics: config.scenarios.anomaly_injection.metrics,
+				intervalMs: config.scenarios.anomaly_injection.intervalMs,
+			}
+			: undefined,
+	});
+
+	const orchestrator = new SimulationOrchestrator(config, {
+		logger: ctx.agentLogger,
+		anomalyService: ctx.anomalyService,
+	});
+
+	ctx.simulationOrchestrator = orchestrator;
+	await orchestrator.start();
+
+	ctx.agentLogger?.infoSync('Simulation mode initialized', {
+		component: LogComponents.agent,
+		status: orchestrator.getStatus(),
+	});
 }

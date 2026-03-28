@@ -78,7 +78,6 @@ param(
     [int]$LogMaxAge = 86400000,
     [int]$MaxLogFileSize = 52428800,
     [int]$MaxLogs = 10000,
-    [string]$SimulateMemoryLeak = "false",
     [string]$AnomalyDetectionEnabled = "true",
     [string]$FirewallEnabled = "false",
     [string]$UseMsgpackPoc = "false",
@@ -536,57 +535,6 @@ function Get-UniquePort {
     return $basePort + $Index
 }
 
-function New-SimulationSensorDevices {
-    param([string]$ProfileName)
-
-    switch ($ProfileName) {
-        'baseline' {
-            return @(
-                @{ endpointTopic = 'modbus'; metric = 'temperature'; protocol = 'modbus'; unit = 'C'; baseValue = 23.0; variance = 2.0; min = 15; max = 35 },
-                @{ endpointTopic = 'snmp'; metric = 'humidity'; protocol = 'snmp'; unit = '%'; baseValue = 55.0; variance = 10.0; min = 30; max = 80 },
-                @{ endpointTopic = 'opcua'; metric = 'pressure'; protocol = 'opcua'; unit = 'hPa'; baseValue = 1013.25; variance = 5.0; min = 980; max = 1050 }
-            )
-        }
-        'production-collected' {
-            # Real baselines from agent DB (8602805f-50b1-40cb-acdc-3f4eb084bfcf)
-            return @(
-                @{ endpointTopic = 'system'; metric = 'cpu_usage'; protocol = 'system'; unit = '%'; baseValue = 7.7; variance = 8.546; min = 3.0; max = 100 },
-                @{ endpointTopic = 'system'; metric = 'memory_percent'; protocol = 'system'; unit = '%'; baseValue = 53.095; variance = 0.770; min = 53.0; max = 54.0 },
-                @{ endpointTopic = 'mqtt'; metric = 'temperature'; protocol = 'mqtt'; unit = 'C'; baseValue = 23.043974; variance = 0.393; min = 22.6968; max = 23.43 },
-                @{ endpointTopic = 'mqtt'; metric = 'humidity'; protocol = 'mqtt'; unit = '%'; baseValue = 45.078735; variance = 0.871; min = 44.5244; max = 45.7729 }
-            )
-        }
-        'high-frequency' {
-            return @(
-                @{ endpointTopic = 'modbus'; metric = 'temperature'; protocol = 'modbus'; unit = 'C'; baseValue = 24.5; variance = 1.5; min = 18; max = 32 },
-                @{ endpointTopic = 'opcua'; metric = 'pressure'; protocol = 'opcua'; unit = 'hPa'; baseValue = 1011.0; variance = 4.0; min = 990; max = 1040 },
-                @{ endpointTopic = 'mqtt'; metric = 'vibration'; protocol = 'mqtt'; unit = 'mm/s'; baseValue = 1.5; variance = 0.7; min = 0.2; max = 5.0 }
-            )
-        }
-        'stress' {
-            return @(
-                @{ endpointTopic = 'modbus'; metric = 'temperature'; protocol = 'modbus'; unit = 'C'; baseValue = 28.0; variance = 3.0; min = 18; max = 45 },
-                @{ endpointTopic = 'can'; metric = 'engine_load'; protocol = 'can'; unit = '%'; baseValue = 62.0; variance = 15.0; min = 5; max = 100 },
-                @{ endpointTopic = 'mqtt'; metric = 'line_speed'; protocol = 'mqtt'; unit = 'm/s'; baseValue = 2.8; variance = 1.2; min = 0.5; max = 8.0 }
-            )
-        }
-        'cyclic' {
-            return @(
-                @{ endpointTopic = 'modbus'; metric = 'temperature'; protocol = 'modbus'; unit = 'C'; baseValue = 22.0; variance = 4.0; min = 10; max = 36 },
-                @{ endpointTopic = 'snmp'; metric = 'humidity'; protocol = 'snmp'; unit = '%'; baseValue = 60.0; variance = 12.0; min = 25; max = 90 },
-                @{ endpointTopic = 'system'; metric = 'airflow'; protocol = 'system'; unit = 'm3/h'; baseValue = 320.0; variance = 45.0; min = 180; max = 500 }
-            )
-        }
-        default {
-            return @(
-                @{ endpointTopic = 'modbus'; metric = 'temperature'; protocol = 'modbus'; unit = 'C'; baseValue = 23.0; variance = 2.0; min = 15; max = 35 },
-                @{ endpointTopic = 'snmp'; metric = 'humidity'; protocol = 'snmp'; unit = '%'; baseValue = 55.0; variance = 10.0; min = 30; max = 80 },
-                @{ endpointTopic = 'opcua'; metric = 'pressure'; protocol = 'opcua'; unit = 'hPa'; baseValue = 1013.25; variance = 5.0; min = 980; max = 1050 }
-            )
-        }
-    }
-}
-
 function New-SimulationProfile {
     param(
         [string]$ProfileName,
@@ -614,7 +562,6 @@ function Convert-SimulationScenariosToJson {
     }
 
     $anomalyConfig = $exportScenarios['anomaly_injection']
-    $sensorConfig = $exportScenarios['sensor_data']
 
     if ($anomalyConfig -and $anomalyConfig.enabled -and $anomalyConfig.mode -eq 'intercept') {
         $compactAnomaly = @{
@@ -636,9 +583,6 @@ function Convert-SimulationScenariosToJson {
 
         $exportScenarios['anomaly_injection'] = $compactAnomaly
 
-        if ($sensorConfig -and $sensorConfig.enabled -eq $false) {
-            $exportScenarios.Remove('sensor_data')
-        }
     }
 
     return (@{ scenarios = $exportScenarios } | ConvertTo-Json -Depth 10 -Compress)
@@ -768,10 +712,6 @@ function Apply-AnomalySimulationOverrides {
     if (-not [string]::IsNullOrWhiteSpace($Mode)) {
         if ($modeNorm -eq 'inject' -or $modeNorm -eq 'intercept') {
             $anomalyConfig.mode = $modeNorm
-            # Intercept mode works on real live data — disable synthetic sensor_data generation.
-            if ($modeNorm -eq 'intercept' -and $scenarios.ContainsKey('sensor_data')) {
-                $scenarios.sensor_data.enabled = $false
-            }
         } else {
             Write-Warning "Invalid SimulationAnomalyMode '$Mode'. Expected inject|intercept."
         }
@@ -853,12 +793,6 @@ function Get-SimulationConfig {
                 baselineDeviceId = 'unknown-device'
                 baselineDeviceState = 'unknown'
             }
-            sensor_data = @{
-                enabled = $true
-                pattern = 'realistic'
-                publishIntervalMs = 10000
-                devices = (New-SimulationSensorDevices -ProfileName 'baseline')
-            }
         }),
         (New-SimulationProfile -ProfileName 'high-frequency-drift' -Scenarios @{
             anomaly_injection = @{
@@ -873,12 +807,6 @@ function Get-SimulationConfig {
                 baselineMinSamples = 10
                 baselineDeviceId = 'unknown-device'
                 baselineDeviceState = 'unknown'
-            }
-            sensor_data = @{
-                enabled = $true
-                pattern = 'realistic'
-                publishIntervalMs = 5000
-                devices = (New-SimulationSensorDevices -ProfileName 'high-frequency')
             }
         }),
         (New-SimulationProfile -ProfileName 'stress-spike' -Scenarios @{
@@ -895,27 +823,6 @@ function Get-SimulationConfig {
                 baselineDeviceId = 'unknown-device'
                 baselineDeviceState = 'unknown'
             }
-            sensor_data = @{
-                enabled = $true
-                pattern = 'noisy'
-                publishIntervalMs = 8000
-                devices = (New-SimulationSensorDevices -ProfileName 'stress')
-            }
-        }),
-        (New-SimulationProfile -ProfileName 'cyclic-memory' -Scenarios @{
-            memory_leak = @{
-                enabled = $true
-                type = 'cyclic'
-                rateMB = 2
-                intervalMs = 15000
-                maxMB = 24
-            }
-            sensor_data = @{
-                enabled = $true
-                pattern = 'cyclic'
-                publishIntervalMs = 15000
-                devices = (New-SimulationSensorDevices -ProfileName 'cyclic')
-            }
         }),
         (New-SimulationProfile -ProfileName 'production-collected' -Scenarios @{
             anomaly_injection = @{
@@ -931,12 +838,6 @@ function Get-SimulationConfig {
                 baselineMinSamples = 10
                 baselineDeviceId = '8602805f-50b1-40cb-acdc-3f4eb084bfcf'
                 baselineDeviceState = 'running'
-            }
-            sensor_data = @{
-                enabled = $false
-                pattern = 'realistic'
-                publishIntervalMs = 12000
-                devices = (New-SimulationSensorDevices -ProfileName 'production-collected')
             }
         })
     )
@@ -966,7 +867,7 @@ if ($Cleanup) {
 
 Write-Host "Generating $Count agents (indices $StartIndex to $($StartIndex + $Count - 1))..." -ForegroundColor Cyan
 if ($EnableSimulation) {
-    Write-Host "Simulation profiles: normal-operation, baseline-realistic, high-frequency-drift, stress-spike, cyclic-memory, production-collected" -ForegroundColor Gray
+    Write-Host "Simulation profiles: normal-operation, baseline-realistic, high-frequency-drift, stress-spike, production-collected" -ForegroundColor Gray
 } else {
     Write-Host "Simulation: DISABLED (all agents in normal operation mode)" -ForegroundColor Gray
 }
@@ -1072,7 +973,6 @@ $networkConfig
       - SIMULATION_MODE=$($simConfig.enabled)
       - SIMULATION_PROFILE=$($simConfig.name)
       - SIMULATION_CONFIG='$($simConfig.config)'
-      - SIMULATE_MEMORY_LEAK=$SimulateMemoryLeak
       - USE_MSGPACK_POC=$UseMsgpackPoc
       - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc
       - USE_DEFLATE_COMPRESSION=$UseDeflateCompression

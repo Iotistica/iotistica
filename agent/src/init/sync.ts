@@ -7,7 +7,10 @@ import { initAnomalyDetection } from './ai.js';
 
 export async function initSync(ctx: AgentInitContext): Promise<void> {
 	await initDeviceSync(ctx);
-	await initAnomalyDetection(ctx);
+	// Skip if already initialized during features phase.
+	if (!ctx.anomalyService) {
+		await initAnomalyDetection(ctx);
+	}
 
 	deviceActions.initialize(
 		ctx.containerManager,

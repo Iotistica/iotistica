@@ -24,7 +24,7 @@ import type {
 } from './types';
 import { createBuffer, addValue, getRecentValues, getTrend, getMedian } from './buffer';
 import { getDetector } from './detectors';
-import { AlertManager } from './alert-manager';
+import { AlertManager } from './alerts';
 import { LINEAR_PREDICTOR_LOOKBACK, LinearPredictor, MIN_TIME_TO_THRESHOLD_CONFIDENCE, recordForecastResult, shouldPublishForecast, shouldRunForecast } from './forecaster';
 import type { ForecastCadenceConfig, ForecastCadenceState, Prediction } from './forecaster';
 import { AnomalyStorageService, type AnomalyBaselineRecord } from './storage';
@@ -151,6 +151,15 @@ export class AnomalyDetectionService {
 			return;
 		}
 		
+		if (dataPoint.simulationMeta?.simulatedAnomaly) {
+			this.logger?.infoSync('Simulation data point received', {
+				component: LogComponents.anomaly,
+				metric: dataPoint.metric,
+				value: dataPoint.value,
+				pattern: dataPoint.simulationMeta.pattern,
+			});
+		}
+
 		const metricConfig = this.getMetricConfig(dataPoint.metric);
 		if (!metricConfig || !metricConfig.enabled) {
 			const missingCount = (this.unconfiguredMetricLogCounts.get(dataPoint.metric) || 0) + 1;
@@ -200,19 +209,26 @@ export class AnomalyDetectionService {
 			});
 		}
 		
-		// Add value to buffer
-		addValue(buffer, dataPoint.value, dataPoint.timestamp);
+		// Add value to buffer — skip simulated points so injected anomalies don't
+		// corrupt the rolling baseline (mean, stdDev, percentiles) used by detectors.
+		if (!dataPoint.simulationMeta?.simulatedAnomaly) {
+			addValue(buffer, dataPoint.value, dataPoint.timestamp);
+		}
 		
 		// Run detection if buffer has enough samples (async, updates cache)
-		if (buffer.size >= 10) {
-			this.logger?.debugSync('Buffer sufficient for detection', {
-				component: LogComponents.anomaly,
-				metric: dataPoint.metric,
-				deviceState: normalizedState,
-				bufferSize: buffer.size,
-				mean: isNaN(buffer.mean) ? 'NaN' : buffer.mean.toFixed(3),
-				stdDev: isNaN(buffer.stdDev) ? 'NaN' : buffer.stdDev.toFixed(3),
-			});
+		// Simulated anomalies bypass the minimum buffer requirement — the fast-path
+		// in runDetection handles them immediately regardless of buffer size.
+		if (buffer.size >= 10 || dataPoint.simulationMeta?.simulatedAnomaly) {
+			if (!dataPoint.simulationMeta?.simulatedAnomaly) {
+				this.logger?.debugSync('Buffer sufficient for detection', {
+					component: LogComponents.anomaly,
+					metric: dataPoint.metric,
+					deviceState: normalizedState,
+					bufferSize: buffer.size,
+					mean: isNaN(buffer.mean) ? 'NaN' : buffer.mean.toFixed(3),
+					stdDev: isNaN(buffer.stdDev) ? 'NaN' : buffer.stdDev.toFixed(3),
+				});
+			}
 			this.runDetection(dataPoint, buffer, metricConfig);
 		} else {
 			// Buffer still building, cache zero score for this metric
@@ -295,6 +311,48 @@ export class AnomalyDetectionService {
 		const results: AnomalyAlert[] = [];
 		let maxConfidence = 0.0; // Track max confidence across all detectors
 		
+		// SIMULATION FAST-PATH: Bypass warm-up and statistical waiting for intentionally injected anomalies.
+		// The simulator is the ground truth — it knows the value is anomalous and the buffer has already
+		// been updated. Skip the 50-sample wait and warm-up suppression and emit the alert immediately.
+		if (dataPoint.simulationMeta?.simulatedAnomaly) {
+			const syntheticResult = {
+				method: 'simulation' as import('./types').DetectionMethod,
+				isAnomaly: true,
+				confidence: 0.9,
+				deviation: 5.0,
+				expectedRange: metricConfig.expectedRange,
+				message: `Simulated anomaly (pattern: ${dataPoint.simulationMeta.pattern ?? 'unknown'})`,
+				baselineSource: 'simulation',
+			};
+			// deviceState and deviceId are set on the dataPoint by processDataPoint before runDetection is called
+			const bufferKey = this.getBufferKey(dataPoint.metric, dataPoint.deviceState ?? 'unknown', dataPoint.deviceId ?? 'unknown-device');
+			this.anomalyScores.set(bufferKey, syntheticResult.confidence);
+			this.anomalyMetadata.set(bufferKey, {
+				threshold: metricConfig.minConfidence || this.config.alerts.minConfidence || 0.7,
+				methods: ['simulation'],
+				samples: buffer.size,
+			});
+			const alert = this.createAlert(dataPoint, buffer, metricConfig, syntheticResult);
+			this.alertManager.addAlert(alert);
+			if (this.storage) {
+				this.storage.storeAlert(alert).catch((error) => {
+					this.logger?.errorSync('Failed to store simulated anomaly alert', error as Error, {
+						component: LogComponents.anomaly,
+					});
+				});
+			}
+			this.logger?.warnSync('Simulated anomaly fast-pathed', {
+				component: LogComponents.anomaly,
+				metric: dataPoint.metric,
+				value: dataPoint.value,
+				pattern: dataPoint.simulationMeta.pattern,
+				scenarioId: dataPoint.simulationMeta.scenarioId,
+				bufferSize: buffer.size,
+			});
+			this.emitAnomalyEvent(dataPoint, [alert], ['simulation'], syntheticResult.confidence, metricConfig, buffer);
+			return;
+		}
+
 		// WARM-UP PERIOD: Suppress alerts for first 15 minutes after agent startup
 		// Prevents false positives from:
 		// - Initial data collection noise
@@ -677,6 +735,11 @@ export class AnomalyDetectionService {
 	 * ExpectedRange and RateChange remain 'critical' for hard threshold violations
 	 */
 	private calculateSeverity(confidence: number, deviation: number, method?: string): AnomalySeverity {
+		// Simulation fast-path: always critical (injected ground-truth anomaly)
+		if (method === 'simulation') {
+			return 'critical';
+		}
+
 		// MAD detector: Downgrade to warning max (frequency deviations not critical unless persistent)
 		if (method === 'mad') {
 			if (confidence >= 0.7 || deviation >= 3.0) {
@@ -774,17 +837,25 @@ export class AnomalyDetectionService {
 			return exact;
 		}
 
-		// Device-scoped match
+		// Device-scoped match: "{deviceName}_{name}"
 		for (const m of this.config.metrics) {
 			if (m.deviceName && `${m.deviceName}_${m.name}` === metricName) {
 				return m;
 			}
 		}
 
-		this.logger?.debugSync('No metric config match', {
-			component: LogComponents.anomaly,
-			metricName,
-		});
+		// System metric fallback: strip "{uuid}_system_" prefix and retry with bare name.
+		// Handles the case where simulation passes a UUID-prefixed name (e.g.
+		// "8602805f-..._system_memory_percent") but the config was loaded from env
+		// with bare names (e.g. "memory_percent").
+		const systemPrefixMatch = metricName.match(/^[0-9a-f-]{36}_system_(.+)$/);
+		if (systemPrefixMatch) {
+			const bareName = systemPrefixMatch[1];
+			const bare = this.config.metrics.find(m => m.name === bareName);
+			if (bare) {
+				return bare;
+			}
+		}
 
 		return undefined;
 	}
