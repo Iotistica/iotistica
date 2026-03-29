@@ -2,6 +2,7 @@
 
 import { CLIError, logger } from './core';
 import { showHelp } from './help';
+import { CommandMap } from './command-types';
 import { dbBackup, dbList, dbPrune, dbRestore, dbVerify } from './commands/db';
 import { configGet, configGetApi, configReset, configSet, configSetApi, configShow } from './commands/config';
 import { appsInfo, appsList, appsPurge, appsRestart, appsStart, appsStop } from './commands/apps';
@@ -10,25 +11,8 @@ import { devicesList, discover, endpointsList, endpointsShow } from './commands/
 import { factoryReset, mqttListUsers, provisionStatus, provisionWithKey, deprovision } from './commands/provision';
 import { bufferStatus, memoryDiagnostics, restart, runDiagnostics, showLogs, showStatusEnhanced, showVersion } from './commands/system';
 
-type CommandHandler = (...args: any[]) => any;
-type CommandGroup = Record<string, CommandHandler> & {
-  _default?: CommandHandler;
-};
-
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-
-  if (args.length === 0) {
-    showHelp();
-    return;
-  }
-
-  const command = args[0];
-  const subcommand = args[1];
-  const arg1 = args[2];
-  const arg2 = args[3];
-
-  const commands: Record<string, CommandGroup> = {
+function buildCommands(args: string[]): CommandMap {
+  const commands: CommandMap = {
     provision: {
       _default: (key?: string) => {
         if (!key) {
@@ -126,13 +110,13 @@ async function main(): Promise<void> {
       },
     },
     help: {
-      _default: showHelp,
+      _default: () => showHelp(commands),
     },
     '--help': {
-      _default: showHelp,
+      _default: () => showHelp(commands),
     },
     '-h': {
-      _default: showHelp,
+      _default: () => showHelp(commands),
     },
     version: {
       _default: showVersion,
@@ -144,6 +128,23 @@ async function main(): Promise<void> {
       _default: showVersion,
     },
   };
+
+  return commands;
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const commands = buildCommands(args);
+
+  if (args.length === 0) {
+    showHelp(commands);
+    return;
+  }
+
+  const command = args[0];
+  const subcommand = args[1];
+  const arg1 = args[2];
+  const arg2 = args[3];
 
   const commandGroup = commands[command];
   if (!commandGroup) {
