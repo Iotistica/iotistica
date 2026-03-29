@@ -55,6 +55,8 @@ function TableDataCardComponent({
   const [data, setData] = useState<TableRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const [staleReason, setStaleReason] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortColumn, setSortColumn] = useState<SortColumn>('timestamp');
@@ -122,10 +124,21 @@ function TableDataCardComponent({
 
       setData(tableData);
       setLastRefreshed(new Date());
+      setStale(false);
+      setStaleReason(null);
       onDataLoaded?.(result);
     } catch (err) {
       console.error('Error fetching table data:', err);
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      const hasExistingData = data.length > 0;
+
+      if (hasExistingData) {
+        setStale(true);
+        setStaleReason(message);
+        setError(null);
+      } else {
+        setError(message);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -195,12 +208,18 @@ function TableDataCardComponent({
     <div className="flex flex-col h-full">
       {/* Table */}
       <div className="flex-1 overflow-auto">
+        {stale && data.length > 0 && (
+          <div className="mb-2 rounded-md border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-xs text-amber-800">
+            Showing last known table data{lastRefreshed ? ` • updated ${lastRefreshed.toLocaleTimeString()}` : ''}
+            {staleReason ? ` • ${staleReason}` : ''}
+          </div>
+        )}
         {isLoading && data.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-muted-foreground">
             <RefreshCw className="h-4 w-4 animate-spin mr-2" />
             Loading...
           </div>
-        ) : error ? (
+        ) : error && data.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-destructive">
             {error}
           </div>

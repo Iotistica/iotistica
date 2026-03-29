@@ -17,7 +17,7 @@ import {
 } from 'recharts';
 import { buildApiUrl } from '@/config/api';
 import { metricsRequestQueue } from '@/utils/metricsRequestQueue';
-import { detectGaps, createGapDotRenderer } from '@/utils/chartGapDetection';
+import { detectGaps } from '@/utils/chartGapDetection';
 import { useGlobalNow } from '../hooks/useGlobalNow';
 
 const VISUAL_DRIFT_MS = 5000;
@@ -172,6 +172,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const [staleReason, setStaleReason] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const now = useGlobalNow();
   const latestDataRef = useRef<TimeSeriesResponse | null>(null);
@@ -241,14 +243,30 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       setData(merged);
       latestDataRef.current = merged;
       setError(null);
+      setStale(false);
+      setStaleReason(null);
       setLastRefreshed(new Date());
       onDataLoaded?.(merged);
     } catch (err: any) {
       console.error('Error fetching metric data:', err);
-      if (err?.status === 429) {
-        setError('Rate limited. Pausing refresh briefly.');
+      const message = err?.status === 429
+        ? 'Rate limited. Pausing refresh briefly.'
+        : (err?.message || 'Connection lost');
+
+      const hasExistingData = Boolean(latestDataRef.current && latestDataRef.current.data && latestDataRef.current.data.length > 0);
+
+      if (hasExistingData) {
+        // Keep rendering last known-good chart data and mark it stale.
+        setStale(true);
+        setStaleReason(message);
+        setError(null);
       } else {
-        setError(err.message || 'Failed to fetch data');
+        // No historical data available - show an empty/offline state instead of a hard fetch error.
+        setError(message);
+      }
+
+      if (err?.status === 429) {
+        setStale(true);
       }
     } finally {
       setLoading(false);
@@ -339,52 +357,46 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     return detectGaps(visibleChartData);
   }, [visibleChartData]);
 
-  const smoothedChartData = useMemo(() => {
-    if (chartDataWithGaps.length < 2) {
-      return chartDataWithGaps;
+  const chartDataWithBreaks = useMemo(() => {
+    if (chartDataWithGaps.length === 0) {
+      return [] as Array<(typeof chartDataWithGaps)[number] & { value: number | null; isGapBreak?: boolean }>;
     }
 
-    const lastIndex = chartDataWithGaps.length - 1;
-    const previousPoint = chartDataWithGaps[lastIndex - 1];
-    const currentPoint = chartDataWithGaps[lastIndex];
+    const result: Array<(typeof chartDataWithGaps)[number] & { value: number | null; isGapBreak?: boolean }> = [];
 
-    if (previousPoint.isGap || currentPoint.isGap) {
-      return chartDataWithGaps;
-    }
+    for (let i = 0; i < chartDataWithGaps.length; i += 1) {
+      const point = chartDataWithGaps[i] as (typeof chartDataWithGaps)[number] & { value: number | null };
 
-    const timeSpan = currentPoint.timeValue - previousPoint.timeValue;
-    if (timeSpan <= 0) {
-      return chartDataWithGaps;
-    }
-
-    const progress = Math.min((now - previousPoint.timeValue) / timeSpan, 1);
-
-    return chartDataWithGaps.map((point, index) => {
-      if (index !== lastIndex) {
-        return point;
+      if (i > 0 && point.isGap) {
+        // Insert a null point just before the resumed point to force a hard line/area break.
+        result.push({
+          ...point,
+          value: null,
+          isGapBreak: true,
+          timeValue: point.timeValue - 1,
+          time: point.timeValue - 1,
+        });
       }
 
-      return {
-        ...point,
-        value: previousPoint.value + (currentPoint.value - previousPoint.value) * progress,
-        isEstimated: progress < 1,
-      };
-    });
-  }, [chartDataWithGaps, now]);
+      result.push(point);
+    }
+
+    return result;
+  }, [chartDataWithGaps]);
 
   const chartState = useMemo(() => {
-    if (!data || smoothedChartData.length === 0) {
+    if (!data || chartDataWithBreaks.length === 0) {
       return null;
     }
 
-    const gapTimes = smoothedChartData
+    const gapTimes = chartDataWithGaps
       .filter((point) => point.isGap)
       .map((point) => point.timeValue)
       .slice(-MAX_VISIBLE_GAP_LINES);
 
-    const dataValues = smoothedChartData
+    const dataValues = chartDataWithBreaks
       .map((point) => point.value)
-      .filter((value) => Number.isFinite(value));
+      .filter((value): value is number => Number.isFinite(value));
 
     const yDomain: [number, number] = (() => {
       let domainMin = 0;
@@ -433,12 +445,12 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     const xDomain: [number, number] = [domainEnd - timeRangeMs, domainEnd];
 
     return {
-      chartDataWithGaps: smoothedChartData,
+      chartDataWithGaps: chartDataWithBreaks,
       gapTimes,
       yDomain,
       xDomain,
     };
-  }, [config.thresholds, config.thresholdsEnabled, data, now, smoothedChartData, timeRangeMs]);
+  }, [chartDataWithBreaks, chartDataWithGaps, config.thresholds, config.thresholdsEnabled, data, now, timeRangeMs]);
 
   const calculateStats = () => {
     if (!data || data.data.length === 0) return null;
@@ -462,11 +474,16 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     if (!chartState || !currentData) return null;
 
     const { chartDataWithGaps, gapTimes, yDomain, xDomain } = chartState;
+    const lastDataTime = chartDataWithGaps.length > 0
+      ? chartDataWithGaps[chartDataWithGaps.length - 1].timeValue
+      : null;
     const unit = currentData.metric.unit ?? '';
 
-    const formatTooltipMetricValue = (value: number, payload?: { payload?: { isEstimated?: boolean } }) => {
-      const estimatedSuffix = payload?.payload?.isEstimated ? ' (Estimated live)' : '';
-      return [formatValue(value) + (unit ? ` ${unit}` : '') + estimatedSuffix, 'Value'];
+    const formatTooltipMetricValue = (value: number | null) => {
+      if (value === null || !Number.isFinite(value)) {
+        return ['No data', 'Value'];
+      }
+      return [formatValue(value) + (unit ? ` ${unit}` : ''), 'Value'];
     };
 
     const commonProps = {
@@ -475,7 +492,6 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     };
 
     const color = config.color || '#3b82f6'; // Use config color or default blue-500
-    const gapDotRenderer = createGapDotRenderer({ color: '#ef4444' });
 
     switch (config.chartType) {
       case 'area':
@@ -510,8 +526,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   color: 'white'
                 }}
                 labelFormatter={(label: number) => formatTimeValue(label)}
-                formatter={(value: number, _name: string, payload: { payload?: { isEstimated?: boolean } }) =>
-                  formatTooltipMetricValue(value, payload)
+                formatter={(value: number | null) =>
+                  formatTooltipMetricValue(value)
                 }
               />
               <Area 
@@ -521,7 +537,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 stroke={color} 
                 fill={color}
                 fillOpacity={0.3}
-                dot={gapDotRenderer}
+                connectNulls={false}
                 isAnimationActive={false}
                 animationBegin={0}
                 animationDuration={350}
@@ -538,6 +554,16 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   opacity={0.8}
                 />
               ))}
+              {stale && lastDataTime !== null && (
+                <ReferenceLine
+                  x={lastDataTime}
+                  yAxisId="left"
+                  stroke="#f59e0b"
+                  strokeDasharray="3 3"
+                  strokeWidth={1.5}
+                  opacity={0.95}
+                />
+              )}
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
                   key={`threshold-${config.widgetId}-${idx}`}
@@ -590,8 +616,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   color: 'white'
                 }}
                 labelFormatter={(label: number) => formatTimeValue(label)}
-                formatter={(value: number, _name: string, payload: { payload?: { isEstimated?: boolean } }) =>
-                  formatTooltipMetricValue(value, payload)
+                formatter={(value: number | null) =>
+                  formatTooltipMetricValue(value)
                 }
               />
               <Bar 
@@ -614,6 +640,16 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   opacity={0.8}
                 />
               ))}
+              {stale && lastDataTime !== null && (
+                <ReferenceLine
+                  x={lastDataTime}
+                  yAxisId="left"
+                  stroke="#f59e0b"
+                  strokeDasharray="3 3"
+                  strokeWidth={1.5}
+                  opacity={0.95}
+                />
+              )}
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
                   key={`threshold-${config.widgetId}-${idx}`}
@@ -666,8 +702,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   color: 'white'
                 }}
                 labelFormatter={(label: number) => formatTimeValue(label)}
-                formatter={(value: number, _name: string, payload: { payload?: { isEstimated?: boolean } }) =>
-                  formatTooltipMetricValue(value, payload)
+                formatter={(value: number | null) =>
+                  formatTooltipMetricValue(value)
                 }
               />
               <Line 
@@ -676,7 +712,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 dataKey="value" 
                 stroke={color}
                 strokeWidth={2}
-                dot={gapDotRenderer}
+                dot={false}
+                connectNulls={false}
                 isAnimationActive={false}
                 animationBegin={0}
                 animationDuration={350}
@@ -693,6 +730,16 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   opacity={0.8}
                 />
               ))}
+              {stale && lastDataTime !== null && (
+                <ReferenceLine
+                  x={lastDataTime}
+                  yAxisId="left"
+                  stroke="#f59e0b"
+                  strokeDasharray="3 3"
+                  strokeWidth={1.5}
+                  opacity={0.95}
+                />
+              )}
               {config.thresholdsEnabled && config.thresholds?.map((threshold, idx) => (
                 <ReferenceLine
                   key={`threshold-${config.widgetId}-${idx}`}
@@ -716,6 +763,10 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   };
 
   const stats = calculateStats();
+  const hasData = Boolean(data && data.data.length > 0);
+  const staleAgeLabel = lastRefreshed
+    ? `${Math.max(1, Math.floor((now - lastRefreshed.getTime()) / 60000))}m ago`
+    : null;
 
   return (
     <div className="h-full flex flex-col">
@@ -723,13 +774,11 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
           <div className="flex items-center justify-center h-full">
             <div className="text-sm text-muted-foreground">Loading...</div>
           </div>
-        ) : error ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-sm text-destructive">{error}</div>
-          </div>
         ) : !data || data.data.length === 0 ? (
           <div className="flex items-center justify-center h-full">
-            <div className="text-sm text-muted-foreground">No data available</div>
+            <div className="text-sm text-muted-foreground">
+              {error ? 'No data available (connection lost)' : 'No data available'}
+            </div>
           </div>
         ) : (
           <>
@@ -768,13 +817,13 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               <div className="flex items-center gap-3">
                 <div
                   className="flex items-center gap-1 text-xs"
-                  style={{ color: refreshInterval > 0 ? '#22c55e' : '#9ca3af' }}
+                  style={{ color: refreshInterval > 0 ? (stale ? '#f59e0b' : '#22c55e') : '#9ca3af' }}
                 >
                   <span
                     className="relative inline-flex h-2.5 w-2.5 shrink-0"
                     aria-hidden="true"
                   >
-                    {refreshInterval > 0 && (
+                    {refreshInterval > 0 && !stale && (
                       <span
                         className="absolute inline-flex h-full w-full rounded-full animate-ping opacity-75"
                         style={{ backgroundColor: '#22c55e' }}
@@ -782,11 +831,19 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                     )}
                     <span
                       className="relative inline-flex h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: refreshInterval > 0 ? '#22c55e' : '#9ca3af' }}
+                      style={{ backgroundColor: refreshInterval > 0 ? (stale ? '#f59e0b' : '#22c55e') : '#9ca3af' }}
                     />
                   </span>
-                  {refreshInterval > 0 ? 'Live' : 'Paused'}
+                  {refreshInterval > 0 ? (stale ? 'Stale' : 'Live') : 'Paused'}
                 </div>
+                {stale && (
+                  <span
+                    className="text-[11px] leading-none px-2 py-1 rounded border border-amber-300/60 bg-amber-50/80 text-amber-800 whitespace-nowrap"
+                    title={staleReason || 'Showing last known data'}
+                  >
+                    Last known{staleAgeLabel ? ` • ${staleAgeLabel}` : ''}
+                  </span>
+                )}
                 {lastRefreshed && (
                   <span className="text-right">
                     Updated {lastRefreshed.toLocaleTimeString()}

@@ -59,6 +59,8 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const [staleReason, setStaleReason] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
@@ -100,13 +102,24 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
       const result: TimeSeriesResponse = await response.json();
       setData(result);
       setLastUpdate(new Date());
+      setStale(false);
+      setStaleReason(null);
       
       if (onDataLoaded) {
         onDataLoaded(result);
       }
     } catch (err) {
       console.error('Error fetching metric data:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch data');
+      const message = err instanceof Error ? err.message : 'Failed to fetch data';
+      const hasExistingData = Boolean(data && data.data && data.data.length > 0);
+
+      if (hasExistingData) {
+        setStale(true);
+        setStaleReason(message);
+        setError(null);
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -185,7 +198,7 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
     );
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <Card className="h-full">
         <CardContent className="flex flex-col items-center justify-center h-full gap-2">
@@ -261,7 +274,8 @@ const content = (
 
       {/* Footer Info */}
       <div className="text-xs text-muted-foreground text-center">
-        {data.data_points} points • {config.timeRange} • Updated {formatTime(lastUpdate)}
+        {data.data_points} points • {config.timeRange} • {stale ? 'Stale' : 'Live'} • Updated {formatTime(lastUpdate)}
+        {staleReason ? ` • ${staleReason}` : ''}
       </div>
     </>
   );
