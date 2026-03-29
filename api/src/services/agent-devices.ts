@@ -87,8 +87,7 @@ function resolvePollIntervalForPersistence(endpoint: EndpointDeviceConfig, exist
 }
 
 export class DeviceSensorSyncService {
-  private lastRefreshTime: number = 0;
-  private readonly REFRESH_THROTTLE_MS = 60000; // Max once per minute
+  private static refreshInFlight: Promise<void> | null = null;
 
   /**
    * Remove anomaly metrics bound to an endpoint that is being deleted.
@@ -132,20 +131,58 @@ export class DeviceSensorSyncService {
    * Called after device sensors are synced
    */
   private async refreshMetricCatalog(): Promise<void> {
-    const now = Date.now();
-    
-    // Throttle: only refresh once per minute
-    if (now - this.lastRefreshTime < this.REFRESH_THROTTLE_MS) {
+    // Per-process guard: collapses concurrent calls within this pod into one
+    // DB round trip. Cross-pod coordination is handled by the UPDATE throttle below.
+    if (DeviceSensorSyncService.refreshInFlight) {
       return;
     }
 
-    try {
-      await query('SELECT refresh_all_catalog_views()');
-      this.lastRefreshTime = now;
-      logger.debug('Refreshed metric catalog views');
-    } catch (error) {
-      logger.error('Failed to refresh metric catalog views:', error);
-    }
+    DeviceSensorSyncService.refreshInFlight = (async () => {
+      let leaseAcquired = false;
+
+      try {
+        // Distributed lease: one atomic UPDATE wins per window across all pods.
+        // Claim holds the lease for 120 s — long enough to cover any normal refresh
+        // duration. If the pod crashes mid-refresh the lease self-expires, so no
+        // worker is blocked forever.
+        const claim = await query(
+          `UPDATE refresh_control
+             SET last_refresh = NOW(),
+                 lease_until  = NOW() + interval '120 seconds'
+           WHERE key = 'metric_catalog'
+             AND NOW() > lease_until
+           RETURNING 1`,
+          []
+        );
+
+        if (claim.rowCount === 0) {
+          logger.debug('Skipped metric catalog refresh - another worker holds the lease');
+          return;
+        }
+
+        leaseAcquired = true;
+        await query('SELECT refresh_all_catalog_views()', []);
+        logger.debug('Refreshed metric catalog views');
+      } catch (error) {
+        logger.error('Failed to refresh metric catalog views:', error);
+      } finally {
+        if (leaseAcquired) {
+          // Release early: whether refresh succeeded or failed, transition from the
+          // active lock (120 s) to the throttle window (60 s). This unblocks other
+          // pods promptly while still preventing an immediate retry storm.
+          await query(
+            `UPDATE refresh_control
+               SET lease_until = NOW() + interval '60 seconds'
+             WHERE key = 'metric_catalog'`,
+            []
+          ).catch(err => logger.warn('Failed to release refresh lease:', err));
+        }
+      }
+    })().finally(() => {
+      DeviceSensorSyncService.refreshInFlight = null;
+    });
+
+    await DeviceSensorSyncService.refreshInFlight;
   }
 
   /**

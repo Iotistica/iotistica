@@ -1,5 +1,6 @@
 import type Redis from 'ioredis';
 import { logger } from '../../utils/logger';
+import { getPoolStats } from '../../db/connection';
 import { SensorDataEntry, CompressedSensorEntry, RedisSensorEntry } from './types';
 import { decompressAndParseSensors } from './decoder';
 import { incrementFailureCount, moveToDLQ, startFailureTrackingPruner } from './dlq';
@@ -16,10 +17,48 @@ export interface WorkerConfig {
   blockTimeMs: number;
   maxRetries: number;
   maxDlqLength: number;
+  dbWaitingHighWatermark: number;
+  dbSaturationHighWatermarkPct: number;
+  backpressureSleepMs: number;
+}
+
+/**
+ * Tracks recently processed Redis Stream message IDs to suppress in-process redeliveries.
+ * Uses insertion-order eviction to bound memory at ~maxSize × ~20 bytes.
+ */
+class RecentMessageTracker {
+  private readonly ids = new Set<string>();
+  private readonly maxSize: number;
+
+  constructor(maxSize = 50_000) {
+    this.maxSize = maxSize;
+  }
+
+  has(id: string): boolean {
+    return this.ids.has(id);
+  }
+
+  markAll(ids: string[]): void {
+    for (const id of ids) {
+      if (this.ids.size >= this.maxSize) {
+        // Evict oldest ~20% (Set preserves insertion order)
+        const toEvict = Math.floor(this.maxSize * 0.2);
+        const iter = this.ids.values();
+        for (let i = 0; i < toEvict; i++) {
+          const { value, done } = iter.next();
+          if (done) break;
+          this.ids.delete(value);
+        }
+      }
+      this.ids.add(id);
+    }
+  }
 }
 
 export class RedisQueueConsumer {
   private isRunning = false;
+  private lastBackpressureLogAtMs = 0;
+  private readonly messageTracker = new RecentMessageTracker();
 
   constructor(
     private readonly redis: Redis,
@@ -95,6 +134,11 @@ export class RedisQueueConsumer {
   private async workerLoop(workerId: number): Promise<void> {
     while (this.isRunning) {
       try {
+        if (this.shouldBackoffForDbPressure()) {
+          await new Promise(resolve => setTimeout(resolve, this.config.backpressureSleepMs));
+          continue;
+        }
+
         const staleEntries = await this.claimStaleMessages();
         if (staleEntries.length > 0) {
           await this.processBatch(staleEntries);
@@ -119,6 +163,31 @@ export class RedisQueueConsumer {
         await this.handleWorkerError(workerId, err);
       }
     }
+  }
+
+  private shouldBackoffForDbPressure(): boolean {
+    const stats = getPoolStats();
+    const waitingTooHigh = stats.waiting >= this.config.dbWaitingHighWatermark;
+    const saturationTooHigh = stats.saturationPct >= this.config.dbSaturationHighWatermarkPct;
+
+    if (!waitingTooHigh && !saturationTooHigh) {
+      return false;
+    }
+
+    const now = Date.now();
+    if (now - this.lastBackpressureLogAtMs > 10000) {
+      this.lastBackpressureLogAtMs = now;
+      logger.warn('Applying ingestion backpressure due to DB pool pressure', {
+        waiting: stats.waiting,
+        saturationPct: stats.saturationPct,
+        configuredMax: stats.configuredMax,
+        waitingHighWatermark: this.config.dbWaitingHighWatermark,
+        saturationHighWatermarkPct: this.config.dbSaturationHighWatermarkPct,
+        sleepMs: this.config.backpressureSleepMs,
+      });
+    }
+
+    return true;
   }
 
   private parseStreamMessages(messages: Array<[string, string[]]>): RedisSensorEntry[] {
@@ -278,9 +347,24 @@ export class RedisQueueConsumer {
 
   private async processBatch(entries: RedisSensorEntry[]): Promise<void> {
     const startTime = Date.now();
+
+    // Suppress in-process redeliveries: ACK and skip messages already successfully
+    // processed within this worker's lifetime. Cross-process duplicates (crash/restart)
+    // are still handled by ON CONFLICT DO NOTHING in the DB layer.
+    const fresh: RedisSensorEntry[] = [];
+    const alreadySeen: RedisSensorEntry[] = [];
+    for (const entry of entries) {
+      (this.messageTracker.has(entry.id) ? alreadySeen : fresh).push(entry);
+    }
+    if (alreadySeen.length > 0) {
+      logger.debug('Skipping already-processed message IDs (in-process redelivery)', { count: alreadySeen.length });
+      await this.redis.xack(this.config.streamKey, this.config.consumerGroup, ...alreadySeen.map(e => e.id));
+    }
+    if (fresh.length === 0) return;
+
     try {
       const allData: SensorDataEntry[] = [];
-      for (const entry of entries) {
+      for (const entry of fresh) {
         const data = await this.resolveEntryData(entry);
         if (data !== null) allData.push(...data);
       }
@@ -288,11 +372,12 @@ export class RedisQueueConsumer {
       if (allData.length === 0) return;
 
       await this.inserter.insertBatch(allData);
-      await this.redis.xack(this.config.streamKey, this.config.consumerGroup, ...entries.map(e => e.id));
-      this.logBatchSuccess(entries, allData, startTime);
+      await this.redis.xack(this.config.streamKey, this.config.consumerGroup, ...fresh.map(e => e.id));
+      this.messageTracker.markAll(fresh.map(e => e.id));
+      this.logBatchSuccess(fresh, allData, startTime);
     } catch (err: any) {
-      logger.error('Failed to process sensor data batch', { count: entries.length, error: err.message });
-      await this.handleBatchFailures(entries, err);
+      logger.error('Failed to process sensor data batch', { count: fresh.length, error: err.message });
+      await this.handleBatchFailures(fresh, err);
     }
   }
 

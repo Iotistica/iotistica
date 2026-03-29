@@ -21,10 +21,19 @@ export class ReadingInserter {
         readings.push(...expanded);
       });
 
-      const insertedCount = await this.readingsService.bulkInsert(readings);
-      logger.debug(`Inserted ${insertedCount} readings (chunk ${Math.floor(i / chunkSize) + 1})`);
+      // Deduplicate intra-batch on (agent_uuid, metric_name, time) before hitting the DB.
+      // Eliminates ON CONFLICT hits from replay/retry scenarios within the same batch.
+      const seen = new Map<string, ReadingInsert>();
+      for (const r of readings) {
+        const key = `${r.agent_uuid}:${r.metric_name}:${(r.time ?? ingestedAt).getTime()}`;
+        seen.set(key, r); // last writer wins (most recent re-send is authoritative)
+      }
+      const deduped = [...seen.values()];
 
-      await this.updateLastTelemetryAt(readings, ingestedAt);
+      const insertedCount = await this.readingsService.bulkInsert(deduped);
+      logger.debug(`Inserted ${insertedCount} readings (chunk ${Math.floor(i / chunkSize) + 1}, deduped ${readings.length - deduped.length})`);
+
+      await this.updateLastTelemetryAt(deduped, ingestedAt);
     }
   }
 

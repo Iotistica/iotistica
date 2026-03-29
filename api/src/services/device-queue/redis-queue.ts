@@ -36,6 +36,9 @@ export class RedisDeviceQueue {
   private readonly blockTimeMs: number;
   private readonly maxStreamLength: number;
   private readonly maxDlqLength: number;
+  private readonly dbWaitingHighWatermark: number;
+  private readonly dbSaturationHighWatermarkPct: number;
+  private readonly backpressureSleepMs: number;
 
   private readonly pipeline: RedisPipeline;
   private readonly diskSpool: DiskSpool;
@@ -68,6 +71,9 @@ export class RedisDeviceQueue {
     this.blockTimeMs = parseInt(process.env.SENSOR_FLUSH_INTERVAL_MS || '2000', 10);
     this.maxStreamLength = parseInt(process.env.REDIS_INGESTION_STREAM_MAXLEN || '10000', 10);
     this.maxDlqLength = parseInt(process.env.REDIS_DLQ_MAXLEN || '1000', 10);
+    this.dbWaitingHighWatermark = parseInt(process.env.SENSOR_DB_WAITING_HIGH_WATERMARK || '10', 10);
+    this.dbSaturationHighWatermarkPct = parseInt(process.env.SENSOR_DB_SATURATION_HIGH_WATERMARK_PCT || '85', 10);
+    this.backpressureSleepMs = parseInt(process.env.SENSOR_DB_BACKPRESSURE_SLEEP_MS || '250', 10);
 
     this.pipeline = new RedisPipeline(this.redisIngestion);
 
@@ -183,6 +189,9 @@ export class RedisDeviceQueue {
         blockTimeMs: this.blockTimeMs,
         maxRetries: this.maxRetries,
         maxDlqLength: this.maxDlqLength,
+        dbWaitingHighWatermark: this.dbWaitingHighWatermark,
+        dbSaturationHighWatermarkPct: this.dbSaturationHighWatermarkPct,
+        backpressureSleepMs: this.backpressureSleepMs,
       },
       this.inserter,
       () => this.initialize(),

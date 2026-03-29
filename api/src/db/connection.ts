@@ -6,6 +6,28 @@
 import { Pool, PoolClient, QueryResult } from 'pg';
 import logger from '../utils/logger';
 
+function parseIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+const requestedPoolSize = parseIntEnv('DB_POOL_SIZE', 50);
+const boundedPoolSize = clamp(requestedPoolSize, 5, 100);
+if (requestedPoolSize !== boundedPoolSize) {
+  logger.warn('DB_POOL_SIZE out of safe bounds; clamping value', {
+    requestedPoolSize,
+    boundedPoolSize,
+    minAllowed: 5,
+    maxAllowed: 100,
+  });
+}
+
 // Database configuration from environment variables
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
@@ -13,7 +35,7 @@ const dbConfig = {
   database: process.env.DB_NAME || 'iotistic',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
-  max: parseInt(process.env.DB_POOL_SIZE || '50'), // High for large fleet deployments (100+ agents)
+  max: boundedPoolSize,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 30000, // 30 seconds to handle load spikes from multiple agents
   statementTimeout: 60000, // 60 seconds max query execution time
@@ -31,6 +53,34 @@ const dbConfig = {
 
 // Create connection pool
 export const pool = new Pool(dbConfig);
+
+export interface DbPoolStats {
+  total: number;
+  idle: number;
+  active: number;
+  waiting: number;
+  saturationPct: number;
+  configuredMax: number;
+}
+
+export function getPoolStats(): DbPoolStats {
+  const totalClients = pool.totalCount;
+  const idleClients = pool.idleCount;
+  const waitingClients = pool.waitingCount;
+  const activeClients = Math.max(0, totalClients - idleClients);
+  const configuredMax = boundedPoolSize;
+  const denom = configuredMax > 0 ? configuredMax : Math.max(1, totalClients);
+  const saturationPct = Number(((activeClients / denom) * 100).toFixed(1));
+
+  return {
+    total: totalClients,
+    idle: idleClients,
+    active: activeClients,
+    waiting: waitingClients,
+    saturationPct,
+    configuredMax,
+  };
+}
 
 // Handle pool errors
 pool.on('error', (err) => {
@@ -56,10 +106,13 @@ export async function query<T = any>(
       ? `${text.slice(0, maxQueryPreview)}... [truncated ${text.length - maxQueryPreview} chars]`
       : text;
 
+    const poolStats = getPoolStats();
+
     logger.error('Query error', {
       text: textPreview,
       textLength: text.length,
       paramsCount: Array.isArray(params) ? params.length : 0,
+      dbPool: poolStats,
       error
     });
     throw error;

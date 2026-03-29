@@ -102,7 +102,10 @@ function extractAnomalyFields(reading: any): Partial<ReadingInsert> {
   if (typeof reading.anomaly_score === 'number') fields.anomaly_score = reading.anomaly_score;
   if (typeof reading.anomaly_threshold === 'number') fields.anomaly_threshold = reading.anomaly_threshold;
   if (typeof reading.baseline_samples === 'number') fields.baseline_samples = reading.baseline_samples;
-  if (reading.detection_methods) fields.detection_methods = reading.detection_methods;
+  if (reading.detection_methods) {
+    fields.detection_methods = reading.detection_methods;
+    fields.detectionMethodsJson = JSON.stringify(reading.detection_methods);
+  }
   return fields;
 }
 
@@ -123,6 +126,7 @@ export function normalizeReading(
     return null;
   }
 
+  const extra = buildExtraPayload(reading, entry, ingestedAt, messageContext);
   return {
     agent_uuid: entry.deviceUuid,
     metric_name: reading.metric || reading.nodeName || reading.name || entry.sensorName,
@@ -130,7 +134,8 @@ export function normalizeReading(
     quality: normalizeQuality(reading.quality),
     unit: reading.unit || null,
     protocol,
-    extra: buildExtraPayload(reading, entry, ingestedAt, messageContext),
+    extra,
+    extraJson: JSON.stringify(extra),
     time: new Date(reading.timestamp || messageTimestamp || entry.timestamp),
     ...extractAnomalyFields(reading),
   };
@@ -176,6 +181,7 @@ function expandFormat3(entry: SensorDataEntry, protocol: string, ingestedAt: Dat
   const value = typeof entry.data === 'object'
     ? (entry.data.value ?? entry.data.rawValue ?? null)
     : entry.data;
+  const extra = buildExtraPayload(entry.data, entry, ingestedAt);
   return [{
     agent_uuid: entry.deviceUuid,
     metric_name:
@@ -187,7 +193,8 @@ function expandFormat3(entry: SensorDataEntry, protocol: string, ingestedAt: Dat
     quality: normalizeQuality(entry.data?.quality),
     unit: entry.data?.unit || null,
     protocol,
-    extra: buildExtraPayload(entry.data, entry, ingestedAt),
+    extra,
+    extraJson: JSON.stringify(extra),
     time: new Date(entry.timestamp),
   }];
 }

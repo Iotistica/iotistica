@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-03-28 11:27:08
+# Generated: 2026-03-28 22:30:07
 # Agents: 1 to 1
 # Ports: 48481 to 48481
 
@@ -31,13 +31,13 @@ services:
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=e15e9f1b56e0ade9062f37dc51f30ac7da228840f82d6a7b098376956fe8416c
+      - PROVISIONING_KEY=bda5d0a59f354442f74dc0670b6a9365011169c6de77946182a73483f27f174b
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
       - SIMULATION_MODE=true
       - SIMULATION_PROFILE=baseline-realistic
-      - SIMULATION_CONFIG='{"scenarios":{"anomaly_injection":{"metrics":"8602805f-50b1-40cb-acdc-3f4eb084bfcf_system_memory_percent","valueSource":"static","intervalMs":60000,"severity":"warning","pattern":"spike","magnitude":2,"baselineDeviceId":"unknown-device","mode":"inject","baselineDeviceState":"unknown","enabled":true,"strictBaseline":false,"baselineMinSamples":10}}}'
+      - SIMULATION_CONFIG='{"scenarios":{"anomaly_injection":{"metrics":"8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature","valueSource":"static","intervalMs":60000,"severity":"warning","pattern":"alert","magnitude":2,"baselineDeviceId":"unknown-device","mode":"inject","baselineDeviceState":"unknown","enabled":true,"strictBaseline":false,"baselineMinSamples":10}}}'
       - USE_MSGPACK_POC=false
       - USE_KEY_COMPACTION_POC=false
       - USE_DEFLATE_COMPRESSION=false
