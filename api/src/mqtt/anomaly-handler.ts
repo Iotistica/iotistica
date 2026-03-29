@@ -16,16 +16,25 @@ import logger from '../utils/logger';
 /**
  * Anomaly event from edge device (matches agent schema)
  */
-// Regex: metric names are stored as "{endpoint_uuid}_{metric_suffix}" for non-system metrics
-const ENDPOINT_METRIC_REGEX = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_/i;
+// Canonical endpoint metric formats:
+// 1) "{agent_uuid}_{endpoint_uuid}_{metric_suffix}" (current)
+// 2) "{endpoint_uuid}_{metric_suffix}" (legacy)
+const CANONICAL_TWO_UUID_METRIC_REGEX = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_(.+)$/i;
+const ENDPOINT_METRIC_REGEX = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_(.+)$/i;
 
 /**
  * Extract the device/endpoint UUID from a metric name.
  * Returns the UUID prefix if metric matches "{uuid}_{suffix}", otherwise null.
  */
 function extractDeviceUuidFromMetric(metric: string): string | null {
-	const match = metric.match(ENDPOINT_METRIC_REGEX);
-	return match ? match[1] : null;
+	const twoUuidMatch = metric.match(CANONICAL_TWO_UUID_METRIC_REGEX);
+	if (twoUuidMatch) {
+		// Current canonical format: second UUID is endpoint/device UUID
+		return twoUuidMatch[2];
+	}
+
+	const legacyMatch = metric.match(ENDPOINT_METRIC_REGEX);
+	return legacyMatch ? legacyMatch[1] : null;
 }
 
 /**
@@ -34,11 +43,16 @@ function extractDeviceUuidFromMetric(metric: string): string | null {
  * If no UUID prefix found, returns the input unchanged.
  */
 function extractMetricSuffix(metric: string): string {
-	const match = metric.match(ENDPOINT_METRIC_REGEX);
-	if (match) {
-		// Remove UUID prefix and underscore
-		return metric.substring(match[0].length);
+	const twoUuidMatch = metric.match(CANONICAL_TWO_UUID_METRIC_REGEX);
+	if (twoUuidMatch) {
+		return twoUuidMatch[3];
 	}
+
+	const legacyMatch = metric.match(ENDPOINT_METRIC_REGEX);
+	if (legacyMatch) {
+		return legacyMatch[2];
+	}
+
 	// No UUID prefix, return as-is (e.g., system metrics like "cpu_usage")
 	return metric;
 }
@@ -157,6 +171,7 @@ export class AnomalyEventHandler {
 			
 			// 2. Store raw event to database
 			await this.storeEvent(event);
+			await this.storeObservedValueAsReading(event);
 			logger.info('✅ Event stored, starting correlation', {
 				agentUuid: event.agentUuid,
 				deviceName: event.deviceName,
@@ -247,7 +262,7 @@ export class AnomalyEventHandler {
 				msg_id,
 				agent_uuid,
 				device_name,
-				agent_uuid,
+				device_uuid,
 				device_type,
 				metric,
 				timestamp_ms,
@@ -298,6 +313,78 @@ export class AnomalyEventHandler {
 				event.firstSeen,
 			]
 		);
+	}
+
+	/**
+	 * Mirror anomaly observed value into readings so simulated injections are queryable
+	 * through the same readings APIs/charts as normal telemetry.
+	 */
+	private async storeObservedValueAsReading(event: AnomalyEvent): Promise<void> {
+		try {
+			const metricName = extractMetricSuffix(event.metric);
+			const deviceUuid = extractDeviceUuidFromMetric(event.metric);
+			await query(
+				`INSERT INTO readings (
+					time,
+					agent_uuid,
+					metric_name,
+					value,
+					quality,
+					unit,
+					protocol,
+					extra,
+					anomaly_score,
+					anomaly_threshold,
+					baseline_samples,
+					detection_methods
+				) VALUES (
+					to_timestamp($1::double precision / 1000.0),
+					$2::uuid,
+					$3,
+					$4,
+					$5,
+					$6,
+					$7,
+					$8::jsonb,
+					$9,
+					$10,
+					$11,
+					$12::jsonb
+				)
+				ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING`,
+				[
+					event.timestampMs,
+					event.agentUuid,
+					metricName,
+					event.observedValue,
+					'good',
+					'',
+					event.deviceType,
+					JSON.stringify({
+						source: 'anomaly_event',
+						sourceMetric: event.metric,
+						deviceName: event.deviceName,
+						deviceUuid,
+						endpoint_uuid: deviceUuid,
+						deviceState: event.deviceState || 'unknown',
+						suppressed: event.suppressed,
+						fingerprint: event.fingerprint,
+						expectedRange: event.expectedRange,
+					}),
+					event.anomalyScore,
+					event.confidence,
+					event.baseline?.sampleCount ?? null,
+					JSON.stringify(event.triggeredBy || []),
+				]
+			);
+		} catch (error) {
+			logger.warn('Failed to mirror anomaly observed value into readings', {
+				error: error instanceof Error ? error.message : String(error),
+				agentUuid: event.agentUuid,
+				metric: event.metric,
+				timestampMs: event.timestampMs,
+			});
+		}
 	}
 	
 	/**
@@ -446,7 +533,7 @@ export class AnomalyEventHandler {
 				device_name,
 				agent_uuid,
 				device_type,
-				affected_agents,
+				affected_devices,
 				affected_agents,
 				first_seen,
 				last_seen,
@@ -487,7 +574,7 @@ export class AnomalyEventHandler {
 				device_name = $3,
 				agent_uuid = $4,
 				device_type = $5,
-				affected_agents = $6,
+				affected_devices = $6,
 				affected_agents = $7,
 				last_seen = $8,
 				max_anomaly_score = $9,
@@ -554,17 +641,19 @@ export class AnomalyEventHandler {
 				incident_id,
 				severity,
 				metric,
-				agent_uuid,
-				affected_agents,
+				device_name,
+				device_uuid,
+				affected_devices,
 				max_anomaly_score,
 				message,
 				created_at
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
 			[
 				randomUUID(),
 				incident.incidentId,
 				incident.severity,
 				incident.metric,
+				incident.deviceName,
 				incident.deviceUuid,
 				JSON.stringify(incident.affectedDevices),
 				incident.maxAnomalyScore,

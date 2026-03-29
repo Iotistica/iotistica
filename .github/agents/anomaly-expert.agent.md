@@ -837,6 +837,302 @@ if (shouldPublishForecast(metric, prediction, cadence, state)) {
 - Spamming MQTT with redundant forecasts
 - Wasting CPU on unnecessary predictions
 
+## Simulation & Testing
+
+### Metric Naming Convention
+
+**Critical**: Anomaly metrics use a **canonical key** format for identification:
+
+```
+{agentUuid}_{deviceId}_{fieldName}
+```
+
+**Live Example** (from recent validation):
+```
+8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature
+```
+
+**Components**:
+- `agentUuid`: 36-char UUID of edge device running agent
+- `deviceId`: 36-char UUID of physical device or endpoint (Modbus address, OPC-UA node, etc.)
+- `fieldName`: Canonical name from discovery (temperature, cpu_usage, frequency, etc.)
+
+**Generated In**:
+- `agent/src/features/publish/anomaly/feed.ts` (line 137): Dispatcher creates canonical key from endpoint metadata
+- Formula: Combines `agentUuid`, `endpoint.device_id`, and `dataPoint.name`
+
+### Feature Flag Requirements
+
+**Critical**: Anomaly detection only works when explicitly enabled. Metric names don't matter if the feature is off.
+
+**Option 1: Update Target State** (Persistent, recommended for testing)
+```json
+{
+  "features": {
+    "enableAnomalyDetection": true
+  },
+  "anomalyDetection": {
+    "metrics": [
+      {
+        "name": "8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature",
+        "enabled": true,
+        "methods": ["zscore", "mad"],
+        "threshold": 3.0,
+        "windowSize": 100
+      }
+    ]
+  }
+}
+```
+
+**Option 2: SIMULATION_MODE** (Temporary, bypasses warmup + buffer)
+```bash
+export SIMULATION_MODE=true
+npm run dev  # Agent starts with anomaly detection enabled
+```
+
+**Gate Location**:
+- Feature flag check: [agent/src/init/ai.ts](agent/src/init/ai.ts#L31)
+- Default state: **false** in [api/src/services/provisioning/default-target-state-generator.ts](api/src/services/provisioning/default-target-state-generator.ts#L149)
+- Metric name gate: [agent/src/anomaly/index.ts](agent/src/anomaly/index.ts#L914)
+
+**Cannot emit anomaly events without enableAnomalyDetection: true**
+
+### Testing Workflow
+
+**Phase 1: Auto-Discovery** (Commissioning)
+```powershell
+# 1. Enable anomaly detection with empty metrics list (auto-discover all numeric metrics)
+$targetState = @{
+  features = @{
+    enableAnomalyDetection = $true
+  }
+  anomalyDetection = @{
+    metrics = @()  # Empty = monitor all discovered numeric metrics
+  }
+} | ConvertTo-Json
+
+# 2. Update device config
+curl -X PATCH http://localhost:4002/api/v1/agents/{agentUuid}/config `
+  -H "Content-Type: application/json" `
+  -d $targetState
+
+# 3. Check agent logs for discovered metrics
+Get-Content agent-logs.txt | Select-String "Discovered anomaly metrics" -Context 5
+```
+
+**Phase 2: Whitelist Critical Metrics** (Production Simulation)
+```powershell
+# Configure only high-priority metrics for testing
+$targetState = @{
+  features = @{
+    enableAnomalyDetection = $true
+  }
+  anomalyDetection = @{
+    metrics = @(
+      @{
+        name = "8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature"
+        enabled = $true
+        methods = @("zscore", "mad")
+        threshold = 3.0
+        windowSize = 100
+      },
+      @{
+        name = "8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_frequency"
+        enabled = $true
+        methods = @("zscore")
+        threshold = 2.5
+        windowSize = 200
+        expectedRange = @(59.5, 60.5)
+      }
+    )
+  }
+}
+
+curl -X PATCH http://localhost:4002/api/v1/agents/{agentUuid}/config `
+  -H "Content-Type: application/json" `
+  -d ($targetState | ConvertTo-Json -Depth 10)
+```
+
+**Phase 3: Inject Test Anomalies** (Validation)
+```bash
+# Simulated anomalies bypass warmup (900s) and buffer (10 samples) gates
+# Still require: feature flag enabled + metric name matching exactly
+
+# Inject critical temperature anomaly
+curl -X POST http://localhost:48484/v2/anomaly/simulate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metric": "8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature",
+    "anomalyType": "spike",
+    "severity": "critical",
+    "duration_ms": 5000,
+    "value": 85.0
+  }'
+
+# Verify in API logs:
+# - Agent publishes to agent/{uuid}/anomaly topic
+# - API receives and stores in anomaly_events table
+```
+
+### Warmup Period Bypass
+
+**Default**: 15-minute warmup (900s) suppresses all anomalies on startup
+
+**Automatic Skip** (Recommended for rapid testing):
+```
+If agent finds 30+ baseline samples per metric in SQLite:
+  → Coverage = (metrics with 30+ samples) / (metrics with any baseline)
+  → If coverage >= 80%, warmup skipped automatically
+  
+If NO baselines exist (first startup):
+  → Full 15-minute warmup runs
+  → Anomalies downgraded to 'info' severity
+```
+
+**Manual Skip** (SIMULATION_MODE):
+```bash
+export SIMULATION_MODE=true
+# Agent startup timestamp backdated, warmup skipped instantly
+```
+
+**Baseline Persistence**:
+```sql
+-- Check existing baselines in SQLite
+SELECT COUNT(DISTINCT metric_name) as metrics_with_baselines,
+       COUNT(DISTINCT CASE WHEN sample_count >= 30 THEN metric_name END) as metrics_with_sufficient_samples
+FROM anomaly_baselines;
+
+-- If coverage >= 80%, warmup will be skipped on next agent restart
+-- coverage = (metrics with 30+ samples) / (metrics with any baseline)
+```
+
+### Verification Workflow
+
+**Step 1: Confirm Feature Flag**
+```bash
+# Check target state
+curl http://localhost:4002/api/v1/agents/{agentUuid}/config | jq '.features.enableAnomalyDetection'
+# Expected: true
+
+# Check agent environment
+curl http://localhost:48484/v2/device | jq '.simulationMode'
+# Expected: true (if using SIMULATION_MODE)
+```
+
+**Step 2: Verify Metric Name Match**
+```bash
+# Check configured anomaly metrics
+curl http://localhost:4002/api/v1/agents/{agentUuid}/config | jq '.anomalyDetection.metrics[].name'
+# Expected: ["8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature", ...]
+
+# Check agent logs for metric registration
+grep "Registered anomaly metric" agent-logs.txt
+```
+
+**Step 3: Monitor Detection Gates** (watch logs)
+```bash
+# Warmup status
+grep "Warm-up period" agent-logs.txt
+# Should see: "Skipping warm-up period - sufficient baselines exist" OR "Warm-up period active"
+
+# Buffer accumulation
+grep "Buffer accumulation" agent-logs.txt | tail -1
+# Should show: "samples: 10" before detection starts
+
+# Anomaly scored
+grep "Anomaly detected\|anomaly scored" agent-logs.txt
+# Should include: confidence score, detection method (zscore/mad/fusion), severity
+
+# Event published
+grep "emitAnomalyEvent\|Publishing to agent/\*/anomaly" agent-logs.txt
+# Should show: metric name, timestamp, confidence
+```
+
+**Step 4: Verify API Storage**
+```sql
+-- Check readings table (simulated data reaches here)
+SELECT COUNT(*), MIN(timestamp), MAX(timestamp)
+FROM readings
+WHERE metric_name = '8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature';
+
+-- Check anomaly_events table (populated only if all gates passed)
+SELECT COUNT(*), severity, COUNT(DISTINCT method) as unique_methods
+FROM anomaly_events
+WHERE metric_name = '8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature'
+GROUP BY severity;
+```
+
+### Common Test Issues & Solutions
+
+**Issue: Metric appears in readings but NOT in anomaly_events**
+
+**Diagnostic Checklist**:
+1. `enableAnomalyDetection: true` in target state? → [Query target state](#verification-workflow)
+2. Metric name matches configuration exactly? → Use canonical format: `{agentUuid}_{deviceId}_{fieldName}`
+3. Warmup period active (agent < 15min old)? → Check logs for "Warm-up period active"
+4. Buffer size < 10 samples? → Check "samples: N" in logs
+5. Confidence score < 0.7 (default)? → Review detection confidence in agent logs
+
+**Fix Path**:
+```bash
+# 1. Enable feature flag (most common issue)
+curl -X PATCH http://localhost:4002/api/v1/agents/{agentUuid}/config \
+  -H "Content-Type: application/json" \
+  -d '{"features":{"enableAnomalyDetection":true}}'
+
+# 2. Verify exact metric name
+docker logs $(docker ps | grep iotistic_agent | awk '{print $1}') 2>&1 | grep -i "metric name" | head -5
+
+# 3. For first startup, wait 15 min or use SIMULATION_MODE
+export SIMULATION_MODE=true
+npm run dev
+
+# 4. Inject simulated anomaly to test fast-path
+curl -X POST http://localhost:48484/v2/anomaly/simulate -d '{
+  "metric": "PASTE_EXACT_CANONICAL_KEY",
+  "anomalyType": "spike",
+  "value": 99.0
+}'
+```
+
+**Issue: SIMULATION_MODE but anomalies still not in anomaly_events**
+
+**Root Cause**: Metric name in simulation doesn't match configuration exactly
+
+**Solution**:
+```bash
+# Get canonical metric keys from discovery
+curl http://localhost:48484/v2/device/endpoints | jq '.[] | select(.protocol=="modbus") | .data_points[] | "\(.device_id)_\(.name)"'
+
+# Use EXACT format in simulation command
+curl -X POST http://localhost:48484/v2/anomaly/simulate \
+  -d '{
+    "metric": "8602805f-50b1-40cb-acdc-3f4eb084bfcf_c11224a6-61c3-423f-a0a4-4e72b965aa26_temperature",
+    "anomalyType": "spike",
+    "value": 99.0
+  }'
+
+# Verify in anomaly_events
+psql iotistic -c "SELECT metric_name, severity, confidence FROM anomaly_events ORDER BY timestamp DESC LIMIT 1;"
+```
+
+**Issue: enableAnomalyDetection shows in config but detection still not working**
+
+**Check Agent Initialization**:
+```bash
+# Verify agent loaded the feature flag
+docker logs {agent_container} 2>&1 | grep -i "anomaly" | grep -i "init\|feature\|enable" | head -10
+
+# If SIMULATION_MODE=true but not working:
+docker inspect {agent_container} | jq '.Config.Env[] | select(. | contains("SIMULATION"))'
+
+# Restart agent with fresh initialization
+docker-compose down && docker-compose up -d agent
+sleep 3
+curl http://localhost:48484/v2/device | jq '.features.enableAnomalyDetection'
+```
+
 ## Common Issues & Solutions
 
 ### Issue: Too many false positives

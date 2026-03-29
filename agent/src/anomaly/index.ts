@@ -51,7 +51,7 @@ export class AnomalyDetectionService {
 	private predictionCadence: ForecastCadenceConfig;
 	private predictionCadenceState = new Map<string, ForecastCadenceState>();
 	private storage?: AnomalyStorageService;
-	private baselineSaveTimer?: any;
+	private baselineSaveTimer?: NodeJS.Timeout;
 	private baselineSaveIntervalMs: number = 300000; // 5 minutes
 	// Cache of latest anomaly scores for each metric (0.0-1.0 range)
 	private anomalyScores = new Map<string, number>();
@@ -209,16 +209,10 @@ export class AnomalyDetectionService {
 			});
 		}
 		
-		// Add value to buffer — skip simulated points so injected anomalies don't
-		// corrupt the rolling baseline (mean, stdDev, percentiles) used by detectors.
-		if (!dataPoint.simulationMeta?.simulatedAnomaly) {
-			addValue(buffer, dataPoint.value, dataPoint.timestamp);
-		}
+		addValue(buffer, dataPoint.value, dataPoint.timestamp);
 		
 		// Run detection if buffer has enough samples (async, updates cache)
-		// Simulated anomalies bypass the minimum buffer requirement — the fast-path
-		// in runDetection handles them immediately regardless of buffer size.
-		if (buffer.size >= 10 || dataPoint.simulationMeta?.simulatedAnomaly) {
+		if (buffer.size >= 10) {
 			if (!dataPoint.simulationMeta?.simulatedAnomaly) {
 				this.logger?.debugSync('Buffer sufficient for detection', {
 					component: LogComponents.anomaly,
@@ -311,48 +305,6 @@ export class AnomalyDetectionService {
 		const results: AnomalyAlert[] = [];
 		let maxConfidence = 0.0; // Track max confidence across all detectors
 		
-		// SIMULATION FAST-PATH: Bypass warm-up and statistical waiting for intentionally injected anomalies.
-		// The simulator is the ground truth — it knows the value is anomalous and the buffer has already
-		// been updated. Skip the 50-sample wait and warm-up suppression and emit the alert immediately.
-		if (dataPoint.simulationMeta?.simulatedAnomaly) {
-			const syntheticResult = {
-				method: 'simulation' as import('./types').DetectionMethod,
-				isAnomaly: true,
-				confidence: 0.9,
-				deviation: 5.0,
-				expectedRange: metricConfig.expectedRange,
-				message: `Simulated anomaly (pattern: ${dataPoint.simulationMeta.pattern ?? 'unknown'})`,
-				baselineSource: 'simulation',
-			};
-			// deviceState and deviceId are set on the dataPoint by processDataPoint before runDetection is called
-			const bufferKey = this.getBufferKey(dataPoint.metric, dataPoint.deviceState ?? 'unknown', dataPoint.deviceId ?? 'unknown-device');
-			this.anomalyScores.set(bufferKey, syntheticResult.confidence);
-			this.anomalyMetadata.set(bufferKey, {
-				threshold: metricConfig.minConfidence || this.config.alerts.minConfidence || 0.7,
-				methods: ['simulation'],
-				samples: buffer.size,
-			});
-			const alert = this.createAlert(dataPoint, buffer, metricConfig, syntheticResult);
-			this.alertManager.addAlert(alert);
-			if (this.storage) {
-				this.storage.storeAlert(alert).catch((error) => {
-					this.logger?.errorSync('Failed to store simulated anomaly alert', error as Error, {
-						component: LogComponents.anomaly,
-					});
-				});
-			}
-			this.logger?.warnSync('Simulated anomaly fast-pathed', {
-				component: LogComponents.anomaly,
-				metric: dataPoint.metric,
-				value: dataPoint.value,
-				pattern: dataPoint.simulationMeta.pattern,
-				scenarioId: dataPoint.simulationMeta.scenarioId,
-				bufferSize: buffer.size,
-			});
-			this.emitAnomalyEvent(dataPoint, [alert], ['simulation'], syntheticResult.confidence, metricConfig, buffer);
-			return;
-		}
-
 		// WARM-UP PERIOD: Suppress alerts for first 15 minutes after agent startup
 		// Prevents false positives from:
 		// - Initial data collection noise
@@ -610,7 +562,7 @@ export class AnomalyDetectionService {
 		
 		// Determine device type: Prefer protocol from data point, fall back to constructor value
 		// This allows per-metric protocol specification (modbus, opcua, system, etc.)
-		const deviceType = dataPoint.protocol || this.deviceType || 'system';
+		const deviceType = this.resolveEventDeviceType(dataPoint);
 		const deviceState = this.resolveDeviceState(dataPoint);
 		
 		const event: import('./types').AnomalyEvent = {
@@ -652,7 +604,7 @@ export class AnomalyDetectionService {
 			suppressed: event.suppressed,
 		});
 		
-		// Publish to MQTT (iot/{tenantId}/device/{uuid}/events/anomaly)
+		// Publish to MQTT (iot/{tenantId}/agent/{uuid}/events/anomaly)
 		const mqttConnected = this.mqttManager?.isConnected();
 		const hasDeviceUuid = !!this.deviceUuid;
 		
@@ -829,6 +781,9 @@ export class AnomalyDetectionService {
 	 *  2. Device-scoped match: a config entry with both `name` and `deviceName` set
 	 *     matches an incoming metric whose name is `"${deviceName}_${name}"`.
 	 *     e.g., { name: "level", deviceName: "Zone A-abc12345" } matches "Zone A-abc12345_level".
+	 *  3. Canonical metric fallback: strip the runtime prefixes from endpoint/system
+	 *     metric keys and retry with the bare metric name so env/default configs like
+	 *     "temperature" still apply to canonical keys.
 	 */
 	private getMetricConfig(metricName: string): MetricConfig | undefined {
 		// Exact match (system metrics, pre-qualified legacy names)
@@ -844,13 +799,20 @@ export class AnomalyDetectionService {
 			}
 		}
 
-		// System metric fallback: strip "{uuid}_system_" prefix and retry with bare name.
-		// Handles the case where simulation passes a UUID-prefixed name (e.g.
-		// "8602805f-..._system_memory_percent") but the config was loaded from env
-		// with bare names (e.g. "memory_percent").
+		// Canonical system metric fallback: "{agentUuid}_system_{metric}" -> "{metric}"
 		const systemPrefixMatch = metricName.match(/^[0-9a-f-]{36}_system_(.+)$/);
 		if (systemPrefixMatch) {
 			const bareName = systemPrefixMatch[1];
+			const bare = this.config.metrics.find(m => m.name === bareName);
+			if (bare) {
+				return bare;
+			}
+		}
+
+		// Canonical endpoint metric fallback: "{agentUuid}_{endpointUuid}_{metric}" -> "{metric}"
+		const endpointPrefixMatch = metricName.match(/^[0-9a-f-]{36}_[0-9a-f-]{36}_(.+)$/);
+		if (endpointPrefixMatch) {
+			const bareName = endpointPrefixMatch[1];
 			const bare = this.config.metrics.find(m => m.name === bareName);
 			if (bare) {
 				return bare;
@@ -908,6 +870,36 @@ export class AnomalyDetectionService {
 	/** Returns the current agent/device UUID used for canonical metric keys. */
 	getDeviceUuid(): string | undefined {
 		return this.deviceUuid;
+	}
+
+	getPreferredBufferContext(metricName: string): { deviceId: string; deviceState: CanonicalDeviceState } | undefined {
+		let preferred:
+			| { deviceId: string; deviceState: CanonicalDeviceState; sampleCount: number }
+			| undefined;
+
+		for (const [bufferKey, buffer] of this.buffers.entries()) {
+			const parsed = this.parseBufferKey(bufferKey);
+			if (parsed.metricName !== metricName) {
+				continue;
+			}
+
+			if (!preferred || buffer.size > preferred.sampleCount) {
+				preferred = {
+					deviceId: parsed.deviceId,
+					deviceState: parsed.deviceState,
+					sampleCount: buffer.size,
+				};
+			}
+		}
+
+		if (!preferred) {
+			return undefined;
+		}
+
+		return {
+			deviceId: preferred.deviceId,
+			deviceState: preferred.deviceState,
+		};
 	}
 
 	/** Returns true when the given canonical metric key is configured and enabled. */
@@ -1593,6 +1585,53 @@ export class AnomalyDetectionService {
 		}
 
 		return normalizeDeviceState(protocol, candidate);
+	}
+
+	private resolveEventDeviceType(dataPoint: DataPoint): Protocol {
+		// FIRST: Always prefer explicit protocol if dataPoint sets it
+		if (dataPoint.protocol) {
+			return dataPoint.protocol;
+		}
+
+		// SECOND: Try to infer from metric name if source is 'endpoint'
+		if (dataPoint.source === 'endpoint') {
+			const metric = dataPoint.metric.toLowerCase();
+			if (metric.includes('modbus')) return 'modbus';
+			if (metric.includes('opcua')) return 'opcua';
+			if (metric.includes('bacnet')) return 'bacnet';
+			if (metric.includes('mqtt')) return 'mqtt';
+
+			// Canonical endpoint metric: {agentUuid}_{deviceId}_{metric}
+			// Don't assume protocol - this could be any endpoint protocol
+			// Only use as fallback if no other clues available
+			const canonicalEndpointMetric = /^[0-9a-f-]{36}_[0-9a-f-]{36}_.+$/i.test(dataPoint.metric);
+			if (canonicalEndpointMetric && !dataPoint.protocol) {
+				// Log warning: canonical metric with no explicit protocol
+				this.logger?.warnSync('Canonical endpoint metric without explicit protocol, defaulting to mqtt', {
+					component: LogComponents.anomaly,
+					metric: dataPoint.metric,
+					source: dataPoint.source,
+				});
+				return 'mqtt'; // Fallback for backward compatibility
+			}
+		}
+
+		// THIRD: Fall back to constructor's device type or 'system'
+		this.logger?.debugSync('Resolving device type to fallback', {
+			component: LogComponents.anomaly,
+			metric: dataPoint.metric,
+			source: dataPoint.source,
+			hasProtocol: !!dataPoint.protocol,
+			fallbackDeviceType: this.deviceType || 'system',
+		});
+		return this.deviceType || 'system';
+	}
+
+	/**
+	 * Get MQTT manager for publishing data (used by simulator)
+	 */
+	getMqttManager(): MqttManager | undefined {
+		return this.mqttManager;
 	}
 
 	private resolveDeviceId(dataPoint: DataPoint): string {

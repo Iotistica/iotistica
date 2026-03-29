@@ -143,6 +143,7 @@ export interface SimulationScenario {
 export interface AnomalySimulationService {
 	processDataPoint(dataPoint: DataPoint): void;
 	getStorage?(): any;
+	getPreferredBufferContext?(metric: string): { deviceId: string; deviceState: CanonicalDeviceState } | undefined;
 }
 
 /**
@@ -175,7 +176,7 @@ export const DEFAULT_ANOMALY_CONFIG: AnomalySimulationConfig = {
 	burstCount: 1,
 	alertDirection: 'high',
 	severity: 'warning',
-	magnitude: 3,
+	magnitude: 30,
 };
 
 /**

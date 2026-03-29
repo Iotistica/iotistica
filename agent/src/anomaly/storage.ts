@@ -64,7 +64,7 @@ export class AnomalyStorageService {
 	private logger?: AgentLogger;
 	private retention: number;
 	private cleanupIntervalMs: number = 86400000; // 24 hours
-	private cleanupTimer?: any;
+	private cleanupTimer?: NodeJS.Timeout;
 
 	constructor(db: Knex, retention: number, logger?: AgentLogger) {
 		this.db = db;
@@ -101,13 +101,17 @@ export class AnomalyStorageService {
 	 */
 	async storeAlert(alert: AnomalyAlert): Promise<void> {
 		try {
+			const expectedRange = Array.isArray(alert.expectedRange)
+				? alert.expectedRange
+				: undefined;
+
 			const record: AnomalyAlertRecord = {
 				alert_id: alert.id,
 				severity: alert.severity,
 				metric: alert.metric,
 				value: alert.value,
-				expected_min: alert.expectedRange[0],
-				expected_max: alert.expectedRange[1],
+				expected_min: expectedRange?.[0] ?? null,
+				expected_max: expectedRange?.[1] ?? null,
 				deviation: alert.deviation,
 				detection_method: alert.detectionMethod,
 				timestamp: alert.timestamp,
@@ -318,8 +322,18 @@ export class AnomalyStorageService {
 
 		try {
 			// Find metrics with ANY baselines (have been collected at least once)
-			const anyBaselines = await this.db('anomaly_baselines')
-				.whereIn('metric', metrics)
+			// Support both exact matches (e.g., "temperature") and canonical keys (e.g., "8602805f-..._c11224a6-..._temperature")
+			let anyBaselinesQuery = this.db('anomaly_baselines');
+			
+			// Build OR condition: exact match OR metric ends with "_<metricName>"
+			anyBaselinesQuery = anyBaselinesQuery.where((qb: any) => {
+				qb.whereIn('metric', metrics); // Exact match for short names
+				for (const metric of metrics) {
+					qb.orWhere('metric', 'like', `%_${metric}`); // Canonical key match
+				}
+			});
+			
+			const anyBaselines = await anyBaselinesQuery
 				.select('metric')
 				.groupBy('metric');
 			
@@ -331,9 +345,18 @@ export class AnomalyStorageService {
 			}
 			
 			// Find metrics with SUFFICIENT baselines (minSamples+)
-			const sufficientBaselines = await this.db('anomaly_baselines')
-				.whereIn('metric', metrics)
-				.where('sample_count', '>=', minSamples)
+			let sufficientBaselinesQuery = this.db('anomaly_baselines')
+				.where('sample_count', '>=', minSamples);
+		
+			// Build OR condition: exact match OR metric ends with "_<metricName>"
+			sufficientBaselinesQuery = sufficientBaselinesQuery.where((qb: any) => {
+				qb.whereIn('metric', metrics); // Exact match for short names
+				for (const metric of metrics) {
+					qb.orWhere('metric', 'like', `%_${metric}`); // Canonical key match
+				}
+			});
+		
+			const sufficientBaselines = await sufficientBaselinesQuery
 				.select('metric')
 				.groupBy('metric');
 

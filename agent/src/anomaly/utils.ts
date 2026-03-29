@@ -13,11 +13,12 @@ import type { AnomalyConfig, MetricConfig, DataPoint, DetectionMethod } from './
  * Single-list schema: defaults + metrics
  */
 export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfig {
-	if (!targetStateConfig?.anomalyDetection) {
+	const targetState = targetStateConfig as { anomalyDetection?: Partial<AnomalyConfig> & { metrics?: MetricConfig[] } } | undefined;
+	if (!targetState?.anomalyDetection) {
 		return loadConfigFromEnv();
 	}
 	
-	const rawConfig = targetStateConfig.anomalyDetection;
+	const rawConfig = targetState.anomalyDetection;
 
 	const metrics: MetricConfig[] = Array.isArray(rawConfig.metrics)
 		? rawConfig.metrics

@@ -16,6 +16,8 @@ import type {
 	SimulationDependencies,
 	AnomalySimulationConfig,
 	SimulationPattern,
+	DataPoint,
+	Protocol,
 } from './types';
 import {
 	DEFAULT_SIMULATION_CONFIG,
@@ -46,6 +48,16 @@ function normalizeSimulationMetrics(metrics: unknown): string[] {
 
 	return [];
 }
+
+const CANONICAL_METRIC_REGEX = /^([0-9a-f-]{36})_([0-9a-f-]{36})_(.+)$/i;
+
+type SimulationMetricContext = {
+	source: DataPoint['source'];
+	protocol: Protocol;
+	deviceId?: string;
+	deviceState?: DataPoint['deviceState'];
+	tags: Record<string, string>;
+};
 
 /**
  * Anomaly injection simulation scenario
@@ -235,14 +247,23 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 				continue;
 			}
 
-			const dataPoint = {
-				source: 'system' as const,
+			const metricContext = this.resolveMetricContext(metric);
+
+			const dataPoint: DataPoint = {
+				source: metricContext.source,
+				protocol: metricContext.protocol,
+				deviceState: metricContext.deviceState,
 				metric,
 				value,
 				unit,
 				timestamp: baseTimestamp + (i * 10),
+				deviceId: metricContext.deviceId,
 				quality: 'GOOD' as const,
-				tags: { simulation: 'true', pattern: this.config.pattern },
+				tags: {
+					...metricContext.tags,
+					simulation: 'true',
+					pattern: this.config.pattern,
+				},
 				simulationMeta: {
 					simulatedAnomaly: true,
 					scenarioId: 'anomaly_injection',
@@ -255,6 +276,9 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 				component: LogComponents.metrics,
 				metric,
 				value,
+				source: dataPoint.source,
+				protocol: dataPoint.protocol,
+				deviceId: dataPoint.deviceId,
 				pattern: this.config.pattern,
 				injectionCount: this.injectionCount + 1,
 			});
@@ -327,6 +351,44 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 				this.lastMetric = undefined;
 			}
 		}
+	}
+
+	private resolveMetricContext(metric: string): SimulationMetricContext {
+		const preferredBufferContext = this.anomalyService?.getPreferredBufferContext?.(metric);
+		const canonicalMatch = metric.match(CANONICAL_METRIC_REGEX);
+		if (canonicalMatch) {
+			const sensorDeviceId = canonicalMatch[2];
+			const deviceId = preferredBufferContext?.deviceId || sensorDeviceId;
+			const fieldName = canonicalMatch[3];
+			return {
+				source: 'endpoint',
+				protocol: this.inferProtocol(metric) || 'mqtt',
+				deviceId,
+				deviceState: preferredBufferContext?.deviceState,
+				tags: {
+					deviceId,
+					endpointId: deviceId,
+					deviceUuid: sensorDeviceId,
+					fieldName,
+				},
+			};
+		}
+
+		return {
+			source: 'system',
+			protocol: this.inferProtocol(metric) || 'system',
+			tags: {},
+		};
+	}
+
+	private inferProtocol(metric: string): Protocol | undefined {
+		const normalized = metric.toLowerCase();
+		if (normalized.includes('modbus')) return 'modbus';
+		if (normalized.includes('opcua')) return 'opcua';
+		if (normalized.includes('bacnet')) return 'bacnet';
+		if (normalized.includes('mqtt')) return 'mqtt';
+		if (normalized.startsWith('cpu_') || normalized.startsWith('memory_') || normalized.startsWith('disk_')) return 'system';
+		return undefined;
 	}
 	
 	private async resolveBaseContext(metric: string): Promise<{ base: number; baseline?: AnomalyBaselineRecord } | null> {
@@ -402,7 +464,8 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 				}
 
 				if (state.phase === 'alert') {
-					const deviation = spread * magnitude * (2 + state.strength);
+					const rawDeviation = spread * magnitude * (2 + state.strength);
+					const deviation = this.normalizeDeviation(metric, base, spread, rawDeviation);
 					const target = base + (state.direction * deviation);
 
 					return target;
@@ -419,12 +482,12 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 
 			case 'spike':
 				// Sudden spike well above normal
-				return base + (spread * magnitude * 1.8);
+				return base + this.normalizeDeviation(metric, base, spread, spread * magnitude * 1.8);
 				
 			case 'drift':
 				// Gradual increase over time
 				const driftFactor = metricCount * 0.1;
-				return base + (spread * driftFactor * magnitude * 0.45);
+				return base + this.normalizeDeviation(metric, base, spread, spread * driftFactor * magnitude * 0.45);
 
 			case 'recovery':
 				// Explicit low-variance return toward baseline.
@@ -434,28 +497,28 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 				// Sine wave pattern
 				this.cyclePhase += 0.1;
 				const cycle = Math.sin(this.cyclePhase);
-				return base + (spread * cycle * magnitude * 1.2);
+				return base + this.normalizeSignedDeviation(metric, base, spread, spread * cycle * magnitude * 1.2);
 				
 			case 'noisy':
 				// Add random noise
 				const noise = (Math.random() - 0.5) * 2; // -1 to 1
-				return base + (spread * noise * magnitude * 0.8);
+				return base + this.normalizeSignedDeviation(metric, base, spread, spread * noise * magnitude * 0.8);
 				
 			case 'extreme':
 				// Edge case values
 				return metric === 'cpu_temp' ? 95 : 
 					   metric === 'cpu_usage' ? 98 :
 					   metric === 'memory_percent' ? 99 :
-					   base + (spread * magnitude * 3.2);
+					   base + this.normalizeDeviation(metric, base, spread, spread * magnitude * 3.2);
 				
 			case 'random':
 				// Completely random
-				return Math.random() * Math.max(base + (spread * magnitude), spread);
+				return base + this.normalizeSignedDeviation(metric, base, spread, (Math.random() - 0.5) * spread * magnitude * 2);
 				
 			case 'realistic':
 			default:
 				// Slightly elevated but still realistic
-				return base + (spread * magnitude * 0.9);
+				return base + this.normalizeDeviation(metric, base, spread, spread * magnitude * 0.9);
 		}
 	}
 
@@ -505,17 +568,56 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 			return Math.max(Math.abs(base) * 0.1, 1);
 		}
 
-		if (typeof baseline.std_dev === 'number' && baseline.std_dev > 0) {
-			return Math.max(baseline.std_dev, 0.1);
-		}
-		if (typeof baseline.iqr === 'number' && baseline.iqr > 0) {
-			return Math.max(baseline.iqr / 1.35, 0.1);
-		}
-		if (typeof baseline.max === 'number' && typeof baseline.min === 'number' && baseline.max > baseline.min) {
-			return Math.max((baseline.max - baseline.min) / 6, 0.1);
+		const robustCandidates: number[] = [];
+
+		if (typeof baseline.mad === 'number' && baseline.mad > 0) {
+			robustCandidates.push(baseline.mad * 1.4826);
 		}
 
-		return Math.max(Math.abs(base) * 0.1, 1);
+		if (typeof baseline.iqr === 'number' && baseline.iqr > 0) {
+			robustCandidates.push(baseline.iqr / 1.35);
+		} else if (
+			typeof baseline.q1 === 'number' &&
+			typeof baseline.q3 === 'number' &&
+			baseline.q3 > baseline.q1
+		) {
+			robustCandidates.push((baseline.q3 - baseline.q1) / 1.35);
+		}
+
+		if (typeof baseline.max === 'number' && typeof baseline.min === 'number' && baseline.max > baseline.min) {
+			robustCandidates.push((baseline.max - baseline.min) / 6);
+		}
+
+		const fallbackSpread = Math.max(Math.abs(base) * 0.1, 1);
+		const robustSpread = robustCandidates
+			.filter(candidate => Number.isFinite(candidate) && candidate > 0)
+			.sort((left, right) => left - right)[0];
+
+		if (typeof robustSpread === 'number') {
+			return Math.max(robustSpread, 0.1);
+		}
+
+		if (typeof baseline.std_dev === 'number' && baseline.std_dev > 0) {
+			return Math.max(Math.min(baseline.std_dev, fallbackSpread * 3), 0.1);
+		}
+
+		return fallbackSpread;
+	}
+
+	private normalizeDeviation(metric: string, base: number, spread: number, rawDeviation: number): number {
+		const absoluteRawDeviation = Math.abs(rawDeviation);
+		const absoluteBase = Math.abs(base);
+		const isEndpointMetric = CANONICAL_METRIC_REGEX.test(metric);
+		const minBaseRatio = isEndpointMetric ? 0.3 : 0.15;
+		const minDeviation = Math.max(spread * 2.5, absoluteBase * minBaseRatio, 1);
+		const maxDeviation = Math.max(spread * 6, absoluteBase * 0.35, Math.max(absoluteBase, 1));
+
+		return Math.min(Math.max(absoluteRawDeviation, minDeviation), maxDeviation);
+	}
+
+	private normalizeSignedDeviation(metric: string, base: number, spread: number, rawDeviation: number): number {
+		const sign = rawDeviation < 0 ? -1 : 1;
+		return sign * this.normalizeDeviation(metric, base, spread, rawDeviation);
 	}
 
 	private async getBaseline(metric: string): Promise<AnomalyBaselineRecord | null> {
