@@ -78,6 +78,8 @@ export type SimulationPattern =
 	| 'faulty'        // Intermittent failures
 	| 'alert'         // High-impact deviation intended to trigger anomaly detection quickly
 	| 'extreme'       // Edge case values
+	| 'variance_spike' // Increased variance without mean shift (noisy/unstable sensor)
+	| 'regime_shift'  // Permanent step-change in baseline (new operating level)
 	| 'random';       // Completely random
 
 /**
@@ -92,6 +94,7 @@ export interface AnomalySimulationConfig {
 	enabled: boolean;
 	mode?: 'inject' | 'intercept';      // inject: synthetic points, intercept: mutate real endpoint data
 	metrics: string[];                  // Which metrics to inject anomalies into
+	metricWeights?: Record<string, number>; // Optional per-metric selection weight (default 1.0, higher = selected more often)
 	pattern: SimulationPattern;         // How to generate anomalies
 	intervalMs: number;                 // How often to inject
 	burstCount?: number;                // Number of points injected per cycle

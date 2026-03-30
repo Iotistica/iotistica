@@ -109,6 +109,7 @@ export function MetricDataCardConfigDialog({
     initialConfig?.alertMax !== undefined ? String(initialConfig.alertMax) : ''
   );
   const [showStats, setShowStats] = useState<boolean>(initialConfig?.showStats ?? true);
+  const [showAnomalyOverlay, setShowAnomalyOverlay] = useState<boolean>(initialConfig?.showAnomalyOverlay ?? true);
   const [registeredDevices, setRegisteredDevices] = useState<Map<string, { isOnline: boolean }>>(new Map());
   const [registeredAgents, setRegisteredAgents] = useState<RegisteredAgent[]>([]);
 
@@ -135,6 +136,7 @@ export function MetricDataCardConfigDialog({
       setAlertMin(initialConfig.alertMin !== undefined ? String(initialConfig.alertMin) : '');
       setAlertMax(initialConfig.alertMax !== undefined ? String(initialConfig.alertMax) : '');
       setShowStats(initialConfig.showStats ?? true);
+      setShowAnomalyOverlay(initialConfig.showAnomalyOverlay ?? true);
     } else if (open && !initialConfig) {
       // Reset form for new widget
       setSelectedDevice('');
@@ -151,6 +153,7 @@ export function MetricDataCardConfigDialog({
       setAlertMin('');
       setAlertMax('');
       setShowStats(false);
+      setShowAnomalyOverlay(true);
     }
   }, [open, initialConfig]);
 
@@ -362,6 +365,7 @@ export function MetricDataCardConfigDialog({
       color,
       title: title || undefined,
       showStats,
+      showAnomalyOverlay,
       alertEnabled: enableAlert,
       alertMin: enableAlert && hasValidAlertRange ? parsedAlertMin : undefined,
       alertMax: enableAlert && hasValidAlertRange ? parsedAlertMax : undefined,
@@ -617,6 +621,22 @@ export function MetricDataCardConfigDialog({
             </div>
             <p className="text-xs text-muted-foreground ml-6">
               Display Current/Average/Minimum/Maximum cards above the chart.
+            </p>
+          </div>
+
+          <div className="grid gap-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="show-anomaly-overlay"
+                checked={showAnomalyOverlay}
+                onCheckedChange={(checked) => setShowAnomalyOverlay(checked === true)}
+              />
+              <Label htmlFor="show-anomaly-overlay" className="cursor-pointer">
+                Show Anomaly Overlay
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground ml-6">
+              Display anomaly event markers on the chart.
             </p>
           </div>
 

@@ -30,8 +30,8 @@ import { router as trafficRoutes } from '../routes/traffic';
 import { router as deviceTagsRoutes } from '../routes/agent-tags';
 import dashboardLayoutsRoutes from '../routes/dashboard-layouts';
 import mosquittoAuthRoutes from '../mqtt/auth';
-import { router as noderedStorageRoutes } from '../routes/nodered-storage';
-import { router as metricsCatalogRoutes } from '../routes/metrics-catalog';
+import { router as noderedStorageRoutes } from '../routes/nodered';
+import { router as metricsRoutes } from '../routes/metrics';
 import prometheusRoutes from '../routes/prometheus';
 import anomalyRoutes from '../routes/anomaly';
 import anomalyIncidentsRoutes from '../routes/anomaly-incidents';
@@ -158,7 +158,7 @@ export function mountRoutes(app: express.Application): void {
   api.use(PATHS.profiles, profileRoutes);
   api.use(PATHS.dashboardLayouts, dashboardLayoutsRoutes);
   api.use(PATHS.dashboard, dashboardAiRoutes);
-  api.use(PATHS.metricsCatalog, metricsCatalogRoutes);
+  api.use(PATHS.metricsCatalog, metricsRoutes);
 
   // Mount the versioned sub-router once
   app.use(API_BASE, api);

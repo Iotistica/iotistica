@@ -48,6 +48,7 @@ export interface MetricDataCardConfig {
   timeRange: '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
   color?: string;
   showStats?: boolean;
+  showAnomalyOverlay?: boolean;
   thresholds?: ThresholdLine[];
   thresholdsEnabled?: boolean;
 }
@@ -66,6 +67,9 @@ interface TimeSeriesDataPoint {
   max_value: number;
   sample_count: string;
   quality_ratio: number;
+  anomaly_score?: number | null;
+  anomaly_confidence?: number | null;
+  anomaly_event_count?: number;
 }
 
 interface TimeSeriesResponse {
@@ -114,7 +118,10 @@ function pointsEqual(a: TimeSeriesDataPoint, b: TimeSeriesDataPoint): boolean {
     a.min_value === b.min_value &&
     a.max_value === b.max_value &&
     a.sample_count === b.sample_count &&
-    a.quality_ratio === b.quality_ratio
+    a.quality_ratio === b.quality_ratio &&
+    a.anomaly_score === b.anomaly_score &&
+    a.anomaly_confidence === b.anomaly_confidence &&
+    a.anomaly_event_count === b.anomaly_event_count
   );
 }
 
@@ -145,7 +152,10 @@ function mergeTimeSeriesResponse(
   const cutoff = referenceEnd - getTimeRangeMs(timeRange);
 
   const mergedPoints = Array.from(mergedByTime.values())
-    .filter((point) => new Date(point.time).getTime() >= cutoff)
+    .filter((point) => {
+      const ts = new Date(point.time).getTime();
+      return ts >= cutoff && ts <= referenceEnd;
+    })
     .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
   const hasDataChange =
@@ -317,6 +327,11 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
         value: point.avg_value,
         min: point.min_value,
         max: point.max_value,
+        anomalyScore: point.anomaly_score,
+        anomalyConfidence: point.anomaly_confidence,
+        anomalyMarker: (point.anomaly_event_count || 0) > 0
+          ? point.max_value
+          : null,
       };
     });
   }, [rawData]);
@@ -479,11 +494,85 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       : null;
     const unit = currentData.metric.unit ?? '';
 
-    const formatTooltipMetricValue = (value: number | null) => {
+    const formatTooltipMetricValue = (value: number | null, seriesName?: string) => {
+      const label = seriesName === 'Anomaly'
+        ? 'Anomaly'
+        : seriesName === 'Average'
+          ? 'Average'
+          : 'Value';
+
       if (value === null || !Number.isFinite(value)) {
-        return ['No data', 'Value'];
+        return ['No data', label];
       }
-      return [formatValue(value) + (unit ? ` ${unit}` : ''), 'Value'];
+      return [formatValue(value) + (unit ? ` ${unit}` : ''), label];
+    };
+
+    const renderTooltipContent = ({ active, payload, label }: any) => {
+      if (!active || !Array.isArray(payload) || payload.length === 0) {
+        return null;
+      }
+
+      const anomalyEntry = payload.find((entry: any) =>
+        entry?.name === 'Anomaly' && Number.isFinite(entry?.value)
+      );
+      const averageEntry = payload.find((entry: any) =>
+        entry?.name === 'Average' && Number.isFinite(entry?.value)
+      );
+
+      if (!anomalyEntry && !averageEntry) {
+        return null;
+      }
+      const rows: Array<{ label: string; value: string }> = [];
+
+      if (anomalyEntry) {
+        const [value, seriesLabel] = formatTooltipMetricValue(anomalyEntry.value, anomalyEntry.name);
+        rows.push({ label: seriesLabel, value: value as string });
+
+        const point = anomalyEntry.payload as {
+          anomalyScore?: number | null;
+          anomalyConfidence?: number | null;
+        };
+
+        if (Number.isFinite(point?.anomalyScore)) {
+          rows.push({
+            label: 'Anomaly score',
+            value: Number(point.anomalyScore).toFixed(3),
+          });
+        }
+
+        if (Number.isFinite(point?.anomalyConfidence)) {
+          rows.push({
+            label: 'Confidence',
+            value: `${(Number(point.anomalyConfidence) * 100).toFixed(1)}%`,
+          });
+        }
+      }
+
+      if (averageEntry) {
+        const [value, seriesLabel] = formatTooltipMetricValue(averageEntry.value, averageEntry.name);
+        rows.push({ label: seriesLabel, value: value as string });
+      }
+
+      return (
+        <div
+          style={{
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            border: 'none',
+            borderRadius: '4px',
+            color: 'white',
+            padding: '8px 10px',
+          }}
+        >
+          <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 4 }}>
+            {formatTimeValue(label as number)}
+          </div>
+          {rows.map((row, index) => (
+            <div key={`${row.label}-${index}`} style={{ fontSize: 13, fontWeight: 600 }}>
+              {row.label}: {row.value}
+            </div>
+          ))}
+        </div>
+      );
     };
 
     const commonProps = {
@@ -519,21 +608,13 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 domain={yDomain}
               />
               <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-                  border: 'none',
-                  borderRadius: '4px',
-                  color: 'white'
-                }}
-                labelFormatter={(label: number) => formatTimeValue(label)}
-                formatter={(value: number | null) =>
-                  formatTooltipMetricValue(value)
-                }
+                content={renderTooltipContent}
               />
               <Area 
                 yAxisId="left"
                 type="linear" 
                 dataKey="value" 
+                name="Average"
                 stroke={color} 
                 fill={color}
                 fillOpacity={0.3}
@@ -609,20 +690,12 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 domain={yDomain}
               />
               <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-                  border: 'none',
-                  borderRadius: '4px',
-                  color: 'white'
-                }}
-                labelFormatter={(label: number) => formatTimeValue(label)}
-                formatter={(value: number | null) =>
-                  formatTooltipMetricValue(value)
-                }
+                content={renderTooltipContent}
               />
               <Bar 
                 yAxisId="left"
                 dataKey="value" 
+                name="Average"
                 fill={color}
                 isAnimationActive={false}
                 animationBegin={0}
@@ -695,21 +768,13 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 domain={yDomain}
               />
               <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-                  border: 'none',
-                  borderRadius: '4px',
-                  color: 'white'
-                }}
-                labelFormatter={(label: number) => formatTimeValue(label)}
-                formatter={(value: number | null) =>
-                  formatTooltipMetricValue(value)
-                }
+                content={renderTooltipContent}
               />
               <Line 
                 yAxisId="left"
                 type="linear" 
                 dataKey="value" 
+                name="Average"
                 stroke={color}
                 strokeWidth={2}
                 dot={false}
@@ -719,6 +784,20 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 animationDuration={350}
                 animationEasing="linear"
               />
+              {config.showAnomalyOverlay !== false && (
+                <Line
+                  yAxisId="left"
+                  type="linear"
+                  dataKey="anomalyMarker"
+                  name="Anomaly"
+                  stroke="transparent"
+                  strokeWidth={0}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                  dot={{ r: 4, fill: '#ef4444', stroke: '#ffffff', strokeWidth: 1 }}
+                  activeDot={{ r: 5, fill: '#ef4444', stroke: '#ffffff', strokeWidth: 1 }}
+                />
+              )}
               {gapTimes.map((gapTime, idx) => (
                 <ReferenceLine
                   key={`line-gap-${idx}`}
@@ -763,7 +842,6 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   };
 
   const stats = calculateStats();
-  const hasData = Boolean(data && data.data.length > 0);
   const staleAgeLabel = lastRefreshed
     ? `${Math.max(1, Math.floor((now - lastRefreshed.getTime()) / 60000))}m ago`
     : null;
@@ -788,6 +866,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   <div className="text-xs text-muted-foreground mb-1">Current</div>
                   <div className="text-lg font-bold flex items-center gap-1">
                     {formatValue(stats.current)}
+                    {data?.metric.unit && <span className="text-sm font-normal text-muted-foreground">{data.metric.unit}</span>}
                     {stats.trend === 'up' && <TrendingUp className="h-4 w-4 text-green-500" />}
                     {stats.trend === 'down' && <TrendingDown className="h-4 w-4 text-red-500" />}
                     {stats.trend === 'stable' && <Minus className="h-4 w-4 text-gray-500" />}
@@ -795,15 +874,24 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 </div>
                 <div className="bg-muted/50 rounded-lg p-3 border">
                   <div className="text-xs text-muted-foreground mb-1">Average</div>
-                  <div className="text-lg font-bold">{formatValue(stats.avg)}</div>
+                  <div className="text-lg font-bold">
+                    {formatValue(stats.avg)}
+                    {data?.metric.unit && <><span> </span><span className="text-sm font-normal text-muted-foreground">{data.metric.unit}</span></>}
+                  </div>
                 </div>
                 <div className="bg-muted/50 rounded-lg p-3 border">
                   <div className="text-xs text-muted-foreground mb-1">Minimum</div>
-                  <div className="text-lg font-bold text-blue-600">{formatValue(stats.min)}</div>
+                  <div className="text-lg font-bold text-blue-600">
+                    {formatValue(stats.min)}
+                    {data?.metric.unit && <><span> </span><span className="text-sm font-normal text-muted-foreground">{data.metric.unit}</span></>}
+                  </div>
                 </div>
                 <div className="bg-muted/50 rounded-lg p-3 border">
                   <div className="text-xs text-muted-foreground mb-1">Maximum</div>
-                  <div className="text-lg font-bold text-red-600">{formatValue(stats.max)}</div>
+                  <div className="text-lg font-bold text-red-600">
+                    {formatValue(stats.max)}
+                    {data?.metric.unit && <><span> </span><span className="text-sm font-normal text-muted-foreground">{data.metric.unit}</span></>}
+                  </div>
                 </div>
               </div>
             )}
