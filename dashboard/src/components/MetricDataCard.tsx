@@ -22,6 +22,7 @@ import { useVisibilityState } from '../hooks/useVisibilityState';
 import { buildMetricChartPipeline, getTimeRangeMs, stabilizeYDomain } from '@/utils/metricChartPipeline';
 
 const Y_DOMAIN_SHRINK_LERP = 0.08;
+const CHART_Y_AXIS_WIDTH = 40;
 const OFFSCREEN_REFRESH_MULTIPLIER = 4;
 const OFFSCREEN_MIN_REFRESH_SECONDS = 120;
 const HIDDEN_TAB_REFRESH_MULTIPLIER = 10;
@@ -509,7 +510,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       : null;
     const commonProps = {
       data: chartDataWithGaps,
-      margin: { top: 5, right: 10, left: 24, bottom: 5 },
+      margin: { top: 5, right: 10, left: 0, bottom: 5 },
     };
 
     const color = config.color || '#3b82f6'; // Use config color or default blue-500
@@ -534,6 +535,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 id={`yaxis-${config.widgetId}`}
                 yAxisId="left"
                 orientation="left"
+                width={CHART_Y_AXIS_WIDTH}
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={formatValue}
@@ -616,6 +618,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 id={`yaxis-${config.widgetId}`}
                 yAxisId="left"
                 orientation="left"
+                width={CHART_Y_AXIS_WIDTH}
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={formatValue}
@@ -694,6 +697,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 id={`yaxis-${config.widgetId}`}
                 yAxisId="left"
                 orientation="left"
+                width={CHART_Y_AXIS_WIDTH}
                 fontSize={12}
                 tickLine={false}
                 tickFormatter={formatValue}

@@ -92,7 +92,7 @@ LEFT JOIN timescaledb_information.job_stats js ON j.job_id = js.job_id
 WHERE j.proc_name = 'policy_compression'
 ORDER BY j.hypertable_name;
 
--- Expected: All 4 tables should have compress_after = '1 day', scheduled = true
+-- Expected: All target tables should show their configured compress_after interval and scheduled = true
 
 -- ============================================================================
 -- 6. COMPRESSION STATISTICS PER HYPERTABLE
@@ -101,45 +101,97 @@ ORDER BY j.hypertable_name;
 -- Device logs compression stats
 SELECT 
     *,
-    pg_size_pretty(before_compression_total_bytes) AS before_size,
-    pg_size_pretty(after_compression_total_bytes) AS after_size,
-    ROUND(
-        100 * (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)::numeric),
-        2
-    ) AS compression_ratio_percent
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN pg_size_pretty(before_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS before_size,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN pg_size_pretty(after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS after_size,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN ROUND(
+            100 * (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)::numeric),
+            2
+        )
+        ELSE NULL
+    END AS compression_ratio_percent,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN 'Compressed'
+        ELSE 'Not compressed yet'
+    END AS compression_status
 FROM hypertable_compression_stats('agent_logs');
 
 -- MQTT topic metrics compression stats
 SELECT 
     *,
-    pg_size_pretty(before_compression_total_bytes) AS before_size,
-    pg_size_pretty(after_compression_total_bytes) AS after_size,
-    ROUND(
-        100 * (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)::numeric),
-        2
-    ) AS compression_ratio_percent
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN pg_size_pretty(before_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS before_size,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN pg_size_pretty(after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS after_size,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN ROUND(
+            100 * (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)::numeric),
+            2
+        )
+        ELSE NULL
+    END AS compression_ratio_percent,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN 'Compressed'
+        ELSE 'Not compressed yet'
+    END AS compression_status
 FROM hypertable_compression_stats('mqtt_topic_metrics');
 
 -- MQTT broker stats compression stats
 SELECT 
     *,
-    pg_size_pretty(before_compression_total_bytes) AS before_size,
-    pg_size_pretty(after_compression_total_bytes) AS after_size,
-    ROUND(
-        100 * (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)::numeric),
-        2
-    ) AS compression_ratio_percent
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN pg_size_pretty(before_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS before_size,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN pg_size_pretty(after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS after_size,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN ROUND(
+            100 * (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)::numeric),
+            2
+        )
+        ELSE NULL
+    END AS compression_ratio_percent,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN 'Compressed'
+        ELSE 'Not compressed yet'
+    END AS compression_status
 FROM hypertable_compression_stats('mqtt_broker_stats');
 
 -- Readings compression stats
 SELECT 
     *,
-    pg_size_pretty(before_compression_total_bytes) AS before_size,
-    pg_size_pretty(after_compression_total_bytes) AS after_size,
-    ROUND(
-        100 * (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)::numeric),
-        2
-    ) AS compression_ratio_percent
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN pg_size_pretty(before_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS before_size,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN pg_size_pretty(after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS after_size,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN ROUND(
+            100 * (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)::numeric),
+            2
+        )
+        ELSE NULL
+    END AS compression_ratio_percent,
+    CASE 
+        WHEN number_compressed_chunks > 0 THEN 'Compressed'
+        ELSE 'Not compressed yet'
+    END AS compression_status
 FROM hypertable_compression_stats('readings');
 
 -- Expected compression ratios:
@@ -156,11 +208,18 @@ FROM hypertable_compression_stats('readings');
 SELECT 
     chunk_name,
     pg_size_pretty(before_compression_total_bytes) AS uncompressed_size,
-    pg_size_pretty(after_compression_total_bytes) AS compressed_size,
+    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
+        THEN pg_size_pretty(after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS compressed_size,
     CASE WHEN after_compression_total_bytes > 0 
          THEN ROUND(100 * (1 - after_compression_total_bytes::numeric / before_compression_total_bytes::numeric), 1)
          ELSE NULL 
-    END AS compression_percent
+    END AS compression_percent,
+    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
+        THEN 'Compressed'
+        ELSE 'Not compressed yet'
+    END AS compression_status
 FROM chunk_compression_stats('agent_logs')
 ORDER BY chunk_name;
 
@@ -168,11 +227,18 @@ ORDER BY chunk_name;
 SELECT 
     chunk_name,
     pg_size_pretty(before_compression_total_bytes) AS uncompressed_size,
-    pg_size_pretty(after_compression_total_bytes) AS compressed_size,
+    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
+        THEN pg_size_pretty(after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS compressed_size,
     CASE WHEN after_compression_total_bytes > 0 
          THEN ROUND(100 * (1 - after_compression_total_bytes::numeric / before_compression_total_bytes::numeric), 1)
          ELSE NULL 
-    END AS compression_percent
+    END AS compression_percent,
+    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
+        THEN 'Compressed'
+        ELSE 'Not compressed yet'
+    END AS compression_status
 FROM chunk_compression_stats('mqtt_topic_metrics')
 ORDER BY chunk_name;
 
@@ -180,11 +246,18 @@ ORDER BY chunk_name;
 SELECT 
     chunk_name,
     pg_size_pretty(before_compression_total_bytes) AS uncompressed_size,
-    pg_size_pretty(after_compression_total_bytes) AS compressed_size,
+    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
+        THEN pg_size_pretty(after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS compressed_size,
     CASE WHEN after_compression_total_bytes > 0 
          THEN ROUND(100 * (1 - after_compression_total_bytes::numeric / before_compression_total_bytes::numeric), 1)
          ELSE NULL 
-    END AS compression_percent
+    END AS compression_percent,
+    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
+        THEN 'Compressed'
+        ELSE 'Not compressed yet'
+    END AS compression_status
 FROM chunk_compression_stats('mqtt_broker_stats')
 ORDER BY chunk_name;
 
@@ -194,11 +267,18 @@ SELECT
     d.range_start,
     d.range_end,
     pg_size_pretty(c.before_compression_total_bytes) AS uncompressed_size,
-    pg_size_pretty(c.after_compression_total_bytes) AS compressed_size,
+    CASE WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 
+         THEN pg_size_pretty(c.after_compression_total_bytes)
+         ELSE 'Not compressed yet'
+    END AS compressed_size,
     CASE WHEN c.after_compression_total_bytes > 0 
          THEN ROUND(100 * (1 - c.after_compression_total_bytes::numeric / c.before_compression_total_bytes::numeric), 1)
          ELSE NULL 
-    END AS compression_percent
+    END AS compression_percent,
+    CASE WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 
+         THEN 'Compressed'
+         ELSE 'Not compressed yet'
+    END AS compression_status
 FROM chunk_compression_stats('readings') c
 JOIN timescaledb_information.chunks d 
     ON c.chunk_schema = d.chunk_schema AND c.chunk_name = d.chunk_name
@@ -209,35 +289,28 @@ ORDER BY d.range_start DESC;
 -- ============================================================================
 
 -- Count compressed vs uncompressed chunks per hypertable
--- Using chunk_compression_stats function to identify compressed chunks
+-- Uses hypertable_compression_stats().number_compressed_chunks, which works in both states
+WITH target_hypertables AS (
+    SELECT hypertable_name, num_chunks
+    FROM timescaledb_information.hypertables
+    WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+), compression_stats AS (
+    SELECT h.hypertable_name, c.number_compressed_chunks
+    FROM target_hypertables h
+    CROSS JOIN LATERAL hypertable_compression_stats(h.hypertable_name::text) c
+)
 SELECT 
-    'agent_logs' AS hypertable_name,
-    (SELECT COUNT(*) FROM chunk_compression_stats('agent_logs')) AS compressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs') - 
-        (SELECT COUNT(*) FROM chunk_compression_stats('agent_logs')) AS uncompressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs') AS total_chunks
-UNION ALL
-SELECT 
-    'mqtt_topic_metrics' AS hypertable_name,
-    (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_topic_metrics')) AS compressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_topic_metrics') - 
-        (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_topic_metrics')) AS uncompressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_topic_metrics') AS total_chunks
-UNION ALL
-SELECT 
-    'mqtt_broker_stats' AS hypertable_name,
-    (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_broker_stats')) AS compressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_broker_stats') - 
-        (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_broker_stats')) AS uncompressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_broker_stats') AS total_chunks
-UNION ALL
-SELECT 
-    'readings' AS hypertable_name,
-    (SELECT COUNT(*) FROM chunk_compression_stats('readings')) AS compressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'readings') - 
-        (SELECT COUNT(*) FROM chunk_compression_stats('readings')) AS uncompressed_chunks,
-    (SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'readings') AS total_chunks
-ORDER BY hypertable_name;
+    h.hypertable_name,
+    COALESCE(c.number_compressed_chunks, 0) AS compressed_chunks,
+    h.num_chunks - COALESCE(c.number_compressed_chunks, 0) AS uncompressed_chunks,
+    h.num_chunks AS total_chunks,
+    CASE 
+        WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN 'Compression active'
+        ELSE 'No chunks compressed yet'
+    END AS status
+FROM target_hypertables h
+LEFT JOIN compression_stats c ON c.hypertable_name = h.hypertable_name
+ORDER BY h.hypertable_name;
 
 -- Expected: Most chunks compressed, only current/recent chunks uncompressed
 
@@ -280,207 +353,114 @@ ORDER BY j.job_id;
 -- ============================================================================
 
 -- Generate a summary report showing current size and compression savings
--- Shows all hypertables regardless of compression status
+-- Works whether no chunks are compressed yet or compression is active
+WITH target_hypertables AS (
+    SELECT *
+    FROM (VALUES
+        ('agent_logs'),
+        ('mqtt_topic_metrics'),
+        ('mqtt_broker_stats'),
+        ('readings')
+    ) AS t(hypertable_name)
+), existing_hypertables AS (
+    SELECT hypertable_schema, hypertable_name
+    FROM timescaledb_information.hypertables
+    WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+), size_stats AS (
+    SELECT e.hypertable_name, s.total_bytes
+    FROM existing_hypertables e
+    CROSS JOIN LATERAL hypertable_detailed_size(format('%I.%I', e.hypertable_schema, e.hypertable_name)::regclass) s
+), compression_stats AS (
+    SELECT 
+        e.hypertable_name,
+        c.number_compressed_chunks,
+        c.before_compression_total_bytes,
+        c.after_compression_total_bytes
+    FROM existing_hypertables e
+    CROSS JOIN LATERAL hypertable_compression_stats(e.hypertable_name::text) c
+)
 SELECT 
-    'agent_logs' AS hypertable_name,
+    t.hypertable_name,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs') 
-        THEN pg_size_pretty(COALESCE((SELECT (hypertable_detailed_size('agent_logs'::regclass)).total_bytes), 0))
+        WHEN s.total_bytes IS NOT NULL THEN pg_size_pretty(s.total_bytes)
         ELSE 'Not created yet'
     END AS current_size,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs')) 
-        THEN pg_size_pretty((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')))
+        WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN pg_size_pretty(c.before_compression_total_bytes)
         ELSE 'N/A'
     END AS original_size_before_compression,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs'))
-        THEN pg_size_pretty((SELECT after_compression_total_bytes FROM hypertable_compression_stats('agent_logs')))
+        WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN pg_size_pretty(c.after_compression_total_bytes)
         ELSE 'N/A'
     END AS compressed_size,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs'))
-        THEN pg_size_pretty((SELECT before_compression_total_bytes - after_compression_total_bytes FROM hypertable_compression_stats('agent_logs')))
+        WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN pg_size_pretty(c.before_compression_total_bytes - c.after_compression_total_bytes)
         ELSE 'N/A'
     END AS space_saved,
     CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs'))
-        THEN ROUND(100 * (SELECT (before_compression_total_bytes - after_compression_total_bytes)::numeric / NULLIF(before_compression_total_bytes, 0)::numeric FROM hypertable_compression_stats('agent_logs')), 1)
+        WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN ROUND(
+            100 * ((c.before_compression_total_bytes - c.after_compression_total_bytes)::numeric /
+            NULLIF(c.before_compression_total_bytes, 0)::numeric),
+            1
+        )
         ELSE 0
     END AS compression_ratio_percent,
     CASE 
-        WHEN NOT EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs') THEN 'Table not created yet'
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('agent_logs')) THEN 'Compressed'
+        WHEN s.total_bytes IS NULL THEN 'Table not created yet'
+        WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN 'Compressed'
         ELSE 'Not compressed yet'
     END AS status
-UNION ALL
-SELECT 
-    'mqtt_topic_metrics',
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_topic_metrics') 
-        THEN pg_size_pretty(COALESCE((SELECT (hypertable_detailed_size('mqtt_topic_metrics'::regclass)).total_bytes), 0))
-        ELSE 'Not created yet'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_topic_metrics')) 
-        THEN pg_size_pretty((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')))
-        ELSE 'N/A'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_topic_metrics'))
-        THEN pg_size_pretty((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')))
-        ELSE 'N/A'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_topic_metrics'))
-        THEN pg_size_pretty((SELECT before_compression_total_bytes - after_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')))
-        ELSE 'N/A'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_topic_metrics'))
-        THEN ROUND(100 * (SELECT (before_compression_total_bytes - after_compression_total_bytes)::numeric / NULLIF(before_compression_total_bytes, 0)::numeric FROM hypertable_compression_stats('mqtt_topic_metrics')), 1)
-        ELSE 0
-    END,
-    CASE 
-        WHEN NOT EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_topic_metrics') THEN 'Table not created yet'
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_topic_metrics')) THEN 'Compressed'
-        ELSE 'Not compressed yet'
-    END
-UNION ALL
-SELECT 
-    'mqtt_broker_stats',
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_broker_stats') 
-        THEN pg_size_pretty(COALESCE((SELECT (hypertable_detailed_size('mqtt_broker_stats'::regclass)).total_bytes), 0))
-        ELSE 'Not created yet'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_broker_stats')) 
-        THEN pg_size_pretty((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')))
-        ELSE 'N/A'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_broker_stats'))
-        THEN pg_size_pretty((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')))
-        ELSE 'N/A'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_broker_stats'))
-        THEN pg_size_pretty((SELECT before_compression_total_bytes - after_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')))
-        ELSE 'N/A'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_broker_stats'))
-        THEN ROUND(100 * (SELECT (before_compression_total_bytes - after_compression_total_bytes)::numeric / NULLIF(before_compression_total_bytes, 0)::numeric FROM hypertable_compression_stats('mqtt_broker_stats')), 1)
-        ELSE 0
-    END,
-    CASE 
-        WHEN NOT EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_broker_stats') THEN 'Table not created yet'
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('mqtt_broker_stats')) THEN 'Compressed'
-        ELSE 'Not compressed yet'
-    END
-UNION ALL
-SELECT 
-    'readings',
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'readings') 
-        THEN pg_size_pretty(COALESCE((SELECT (hypertable_detailed_size('readings'::regclass)).total_bytes), 0))
-        ELSE 'Not created yet'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('readings')) 
-        THEN pg_size_pretty((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')))
-        ELSE 'N/A'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('readings'))
-        THEN pg_size_pretty((SELECT after_compression_total_bytes FROM hypertable_compression_stats('readings')))
-        ELSE 'N/A'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('readings'))
-        THEN pg_size_pretty((SELECT before_compression_total_bytes - after_compression_total_bytes FROM hypertable_compression_stats('readings')))
-        ELSE 'N/A'
-    END,
-    CASE 
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('readings'))
-        THEN ROUND(100 * (SELECT (before_compression_total_bytes - after_compression_total_bytes)::numeric / NULLIF(before_compression_total_bytes, 0)::numeric FROM hypertable_compression_stats('readings')), 1)
-        ELSE 0
-    END,
-    CASE 
-        WHEN NOT EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'readings') THEN 'Table not created yet'
-        WHEN EXISTS(SELECT 1 FROM hypertable_compression_stats('readings')) THEN 'Compressed'
-        ELSE 'Not compressed yet'
-    END
-ORDER BY hypertable_name;
+FROM target_hypertables t
+LEFT JOIN size_stats s ON s.hypertable_name = t.hypertable_name
+LEFT JOIN compression_stats c ON c.hypertable_name = t.hypertable_name
+ORDER BY t.hypertable_name;
 
 -- Calculate total savings across all hypertables
+WITH existing_hypertables AS (
+    SELECT hypertable_schema, hypertable_name
+    FROM timescaledb_information.hypertables
+    WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+), size_stats AS (
+    SELECT e.hypertable_name, s.total_bytes
+    FROM existing_hypertables e
+    CROSS JOIN LATERAL hypertable_detailed_size(format('%I.%I', e.hypertable_schema, e.hypertable_name)::regclass) s
+), compression_stats AS (
+    SELECT 
+        e.hypertable_name,
+        c.number_compressed_chunks,
+        c.before_compression_total_bytes,
+        c.after_compression_total_bytes
+    FROM existing_hypertables e
+    CROSS JOIN LATERAL hypertable_compression_stats(e.hypertable_name::text) c
+)
 SELECT 
-    pg_size_pretty(
-        COALESCE((SELECT (hypertable_detailed_size('agent_logs'::regclass)).total_bytes WHERE EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs')), 0) +
-        COALESCE((SELECT (hypertable_detailed_size('mqtt_topic_metrics'::regclass)).total_bytes WHERE EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_topic_metrics')), 0) +
-        COALESCE((SELECT (hypertable_detailed_size('mqtt_broker_stats'::regclass)).total_bytes WHERE EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_broker_stats')), 0) +
-        COALESCE((SELECT (hypertable_detailed_size('readings'::regclass)).total_bytes WHERE EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'readings')), 0)
-    ) AS current_total_size,
+    pg_size_pretty(COALESCE(SUM(s.total_bytes), 0)) AS current_total_size,
     CASE 
-        WHEN (
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)
-        ) > 0 THEN 
-            pg_size_pretty(
-                (COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
-                 COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
-                 COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
-                 COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)) -
-                (COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
-                 COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
-                 COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
-                 COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('readings')), 0))
-            )
+        WHEN COALESCE(SUM(CASE WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN c.before_compression_total_bytes ELSE 0 END), 0) > 0
+        THEN pg_size_pretty(
+            SUM(CASE WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN c.before_compression_total_bytes - c.after_compression_total_bytes ELSE 0 END)
+        )
         ELSE 'N/A'
     END AS total_space_saved,
     CASE 
-        WHEN (
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)
-        ) > 0 THEN 
-            ROUND(
-                100 * (
-                    ((COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
-                      COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
-                      COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
-                      COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)) -
-                     (COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
-                      COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
-                      COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
-                      COALESCE((SELECT after_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)))::numeric /
-                    NULLIF(
-                        (COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
-                         COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
-                         COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
-                         COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)),
-                        0
-                    )::numeric
-                ),
-                1
-            )
+        WHEN COALESCE(SUM(CASE WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN c.before_compression_total_bytes ELSE 0 END), 0) > 0
+        THEN ROUND(
+            100 * (
+                SUM(CASE WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN c.before_compression_total_bytes - c.after_compression_total_bytes ELSE 0 END)::numeric /
+                NULLIF(SUM(CASE WHEN COALESCE(c.number_compressed_chunks, 0) > 0 THEN c.before_compression_total_bytes ELSE 0 END), 0)::numeric
+            ),
+            1
+        )
         ELSE 0
     END AS total_compression_ratio_percent,
     CASE 
-        WHEN NOT EXISTS(SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings'))
-            THEN 'No target hypertables found - run migration first'
-        WHEN (
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('agent_logs')), 0) +
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_topic_metrics')), 0) +
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('mqtt_broker_stats')), 0) +
-            COALESCE((SELECT before_compression_total_bytes FROM hypertable_compression_stats('readings')), 0)
-        ) = 0 THEN 'Hypertables exist but no compression yet - policies will run soon'
+        WHEN COUNT(e.hypertable_name) = 0 THEN 'No target hypertables found - run migration first'
+        WHEN COALESCE(SUM(COALESCE(c.number_compressed_chunks, 0)), 0) = 0 THEN 'Hypertables exist but no compression yet - policies will run soon'
         ELSE 'Compression active'
-    END AS status;
+    END AS status
+FROM existing_hypertables e
+LEFT JOIN size_stats s ON s.hypertable_name = e.hypertable_name
+LEFT JOIN compression_stats c ON c.hypertable_name = e.hypertable_name;
 
 -- Expected results:
 -- Total space saved: ~860 MB (from 960 MB → 99 MB)
@@ -528,6 +508,15 @@ GROUP BY agent_uuid, metric_name;
 -- ============================================================================
 
 -- Single query for monitoring dashboard (run every 5 minutes)
+WITH target_hypertables AS (
+    SELECT hypertable_name, num_chunks
+    FROM timescaledb_information.hypertables
+    WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+), compression_stats AS (
+    SELECT h.hypertable_name, h.num_chunks, c.number_compressed_chunks
+    FROM target_hypertables h
+    CROSS JOIN LATERAL hypertable_compression_stats(h.hypertable_name::text) c
+)
 SELECT 
     current_timestamp AS report_timestamp,
     pg_size_pretty(pg_database_size(current_database())) AS total_db_size,
@@ -542,26 +531,8 @@ SELECT
         WHERE proc_name = 'policy_compression' 
         AND scheduled = true
     ) AS active_compression_policies,
-    (
-        SELECT 
-            (SELECT COUNT(*) FROM chunk_compression_stats('agent_logs')) +
-            (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_topic_metrics')) +
-            (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_broker_stats')) +
-            (SELECT COUNT(*) FROM chunk_compression_stats('readings'))
-    ) AS total_compressed_chunks,
-    (
-        SELECT 
-            COALESCE((SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'agent_logs'), 0) +
-            COALESCE((SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_topic_metrics'), 0) +
-            COALESCE((SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'mqtt_broker_stats'), 0) +
-            COALESCE((SELECT num_chunks FROM timescaledb_information.hypertables WHERE hypertable_name = 'readings'), 0) -
-            (SELECT 
-                (SELECT COUNT(*) FROM chunk_compression_stats('agent_logs')) +
-                (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_topic_metrics')) +
-                (SELECT COUNT(*) FROM chunk_compression_stats('mqtt_broker_stats')) +
-                (SELECT COUNT(*) FROM chunk_compression_stats('readings'))
-            )
-    ) AS total_uncompressed_chunks,
+    COALESCE((SELECT SUM(number_compressed_chunks) FROM compression_stats), 0) AS total_compressed_chunks,
+    COALESCE((SELECT SUM(num_chunks - number_compressed_chunks) FROM compression_stats), 0) AS total_uncompressed_chunks,
     (
         SELECT COUNT(*) 
         FROM timescaledb_information.jobs j
@@ -576,7 +547,7 @@ SELECT
 
 -- 1. Compression is transparent: Queries work the same on compressed data
 -- 2. Compression policies run automatically in the background
--- 3. Recent data (< 1 day) stays uncompressed for fast writes
+-- 3. Recent data (< compress_after interval) stays uncompressed for fast writes
 -- 4. Decompression happens automatically on reads
 -- 5. Compression ratios: 90-98% typical for time-series data
 -- 6. Monitor failed jobs regularly to ensure compression continues
@@ -602,22 +573,27 @@ ORDER BY last_run_started_at DESC;
 
 -- 4. Check chunk age (must be older than compress_after interval)
 -- Shows uncompressed chunks and their age
-SELECT 
-    hypertable_name,
-    chunk_name,
-    range_start,
-    range_end,
-    NOW() - range_end AS age,
-    'Uncompressed' AS status
-FROM timescaledb_information.chunks
-WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
-AND chunk_name NOT IN (
-    SELECT chunk_name FROM chunk_compression_stats('agent_logs')
-    UNION ALL
-    SELECT chunk_name FROM chunk_compression_stats('mqtt_topic_metrics')
-    UNION ALL
-    SELECT chunk_name FROM chunk_compression_stats('mqtt_broker_stats')
-    UNION ALL
-    SELECT chunk_name FROM chunk_compression_stats('readings')
+WITH chunk_stats AS (
+    SELECT h.hypertable_name, c.chunk_schema, c.chunk_name, c.after_compression_total_bytes
+    FROM (
+        SELECT hypertable_name
+        FROM timescaledb_information.hypertables
+        WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+    ) h
+    CROSS JOIN LATERAL chunk_compression_stats(h.hypertable_name::text) c
 )
-ORDER BY range_end DESC;
+SELECT 
+    ch.hypertable_name,
+    ch.chunk_name,
+    ch.range_start,
+    ch.range_end,
+    NOW() - ch.range_end AS age,
+    'Uncompressed' AS status
+FROM timescaledb_information.chunks ch
+LEFT JOIN chunk_stats cs
+    ON cs.hypertable_name = ch.hypertable_name
+   AND cs.chunk_schema = ch.chunk_schema
+   AND cs.chunk_name = ch.chunk_name
+WHERE ch.hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+  AND COALESCE(cs.after_compression_total_bytes, 0) = 0
+ORDER BY ch.range_end DESC;
