@@ -351,14 +351,13 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
                   value={modbusConfig || undefined}
                   onChange={setModbusConfig}
                   onValidationChange={setModbusFormValid}
+                  onDataPointsChange={setModbusDataPoints}
                 />
 
-                {/* Data Points Table - Commented out to reduce confusion, users should work with profiles only
                 <DataPointsTable
                   value={modbusDataPoints}
                   onChange={setModbusDataPoints}
                 />
-                */}
               </div>
             )}
 

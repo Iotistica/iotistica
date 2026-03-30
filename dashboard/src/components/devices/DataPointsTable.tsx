@@ -1,6 +1,6 @@
 /**
  * Data Points Table Component
- * 
+ *
  * Visual editor for Modbus register configurations.
  * Supports Add/Edit/Delete operations with validation.
  */
@@ -24,8 +24,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Plus, Edit, Trash2, Info } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Checkbox } from '@/components/ui/checkbox';
 
 interface DataPointsTableProps {
   value: ModbusDataPoint[];
@@ -64,71 +62,31 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
   };
 
   const handleDelete = (index: number) => {
-    const newDataPoints = value.filter((_, i) => i !== index);
-    onChange(newDataPoints);
+    onChange(value.filter((_, i) => i !== index));
   };
 
   const onSubmit = (data: ModbusDataPoint) => {
-    // Auto-set count based on data type if not string
     if (data.dataType !== 'string') {
       data.count = getRegisterCount(data.dataType);
     }
 
-    // Clean up anomaly detection data
-    if (data.anomalyDetection) {
-      // Convert methods object to array of enabled methods
-      if (data.anomalyDetection.methods && typeof data.anomalyDetection.methods === 'object' && !Array.isArray(data.anomalyDetection.methods)) {
-        const enabledMethods = Object.entries(data.anomalyDetection.methods)
-          .filter(([_, enabled]) => enabled)
-          .map(([method]) => method);
-        data.anomalyDetection.methods = enabledMethods.length > 0 ? enabledMethods : undefined;
-      }
-      
-      // Set default threshold if not provided
-      if (!data.anomalyDetection.threshold) {
-        data.anomalyDetection.threshold = 5.0;
-      }
-      
-      // Remove null values from expectedRange
-      if (data.anomalyDetection.expectedRange) {
-        if (data.anomalyDetection.expectedRange.min === null || data.anomalyDetection.expectedRange.min === undefined) {
-          delete data.anomalyDetection.expectedRange.min;
-        }
-        if (data.anomalyDetection.expectedRange.max === null || data.anomalyDetection.expectedRange.max === undefined) {
-          delete data.anomalyDetection.expectedRange.max;
-        }
-        // Remove expectedRange if both min and max are undefined
-        if (!data.anomalyDetection.expectedRange.min && !data.anomalyDetection.expectedRange.max) {
-          delete data.anomalyDetection.expectedRange;
-        }
-      }
-      
-      // Remove anomalyDetection if not enabled
-      if (!data.anomalyDetection.enabled) {
-        delete data.anomalyDetection;
-      }
-    }
-
     if (editingIndex !== null) {
-      // Update existing
-      const newDataPoints = [...value];
-      newDataPoints[editingIndex] = data;
-      onChange(newDataPoints);
+      const updated = [...value];
+      updated[editingIndex] = data;
+      onChange(updated);
     } else {
-      // Add new
       onChange([...value, data]);
     }
-    
+
     setEditDialogOpen(false);
   };
 
   const getFunctionCodeBadge = (type: ModbusRegisterType) => {
     const info = getFunctionCodeInfo(type);
     const label = `FC${info.read}${info.write ? `/${info.write}` : ''}`;
-    const variant = info.readonly ? 'secondary' : 'default';
-    
+
     return (
-      <Badge variant={variant} className="text-xs">
+      <Badge variant={info.readonly ? 'secondary' : 'default'} className="text-xs">
         {label}
       </Badge>
     );
@@ -144,7 +102,7 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
           </p>
         </div>
         <Button onClick={handleAdd} size="sm">
-          <Plus className="h-4 w-4 mr-2" />
+          <Plus className="mr-2 h-4 w-4" />
           Add Data Point
         </Button>
       </div>
@@ -157,7 +115,7 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
           </AlertDescription>
         </Alert>
       ) : (
-        <div className="border border-border rounded-lg overflow-hidden">
+        <div className="overflow-hidden rounded-lg border border-border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -193,18 +151,10 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
                   <TableCell>{dataPoint.unit || '-'}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleEdit(index)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => handleEdit(index)}>
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDelete(index)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => handleDelete(index)}>
                         <Trash2 className="h-4 w-4 text-red-500" />
                       </Button>
                     </div>
@@ -216,9 +166,8 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
         </div>
       )}
 
-      {/* Add/Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+        <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col">
           <DialogHeader>
             <DialogTitle>
               {editingIndex !== null ? 'Edit Data Point' : 'Add Data Point'}
@@ -228,402 +177,201 @@ export const DataPointsTable: React.FC<DataPointsTableProps> = ({
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col overflow-hidden">
-            <Tabs defaultValue="basic" className="flex-1 flex flex-col overflow-hidden">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="basic">Basic Configuration</TabsTrigger>
-                <TabsTrigger value="anomaly">Anomaly Detection</TabsTrigger>
-              </TabsList>
-
-              <div className="flex-1 overflow-y-auto pr-2">
-              <TabsContent value="basic" className="space-y-4 mt-4">
-            {/* Name */}
-            <div className="space-y-2">
-              <Label htmlFor="dp-name">
-                Name <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="dp-name"
-                {...register('name', { required: 'Name is required' })}
-                placeholder="e.g., temperature, voltage"
-              />
-              {errors.name && (
-                <p className="text-sm text-red-500">{errors.name.message}</p>
-              )}
-            </div>
-
-            {/* Address and Type */}
-            <div className="grid grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit(onSubmit)} className="flex flex-1 flex-col overflow-hidden">
+            <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-2">
               <div className="space-y-2">
-                <Label htmlFor="dp-address">
-                  Register Address <span className="text-red-500">*</span>
+                <Label htmlFor="dp-name">
+                  Name <span className="text-red-500">*</span>
                 </Label>
                 <Input
-                  id="dp-address"
-                  type="number"
-                  {...register('address', { 
-                    required: 'Address is required',
-                    valueAsNumber: true,
-                    min: { value: 0, message: 'Address must be 0 or greater' },
-                    max: { value: 65535, message: 'Address must be 65535 or less' }
-                  })}
-                  placeholder="0"
+                  id="dp-name"
+                  {...register('name', { required: 'Name is required' })}
+                  placeholder="e.g., temperature, voltage"
                 />
-                {errors.address && (
-                  <p className="text-sm text-red-500">{errors.address.message}</p>
-                )}
-                <p className="text-xs text-muted-foreground">0-65535</p>
+                {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="dp-type">
-                  Register Type <span className="text-red-500">*</span>
-                </Label>
-                <Controller
-                  name="type"
-                  control={control}
-                  rules={{ required: 'Register type is required' }}
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger id="dp-type">
-                        <SelectValue placeholder="Select type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="holding">Holding (FC3/FC16)</SelectItem>
-                        <SelectItem value="input">Input (FC4 - Read Only)</SelectItem>
-                        <SelectItem value="coil">Coil (FC1/FC5)</SelectItem>
-                        <SelectItem value="discrete">Discrete (FC2 - Read Only)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                {errors.type && (
-                  <p className="text-sm text-red-500">{errors.type.message}</p>
-                )}
-                {selectedRegisterType && getFunctionCodeInfo(selectedRegisterType).readonly && (
-                  <p className="text-xs text-yellow-600">Read-only register type</p>
-                )}
-              </div>
-            </div>
-
-            {/* Data Type and Byte Order */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="dp-dataType">
-                  Data Type <span className="text-red-500">*</span>
-                </Label>
-                <Controller
-                  name="dataType"
-                  control={control}
-                  rules={{ required: 'Data type is required' }}
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger id="dp-dataType">
-                        <SelectValue placeholder="Select data type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="int16">INT16 (1 register)</SelectItem>
-                        <SelectItem value="uint16">UINT16 (1 register)</SelectItem>
-                        <SelectItem value="int32">INT32 (2 registers)</SelectItem>
-                        <SelectItem value="uint32">UINT32 (2 registers)</SelectItem>
-                        <SelectItem value="float32">FLOAT32 (2 registers)</SelectItem>
-                        <SelectItem value="boolean">Boolean (1 register)</SelectItem>
-                        <SelectItem value="string">String (multi-register)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                {errors.dataType && (
-                  <p className="text-sm text-red-500">{errors.dataType.message}</p>
-                )}
-              </div>
-
-              {selectedDataType && requiresByteOrder(selectedDataType) && (
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="dp-byteOrder">Byte Order</Label>
+                  <Label htmlFor="dp-address">
+                    Register Address <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="dp-address"
+                    type="number"
+                    {...register('address', {
+                      required: 'Address is required',
+                      valueAsNumber: true,
+                      min: { value: 0, message: 'Address must be 0 or greater' },
+                      max: { value: 65535, message: 'Address must be 65535 or less' },
+                    })}
+                    placeholder="0"
+                  />
+                  {errors.address && <p className="text-sm text-red-500">{errors.address.message}</p>}
+                  <p className="text-xs text-muted-foreground">0-65535</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dp-type">
+                    Register Type <span className="text-red-500">*</span>
+                  </Label>
                   <Controller
-                    name="byteOrder"
+                    name="type"
                     control={control}
+                    rules={{ required: 'Register type is required' }}
                     render={({ field }) => (
                       <Select value={field.value} onValueChange={field.onChange}>
-                        <SelectTrigger id="dp-byteOrder">
-                          <SelectValue placeholder="Select byte order" />
+                        <SelectTrigger id="dp-type">
+                          <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="ABCD">ABCD (Big-endian)</SelectItem>
-                          <SelectItem value="CDAB">CDAB (Word-swapped)</SelectItem>
-                          <SelectItem value="BADC">BADC (Byte-swapped)</SelectItem>
-                          <SelectItem value="DCBA">DCBA (Little-endian)</SelectItem>
+                          <SelectItem value="holding">Holding (FC3/FC16)</SelectItem>
+                          <SelectItem value="input">Input (FC4 - Read Only)</SelectItem>
+                          <SelectItem value="coil">Coil (FC1/FC5)</SelectItem>
+                          <SelectItem value="discrete">Discrete (FC2 - Read Only)</SelectItem>
                         </SelectContent>
                       </Select>
                     )}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Common: ABCD (Modbus standard) or CDAB (inverters/meters)
-                  </p>
+                  {errors.type && <p className="text-sm text-red-500">{errors.type.message}</p>}
+                  {selectedRegisterType && getFunctionCodeInfo(selectedRegisterType).readonly && (
+                    <p className="text-xs text-yellow-600">Read-only register type</p>
+                  )}
                 </div>
-              )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="dp-dataType">
+                    Data Type <span className="text-red-500">*</span>
+                  </Label>
+                  <Controller
+                    name="dataType"
+                    control={control}
+                    rules={{ required: 'Data type is required' }}
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <SelectTrigger id="dp-dataType">
+                          <SelectValue placeholder="Select data type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="int16">INT16 (1 register)</SelectItem>
+                          <SelectItem value="uint16">UINT16 (1 register)</SelectItem>
+                          <SelectItem value="int32">INT32 (2 registers)</SelectItem>
+                          <SelectItem value="uint32">UINT32 (2 registers)</SelectItem>
+                          <SelectItem value="float32">FLOAT32 (2 registers)</SelectItem>
+                          <SelectItem value="boolean">Boolean (1 register)</SelectItem>
+                          <SelectItem value="string">String (multi-register)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  {errors.dataType && <p className="text-sm text-red-500">{errors.dataType.message}</p>}
+                </div>
+
+                {selectedDataType && requiresByteOrder(selectedDataType) && (
+                  <div className="space-y-2">
+                    <Label htmlFor="dp-byteOrder">Byte Order</Label>
+                    <Controller
+                      name="byteOrder"
+                      control={control}
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger id="dp-byteOrder">
+                            <SelectValue placeholder="Select byte order" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ABCD">ABCD (Big-endian)</SelectItem>
+                            <SelectItem value="CDAB">CDAB (Word-swapped)</SelectItem>
+                            <SelectItem value="BADC">BADC (Byte-swapped)</SelectItem>
+                            <SelectItem value="DCBA">DCBA (Little-endian)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Common: ABCD (Modbus standard) or CDAB (inverters/meters)
+                    </p>
+                  </div>
+                )}
+
+                {selectedDataType === 'string' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="dp-count">Register Count</Label>
+                    <Input
+                      id="dp-count"
+                      type="number"
+                      {...register('count', { valueAsNumber: true })}
+                      placeholder="1"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Number of registers for string (max 125)
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                <div className="space-y-2">
+                  <Label htmlFor="dp-unit">Unit</Label>
+                  <Input id="dp-unit" {...register('unit')} placeholder="e.g., °C, V, A" />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dp-scale">Scale Factor</Label>
+                  <Input
+                    id="dp-scale"
+                    type="number"
+                    step="any"
+                    {...register('scale', { valueAsNumber: true })}
+                    placeholder="1"
+                  />
+                  <p className="text-xs text-muted-foreground">value × scale</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="dp-offset">Offset</Label>
+                  <Input
+                    id="dp-offset"
+                    type="number"
+                    step="any"
+                    {...register('offset', { valueAsNumber: true })}
+                    placeholder="0"
+                  />
+                  <p className="text-xs text-muted-foreground">+ offset</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dp-description">Description</Label>
+                <Input id="dp-description" {...register('description')} placeholder="Optional description" />
+              </div>
 
               {selectedDataType === 'string' && (
                 <div className="space-y-2">
-                  <Label htmlFor="dp-count">Register Count</Label>
-                  <Input
-                    id="dp-count"
-                    type="number"
-                    {...register('count', { valueAsNumber: true })}
-                    placeholder="1"
+                  <Label htmlFor="dp-encoding">Encoding</Label>
+                  <Controller
+                    name="encoding"
+                    control={control}
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <SelectTrigger id="dp-encoding">
+                          <SelectValue placeholder="Select encoding" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ascii">ASCII</SelectItem>
+                          <SelectItem value="utf8">UTF-8</SelectItem>
+                          <SelectItem value="latin1">Latin-1</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Number of registers for string (max 125)
-                  </p>
                 </div>
               )}
             </div>
 
-            {/* Unit, Scale, Offset */}
-            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-              <div className="space-y-2">
-                <Label htmlFor="dp-unit">Unit</Label>
-                <Input
-                  id="dp-unit"
-                  {...register('unit')}
-                  placeholder="e.g., °C, V, A"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="dp-scale">Scale Factor</Label>
-                <Input
-                  id="dp-scale"
-                  type="number"
-                  step="any"
-                  {...register('scale', { valueAsNumber: true })}
-                  placeholder="1"
-                />
-                <p className="text-xs text-muted-foreground">value × scale</p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="dp-offset">Offset</Label>
-                <Input
-                  id="dp-offset"
-                  type="number"
-                  step="any"
-                  {...register('offset', { valueAsNumber: true })}
-                  placeholder="0"
-                />
-                <p className="text-xs text-muted-foreground">+ offset</p>
-              </div>
-            </div>
-
-            {/* Description */}
-            <div className="space-y-2">
-              <Label htmlFor="dp-description">Description</Label>
-              <Input
-                id="dp-description"
-                {...register('description')}
-                placeholder="Optional description"
-              />
-            </div>
-
-            {/* String Encoding (if string type) */}
-            {selectedDataType === 'string' && (
-              <div className="space-y-2">
-                <Label htmlFor="dp-encoding">Encoding</Label>
-                <Controller
-                  name="encoding"
-                  control={control}
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger id="dp-encoding">
-                        <SelectValue placeholder="Select encoding" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ascii">ASCII</SelectItem>
-                        <SelectItem value="utf8">UTF-8</SelectItem>
-                        <SelectItem value="latin1">Latin-1</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </div>
-            )}
-              </TabsContent>
-
-              <TabsContent value="anomaly" className="space-y-6 mt-4">
-                {/* Anomaly Detection Configuration */}
-                <div className="space-y-6">
-                  <div className="flex items-start space-x-2">
-                    <Controller
-                      name="anomalyDetection.enabled"
-                      control={control}
-                      render={({ field }) => (
-                        <Checkbox
-                          id="anomaly-enabled"
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      )}
-                    />
-                    <div className="grid gap-1.5 leading-none">
-                      <Label
-                        htmlFor="anomaly-enabled"
-                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                      >
-                        Enable
-                      </Label>
-                    </div>
-                  </div>
-
-                  {/* Detection Methods */}
-                  <div className="space-y-3">
-                    <Label>Detection Methods</Label>
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2">
-                        <Controller
-                          name="anomalyDetection.methods.zscore"
-                          control={control}
-                          render={({ field }) => (
-                            <Checkbox
-                              id="method-zscore"
-                              checked={field.value || false}
-                              onCheckedChange={field.onChange}
-                            />
-                          )}
-                        />
-                        <Label htmlFor="method-zscore" className="text-sm font-normal cursor-pointer">
-                          Z-Score (statistical deviation)
-                        </Label>
-                      </div>
-                      
-                      <div className="flex items-center space-x-2">
-                        <Controller
-                          name="anomalyDetection.methods.mad"
-                          control={control}
-                          render={({ field }) => (
-                            <Checkbox
-                              id="method-mad"
-                              checked={field.value || false}
-                              onCheckedChange={field.onChange}
-                            />
-                          )}
-                        />
-                        <Label htmlFor="method-mad" className="text-sm font-normal cursor-pointer">
-                          MAD (median absolute deviation)
-                        </Label>
-                      </div>
-                      
-                      <div className="flex items-center space-x-2">
-                        <Controller
-                          name="anomalyDetection.methods.iqr"
-                          control={control}
-                          render={({ field }) => (
-                            <Checkbox
-                              id="method-iqr"
-                              checked={field.value || false}
-                              onCheckedChange={field.onChange}
-                            />
-                          )}
-                        />
-                        <Label htmlFor="method-iqr" className="text-sm font-normal cursor-pointer">
-                          IQR (interquartile range)
-                        </Label>
-                      </div>
-                      
-                      <div className="flex items-center space-x-2">
-                        <Controller
-                          name="anomalyDetection.methods.roc"
-                          control={control}
-                          render={({ field }) => (
-                            <Checkbox
-                              id="method-roc"
-                              checked={field.value || false}
-                              onCheckedChange={field.onChange}
-                            />
-                          )}
-                        />
-                        <Label htmlFor="method-roc" className="text-sm font-normal cursor-pointer">
-                          Rate of Change (sudden spikes)
-                        </Label>
-                      </div>
-                      
-                      <div className="flex items-center space-x-2">
-                        <Controller
-                          name="anomalyDetection.methods.ewma"
-                          control={control}
-                          render={({ field }) => (
-                            <Checkbox
-                              id="method-ewma"
-                              checked={field.value || false}
-                              onCheckedChange={field.onChange}
-                            />
-                          )}
-                        />
-                        <Label htmlFor="method-ewma" className="text-sm font-normal cursor-pointer">
-                          EWMA (exponentially weighted moving average)
-                        </Label>
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Select one or more detection methods. MAD is recommended for noisy data.
-                    </p>
-                  </div>
-
-                      {/* Threshold */}
-                      <div className="space-y-2">
-                        <Label htmlFor="anomaly-threshold">Threshold</Label>
-                        <Input
-                          id="anomaly-threshold"
-                          type="number"
-                          step="0.1"
-                          {...register('anomalyDetection.threshold', { valueAsNumber: true })}
-                          placeholder="5.0"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Sensitivity threshold (higher = less sensitive, fewer alerts)
-                        </p>
-                      </div>
-
-                      {/* Expected Range */}
-                      <div className="space-y-2">
-                        <Label>Expected Range (Optional)</Label>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="range-min" className="text-xs">Minimum</Label>
-                            <Input
-                              id="range-min"
-                              type="number"
-                              step="any"
-                              {...register('anomalyDetection.expectedRange.min', { valueAsNumber: true })}
-                              placeholder="e.g., 0"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="range-max" className="text-xs">Maximum</Label>
-                            <Input
-                              id="range-max"
-                              type="number"
-                              step="any"
-                              {...register('anomalyDetection.expectedRange.max', { valueAsNumber: true })}
-                              placeholder="e.g., 100"
-                            />
-                          </div>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Define the normal operating range for this metric
-                        </p>
-                      </div>
-                </div>
-              </TabsContent>
-              </div>
-            </Tabs>
-
             <DialogFooter className="mt-6 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setEditDialogOpen(false)}
-              >
+              <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)}>
                 Cancel
               </Button>
               <Button type="submit">

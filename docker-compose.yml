@@ -417,7 +417,7 @@ services:
             - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
             - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
             - MQTT_TOPIC=${MQTT_SIM_TOPIC}
-            - MQTT_METRIC_NAMES=${MQTT_SIM_METRICS:-temperature}
+            - MQTT_METRIC_NAMES=temperature
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
@@ -446,7 +446,7 @@ services:
             - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
             - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
             - MQTT_TOPIC=iot/73eddd385ce8/agent/8602805f-50b1-40cb-acdc-3f4eb084bfcf/mqtt/c83394fa-7d9b-4f55-817e-5dfc36a79533
-            - MQTT_METRIC_NAMES=${MQTT_SIM_METRICS:-humidity}
+            - MQTT_METRIC_NAMES=humidity
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
@@ -465,7 +465,7 @@ services:
             - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
             - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
             - MQTT_TOPIC=iot/73eddd385ce8/agent/8602805f-50b1-40cb-acdc-3f4eb084bfcf/mqtt/7254291f-ab6f-4dca-bbbd-6946deb1aa67
-            - MQTT_METRIC_NAMES=${MQTT_SIM_METRICS:-pressure}
+            - MQTT_METRIC_NAMES=pressure,humidity
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}

@@ -327,12 +327,10 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
                 onDataPointsChange={setModbusDataPoints}
               />
 
-              {/* Data Points Table - Commented out to reduce confusion, users should work with profiles only
               <DataPointsTable
                 value={modbusDataPoints}
                 onChange={setModbusDataPoints}
               />
-              */}
             </div>
           )}
 
