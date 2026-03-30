@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, memo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { Badge } from './ui/badge';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import {
@@ -17,12 +17,15 @@ import {
 } from 'recharts';
 import { buildApiUrl } from '@/config/api';
 import { metricsRequestQueue } from '@/utils/metricsRequestQueue';
-import { detectGaps } from '@/utils/chartGapDetection';
 import { useGlobalNow } from '../hooks/useGlobalNow';
+import { useVisibilityState } from '../hooks/useVisibilityState';
+import { buildMetricChartPipeline, getTimeRangeMs, stabilizeYDomain } from '@/utils/metricChartPipeline';
 
-const VISUAL_DRIFT_MS = 5000;
-const MAX_VISIBLE_GAP_LINES = 50;
 const Y_DOMAIN_SHRINK_LERP = 0.08;
+const OFFSCREEN_REFRESH_MULTIPLIER = 4;
+const OFFSCREEN_MIN_REFRESH_SECONDS = 120;
+const HIDDEN_TAB_REFRESH_MULTIPLIER = 10;
+const HIDDEN_TAB_MIN_REFRESH_SECONDS = 300;
 
 export interface ThresholdLine {
   value: number;
@@ -65,7 +68,7 @@ interface TimeSeriesDataPoint {
   avg_value: number;
   min_value: number;
   max_value: number;
-  sample_count: string;
+  sample_count: number;
   quality_ratio: number;
   anomaly_score?: number | null;
   anomaly_confidence?: number | null;
@@ -90,25 +93,30 @@ interface TimeSeriesResponse {
   data: TimeSeriesDataPoint[];
 }
 
-function getTimeRangeMs(timeRange: MetricDataCardConfig['timeRange']): number {
-  switch (timeRange) {
-    case '1m':
-      return 60 * 1000;
-    case '1h':
-      return 60 * 60 * 1000;
-    case '6h':
-      return 6 * 60 * 60 * 1000;
-    case '12h':
-      return 12 * 60 * 60 * 1000;
-    case '24h':
-      return 24 * 60 * 60 * 1000;
-    case '7d':
-      return 7 * 24 * 60 * 60 * 1000;
-    case '30d':
-      return 30 * 24 * 60 * 60 * 1000;
-    default:
-      return 60 * 60 * 1000;
+function isValidTimeSeriesResponse(value: unknown): value is TimeSeriesResponse {
+  if (!value || typeof value !== 'object') {
+    return false;
   }
+
+  const candidate = value as Partial<TimeSeriesResponse> & {
+    metric?: Partial<TimeSeriesResponse['metric']>;
+    metadata?: Partial<TimeSeriesResponse['metadata']>;
+  };
+
+  return Array.isArray(candidate.data)
+    && typeof candidate.metric?.metricName === 'string'
+    && typeof candidate.metric?.protocol === 'string'
+    && typeof candidate.metadata?.aggregationLevel === 'string';
+}
+
+function normalizeTimeSeriesResponse(response: TimeSeriesResponse): TimeSeriesResponse {
+  return {
+    ...response,
+    data: response.data.map((point) => ({
+      ...point,
+      sample_count: Number(point.sample_count),
+    })),
+  };
 }
 
 function pointsEqual(a: TimeSeriesDataPoint, b: TimeSeriesDataPoint): boolean {
@@ -147,16 +155,16 @@ function mergeTimeSeriesResponse(
   }
 
   const referenceEnd = next.data.length > 0
-    ? new Date(next.data[next.data.length - 1].time).getTime()
+    ? Date.parse(next.data[next.data.length - 1].time)
     : Date.now();
   const cutoff = referenceEnd - getTimeRangeMs(timeRange);
 
   const mergedPoints = Array.from(mergedByTime.values())
     .filter((point) => {
-      const ts = new Date(point.time).getTime();
+      const ts = Date.parse(point.time);
       return ts >= cutoff && ts <= referenceEnd;
     })
-    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    .sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
 
   const hasDataChange =
     mergedPoints.length !== previous.data.length ||
@@ -186,8 +194,30 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   const [staleReason, setStaleReason] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const now = useGlobalNow();
+  const cardRef = useRef<HTMLDivElement | null>(null);
   const latestDataRef = useRef<TimeSeriesResponse | null>(null);
+  const fetchDataRef = useRef<() => Promise<void>>(async () => {});
   const yDomainRef = useRef<[number, number] | null>(null);
+  const { isInViewport, isPageVisible } = useVisibilityState(cardRef, {
+    rootMargin: '240px 0px',
+    threshold: 0.01,
+  });
+
+  const effectiveRefreshInterval = useMemo(() => {
+    if (refreshInterval <= 0) {
+      return 0;
+    }
+
+    if (!isPageVisible) {
+      return Math.max(refreshInterval * HIDDEN_TAB_REFRESH_MULTIPLIER, HIDDEN_TAB_MIN_REFRESH_SECONDS);
+    }
+
+    if (!isInViewport) {
+      return Math.max(refreshInterval * OFFSCREEN_REFRESH_MULTIPLIER, OFFSCREEN_MIN_REFRESH_SECONDS);
+    }
+
+    return refreshInterval;
+  }, [isInViewport, isPageVisible, refreshInterval]);
 
   useEffect(() => {
     latestDataRef.current = data;
@@ -205,8 +235,8 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
         return;
       }
 
-      const cacheTtlMs = refreshInterval > 0
-        ? Math.min(Math.max(refreshInterval * 1000, 5000), 60000)
+      const cacheTtlMs = effectiveRefreshInterval > 0
+        ? Math.min(Math.max(effectiveRefreshInterval * 1000, 5000), 60000)
         : 15000;
       const requestKey = `${config.agentUuid || 'all'}|${config.deviceUuid}|${config.metricName}|${config.timeRange}`;
 
@@ -245,7 +275,12 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
 
-          return response.json();
+          const payload: unknown = await response.json();
+          if (!isValidTimeSeriesResponse(payload)) {
+            throw new Error('Invalid timeseries response payload');
+          }
+
+          return normalizeTimeSeriesResponse(payload);
         },
         cacheTtlMs
       );
@@ -283,17 +318,21 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     }
   };
 
+  fetchDataRef.current = fetchData;
+
   useEffect(() => {
-    fetchData();
+    void fetchDataRef.current();
     
     // Auto-refresh based on global interval (0 = off)
-    if (refreshInterval > 0) {
-      const interval = setInterval(fetchData, refreshInterval * 1000);
+    if (effectiveRefreshInterval > 0) {
+      const interval = setInterval(() => {
+        void fetchDataRef.current();
+      }, effectiveRefreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [config.deviceUuid, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
+  }, [config.deviceUuid, config.metricName, config.timeRange, effectiveRefreshInterval, refreshTrigger]);
 
-  const formatTimeValue = (timeValue: number) => {
+  const formatTimeValue = useCallback((timeValue: number) => {
     const date = new Date(timeValue);
     const now = new Date();
     const diffHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
@@ -303,179 +342,71 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     } else {
       return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
-  };
+  }, []);
 
-  const formatValue = (value: number | null | undefined) => {
+  const formatValue = useCallback((value: number | null | undefined) => {
     if (value === null || value === undefined || isNaN(value) || !isFinite(value)) {
       return '--';
     }
     return value.toFixed(2);
-  };
+  }, []);
 
-  const formatTimeLabel = (timeValue: number) => formatTimeValue(timeValue);
-
+  const formatTimeLabel = useCallback((timeValue: number) => formatTimeValue(timeValue), [formatTimeValue]);
   const timeRangeMs = useMemo(() => getTimeRangeMs(config.timeRange), [config.timeRange]);
-  const rawData = useMemo(() => data?.data ?? [], [data]);
-
-  const baseChartData = useMemo(() => {
-    return rawData.map((point) => {
-      const timeValue = new Date(point.time).getTime();
-      return {
-        time: timeValue,
-        timeValue,
-        timeLabel: formatTimeLabel(timeValue),
-        value: point.avg_value,
-        min: point.min_value,
-        max: point.max_value,
-        anomalyScore: point.anomaly_score,
-        anomalyConfidence: point.anomaly_confidence,
-        anomalyMarker: (point.anomaly_event_count || 0) > 0
-          ? point.max_value
-          : null,
-      };
-    });
-  }, [rawData]);
-
-  const dedupedChartData = useMemo(() => {
-    const pointByTime = new Map<number, (typeof baseChartData)[number]>();
-    for (const point of baseChartData) {
-      pointByTime.set(point.timeValue, point);
-    }
-
-    const points = Array.from(pointByTime.values());
-
-    let isSorted = true;
-    for (let i = 1; i < points.length; i += 1) {
-      if (points[i].timeValue < points[i - 1].timeValue) {
-        isSorted = false;
-        break;
-      }
-    }
-
-    return isSorted ? points : points.sort((a, b) => a.timeValue - b.timeValue);
-  }, [baseChartData]);
-
-  const visibleChartData = useMemo(() => {
-    if (dedupedChartData.length === 0) {
-      return dedupedChartData;
-    }
-
-    const visibleWindowStart = now - VISUAL_DRIFT_MS - timeRangeMs;
-    return dedupedChartData.filter((point) => point.timeValue >= visibleWindowStart);
-  }, [dedupedChartData, now, timeRangeMs]);
-
-  const chartDataWithGaps = useMemo(() => {
-    if (visibleChartData.length === 0) {
-      return [] as ReturnType<typeof detectGaps>;
-    }
-
-    return detectGaps(visibleChartData);
-  }, [visibleChartData]);
-
-  const chartDataWithBreaks = useMemo(() => {
-    if (chartDataWithGaps.length === 0) {
-      return [] as Array<(typeof chartDataWithGaps)[number] & { value: number | null; isGapBreak?: boolean }>;
-    }
-
-    const result: Array<(typeof chartDataWithGaps)[number] & { value: number | null; isGapBreak?: boolean }> = [];
-
-    for (let i = 0; i < chartDataWithGaps.length; i += 1) {
-      const point = chartDataWithGaps[i] as (typeof chartDataWithGaps)[number] & { value: number | null };
-
-      if (i > 0 && point.isGap) {
-        // Insert a null point just before the resumed point to force a hard line/area break.
-        result.push({
-          ...point,
-          value: null,
-          isGapBreak: true,
-          timeValue: point.timeValue - 1,
-          time: point.timeValue - 1,
-        });
-      }
-
-      result.push(point);
-    }
-
-    return result;
-  }, [chartDataWithGaps]);
 
   const chartState = useMemo(() => {
-    if (!data || chartDataWithBreaks.length === 0) {
+    if (!data) {
       return null;
     }
 
-    const gapTimes = chartDataWithGaps
-      .filter((point) => point.isGap)
-      .map((point) => point.timeValue)
-      .slice(-MAX_VISIBLE_GAP_LINES);
+    const thresholdValues = config.thresholdsEnabled && config.thresholds
+      ? config.thresholds.map((threshold) => threshold.value)
+      : [];
 
-    const dataValues = chartDataWithBreaks
-      .map((point) => point.value)
-      .filter((value): value is number => Number.isFinite(value));
+    const pipeline = buildMetricChartPipeline({
+      rawData: data.data,
+      now,
+      timeRangeMs,
+      thresholdValues,
+      formatTimeLabel,
+    });
 
-    const yDomain: [number, number] = (() => {
-      let domainMin = 0;
-      let domainMax = 100;
+    if (!pipeline) {
+      return null;
+    }
 
-      if (dataValues.length > 0) {
-        const dataMin = Math.min(...dataValues);
-        const dataMax = Math.max(...dataValues);
-
-        domainMin = dataMin;
-        domainMax = dataMax;
-
-        if (config.thresholdsEnabled && config.thresholds && config.thresholds.length > 0) {
-          const thresholdValues = config.thresholds.map((threshold) => threshold.value);
-          domainMin = Math.min(dataMin, ...thresholdValues);
-          domainMax = Math.max(dataMax, ...thresholdValues);
-        }
-
-        const range = domainMax - domainMin;
-        const padding = range > 0 ? range * 0.1 : Math.max(Math.abs(domainMax) * 0.1, 1);
-        domainMin -= padding;
-        domainMax += padding;
-      }
-
-      const previousDomain = yDomainRef.current;
-      if (!previousDomain) {
-        const initialDomain: [number, number] = [domainMin, domainMax];
-        yDomainRef.current = initialDomain;
-        return initialDomain;
-      }
-
-      const [prevMin, prevMax] = previousDomain;
-      const stabilizedMin = domainMin < prevMin
-        ? domainMin
-        : prevMin + (domainMin - prevMin) * Y_DOMAIN_SHRINK_LERP;
-      const stabilizedMax = domainMax > prevMax
-        ? domainMax
-        : prevMax + (domainMax - prevMax) * Y_DOMAIN_SHRINK_LERP;
-      const stabilizedDomain: [number, number] = [stabilizedMin, stabilizedMax];
-
-      yDomainRef.current = stabilizedDomain;
-      return stabilizedDomain;
-    })();
-
-    const domainEnd = now - VISUAL_DRIFT_MS;
-    const xDomain: [number, number] = [domainEnd - timeRangeMs, domainEnd];
+    const yDomain = stabilizeYDomain(
+      yDomainRef.current,
+      pipeline.targetYDomain,
+      Y_DOMAIN_SHRINK_LERP,
+    );
+    yDomainRef.current = yDomain;
 
     return {
-      chartDataWithGaps: chartDataWithBreaks,
-      gapTimes,
+      chartDataWithGaps: pipeline.chartDataWithGaps,
+      gapMarkerTimes: pipeline.gapMarkerTimes,
       yDomain,
-      xDomain,
+      xDomain: pipeline.xDomain,
     };
-  }, [chartDataWithBreaks, chartDataWithGaps, config.thresholds, config.thresholdsEnabled, data, now, timeRangeMs]);
+  }, [config.thresholds, config.thresholdsEnabled, data, formatTimeLabel, now, timeRangeMs]);
 
   const calculateStats = () => {
     if (!data || data.data.length === 0) return null;
 
-    const values = data.data.map(d => d.avg_value);
-    const current = values[values.length - 1];
-    const previous = values[values.length - 2];
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    const current = data.data[data.data.length - 1]?.avg_value;
+    const previous = data.data[data.data.length - 2]?.avg_value;
+    let min = Infinity;
+    let max = -Infinity;
+    let sum = 0;
+
+    for (const point of data.data) {
+      const value = point.avg_value;
+      if (value < min) min = value;
+      if (value > max) max = value;
+      sum += value;
+    }
+
+    const avg = sum / data.data.length;
 
     const change = previous ? ((current - previous) / previous) * 100 : 0;
     const trend = change > 0 ? 'up' : change < 0 ? 'down' : 'stable';
@@ -483,98 +414,99 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     return { current, min, max, avg, change, trend };
   };
 
-  const renderChart = () => {
-    const currentData = data;
+  const renderTooltipContent = useCallback(({ active, payload, label }: any) => {
+    if (!active || !Array.isArray(payload) || payload.length === 0) {
+      return null;
+    }
 
-    if (!chartState || !currentData) return null;
-
-    const { chartDataWithGaps, gapTimes, yDomain, xDomain } = chartState;
-    const lastDataTime = chartDataWithGaps.length > 0
-      ? chartDataWithGaps[chartDataWithGaps.length - 1].timeValue
-      : null;
-    const unit = currentData.metric.unit ?? '';
-
+    const unit = data?.metric.unit ?? '';
     const formatTooltipMetricValue = (value: number | null, seriesName?: string) => {
-      const label = seriesName === 'Anomaly'
+      const tooltipLabel = seriesName === 'Anomaly'
         ? 'Anomaly'
         : seriesName === 'Average'
           ? 'Average'
           : 'Value';
 
       if (value === null || !Number.isFinite(value)) {
-        return ['No data', label];
+        return ['No data', tooltipLabel] as const;
       }
-      return [formatValue(value) + (unit ? ` ${unit}` : ''), label];
+
+      return [formatValue(value) + (unit ? ` ${unit}` : ''), tooltipLabel] as const;
     };
 
-    const renderTooltipContent = ({ active, payload, label }: any) => {
-      if (!active || !Array.isArray(payload) || payload.length === 0) {
-        return null;
+    const anomalyEntry = payload.find((entry: any) =>
+      entry?.name === 'Anomaly' && Number.isFinite(entry?.value)
+    );
+    const averageEntry = payload.find((entry: any) =>
+      entry?.name === 'Average' && Number.isFinite(entry?.value)
+    );
+
+    if (!anomalyEntry && !averageEntry) {
+      return null;
+    }
+
+    const rows: Array<{ label: string; value: string }> = [];
+
+    if (anomalyEntry) {
+      const [value, seriesLabel] = formatTooltipMetricValue(anomalyEntry.value, anomalyEntry.name);
+      rows.push({ label: seriesLabel, value });
+
+      const point = anomalyEntry.payload as {
+        anomalyScore?: number | null;
+        anomalyConfidence?: number | null;
+      };
+
+      if (Number.isFinite(point?.anomalyScore)) {
+        rows.push({
+          label: 'Anomaly score',
+          value: Number(point.anomalyScore).toFixed(3),
+        });
       }
 
-      const anomalyEntry = payload.find((entry: any) =>
-        entry?.name === 'Anomaly' && Number.isFinite(entry?.value)
-      );
-      const averageEntry = payload.find((entry: any) =>
-        entry?.name === 'Average' && Number.isFinite(entry?.value)
-      );
-
-      if (!anomalyEntry && !averageEntry) {
-        return null;
+      if (Number.isFinite(point?.anomalyConfidence)) {
+        rows.push({
+          label: 'Confidence',
+          value: `${(Number(point.anomalyConfidence) * 100).toFixed(1)}%`,
+        });
       }
-      const rows: Array<{ label: string; value: string }> = [];
+    }
 
-      if (anomalyEntry) {
-        const [value, seriesLabel] = formatTooltipMetricValue(anomalyEntry.value, anomalyEntry.name);
-        rows.push({ label: seriesLabel, value: value as string });
+    if (averageEntry) {
+      const [value, seriesLabel] = formatTooltipMetricValue(averageEntry.value, averageEntry.name);
+      rows.push({ label: seriesLabel, value });
+    }
 
-        const point = anomalyEntry.payload as {
-          anomalyScore?: number | null;
-          anomalyConfidence?: number | null;
-        };
-
-        if (Number.isFinite(point?.anomalyScore)) {
-          rows.push({
-            label: 'Anomaly score',
-            value: Number(point.anomalyScore).toFixed(3),
-          });
-        }
-
-        if (Number.isFinite(point?.anomalyConfidence)) {
-          rows.push({
-            label: 'Confidence',
-            value: `${(Number(point.anomalyConfidence) * 100).toFixed(1)}%`,
-          });
-        }
-      }
-
-      if (averageEntry) {
-        const [value, seriesLabel] = formatTooltipMetricValue(averageEntry.value, averageEntry.name);
-        rows.push({ label: seriesLabel, value: value as string });
-      }
-
-      return (
-        <div
-          style={{
-            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-            border: 'none',
-            borderRadius: '4px',
-            color: 'white',
-            padding: '8px 10px',
-          }}
-        >
-          <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 4 }}>
-            {formatTimeValue(label as number)}
-          </div>
-          {rows.map((row, index) => (
-            <div key={`${row.label}-${index}`} style={{ fontSize: 13, fontWeight: 600 }}>
-              {row.label}: {row.value}
-            </div>
-          ))}
+    return (
+      <div
+        style={{
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          border: 'none',
+          borderRadius: '4px',
+          color: 'white',
+          padding: '8px 10px',
+        }}
+      >
+        <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 4 }}>
+          {formatTimeValue(label as number)}
         </div>
-      );
-    };
+        {rows.map((row, index) => (
+          <div key={`${row.label}-${index}`} style={{ fontSize: 13, fontWeight: 600 }}>
+            {row.label}: {row.value}
+          </div>
+        ))}
+      </div>
+    );
+  }, [data?.metric.unit, formatTimeValue, formatValue]);
 
+  const renderChart = () => {
+    const currentData = data;
+
+    if (!chartState || !currentData) return null;
+
+    const { chartDataWithGaps, gapMarkerTimes, yDomain, xDomain } = chartState;
+    const lastDataTime = chartDataWithGaps.length > 0
+      ? chartDataWithGaps[chartDataWithGaps.length - 1].timeValue
+      : null;
     const commonProps = {
       data: chartDataWithGaps,
       margin: { top: 5, right: 10, left: 24, bottom: 5 },
@@ -624,7 +556,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 animationDuration={350}
                 animationEasing="linear"
               />
-              {gapTimes.map((gapTime, idx) => (
+              {gapMarkerTimes.map((gapTime, idx) => (
                 <ReferenceLine
                   key={`area-gap-${idx}`}
                   x={gapTime}
@@ -702,7 +634,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 animationDuration={350}
                 animationEasing="linear"
               />
-              {gapTimes.map((gapTime, idx) => (
+              {gapMarkerTimes.map((gapTime, idx) => (
                 <ReferenceLine
                   key={`bar-gap-${idx}`}
                   x={gapTime}
@@ -798,7 +730,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   activeDot={{ r: 5, fill: '#ef4444', stroke: '#ffffff', strokeWidth: 1 }}
                 />
               )}
-              {gapTimes.map((gapTime, idx) => (
+              {gapMarkerTimes.map((gapTime, idx) => (
                 <ReferenceLine
                   key={`line-gap-${idx}`}
                   x={gapTime}
@@ -841,13 +773,22 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     }
   };
 
-  const stats = calculateStats();
+  const stats = useMemo(() => calculateStats(), [data]);
   const staleAgeLabel = lastRefreshed
     ? `${Math.max(1, Math.floor((now - lastRefreshed.getTime()) / 60000))}m ago`
     : null;
+  const refreshState = refreshInterval <= 0
+    ? { label: 'Paused', color: '#9ca3af', detail: 'Auto-refresh disabled' }
+    : stale
+      ? { label: 'Stale', color: '#f59e0b', detail: staleReason || 'Showing last known data' }
+      : !isPageVisible
+        ? { label: 'Background', color: '#64748b', detail: `Throttled to every ${effectiveRefreshInterval}s while tab is hidden` }
+        : !isInViewport
+          ? { label: 'Throttled', color: '#0ea5e9', detail: `Throttled to every ${effectiveRefreshInterval}s while offscreen` }
+          : { label: 'Live', color: '#22c55e', detail: `Refreshing every ${effectiveRefreshInterval}s` };
 
   return (
-    <div className="h-full flex flex-col">
+    <div ref={cardRef} className="h-full flex flex-col">
         {loading && !data ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-sm text-muted-foreground">Loading...</div>
@@ -905,24 +846,25 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               <div className="flex items-center gap-3">
                 <div
                   className="flex items-center gap-1 text-xs"
-                  style={{ color: refreshInterval > 0 ? (stale ? '#f59e0b' : '#22c55e') : '#9ca3af' }}
+                  style={{ color: refreshState.color }}
+                  title={refreshState.detail}
                 >
                   <span
                     className="relative inline-flex h-2.5 w-2.5 shrink-0"
                     aria-hidden="true"
                   >
-                    {refreshInterval > 0 && !stale && (
+                    {refreshInterval > 0 && refreshState.label === 'Live' && (
                       <span
                         className="absolute inline-flex h-full w-full rounded-full animate-ping opacity-75"
-                        style={{ backgroundColor: '#22c55e' }}
+                        style={{ backgroundColor: refreshState.color }}
                       />
                     )}
                     <span
                       className="relative inline-flex h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: refreshInterval > 0 ? (stale ? '#f59e0b' : '#22c55e') : '#9ca3af' }}
+                      style={{ backgroundColor: refreshState.color }}
                     />
                   </span>
-                  {refreshInterval > 0 ? (stale ? 'Stale' : 'Live') : 'Paused'}
+                  {refreshState.label}
                 </div>
                 {stale && (
                   <span
