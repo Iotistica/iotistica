@@ -204,68 +204,141 @@ FROM hypertable_compression_stats('readings');
 -- 7. CHUNK COMPRESSION STATUS
 -- ============================================================================
 
+-- Note: Recent chunks are expected to remain uncompressed until they are older
+-- than the hypertable's compress_after policy and the next background policy run
+-- has executed.
+
 -- Device logs chunks
-SELECT 
-    chunk_name,
-    pg_size_pretty(before_compression_total_bytes) AS uncompressed_size,
-    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
-        THEN pg_size_pretty(after_compression_total_bytes)
-        ELSE 'Not compressed yet'
-    END AS compressed_size,
-    CASE WHEN after_compression_total_bytes > 0 
-         THEN ROUND(100 * (1 - after_compression_total_bytes::numeric / before_compression_total_bytes::numeric), 1)
-         ELSE NULL 
-    END AS compression_percent,
-    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
-        THEN 'Compressed'
-        ELSE 'Not compressed yet'
-    END AS compression_status
-FROM chunk_compression_stats('agent_logs')
-ORDER BY chunk_name;
-
--- MQTT topic metrics chunks
-SELECT 
-    chunk_name,
-    pg_size_pretty(before_compression_total_bytes) AS uncompressed_size,
-    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
-        THEN pg_size_pretty(after_compression_total_bytes)
-        ELSE 'Not compressed yet'
-    END AS compressed_size,
-    CASE WHEN after_compression_total_bytes > 0 
-         THEN ROUND(100 * (1 - after_compression_total_bytes::numeric / before_compression_total_bytes::numeric), 1)
-         ELSE NULL 
-    END AS compression_percent,
-    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
-        THEN 'Compressed'
-        ELSE 'Not compressed yet'
-    END AS compression_status
-FROM chunk_compression_stats('mqtt_topic_metrics')
-ORDER BY chunk_name;
-
--- MQTT broker stats chunks
-SELECT 
-    chunk_name,
-    pg_size_pretty(before_compression_total_bytes) AS uncompressed_size,
-    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
-        THEN pg_size_pretty(after_compression_total_bytes)
-        ELSE 'Not compressed yet'
-    END AS compressed_size,
-    CASE WHEN after_compression_total_bytes > 0 
-         THEN ROUND(100 * (1 - after_compression_total_bytes::numeric / before_compression_total_bytes::numeric), 1)
-         ELSE NULL 
-    END AS compression_percent,
-    CASE WHEN COALESCE(after_compression_total_bytes, 0) > 0 
-        THEN 'Compressed'
-        ELSE 'Not compressed yet'
-    END AS compression_status
-FROM chunk_compression_stats('mqtt_broker_stats')
-ORDER BY chunk_name;
-
--- Readings chunks (with time ranges)
+WITH compression_policy AS (
+    SELECT
+        hypertable_name,
+        (config->>'compress_after')::interval AS compress_after,
+        next_start
+    FROM timescaledb_information.jobs
+    WHERE proc_name = 'policy_compression'
+      AND hypertable_name = 'agent_logs'
+)
 SELECT 
     c.chunk_name,
     d.range_start,
     d.range_end,
+    NOW() - d.range_end AS age,
+    p.compress_after,
+    p.next_start,
+    pg_size_pretty(c.before_compression_total_bytes) AS uncompressed_size,
+    CASE WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 
+        THEN pg_size_pretty(c.after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS compressed_size,
+    CASE WHEN c.after_compression_total_bytes > 0 
+         THEN ROUND(100 * (1 - c.after_compression_total_bytes::numeric / c.before_compression_total_bytes::numeric), 1)
+         ELSE NULL 
+    END AS compression_percent,
+    CASE
+        WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 THEN 'Compressed'
+        WHEN NOW() < d.range_end THEN 'Active chunk or future range'
+        WHEN NOW() - d.range_end < p.compress_after THEN 'Not eligible yet'
+        ELSE 'Eligible, waiting for next policy run'
+    END AS compression_status
+FROM chunk_compression_stats('agent_logs') c
+JOIN timescaledb_information.chunks d
+    ON c.chunk_schema = d.chunk_schema AND c.chunk_name = d.chunk_name
+CROSS JOIN compression_policy p
+ORDER BY d.range_start DESC;
+
+-- MQTT topic metrics chunks
+WITH compression_policy AS (
+    SELECT
+        hypertable_name,
+        (config->>'compress_after')::interval AS compress_after,
+        next_start
+    FROM timescaledb_information.jobs
+    WHERE proc_name = 'policy_compression'
+      AND hypertable_name = 'mqtt_topic_metrics'
+)
+SELECT 
+    c.chunk_name,
+    d.range_start,
+    d.range_end,
+    NOW() - d.range_end AS age,
+    p.compress_after,
+    p.next_start,
+    pg_size_pretty(c.before_compression_total_bytes) AS uncompressed_size,
+    CASE WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 
+        THEN pg_size_pretty(c.after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS compressed_size,
+    CASE WHEN c.after_compression_total_bytes > 0 
+         THEN ROUND(100 * (1 - c.after_compression_total_bytes::numeric / c.before_compression_total_bytes::numeric), 1)
+         ELSE NULL 
+    END AS compression_percent,
+    CASE
+        WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 THEN 'Compressed'
+        WHEN NOW() < d.range_end THEN 'Active chunk or future range'
+        WHEN NOW() - d.range_end < p.compress_after THEN 'Not eligible yet'
+        ELSE 'Eligible, waiting for next policy run'
+    END AS compression_status
+FROM chunk_compression_stats('mqtt_topic_metrics') c
+JOIN timescaledb_information.chunks d
+    ON c.chunk_schema = d.chunk_schema AND c.chunk_name = d.chunk_name
+CROSS JOIN compression_policy p
+ORDER BY d.range_start DESC;
+
+-- MQTT broker stats chunks
+WITH compression_policy AS (
+    SELECT
+        hypertable_name,
+        (config->>'compress_after')::interval AS compress_after,
+        next_start
+    FROM timescaledb_information.jobs
+    WHERE proc_name = 'policy_compression'
+      AND hypertable_name = 'mqtt_broker_stats'
+)
+SELECT 
+    c.chunk_name,
+    d.range_start,
+    d.range_end,
+    NOW() - d.range_end AS age,
+    p.compress_after,
+    p.next_start,
+    pg_size_pretty(c.before_compression_total_bytes) AS uncompressed_size,
+    CASE WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 
+        THEN pg_size_pretty(c.after_compression_total_bytes)
+        ELSE 'Not compressed yet'
+    END AS compressed_size,
+    CASE WHEN c.after_compression_total_bytes > 0 
+         THEN ROUND(100 * (1 - c.after_compression_total_bytes::numeric / c.before_compression_total_bytes::numeric), 1)
+         ELSE NULL 
+    END AS compression_percent,
+    CASE
+        WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 THEN 'Compressed'
+        WHEN NOW() < d.range_end THEN 'Active chunk or future range'
+        WHEN NOW() - d.range_end < p.compress_after THEN 'Not eligible yet'
+        ELSE 'Eligible, waiting for next policy run'
+    END AS compression_status
+FROM chunk_compression_stats('mqtt_broker_stats') c
+JOIN timescaledb_information.chunks d
+    ON c.chunk_schema = d.chunk_schema AND c.chunk_name = d.chunk_name
+CROSS JOIN compression_policy p
+ORDER BY d.range_start DESC;
+
+-- Readings chunks (with time ranges)
+WITH compression_policy AS (
+    SELECT
+        hypertable_name,
+        (config->>'compress_after')::interval AS compress_after,
+        next_start
+    FROM timescaledb_information.jobs
+    WHERE proc_name = 'policy_compression'
+      AND hypertable_name = 'readings'
+)
+SELECT 
+    c.chunk_name,
+    d.range_start,
+    d.range_end,
+    NOW() - d.range_end AS age,
+    p.compress_after,
+    p.next_start,
     pg_size_pretty(c.before_compression_total_bytes) AS uncompressed_size,
     CASE WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 
          THEN pg_size_pretty(c.after_compression_total_bytes)
@@ -275,13 +348,16 @@ SELECT
          THEN ROUND(100 * (1 - c.after_compression_total_bytes::numeric / c.before_compression_total_bytes::numeric), 1)
          ELSE NULL 
     END AS compression_percent,
-    CASE WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 
-         THEN 'Compressed'
-         ELSE 'Not compressed yet'
+    CASE
+         WHEN COALESCE(c.after_compression_total_bytes, 0) > 0 THEN 'Compressed'
+         WHEN NOW() < d.range_end THEN 'Active chunk or future range'
+         WHEN NOW() - d.range_end < p.compress_after THEN 'Not eligible yet'
+         ELSE 'Eligible, waiting for next policy run'
     END AS compression_status
 FROM chunk_compression_stats('readings') c
 JOIN timescaledb_information.chunks d 
     ON c.chunk_schema = d.chunk_schema AND c.chunk_name = d.chunk_name
+CROSS JOIN compression_policy p
 ORDER BY d.range_start DESC;
 
 -- ============================================================================
@@ -572,9 +648,22 @@ ORDER BY last_run_started_at DESC;
 -- SELECT compress_chunk('_timescaledb_internal._hyper_1_1_chunk');
 
 -- 4. Check chunk age (must be older than compress_after interval)
--- Shows uncompressed chunks and their age
-WITH chunk_stats AS (
-    SELECT h.hypertable_name, c.chunk_schema, c.chunk_name, c.after_compression_total_bytes
+-- Shows chunk eligibility against the actual compression policy
+WITH compression_policies AS (
+    SELECT
+        hypertable_name,
+        (config->>'compress_after')::interval AS compress_after,
+        next_start
+    FROM timescaledb_information.jobs
+    WHERE proc_name = 'policy_compression'
+      AND hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+), chunk_stats AS (
+    SELECT
+        h.hypertable_name,
+        c.chunk_schema,
+        c.chunk_name,
+        c.before_compression_total_bytes,
+        c.after_compression_total_bytes
     FROM (
         SELECT hypertable_name
         FROM timescaledb_information.hypertables
@@ -588,12 +677,33 @@ SELECT
     ch.range_start,
     ch.range_end,
     NOW() - ch.range_end AS age,
-    'Uncompressed' AS status
+    p.compress_after,
+    p.next_start,
+    cs.before_compression_total_bytes,
+    cs.after_compression_total_bytes,
+    CASE
+        WHEN COALESCE(cs.after_compression_total_bytes, 0) > 0
+        THEN ROUND(
+            100 * (
+                1 - cs.after_compression_total_bytes::numeric /
+                NULLIF(cs.before_compression_total_bytes, 0)::numeric
+            ),
+            1
+        )
+        ELSE NULL
+    END AS compression_percent,
+    CASE
+        WHEN COALESCE(cs.after_compression_total_bytes, 0) > 0 THEN 'Compressed'
+        WHEN NOW() < ch.range_end THEN 'Active chunk or future range'
+        WHEN NOW() - ch.range_end < p.compress_after THEN 'Not eligible yet'
+        ELSE 'Eligible, waiting for next policy run'
+    END AS status
 FROM timescaledb_information.chunks ch
 LEFT JOIN chunk_stats cs
     ON cs.hypertable_name = ch.hypertable_name
    AND cs.chunk_schema = ch.chunk_schema
    AND cs.chunk_name = ch.chunk_name
+LEFT JOIN compression_policies p
+    ON p.hypertable_name = ch.hypertable_name
 WHERE ch.hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
-  AND COALESCE(cs.after_compression_total_bytes, 0) = 0
 ORDER BY ch.range_end DESC;
