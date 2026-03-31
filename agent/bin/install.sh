@@ -137,6 +137,132 @@ install_docker_if_needed() {
     fi
 }
 
+install_mosquitto_if_needed() {
+    if ! command -v setfacl >/dev/null 2>&1; then
+        echo "Installing ACL utilities..."
+        apt-get install -y --no-install-recommends acl || {
+            echo "Error: Failed to install ACL utilities"
+            exit 1
+        }
+    fi
+
+    if command -v mosquitto >/dev/null 2>&1; then
+        echo "✓ Mosquitto is already installed ($(mosquitto -h 2>&1 | head -1))"
+    else
+        echo "Installing Mosquitto..."
+        apt-get install -y --no-install-recommends mosquitto mosquitto-clients || {
+            echo "Error: Failed to install Mosquitto"
+            exit 1
+        }
+        echo "✓ Mosquitto installed successfully"
+    fi
+
+    systemctl enable mosquitto
+}
+
+configure_mosquitto_file_auth() {
+    echo ""
+    echo "=================================="
+    echo "MQTT Broker Setup (Mosquitto)"
+    echo "=================================="
+
+    MQTT_BROKER_HOST_VALUE="${MQTT_BROKER_HOST:-localhost}"
+    MQTT_BROKER_PORT_VALUE="${MQTT_BROKER_PORT:-1883}"
+    MQTT_BROKER_URL_VALUE="mqtt://${MQTT_BROKER_HOST_VALUE}:${MQTT_BROKER_PORT_VALUE}"
+    MQTT_AUTH_DIR_VALUE="/etc/mosquitto"
+    MQTT_USERNAME_VALUE="${MQTT_USERNAME:-admin}"
+
+    if [ -n "$MQTT_PASSWORD" ]; then
+        MQTT_PASSWORD_VALUE="$MQTT_PASSWORD"
+    else
+        MQTT_PASSWORD_VALUE="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
+    fi
+
+    export MQTT_BROKER_HOST_VALUE MQTT_BROKER_PORT_VALUE MQTT_BROKER_URL_VALUE
+    export MQTT_AUTH_DIR_VALUE MQTT_USERNAME_VALUE MQTT_PASSWORD_VALUE
+
+    install_mosquitto_if_needed
+
+    echo "Configuring Mosquitto..."
+    mkdir -p /etc/mosquitto/conf.d
+    mkdir -p /var/log/mosquitto
+    chgrp mosquitto /etc/mosquitto
+    chmod 2755 /etc/mosquitto
+
+    if ! grep -q '^[[:space:]]*include_dir[[:space:]]\+/etc/mosquitto/conf.d[[:space:]]*$' /etc/mosquitto/mosquitto.conf 2>/dev/null; then
+        echo "include_dir /etc/mosquitto/conf.d" >> /etc/mosquitto/mosquitto.conf
+    fi
+
+    if [ -f /etc/mosquitto/conf.d/iotistica.conf ]; then
+        echo "Updating existing Iotistica Mosquitto config..."
+    else
+        echo "Creating Iotistica Mosquitto config..."
+    fi
+
+    cat > /etc/mosquitto/conf.d/iotistica.conf << EOFMOSQ
+# Iotistica managed configuration
+
+listener ${MQTT_BROKER_PORT_VALUE}
+allow_anonymous false
+
+password_file /etc/mosquitto/passwd
+acl_file /etc/mosquitto/acl
+
+persistence true
+persistence_location /var/lib/mosquitto/
+
+log_dest file /var/log/mosquitto/mosquitto.log
+EOFMOSQ
+
+    echo "Initializing MQTT auth files..."
+    touch /etc/mosquitto/passwd
+    touch /etc/mosquitto/acl
+    touch /var/log/mosquitto/mosquitto.log
+
+    mosquitto_passwd -b -c /etc/mosquitto/passwd "$MQTT_USERNAME_VALUE" "$MQTT_PASSWORD_VALUE"
+
+    cat > /etc/mosquitto/acl << EOFACL
+# Iotistica managed ACL
+user ${MQTT_USERNAME_VALUE}
+topic readwrite #
+EOFACL
+
+    chown iotistic:mosquitto /etc/mosquitto/passwd /etc/mosquitto/acl
+    chmod 640 /etc/mosquitto/passwd /etc/mosquitto/acl
+    chown mosquitto:mosquitto /var/log/mosquitto/mosquitto.log
+    chmod 640 /var/log/mosquitto/mosquitto.log
+
+    if command -v setfacl >/dev/null 2>&1; then
+        setfacl -m u:iotistic:rwx /etc/mosquitto || true
+    else
+        echo "Warning: setfacl not available; verify the agent user can update /etc/mosquitto/passwd and /etc/mosquitto/acl"
+    fi
+
+    cat > /usr/local/bin/iotistica-mqtt-reload.sh << 'EOFRELOAD'
+#!/bin/bash
+set -e
+
+chmod 640 /etc/mosquitto/passwd /etc/mosquitto/acl
+chown iotistic:mosquitto /etc/mosquitto/passwd /etc/mosquitto/acl
+
+systemctl reload mosquitto
+EOFRELOAD
+    chmod +x /usr/local/bin/iotistica-mqtt-reload.sh
+
+    systemctl daemon-reload
+    systemctl restart mosquitto
+
+    sleep 3
+
+    if systemctl is-active --quiet mosquitto; then
+        echo "✓ Mosquitto is running"
+    else
+        echo "✗ Mosquitto failed to start"
+        systemctl status mosquitto --no-pager
+        exit 1
+    fi
+}
+
 echo ""
 echo "Installation method: Systemd + Docker"
 echo ""
@@ -251,6 +377,8 @@ echo ""
         # Ensure user is in docker group even if already exists
         usermod -aG docker iotistic 2>/dev/null || true
     fi
+
+    configure_mosquitto_file_auth
 
     # Create directories
     echo ""
@@ -541,6 +669,10 @@ ORCHESTRATOR_INTERVAL=30000
 DATA_DIR=/var/lib/iotistic/agent
 STATE_FILE=/var/lib/iotistic/agent/target-state.json
 DATABASE_PATH=/var/lib/iotistic/agent/agent.sqlite
+MQTT_BROKER_URL=${MQTT_BROKER_URL_VALUE}
+MQTT_AUTH_DIR=${MQTT_AUTH_DIR_VALUE}
+MQTT_USERNAME=${MQTT_USERNAME_VALUE}
+MQTT_PASSWORD=${MQTT_PASSWORD_VALUE}
 EOF
 
     # Write CI mode flag if set (for testing environments)
@@ -561,15 +693,6 @@ EOF
         echo "IOTISTICA_API=${IOTISTICA_API}" >> /etc/iotistic/agent.env
     fi
 
-    # Add MQTT broker configuration if provided
-    if [ -n "$MQTT_BROKER_HOST" ]; then
-        echo "MQTT_BROKER_HOST=${MQTT_BROKER_HOST}" >> /etc/iotistic/agent.env
-    fi
-    
-    if [ -n "$MQTT_BROKER_PORT" ]; then
-        echo "MQTT_BROKER_PORT=${MQTT_BROKER_PORT}" >> /etc/iotistic/agent.env
-    fi
-    
     if [ -n "$MQTT_USE_TLS" ]; then
         echo "MQTT_USE_TLS=${MQTT_USE_TLS}" >> /etc/iotistic/agent.env
     fi
@@ -623,8 +746,8 @@ EOF
 [Unit]
 Description=Iotistic Agent - IoT Device Management Service
 Documentation=https://github.com/Iotistica/iotistic
-After=network-online.target docker.service
-Requires=docker.service
+After=network-online.target docker.service mosquitto.service
+Requires=docker.service mosquitto.service
 Wants=network-online.target
 
 [Service]
@@ -660,7 +783,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/iotistic /var/log/iotistic /opt/iotistic/agent /var/run/docker.sock
+ReadWritePaths=/var/lib/iotistic /var/log/iotistic /opt/iotistic/agent /var/run/docker.sock /etc/mosquitto
 CapabilityBoundingSet=
 LockPersonality=true
 MemoryAccounting=true
