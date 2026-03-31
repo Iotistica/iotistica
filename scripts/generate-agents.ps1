@@ -957,10 +957,12 @@ $networkConfig
       - /var/run/docker.sock:/var/run/docker.sock
       - $volumeName`:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
+      - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth
     environment:
       - DEVICE_API_PORT=$port
       - IOTISTICA_API=$cloudApiEndpoint
       - NODE_ENV=$NodeEnv
+      - MQTT_AUTH_DIR=/app/data/mosquitto-auth
       - MQTT_BROKER_URL=$MqttBrokerUrl
       - MQTT_USERNAME=$MqttUsername
       - MQTT_PASSWORD=$MqttPassword

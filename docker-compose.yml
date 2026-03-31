@@ -245,48 +245,68 @@ services:
         networks:
             - iotistica-net
 
+    # mosquitto-agent:
+    #     image: iegomez/mosquitto-go-auth
+    #     restart: unless-stopped
+    #     container_name: iotistic-mosquitto-agent
+    #     ports:
+    #       - "${AGENT_MOSQUITTO_PORT_EXT:-5884}:1883"     # Dedicated MQTT for agent traffic
+    #       - "${AGENT_MOSQUITTO_WS_PORT_EXT:-59003}:9001" # Dedicated MQTT WebSocket for agent traffic
+    #     volumes:
+    #       - ./mosquitto/mosquitto-agent.conf:/etc/mosquitto/mosquitto.conf:ro
+    #     healthcheck:
+    #         test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
+    #         interval: 30s
+    #         timeout: 10s
+    #         retries: 3
+    #         start_period: 10s
+    #     depends_on:
+    #         api:
+    #             condition: service_healthy
+    #         redis:
+    #             condition: service_healthy
+    #     networks:
+    #         - iotistica-net
+
     mosquitto-agent:
-        image: iegomez/mosquitto-go-auth
+        image: eclipse-mosquitto:2
         restart: unless-stopped
         container_name: iotistic-mosquitto-agent
         ports:
           - "${AGENT_MOSQUITTO_PORT_EXT:-5884}:1883"     # Dedicated MQTT for agent traffic
           - "${AGENT_MOSQUITTO_WS_PORT_EXT:-59003}:9001" # Dedicated MQTT WebSocket for agent traffic
         volumes:
-          - ./mosquitto/mosquitto-agent.conf:/etc/mosquitto/mosquitto.conf:ro
+          - ./mosquitto-agent/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+          - ./mosquitto-agent/auth:/mosquitto/auth  # writable: agent reconciles passwd + acl files here
         healthcheck:
-            test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-nodered} -P ${MQTT_PASSWORD:-secret} -t '$$SYS/#' -C 1 || exit 1"]
+            test: ["CMD-SHELL", "timeout 5 mosquitto_sub -h localhost -p 1883 -u ${MQTT_USERNAME:-admin} -P ${MQTT_PASSWORD:-iotistic42!} -t '$$SYS/#' -C 1 || exit 1"]
             interval: 30s
             timeout: 10s
             retries: 3
             start_period: 10s
-        depends_on:
-            api:
-                condition: service_healthy
-            redis:
-                condition: service_healthy
         networks:
             - iotistica-net
 
-    emqx:
-        image: emqx/emqx:latest
-        container_name: iotistic-emqx
-        restart: unless-stopped
-        ports:
-            - "${EMQX_MQTT_PORT_EXT:-1884}:1883"   # EMQX MQTT
-            - "${EMQX_WS_PORT_EXT:-8084}:8083"     # EMQX WebSocket
-            - "${EMQX_DASHBOARD_PORT_EXT:-18084}:18083"  # EMQX Dashboard
-        environment:
-            - EMQX_DASHBOARD__DEFAULT_USERNAME=${EMQX_DASHBOARD_USER:-admin}
-            - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD:-public}
-        volumes:
-            - ./emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
-            - emqx-data:/opt/emqx/data
-        depends_on:
-            api:
-                condition: service_healthy
-        networks:
-            - iotistica-net
+
+    # emqx:
+    #     image: emqx/emqx:latest
+    #     container_name: iotistic-emqx
+    #     restart: unless-stopped
+    #     ports:
+    #         - "${EMQX_MQTT_PORT_EXT:-1884}:1883"   # EMQX MQTT
+    #         - "${EMQX_WS_PORT_EXT:-8084}:8083"     # EMQX WebSocket
+    #         - "${EMQX_DASHBOARD_PORT_EXT:-18084}:18083"  # EMQX Dashboard
+    #     environment:
+    #         - EMQX_DASHBOARD__DEFAULT_USERNAME=${EMQX_DASHBOARD_USER:-admin}
+    #         - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD:-public}
+    #     volumes:
+    #         - ./emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
+    #         - emqx-data:/opt/emqx/data
+    #     depends_on:
+    #         api:
+    #             condition: service_healthy
+    #     networks:
+    #         - iotistica-net
     
 
     # VPN Services - Commented out until TypeScript code is complete
@@ -422,7 +442,7 @@ services:
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
             - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
         depends_on:
-            mosquitto:
+            mosquitto-agent:
                 condition: service_started
         networks:
             - iotistica-net
@@ -452,7 +472,7 @@ services:
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
             - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
         depends_on:
-            mosquitto:
+            mosquitto-agent:
                 condition: service_started
         networks:
             - iotistica-net
@@ -482,7 +502,7 @@ services:
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
             - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
         depends_on:
-            mosquitto:
+            mosquitto-agent:
                 condition: service_started
         networks:
             - iotistica-net

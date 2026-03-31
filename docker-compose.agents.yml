@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-03-30 21:12:49
+# Generated: 2026-03-31 06:37:14
 # Agents: 1 to 1
 # Ports: 48481 to 48481
 
@@ -22,16 +22,18 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - agent-1-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
+      - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth
     environment:
       - DEVICE_API_PORT=48481
       - IOTISTICA_API=https://localhost:3443
       - NODE_ENV=development
+      - MQTT_AUTH_DIR=/app/data/mosquitto-auth
       - MQTT_BROKER_URL=mqtt://localhost:5884
       - MQTT_USERNAME=admin
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=ac6ff0759b57a10d90846bad8385f5170aa21d2a7227856c32fe60136d96b189
+      - PROVISIONING_KEY=1e181a4c8240ea019b3365c905a967214e10a2db411fd1b2130420b6fef79c2a
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)

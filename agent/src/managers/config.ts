@@ -14,6 +14,7 @@ import _ from 'lodash';
 import { models as db } from '../db/connection.js';
 import { EndpointModel, type Endpoint } from '../db/models/endpoint.model.js';
 import { MqttAuthModel } from '../db/models/mqtt-auth.model.js';
+import { MqttFileAuthReconciler, resolveMosquittoAuthDir, type ContainerManager } from '../mqtt/auth.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents, type LogLevel } from '../logging/types.js';
 import type {
@@ -175,6 +176,7 @@ export class ConfigManager extends EventEmitter {
 		// This guarantees bootstrap MQTT credentials exist before endpoint-driven
 		// reconciliation runs.
 		await this.syncMqttAuthToDatabase(this.currentConfig.endpoints || []);
+		await this.syncMosquittoAuthToFiles(this.currentConfig.endpoints || []);
 	}
 
 	/**
@@ -748,6 +750,7 @@ export class ConfigManager extends EventEmitter {
 
 		if (!devices || !Array.isArray(devices) || devices.length === 0) {
 			await this.syncMqttAuthToDatabase([]);
+			await this.syncMosquittoAuthToFiles([]);
 			return;
 		}
 
@@ -990,6 +993,7 @@ export class ConfigManager extends EventEmitter {
 			}
 
 			await this.syncMqttAuthToDatabase(devices);
+			await this.syncMosquittoAuthToFiles(devices);
 
 		} catch (error) {
 			this.logger?.errorSync(
@@ -998,6 +1002,47 @@ export class ConfigManager extends EventEmitter {
 				{
 					component: LogComponents.configManager,
 					operation: 'syncEndpointsToDatabase'
+				}
+			);
+		}
+	}
+	private async syncMosquittoAuthToFiles(devices: any[]): Promise<void> {
+		try {
+			const reconciler = new MqttFileAuthReconciler(this.logger);
+			const rawDocker = (this.containerManager as any)?.getDocker?.();
+			const dockerManager: ContainerManager | undefined = rawDocker
+				? {
+						findContainerByName: async (name: string) => {
+							const all = await rawDocker.listContainers({ all: true });
+							const found = (all as any[]).find((c) =>
+								(c.Names as string[]).some((n) => n === `/${name}`)
+							);
+							return found ? rawDocker.getContainer(found.Id) : null;
+						},
+				  }
+				: undefined;
+
+			const result = await reconciler.reconcile(devices, {
+				authDir: resolveMosquittoAuthDir(),
+				containerName: 'iotistic-mosquitto-agent',
+				dockerManager,
+			});
+
+			if (result.changed) {
+				this.logger?.infoSync('Reconciled MQTT file auth', {
+					component: LogComponents.configManager,
+					operation: 'syncMosquittoAuthToFiles',
+					users: result.users,
+					acls: result.acls,
+				});
+			}
+		} catch (error) {
+			this.logger?.errorSync(
+				'Failed to reconcile MQTT file auth',
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					component: LogComponents.configManager,
+					operation: 'syncMosquittoAuthToFiles',
 				}
 			);
 		}

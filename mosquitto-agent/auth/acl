@@ -1,0 +1,5 @@
+# Mosquitto ACL file — managed by agent file-auth reconciler.
+# Do not edit by hand. Reload via SIGHUP to iotistic-mosquitto-agent.
+
+user admin
+topic readwrite #
