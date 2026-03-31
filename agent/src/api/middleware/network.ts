@@ -94,12 +94,6 @@ export default function networkSecurity(req: Request, res: Response, next: NextF
 	
 	switch (SECURITY_MODE) {
 		case 'LOCALHOST_ONLY':
-			// Allow broker auth callbacks from private network addresses (e.g. Docker bridge).
-			// Keep all other routes localhost-only in this mode.
-			if (isMqttAuthCallback(path) && isPrivateNetwork(clientIP)) {
-				break;
-			}
-
 			if (!isLocalhost(clientIP)) {
 				logger?.warnSync('Blocked non-localhost API access', {
 					component: LogComponents.agent,
