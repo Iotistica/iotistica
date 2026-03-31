@@ -106,7 +106,7 @@ class MqttSimulator:
         self.username = os.environ.get("MQTT_USERNAME") 
         self.password = os.environ.get("MQTT_PASSWORD") 
         self.client_id = os.environ.get("MQTT_CLIENT_ID", "iotistic-mqtt-simulator")
-        self.device_id = os.environ.get("MQTT_DEVICE_ID", self.client_id)
+        self.device_uuid = os.environ.get("MQTT_DEVICE_UUID", "")
         self.publish_topic = os.environ.get("MQTT_TOPIC", "sensor/temperature")
         metric_names_raw = os.environ.get("MQTT_METRIC_NAMES", "temperature")
         self.metric_names = [name.strip() for name in metric_names_raw.split(",") if name.strip()]
@@ -130,6 +130,9 @@ class MqttSimulator:
 
         if not self.username or not self.password:
             raise ValueError("MQTT auth is required: set MQTT_USERNAME and MQTT_PASSWORD")
+
+        if not self.device_uuid:
+            raise ValueError("MQTT_DEVICE_UUID is required")
 
         if self.publish_interval_ms < 100:
             raise ValueError("PUBLISH_INTERVAL_MS must be >= 100")
@@ -185,7 +188,7 @@ class MqttSimulator:
                 "min": defaults.get("min"),
                 "max": defaults.get("max"),
                 "period_s": 30.0,
-                "device_uuid": os.environ.get("MQTT_DEVICE_UUID", ""),
+                "device_uuid": self.device_uuid,
             })
 
         if self.metric_unit_overrides or self.metric_base_overrides:
@@ -202,7 +205,7 @@ class MqttSimulator:
 
         self.client = mqtt.Client(client_id=self.client_id)
         self.client.username_pw_set(self.username, self.password)
-        self.client.will_set(f"device/{self.device_id}/status", payload="offline", qos=1, retain=True)
+        self.client.will_set(f"device/{self.device_uuid}/status", payload="offline", qos=1, retain=True)
         self.client.enable_logger(logger)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
@@ -218,8 +221,8 @@ class MqttSimulator:
             logger.error("MQTT connect failed with code %s", rc)
         else:
             logger.info("Connected to MQTT broker %s:%s", self.host, self.port)
-            client.publish(f"device/{self.device_id}/status", "online", qos=1, retain=True)
-            logger.info("Published LWT online status topic=device/%s/status", self.device_id)
+            client.publish(f"device/{self.device_uuid}/status", "online", qos=1, retain=True)
+            logger.info("Published LWT online status topic=device/%s/status", self.device_uuid)
 
     def _on_disconnect(self, client, userdata, rc):
         logger.warning("Disconnected from MQTT broker rc=%s", rc)
@@ -245,7 +248,6 @@ class MqttSimulator:
 
         payload = {
             self.timestamp_field: timestamp_value,
-            "deviceId": self.device_id,
         }
 
         device_uuid = next((p.device_uuid for p in publishers if p.device_uuid), None)
@@ -268,7 +270,6 @@ class MqttSimulator:
         for pub in self.publishers:
             value = pub.next_value(now)
             payload = pub.build_payload(value)
-            payload["deviceId"] = self.device_id
             msg = json.dumps(payload, separators=(",", ":"))
             info = self.client.publish(pub.topic, msg, qos=pub.qos, retain=pub.retain)
             if info.rc != mqtt.MQTT_ERR_SUCCESS:
