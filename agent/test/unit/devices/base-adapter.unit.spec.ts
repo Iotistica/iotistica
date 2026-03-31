@@ -1,5 +1,5 @@
 import { BaseProtocolAdapter, GenericDeviceConfig } from '../../../src/features/adapters/base';
-import { SensorDataPoint } from '../../../src/features/adapters/types';
+import { DeviceDataPoint } from '../../../src/features/adapters/types';
 
 class TestAdapter extends BaseProtocolAdapter {
   getProtocolName(): string {
@@ -14,11 +14,11 @@ class TestAdapter extends BaseProtocolAdapter {
     // Mock implementation
   }
 
-  async readDeviceData(deviceName: string, device: GenericDeviceConfig): Promise<SensorDataPoint[]> {
+  async readDeviceData(deviceName: string, device: GenericDeviceConfig): Promise<DeviceDataPoint[]> {
     return [];
   }
 
-  async pollDevice(device: GenericDeviceConfig): Promise<SensorDataPoint[]> {
+  async pollDevice(device: GenericDeviceConfig): Promise<DeviceDataPoint[]> {
     return [];
   }
 

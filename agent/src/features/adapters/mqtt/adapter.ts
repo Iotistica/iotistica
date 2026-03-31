@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import * as mqtt from 'mqtt';
 import * as mqttPattern from 'mqtt-pattern';
-import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
+import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
 import { MqttAdapterConfig, MqttDevice, MqttMetricConfig } from './types.js';
 import { parsePayload, coerceType } from './payload.js';
 import { agentTopic } from '../../../mqtt/topics.js';
@@ -36,10 +36,12 @@ export class MqttAdapter extends EventEmitter {
   private deviceStatuses: Map<string, DeviceStatus> = new Map();
   private running = false;
   private connected = false;
-  private emitQueue: SensorDataPoint[][] = [];
+  private emitQueue: DeviceDataPoint[][] = [];
   private processingEmitQueue = false;
   private droppedMessageCount = 0;
   private firstConnect = true; // Track first connection for subscription logic
+  private reconnectAttemptCount = 0;
+  private currentReconnectPeriod = 0;
   private compiledMetrics = new Map<string, Array<MqttMetricConfig & { path: string[] }>>();
   private compiledTimestampFields = new Map<string, string[]>();
   private lwtDeviceIdToName = new Map<string, string>();
@@ -53,6 +55,7 @@ export class MqttAdapter extends EventEmitter {
     this.config = config;
     this.logger = logger;
     this.deviceUuid = deviceUuid?.trim() || null;
+    this.currentReconnectPeriod = this.getBaseReconnectPeriod();
 
     for (const device of this.config.devices) {
       if (device.enabled) {
@@ -221,7 +224,10 @@ export class MqttAdapter extends EventEmitter {
     
     this.logger.info(`Creating MQTT client for broker: ${brokerUrl}`, { 
       clientId: stableClientId,
-      reconnectPeriod: this.config.reconnect.period 
+      reconnectPeriod: this.currentReconnectPeriod,
+      reconnectStrategy: this.getReconnectStrategy(),
+      reconnectMaxPeriod: this.getMaxReconnectPeriod(),
+      reconnectJitterRatio: this.getReconnectJitterRatio(),
     });
 
     // Cleanup old client before creating new one (prevents listener leaks)
@@ -235,7 +241,7 @@ export class MqttAdapter extends EventEmitter {
       clientId: stableClientId,
       username: this.config.broker.username,
       password: this.config.broker.password,
-      reconnectPeriod: this.config.reconnect.period,
+      reconnectPeriod: this.currentReconnectPeriod,
       clean: false, // Persistent session: survive reconnects, keep subscriptions, replay QoS 1 messages
       keepalive: 30, // Send pings every 30s (well before mosquitto's 60s idle timeout)
       ...(this.brokerStatusTopic ? {
@@ -253,6 +259,7 @@ export class MqttAdapter extends EventEmitter {
     
     this.client.on('connect', (connack) => {
       this.connected = true;
+      this.resetReconnectBackoff();
       
 
       this.emit('device-connected', 'mqtt-broker');
@@ -267,7 +274,12 @@ export class MqttAdapter extends EventEmitter {
       
       // Refresh configured subscriptions on every connect.
       if (!connack.sessionPresent) {
-        this.logger.warn('MQTT session not present, subscribing all configured topics');
+        this.logger.warn('MQTT session not present, subscribing all configured topics', {
+          firstConnect: this.firstConnect,
+          risk: this.firstConnect
+            ? 'No broker-side session yet; messages published before the first successful subscribe are not recoverable.'
+            : 'Persistent session was lost; messages published while the adapter was disconnected may have been dropped by the broker.',
+        });
       } else if (this.firstConnect) {
         this.logger.debug('Connected with existing persistent session (sessionPresent=true)');
       } else {
@@ -294,7 +306,12 @@ export class MqttAdapter extends EventEmitter {
     });
 
     this.client.on('reconnect', () => {
-      this.logger.info('MQTT reconnecting to broker...');
+      const nextReconnectDelayMs = this.scheduleNextReconnectBackoff();
+      this.logger.info('MQTT reconnecting to broker...', {
+        attempt: this.reconnectAttemptCount,
+        strategy: this.getReconnectStrategy(),
+        nextReconnectDelayMs,
+      });
     });
 
     this.client.on('close', () => {
@@ -322,6 +339,74 @@ export class MqttAdapter extends EventEmitter {
     throw new Error(
       'MQTT clientId requires a valid device UUID to derive agent-<deviceUuid>.'
     );
+  }
+
+  private getBaseReconnectPeriod(): number {
+    const configured = Number(this.config.reconnect.period);
+    return Number.isFinite(configured) ? Math.max(0, configured) : 0;
+  }
+
+  private getReconnectStrategy(): 'fixed' | 'exponential' {
+    return this.config.reconnect.strategy === 'exponential' ? 'exponential' : 'fixed';
+  }
+
+  private getMaxReconnectPeriod(): number {
+    const base = this.getBaseReconnectPeriod();
+    const configured = Number(this.config.reconnect.maxPeriod);
+
+    if (!Number.isFinite(configured)) {
+      return base;
+    }
+
+    return Math.max(base, configured);
+  }
+
+  private getReconnectJitterRatio(): number {
+    const configured = Number(this.config.reconnect.jitterRatio);
+    if (!Number.isFinite(configured)) {
+      return 0;
+    }
+
+    return Math.min(1, Math.max(0, configured));
+  }
+
+  private applyReconnectPeriod(periodMs: number): void {
+    this.currentReconnectPeriod = periodMs;
+
+    if (this.client) {
+      (this.client.options as mqtt.IClientOptions).reconnectPeriod = periodMs;
+    }
+  }
+
+  private computeReconnectPeriod(attempt: number): number {
+    const base = this.getBaseReconnectPeriod();
+    if (this.getReconnectStrategy() === 'fixed') {
+      return base;
+    }
+
+    const maxPeriod = this.getMaxReconnectPeriod();
+    const exponentialDelay = Math.min(maxPeriod, base * (2 ** Math.max(0, attempt - 1)));
+    const jitterRatio = this.getReconnectJitterRatio();
+
+    if (jitterRatio === 0) {
+      return exponentialDelay;
+    }
+
+    const lowerBound = exponentialDelay * (1 - jitterRatio);
+    const upperBound = exponentialDelay * (1 + jitterRatio);
+    return Math.round(lowerBound + (Math.random() * (upperBound - lowerBound)));
+  }
+
+  private resetReconnectBackoff(): void {
+    this.reconnectAttemptCount = 0;
+    this.applyReconnectPeriod(this.getBaseReconnectPeriod());
+  }
+
+  private scheduleNextReconnectBackoff(): number {
+    this.reconnectAttemptCount += 1;
+    const nextPeriod = this.computeReconnectPeriod(this.reconnectAttemptCount);
+    this.applyReconnectPeriod(nextPeriod);
+    return nextPeriod;
   }
 
   private resolveBrokerStatusTopic(): string | null {
@@ -429,6 +514,14 @@ export class MqttAdapter extends EventEmitter {
     const topic = device.topic;
     const qos = device.qos || this.config.qos;
 
+    if (qos === 0) {
+      this.logger.warn('MQTT subscription uses QoS 0; messages published during disconnects may be lost', {
+        topic,
+        deviceName: device.name,
+        clientId: this.client.options.clientId,
+      });
+    }
+
     return new Promise((resolve, reject) => {
       this.client!.subscribe(topic, { qos }, (err) => {
         if (err) {
@@ -501,7 +594,7 @@ export class MqttAdapter extends EventEmitter {
     }
   }
 
-  private enqueueData(points: SensorDataPoint[], topic: string): void {
+  private enqueueData(points: DeviceDataPoint[], topic: string): void {
     if (this.emitQueue.length >= MqttAdapter.MAX_QUEUE_DEPTH) {
       this.droppedMessageCount++;
       if (this.droppedMessageCount % 100 === 1) {
@@ -599,7 +692,7 @@ export class MqttAdapter extends EventEmitter {
     return fallback;
   }
 
-  private resolveMetricUnit(parsed: unknown, metric: string, fallback: string = ''): string {
+  private resolveIncomingUnit(parsed: unknown, metric: string): string | undefined {
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const parsedObj = parsed as Record<string, unknown>;
 
@@ -623,28 +716,253 @@ export class MqttAdapter extends EventEmitter {
       }
     }
 
-    return fallback;
+    return undefined;
+  }
+
+  private canonicalizeUnit(unit: string | undefined): string | undefined {
+    if (!unit) {
+      return undefined;
+    }
+
+    const trimmed = unit.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const normalized = trimmed.toLowerCase();
+    switch (normalized) {
+      case 'c':
+      case '°c':
+      case 'degc':
+      case 'deg_c':
+      case 'celsius':
+        return 'C';
+      case 'f':
+      case '°f':
+      case 'fahrenheit':
+        return 'F';
+      case 'k':
+      case 'kelvin':
+        return 'K';
+      case 'pa':
+        return 'Pa';
+      case 'kpa':
+        return 'kPa';
+      case 'bar':
+        return 'bar';
+      case 'mbar':
+        return 'mbar';
+      case 'mm/s':
+        return 'mm/s';
+      case 'psi':
+        return 'psi';
+      case 'atm':
+        return 'atm';
+      case '%':
+      case 'percent':
+      case 'percentage':
+        return '%';
+      default:
+        this.logger.warn('Unknown unit encountered', { unit: trimmed });
+        return trimmed;
+    }
+  }
+
+  private resolveUnitDimension(unit: string): 'temperature' | 'pressure' | undefined {
+    switch (unit) {
+      case 'C':
+      case 'F':
+      case 'K':
+        return 'temperature';
+      case 'Pa':
+      case 'kPa':
+      case 'bar':
+      case 'mbar':
+      case 'psi':
+      case 'atm':
+        return 'pressure';
+      default:
+        return undefined;
+    }
+  }
+
+  private convertToBaseUnit(value: number, unit: string, dimension: 'temperature' | 'pressure'): number {
+    if (dimension === 'temperature') {
+      switch (unit) {
+        case 'K':
+          return value;
+        case 'C':
+          return value + 273.15;
+        case 'F':
+          return ((value - 32) * 5 / 9) + 273.15;
+      }
+    }
+
+    if (dimension === 'pressure') {
+      switch (unit) {
+        case 'Pa':
+          return value;
+        case 'kPa':
+          return value * 1000;
+        case 'bar':
+          return value * 100000;
+        case 'mbar':
+          return value * 100;
+        case 'psi':
+          return value * 6894.757293168;
+        case 'atm':
+          return value * 101325;
+      }
+    }
+
+    throw new Error(`Unsupported unit conversion source: ${unit}`);
+  }
+
+  private convertFromBaseUnit(value: number, unit: string, dimension: 'temperature' | 'pressure'): number {
+    if (dimension === 'temperature') {
+      switch (unit) {
+        case 'K':
+          return value;
+        case 'C':
+          return value - 273.15;
+        case 'F':
+          return ((value - 273.15) * 9 / 5) + 32;
+      }
+    }
+
+    if (dimension === 'pressure') {
+      switch (unit) {
+        case 'Pa':
+          return value;
+        case 'kPa':
+          return value / 1000;
+        case 'bar':
+          return value / 100000;
+        case 'mbar':
+          return value / 100;
+        case 'psi':
+          return value / 6894.757293168;
+        case 'atm':
+          return value / 101325;
+      }
+    }
+
+    throw new Error(`Unsupported unit conversion target: ${unit}`);
+  }
+
+  private convertUnitValue(value: number, fromUnit: string, toUnit: string): number {
+    if (fromUnit === toUnit) {
+      return value;
+    }
+
+    const fromDimension = this.resolveUnitDimension(fromUnit);
+    const toDimension = this.resolveUnitDimension(toUnit);
+
+    if (!fromDimension || !toDimension || fromDimension !== toDimension) {
+      throw new Error(`Unsupported unit conversion: ${fromUnit} -> ${toUnit}`);
+    }
+
+    const baseValue = this.convertToBaseUnit(value, fromUnit, fromDimension);
+    return this.convertFromBaseUnit(baseValue, toUnit, toDimension);
+  }
+
+  private normalizePrecision(precision: number | undefined): number | undefined {
+    if (!Number.isFinite(precision)) {
+      return undefined;
+    }
+
+    return Math.max(0, Math.floor(Number(precision)));
+  }
+
+  private roundNumericValue(value: number, precision: number): number {
+    const factor = 10 ** precision;
+    return Math.round((value + Number.EPSILON) * factor) / factor;
+  }
+
+  private normalizeMetricValue(
+    rawValue: any,
+    type: string,
+    incomingUnit: string | undefined,
+    canonicalUnit: string | undefined,
+    precision: number | undefined,
+  ): { value: number | boolean | string | null; unit?: string } {
+    const value = coerceType(rawValue, type);
+    const normalizedIncoming = this.canonicalizeUnit(incomingUnit);
+    const normalizedCanonical = this.canonicalizeUnit(canonicalUnit);
+    const normalizedPrecision = this.normalizePrecision(precision);
+
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return {
+        value,
+        unit: normalizedCanonical ?? normalizedIncoming,
+      };
+    }
+
+    if (normalizedCanonical) {
+      if (!normalizedIncoming || normalizedIncoming === normalizedCanonical) {
+        return {
+          value: normalizedPrecision !== undefined
+            ? this.roundNumericValue(value, normalizedPrecision)
+            : value,
+          unit: normalizedCanonical,
+        };
+      }
+
+        try {
+          const convertedValue = this.convertUnitValue(value, normalizedIncoming, normalizedCanonical);
+          return {
+            value: this.roundNumericValue(convertedValue, normalizedPrecision ?? 2),
+            unit: normalizedCanonical,
+          };
+        } catch (error) {
+          this.logger.warn('Unknown unit conversion, storing raw value', {
+            from: normalizedIncoming,
+            to: normalizedCanonical,
+            error: error instanceof Error ? error.message : String(error),
+          });
+
+          return {
+            value,
+            unit: normalizedIncoming,
+          };
+        }
+    }
+
+    return {
+      value: normalizedPrecision !== undefined
+        ? this.roundNumericValue(value, normalizedPrecision)
+        : value,
+      unit: normalizedIncoming,
+    };
   }
 
   private buildMetricPoint(
     device: MqttDevice,
     metric: string,
     rawValue: any,
-    unit: string,
+    incomingUnit: string | undefined,
+    canonicalUnit: string | undefined,
+    precision: number | undefined,
     type: string | undefined,
     deviceId: string | undefined,
     topic: string,
     now: string,
     retain: boolean
-  ): SensorDataPoint {
-    const value = coerceType(rawValue, type || device.dataType || 'string');
+  ): DeviceDataPoint {
+    const normalized = this.normalizeMetricValue(
+      rawValue,
+      type || device.dataType || 'string',
+      incomingUnit,
+      canonicalUnit,
+      precision,
+    );
 
     return {
       deviceName: device.name,
       ...(deviceId && { deviceId }),
       metric: metric || topic,
-      value,
-      unit,
+      value: normalized.value,
+      ...(normalized.unit !== undefined && { unit: normalized.unit }),
       timestamp: now,
       quality: retain ? 'UNCERTAIN' : 'GOOD',
       ...(retain && { qualityCode: 'RETAINED_MESSAGE' })
@@ -715,7 +1033,7 @@ export class MqttAdapter extends EventEmitter {
         ? this.resolveTimestamp(this.getFieldFast(parsed, timestampPath), now)
         : now;
       const resolvedDeviceId = this.resolveMessageDeviceId(device, parsed);
-      const points: SensorDataPoint[] = [];
+      const points: DeviceDataPoint[] = [];
 
       const compiledDeviceMetrics = this.compiledMetrics.get(device.name);
       if (compiledDeviceMetrics && compiledDeviceMetrics.length > 0) {
@@ -737,7 +1055,9 @@ export class MqttAdapter extends EventEmitter {
                 device,
                 metricConfig.metric,
                 rawValue,
-                this.resolveMetricUnit(parsed, metricConfig.metric, metricConfig.unit || ''),
+                this.resolveIncomingUnit(parsed, metricConfig.metric),
+                metricConfig.unit,
+                metricConfig.precision,
                 metricConfig.type,
                 resolvedDeviceId,
                 topic,
@@ -773,7 +1093,9 @@ export class MqttAdapter extends EventEmitter {
               device,
               key,
               rawValue,
-              this.resolveMetricUnit(parsed, key, ''),
+              this.resolveIncomingUnit(parsed, key),
+              device.defaultUnits?.[key],
+              device.defaultPrecisions?.[key],
               undefined,
               resolvedDeviceId,
               topic,
@@ -824,7 +1146,9 @@ export class MqttAdapter extends EventEmitter {
                   device,
                   metricName,
                   metricValue,
-                  this.resolveMetricUnit(parsedObj, metricName, ''),
+                  this.resolveIncomingUnit(parsedObj, metricName),
+                  device.defaultUnits?.[metricName],
+                  device.defaultPrecisions?.[metricName],
                   undefined,
                   resolvedDeviceId,
                   topic,
@@ -851,7 +1175,9 @@ export class MqttAdapter extends EventEmitter {
             device,
             singleMetric,
             singleSource,
-            this.resolveMetricUnit(parsed, singleMetric, device.unit || ''),
+            this.resolveIncomingUnit(parsed, singleMetric),
+            device.unit,
+            device.precision,
             singleType,
             resolvedDeviceId,
             topic,
@@ -876,11 +1202,11 @@ export class MqttAdapter extends EventEmitter {
       this.logger.error(`Failed to parse MQTT message from topic ${topic}: ${errorMessage}`);
 
       // Emit BAD quality data point
-      const dataPoint: SensorDataPoint = {
+      const dataPoint: DeviceDataPoint = {
         deviceName: device.name,
         metric: device.metric || topic,
         value: null,
-        unit: device.unit || '',
+        ...(device.unit !== undefined && { unit: device.unit }),
         timestamp: new Date().toISOString(),
         quality: 'BAD',
         qualityCode: 'PARSE_ERROR'

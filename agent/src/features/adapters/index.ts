@@ -20,7 +20,7 @@ import { ModbusAdapterConfig } from './modbus/types.js';
 import { MqttAdapter } from './mqtt/adapter.js';
 import { MqttAdapterConfig } from './mqtt/types.js';
 import { SocketServer } from './common/socket-server.js';
-import { SensorDataPoint, SocketOutput } from './types.js';
+import { DeviceDataPoint, SocketOutput } from './types.js';
 import { EndpointOutputModel } from '../../db/models/endpoint-outputs.model.js';
 import { EndpointModel } from '../../db/models/endpoint.model.js';
 
@@ -65,9 +65,9 @@ export class SensorsFeature extends BaseFeature {
   private socketServers: Map<string, SocketServer> = new Map();
 
   private enrichWithEndpointUuid(
-    dataPoints: SensorDataPoint[],
+    dataPoints: DeviceDataPoint[],
     endpointUuidByName: Map<string, string>
-  ): SensorDataPoint[] {
+  ): DeviceDataPoint[] {
     if (endpointUuidByName.size === 0 || dataPoints.length === 0) {
       return dataPoints;
     }
@@ -282,7 +282,7 @@ export class SensorsFeature extends BaseFeature {
         this.logger.info('Modbus adapter started');
       });
 
-      modbusAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
+      modbusAdapter.on('data', (dataPoints: DeviceDataPoint[]) => {
         // Route data from adapter to socket server
         modbusSocket.sendData(this.enrichWithEndpointUuid(dataPoints, modbusEndpointUuidByName));
       });
@@ -385,7 +385,7 @@ export class SensorsFeature extends BaseFeature {
         this.logger.debug('OPC-UA adapter started');
       });
 
-      opcuaAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
+      opcuaAdapter.on('data', (dataPoints: DeviceDataPoint[]) => {
         // Route data from adapter to socket server
         opcuaSocket.sendData(this.enrichWithEndpointUuid(dataPoints, opcuaEndpointUuidByName));
       });
@@ -490,7 +490,7 @@ export class SensorsFeature extends BaseFeature {
         this.logger.info('SNMP adapter started');
       });
 
-      snmpAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
+      snmpAdapter.on('data', (dataPoints: DeviceDataPoint[]) => {
         // Route data from adapter to socket server
         snmpSocket.sendData(this.enrichWithEndpointUuid(dataPoints, snmpEndpointUuidByName));
       });
@@ -565,7 +565,10 @@ export class SensorsFeature extends BaseFeature {
           qos: 1,
           reconnect: {
             period: 1000,
-            maxAttempts: 10
+            maxAttempts: 10,
+            strategy: 'fixed',
+            maxPeriod: 1000,
+            jitterRatio: 0,
           },
           devices: dbDevices.map(d => ({
             uuid: d.uuid,
@@ -575,6 +578,9 @@ export class SensorsFeature extends BaseFeature {
             qos: d.connection.qos || 1,
             dataType: d.connection.dataType || 'float32',
             unit: d.connection.unit,
+            precision: Number.isFinite((d.connection as any).precision)
+              ? Number((d.connection as any).precision)
+              : undefined,
             metric: d.connection.metric,
             deviceId: d.connection.deviceId,
             timestampField: d.connection.timestampField,
@@ -584,9 +590,28 @@ export class SensorsFeature extends BaseFeature {
                   metric: metric.metric,
                   unit: metric.unit,
                   type: metric.type,
+                  precision: Number.isFinite(metric.precision) ? Number(metric.precision) : undefined,
                 }))
               : undefined,
             autoMetrics: Boolean((d.connection as any).autoMetrics),
+            defaultUnits:
+              (d.connection as any).defaultUnits && typeof (d.connection as any).defaultUnits === 'object'
+                ? Object.entries((d.connection as any).defaultUnits).reduce<Record<string, string>>((acc, [key, value]) => {
+                    if (typeof key === 'string' && key.trim() && typeof value === 'string' && value.trim()) {
+                      acc[key] = value;
+                    }
+                    return acc;
+                  }, {})
+                : undefined,
+            defaultPrecisions:
+              (d.connection as any).defaultPrecisions && typeof (d.connection as any).defaultPrecisions === 'object'
+                ? Object.entries((d.connection as any).defaultPrecisions).reduce<Record<string, number>>((acc, [key, value]) => {
+                    if (typeof key === 'string' && key.trim() && Number.isFinite(value)) {
+                      acc[key] = Number(value);
+                    }
+                    return acc;
+                  }, {})
+                : undefined,
             allowArrayMetrics: Boolean((d.connection as any).allowArrayMetrics)
           })),
 
@@ -637,7 +662,7 @@ export class SensorsFeature extends BaseFeature {
         this.logger.info('MQTT adapter started');
       });
 
-      mqttAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
+      mqttAdapter.on('data', (dataPoints: DeviceDataPoint[]) => {
         // Route data from adapter to socket server
         mqttSocket.sendData(this.enrichWithEndpointUuid(dataPoints, mqttEndpointUuidByName));
       });
@@ -891,7 +916,7 @@ export class SensorsFeature extends BaseFeature {
         this.logger.info('BACnet adapter started');
       });
 
-      bacnetAdapter.on('data', (dataPoints: SensorDataPoint[]) => {
+      bacnetAdapter.on('data', (dataPoints: DeviceDataPoint[]) => {
         // Route data from adapter to socket server
         bacnetSocket.sendData(this.enrichWithEndpointUuid(dataPoints, bacnetEndpointUuidByName));
       });

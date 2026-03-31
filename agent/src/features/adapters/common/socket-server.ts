@@ -1,7 +1,7 @@
 import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
-import { SensorDataPoint, SocketOutput, Logger } from '../types.js';
+import { DeviceDataPoint, SocketOutput, Logger } from '../types.js';
 
 /**
  * IPC Socket Server that receives sensor data and serves it to connected clients
@@ -160,7 +160,7 @@ export class SocketServer {
    * Decision: Keep simple broadcast until proven hot. The backpressure handling
    * already prevents the critical failure mode (OOM from slow consumers).
    */
-  sendData(dataPoints: SensorDataPoint[]): void {
+  sendData(dataPoints: DeviceDataPoint[]): void {
     if (!this.started || this.clients.length === 0) {
       return;
     }
@@ -277,7 +277,7 @@ export class SocketServer {
    * Recommendation: Migrate to MessagePack framing when consolidating serialization.
    * This matches the sensor-publish msgpack usage and provides type-safe framing.
    */
-  private formatData(dataPoints: SensorDataPoint[]): string {
+  private formatData(dataPoints: DeviceDataPoint[]): string {
     if (this.config.dataFormat === 'csv') {
       return this.formatAsCsv(dataPoints);
     } else {
@@ -289,7 +289,7 @@ export class SocketServer {
    * Format data as JSON
    * Returns flat array of readings for cleaner database storage
    */
-  private formatAsJson(dataPoints: SensorDataPoint[]): string {
+  private formatAsJson(dataPoints: DeviceDataPoint[]): string {
     const timestamp = new Date().toISOString();
     
     // Create flat array of readings (one per register)
@@ -317,7 +317,7 @@ export class SocketServer {
   /**
    * Format data as CSV
    */
-  private formatAsCsv(dataPoints: SensorDataPoint[]): string {
+  private formatAsCsv(dataPoints: DeviceDataPoint[]): string {
     const rows: string[] = [];
     
     for (const point of dataPoints) {

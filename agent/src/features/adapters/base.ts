@@ -13,7 +13,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { SensorDataPoint, DeviceStatus, Logger } from './types.js';
+import { DeviceDataPoint, DeviceStatus, Logger } from './types.js';
 import { Endpoint } from '../../db/models/endpoint.model.js';
 import { DeviceModel } from '../../db/models/device.model.js';
 
@@ -197,7 +197,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
   protected abstract readDeviceData(
     deviceName: string,
     device: GenericDeviceConfig
-  ): Promise<SensorDataPoint[]>;
+  ): Promise<DeviceDataPoint[]>;
 
   /**
    * Validate device configuration (protocol-specific)
@@ -352,7 +352,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
   protected createBadQualityDataPoints(
     device: GenericDeviceConfig,
     qualityCode: string
-  ): SensorDataPoint[] {
+  ): DeviceDataPoint[] {
     const timestamp = new Date().toISOString();
     
     return device.dataPoints.map((dataPoint: any) => ({

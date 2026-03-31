@@ -22,6 +22,37 @@ logging.basicConfig(
 logger = logging.getLogger("mqtt-simulator")
 
 
+def parse_metric_overrides(raw_value: str | None, env_name: str, value_parser):
+    overrides = {}
+    if not raw_value:
+        return overrides
+
+    for entry in raw_value.split(","):
+        item = entry.strip()
+        if not item:
+            continue
+
+        metric_name, separator, raw_metric_value = item.partition(":")
+        if not separator:
+            raise ValueError(f"{env_name} entries must use metric:value format")
+
+        metric_key = metric_name.strip().lower()
+        metric_value = raw_metric_value.strip()
+        if not metric_key:
+            raise ValueError(f"{env_name} contains an empty metric name")
+        if not metric_value:
+            raise ValueError(f"{env_name} contains an empty value for metric '{metric_name.strip()}'")
+
+        try:
+            overrides[metric_key] = value_parser(metric_value)
+        except Exception as exc:
+            raise ValueError(
+                f"{env_name} contains an invalid value for metric '{metric_name.strip()}': {metric_value}"
+            ) from exc
+
+    return overrides
+
+
 class DataPointPublisher:
     def __init__(self, datapoint: dict):
         self.name = datapoint["name"]
@@ -86,6 +117,16 @@ class MqttSimulator:
         self.timestamp_field = os.environ.get("MQTT_TIMESTAMP_FIELD", "ts")
         self.timestamp_format = os.environ.get("MQTT_TIMESTAMP_FORMAT", "epoch_ms").lower()
         self.log_publish_events = os.environ.get("LOG_PUBLISH_EVENTS", "true").lower() == "true"
+        self.metric_unit_overrides = parse_metric_overrides(
+            os.environ.get("MQTT_METRIC_UNITS"),
+            "MQTT_METRIC_UNITS",
+            lambda value: value,
+        )
+        self.metric_base_overrides = parse_metric_overrides(
+            os.environ.get("MQTT_METRIC_BASES"),
+            "MQTT_METRIC_BASES",
+            float,
+        )
 
         if not self.username or not self.password:
             raise ValueError("MQTT auth is required: set MQTT_USERNAME and MQTT_PASSWORD")
@@ -123,7 +164,15 @@ class MqttSimulator:
         }
 
         for metric_name in self.metric_names:
-            defaults = metric_defaults.get(metric_name.lower(), {"unit": "", "base": 50.0})
+            metric_key = metric_name.lower()
+            defaults = dict(metric_defaults.get(metric_key, {"unit": "", "base": 50.0}))
+
+            if metric_key in self.metric_unit_overrides:
+                defaults["unit"] = self.metric_unit_overrides[metric_key]
+
+            if metric_key in self.metric_base_overrides:
+                defaults["base"] = self.metric_base_overrides[metric_key]
+
             datapoints.append({
                 "name": metric_name,
                 "topic": self.publish_topic,
@@ -138,6 +187,13 @@ class MqttSimulator:
                 "period_s": 30.0,
                 "device_uuid": os.environ.get("MQTT_DEVICE_UUID", ""),
             })
+
+        if self.metric_unit_overrides or self.metric_base_overrides:
+            logger.info(
+                "Applying MQTT metric overrides units=%s bases=%s",
+                sorted(self.metric_unit_overrides.keys()),
+                sorted(self.metric_base_overrides.keys()),
+            )
 
         self.publishers = [DataPointPublisher(dp) for dp in datapoints]
         self.publishers_by_topic = defaultdict(list)

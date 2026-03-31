@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { ModbusAdapterConfig } from './types';
 import { ModbusDevice } from './types';
 import { ModbusClient } from './client';
-import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
+import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
 import { DeviceMetrics, MetricsSummary } from '../metrics.js';
 import { EndpointModel } from '../../../db/models/endpoint.model.js';
 import { DeviceModel } from '../../../db/models/device.model.js';
@@ -481,7 +481,7 @@ export class ModbusAdapter extends EventEmitter {
 
       // Helper: attach resolvedDisplayName to data points (no-op if no override configured)
       const resolvedDisplayName = this.resolvedDeviceNames.get(deviceConfig.name);
-      const enrich = (pts: SensorDataPoint[]): SensorDataPoint[] =>
+      const enrich = (pts: DeviceDataPoint[]): DeviceDataPoint[] =>
         resolvedDisplayName ? pts.map(p => ({ ...p, resolvedDisplayName })) : pts;
       
       const isConnected = client.isConnected();
@@ -605,7 +605,7 @@ export class ModbusAdapter extends EventEmitter {
   /**
    * Track register changes for a device
    */
-  private trackRegisterChanges(deviceName: string, dataPoints: SensorDataPoint[]): number {
+  private trackRegisterChanges(deviceName: string, dataPoints: DeviceDataPoint[]): number {
     const lastValues = this.lastValues.get(deviceName);
     if (!lastValues) return 0;
     

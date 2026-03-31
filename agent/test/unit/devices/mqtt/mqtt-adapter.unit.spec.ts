@@ -160,7 +160,513 @@ describe('MqttAdapter', () => {
     });
   });
 
+  describe('reconnect backoff', () => {
+    it('should keep a fixed reconnect period by default', () => {
+      const adapter = new MqttAdapter(mockConfig, mockLogger) as any;
+
+      expect(adapter.computeReconnectPeriod(1)).toBe(5000);
+      expect(adapter.computeReconnectPeriod(4)).toBe(5000);
+    });
+
+    it('should compute exponential reconnect periods when enabled', () => {
+      const adapter = new MqttAdapter({
+        ...mockConfig,
+        reconnect: {
+          period: 1000,
+          maxAttempts: 10,
+          strategy: 'exponential',
+          maxPeriod: 8000,
+          jitterRatio: 0,
+        }
+      }, mockLogger) as any;
+
+      expect(adapter.computeReconnectPeriod(1)).toBe(1000);
+      expect(adapter.computeReconnectPeriod(2)).toBe(2000);
+      expect(adapter.computeReconnectPeriod(3)).toBe(4000);
+      expect(adapter.computeReconnectPeriod(4)).toBe(8000);
+      expect(adapter.computeReconnectPeriod(5)).toBe(8000);
+    });
+  });
+
   describe('handleMessage - Backpressure', () => {
+    it('should convert configured metric values into the canonical configured unit', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          metrics: [{
+            field: 'temperature',
+            metric: 'temperature',
+            unit: 'C',
+            type: 'number'
+          }]
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          ts: 1711843200000,
+          temperature: 77,
+          units: {
+            temperature: 'F'
+          }
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints).toHaveLength(1);
+      expect(emittedPoints[0]).toEqual(
+        expect.objectContaining({ metric: 'temperature', value: 25, unit: 'C' })
+      );
+    });
+
+    it('should round converted values to two decimals by default', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          metrics: [{
+            field: 'temperature',
+            metric: 'temperature',
+            unit: 'C',
+            type: 'number'
+          }]
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          temperature: 72,
+          units: {
+            temperature: 'F'
+          }
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints[0]).toEqual(
+        expect.objectContaining({ metric: 'temperature', value: 22.22, unit: 'C' })
+      );
+    });
+
+    it('should convert configured temperature values through Kelvin as the base unit', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          metrics: [{
+            field: 'temperature',
+            metric: 'temperature',
+            unit: 'K',
+            type: 'number'
+          }]
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          temperature: 77,
+          units: {
+            temperature: 'F'
+          }
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints).toHaveLength(1);
+      expect(emittedPoints[0].metric).toBe('temperature');
+      expect(emittedPoints[0].unit).toBe('K');
+      expect(emittedPoints[0].value).toBeCloseTo(298.15, 6);
+    });
+
+    it('should canonicalize degC aliases to C without attempting conversion', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          metrics: [{
+            field: 'temperature',
+            metric: 'temperature',
+            unit: 'degC',
+            type: 'number'
+          }]
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          temperature: 22,
+          units: {
+            temperature: 'deg_c'
+          }
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints[0]).toEqual(
+        expect.objectContaining({ metric: 'temperature', value: 22, unit: 'C' })
+      );
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
+        'Unknown unit conversion, storing raw value',
+        expect.anything()
+      );
+    });
+
+    it('should preserve the raw value and incoming unit when canonical conversion is unsupported', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          metrics: [{
+            field: 'temperature',
+            metric: 'temperature',
+            unit: 'kPa',
+            type: 'number'
+          }]
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          temperature: 77,
+          units: {
+            temperature: 'F'
+          }
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints).toHaveLength(1);
+      expect(emittedPoints[0]).toEqual(
+        expect.objectContaining({ metric: 'temperature', value: 77, unit: 'F' })
+      );
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Unknown unit conversion, storing raw value',
+        expect.objectContaining({ from: 'F', to: 'kPa' })
+      );
+    });
+
+    it('should log unknown units encountered during canonicalization', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          metrics: [{
+            field: 'temperature',
+            metric: 'temperature',
+            unit: 'celcuis',
+            type: 'number'
+          }]
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          temperature: 22,
+          units: {
+            temperature: 'celcuis'
+          }
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Unknown unit encountered',
+        expect.objectContaining({ unit: 'celcuis' })
+      );
+    });
+
+    it('should canonicalize psi and atm aliases case-insensitively for autoMetrics defaultUnits', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          autoMetrics: true,
+          defaultUnits: {
+            pressurePsi: 'PSI',
+            pressureAtm: 'ATM'
+          }
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          pressurePsi: 100,
+          pressurePsi_unit: 'psi',
+          pressureAtm: 1,
+          pressureAtm_unit: 'atm'
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ metric: 'pressurePsi', value: 100, unit: 'psi' }),
+          expect.objectContaining({ metric: 'pressureAtm', value: 1, unit: 'atm' }),
+        ])
+      );
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
+        'Unknown unit conversion, storing raw value',
+        expect.anything()
+      );
+    });
+
+    it('should treat mm/s as a recognized engineering unit without logging an unknown-unit warning', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          autoMetrics: true
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          vibration: 5.2,
+          units: {
+            vibration: 'mm/s'
+          }
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints).toHaveLength(1);
+      expect(emittedPoints[0]).toEqual(
+        expect.objectContaining({ metric: 'vibration', value: 5.2, unit: 'mm/s' })
+      );
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(
+        'Unknown unit encountered',
+        expect.objectContaining({ unit: 'mm/s' })
+      );
+    });
+
+    it('should apply defaultUnits canonical conversion for autoMetrics fields', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          autoMetrics: true,
+          defaultUnits: {
+            temp: 'C'
+          }
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          temp: 72,
+          temp_unit: 'F'
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints).toHaveLength(1);
+      expect(emittedPoints[0].metric).toBe('temp');
+      expect(emittedPoints[0].unit).toBe('C');
+      expect(emittedPoints[0].value).toBe(22.22);
+    });
+
+    it('should honor configured precision for autoMetrics defaultPrecisions', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          autoMetrics: true,
+          defaultUnits: {
+            temp: 'C'
+          },
+          defaultPrecisions: {
+            temp: 1
+          }
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          temp: 72,
+          temp_unit: 'F'
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints[0]).toEqual(
+        expect.objectContaining({ metric: 'temp', value: 22.2, unit: 'C' })
+      );
+    });
+
+    it('should convert pressure units through Pa as the base unit for autoMetrics defaultUnits', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          autoMetrics: true,
+          defaultUnits: {
+            pressure: 'kPa'
+          }
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          pressure: 14.5037738,
+          pressure_unit: 'psi'
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints).toHaveLength(1);
+      expect(emittedPoints[0].metric).toBe('pressure');
+      expect(emittedPoints[0].unit).toBe('kPa');
+      expect(emittedPoints[0].value).toBeCloseTo(100, 4);
+    });
+
     it('should emit all primitive fields from a JSON payload when no explicit MQTT metric mapping is configured', () => {
       const config = {
         ...mockConfig,
@@ -203,6 +709,43 @@ describe('MqttAdapter', () => {
           expect.objectContaining({ metric: 'humidity', value: 65, unit: '%' }),
         ])
       );
+    });
+
+    it('should leave unit undefined when no unit metadata is present', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number',
+          autoMetrics: true
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          temperature: 23.5
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints).toHaveLength(1);
+      expect(emittedPoints[0]).toEqual(
+        expect.objectContaining({ metric: 'temperature', value: 23.5 })
+      );
+      expect(emittedPoints[0].unit).toBeUndefined();
     });
 
     it('should drop messages when queue depth exceeds threshold', () => {

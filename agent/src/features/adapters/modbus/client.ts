@@ -7,7 +7,7 @@ import {
   ByteOrder,
   Endianness
 } from './types';
-import { SensorDataPoint, Logger } from '../types.js';
+import { DeviceDataPoint, Logger } from '../types.js';
 
 /**
  * Modbus Client wrapper that handles different connection types and data reading
@@ -365,7 +365,7 @@ export class ModbusClient {
    * Read all configured registers and return sensor data points
    * Optimizes by batching contiguous register reads when possible
    */
-  async readAllRegisters(): Promise<SensorDataPoint[]> {
+  async readAllRegisters(): Promise<DeviceDataPoint[]> {
     if (!this.isConnected()) {
       // Device not connected - trigger reconnect and return BAD quality for this iteration
       // Next poll cycle will likely succeed since reconnect will be in progress
@@ -381,7 +381,7 @@ export class ModbusClient {
     );
 
     const pollStart = Date.now();
-    const dataPoints: SensorDataPoint[] = [];
+    const dataPoints: DeviceDataPoint[] = [];
     const timestamp = new Date().toISOString();
     
     // Capture generation at start of poll to detect mid-poll client resets
@@ -713,7 +713,7 @@ export class ModbusClient {
   private async readBatchSmartFallback(
     batch: any[],
     timestamp: string
-  ): Promise<SensorDataPoint[]> {
+  ): Promise<DeviceDataPoint[]> {
     // Base case: single register - read individually
     if (batch.length === 1) {
       const register = batch[0];
@@ -870,7 +870,7 @@ export class ModbusClient {
   /**
    * Create BAD quality data point from error
    */
-  private createBadDataPoint(register: any, timestamp: string, error: unknown): SensorDataPoint {
+  private createBadDataPoint(register: any, timestamp: string, error: unknown): DeviceDataPoint {
     const errorMessage = this.extractErrorMessage(error);
     this.logger.warn(`Failed to read register ${register.name} from device ${this.device.name}: ${errorMessage}`);
     
@@ -985,7 +985,7 @@ export class ModbusClient {
   /**
    * Create BAD quality data points for all registers when device is offline
    */
-  private createBadQualityDataPoints(qualityCode: string): SensorDataPoint[] {
+  private createBadQualityDataPoints(qualityCode: string): DeviceDataPoint[] {
     const timestamp = new Date().toISOString();
     return this.device.registers.map(register => ({
       deviceName: this.device.name,

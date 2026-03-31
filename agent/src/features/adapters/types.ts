@@ -17,14 +17,14 @@ export type SocketOutput = z.infer<typeof SocketOutputSchema>;
  * Sensor Data Point interface
  * Quality model follows OPC UA standard (GOOD, BAD, UNCERTAIN)
  */
-export interface SensorDataPoint {
+export interface DeviceDataPoint {
   deviceName: string;
   deviceId?: string;
   device_uuid?: string;
   endpoint_uuid?: string;  // UUID from the endpoints table (target state)
   metric: string;  // Generic field name (Modbus register, OPC UA node, SNMP OID)
   value: number | boolean | string | null;  // null when quality is BAD
-  unit: string;
+  unit?: string;
   timestamp: string;
   quality: 'GOOD' | 'BAD' | 'UNCERTAIN';  // OPC UA quality codes
   qualityCode?: string;  // Error code when quality is BAD (e.g., 'ETIMEDOUT', 'DEVICE_OFFLINE')

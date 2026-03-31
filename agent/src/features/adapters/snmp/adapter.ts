@@ -1,7 +1,7 @@
 // agent/src/features/endpoints/snmp/adapter.ts
 import { BaseProtocolAdapter, GenericDeviceConfig } from '../base.js';
 import { SNMPClient } from './client.js';
-import { SensorDataPoint, Logger } from '../types.js';
+import { DeviceDataPoint, Logger } from '../types.js';
 import { ConsoleLogger } from '../common/logger.js';
 import { SNMPDeviceConfig, SNMPDataPoint } from './types.js';
 
@@ -65,14 +65,14 @@ export class SNMPAdapter extends BaseProtocolAdapter {
   protected async readDeviceData(
     deviceName: string,
     device: GenericDeviceConfig
-  ): Promise<SensorDataPoint[]> {
+  ): Promise<DeviceDataPoint[]> {
     const client = this.clients.get(deviceName);
     if (!client) {
       throw new Error(`SNMP client not found for device: ${deviceName}`);
     }
 
     const config = device as SNMPDeviceConfig;
-    const dataPoints: SensorDataPoint[] = [];
+    const dataPoints: DeviceDataPoint[] = [];
     const timestamp = new Date().toISOString();
     const resolvedDisplayName = this.resolvedDeviceNames.get(deviceName);
 

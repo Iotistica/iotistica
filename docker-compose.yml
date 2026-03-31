@@ -441,12 +441,14 @@ services:
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
             - MQTT_USERNAME=mqtt-user-2
-            - MQTT_PASSWORD=test123!
+            - MQTT_PASSWORD=iotistic42!
             - MQTT_CLIENT_ID=mqtt-device-2
-            - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim-2}
+            - MQTT_DEVICE_ID=mqtt-device-2
             - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
-            - MQTT_TOPIC=iot/73eddd385ce8/agent/8602805f-50b1-40cb-acdc-3f4eb084bfcf/mqtt/c83394fa-7d9b-4f55-817e-5dfc36a79533
-            - MQTT_METRIC_NAMES=humidity
+            - MQTT_TOPIC=iot/73eddd385ce8/agent/02866bcf-f2f7-4432-967f-b5a85e63a89a/mqtt/a8b7c9cd-9f2e-45bf-b6dd-df730b2542ce
+            - MQTT_METRIC_NAMES=pressure,vibration,temperature2
+            - MQTT_METRIC_UNITS=temperature2:C
+            - MQTT_METRIC_BASES=temperature2:26
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
@@ -470,12 +472,14 @@ services:
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
             - MQTT_USERNAME=mqtt-user-3
-            - MQTT_PASSWORD=test123!
+            - MQTT_PASSWORD=iotistic42!
             - MQTT_CLIENT_ID=mqtt-device-3
-            - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim-3}
+            - MQTT_DEVICE_ID=mqtt-device-3
             - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
-            - MQTT_TOPIC=iot/73eddd385ce8/agent/8602805f-50b1-40cb-acdc-3f4eb084bfcf/mqtt/7254291f-ab6f-4dca-bbbd-6946deb1aa67
-            - MQTT_METRIC_NAMES=pressure,humidity
+            - MQTT_TOPIC=iot/73eddd385ce8/agent/02866bcf-f2f7-4432-967f-b5a85e63a89a/mqtt/5f65fc41-bd8d-46f3-affe-0017cee83857
+            - MQTT_METRIC_NAMES=temperature3
+            - MQTT_METRIC_UNITS=temperature3:C
+            - MQTT_METRIC_BASES=temperature3:29
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}

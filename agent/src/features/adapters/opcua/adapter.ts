@@ -72,7 +72,7 @@ import {
   DataType,
 } from 'node-opcua-client';
 import { BaseProtocolAdapter, GenericDeviceConfig } from '../base.js';
-import { SensorDataPoint, Logger } from '../types.js';
+import { DeviceDataPoint, Logger } from '../types.js';
 import { ConsoleLogger } from '../common/logger.js';
 import {
   OPCUADeviceConfig,
@@ -563,7 +563,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
             const quality = this.determineQuality(dataValue.statusCode);
             const qualityCode = quality !== 'GOOD' ? this.extractQualityCode(dataValue.statusCode) : undefined;
 
-            const dataPoint: SensorDataPoint = {
+            const dataPoint: DeviceDataPoint = {
               timestamp: new Date().toISOString(),
               deviceName,
               deviceId: this.buildStableNodeDeviceId(device, dp),
@@ -1495,7 +1495,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
   protected async readDeviceData(
     deviceName: string,
     device: OPCUADeviceConfig
-  ): Promise<SensorDataPoint[]> {
+  ): Promise<DeviceDataPoint[]> {
     const sessionWrapper = this.sessions.get(deviceName);
     if (!sessionWrapper?.session) {
       throw new Error(`No active session for device: ${deviceName}`);
@@ -1538,7 +1538,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     );
 
     // Convert to SensorDataPoint format
-    const results: SensorDataPoint[] = [];
+    const results: DeviceDataPoint[] = [];
     const timestamp = new Date().toISOString();
     let goodValueCount = 0;
 

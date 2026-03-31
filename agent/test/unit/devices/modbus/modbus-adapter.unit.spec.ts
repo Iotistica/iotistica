@@ -10,7 +10,7 @@ jest.mock('uuid', () => ({
 
 import { ModbusAdapter } from '../../../../src/features/adapters/modbus/adapter';
 import { ModbusAdapterConfig, ModbusConnectionType } from '../../../../src/features/adapters/modbus/types';
-import { SensorDataPoint } from '../../../../src/features/adapters/types';
+import { DeviceDataPoint } from '../../../../src/features/adapters/types';
 
 describe('ModbusAdapter', () => {
   let mockLogger: any;
@@ -298,7 +298,7 @@ describe('ModbusAdapter', () => {
 
       const adapter = new ModbusAdapter(config, mockLogger);
       
-      const dataPoints: SensorDataPoint[] = [
+      const dataPoints: DeviceDataPoint[] = [
         {
           deviceName: 'test_device',
           timestamp: new Date().toISOString(),
@@ -349,7 +349,7 @@ describe('ModbusAdapter', () => {
 
       const adapter = new ModbusAdapter(config, mockLogger);
       
-      const dataPoints: SensorDataPoint[] = [
+      const dataPoints: DeviceDataPoint[] = [
         {
           deviceName: 'test_device',
           timestamp: new Date().toISOString(),
@@ -396,7 +396,7 @@ describe('ModbusAdapter', () => {
 
       const adapter = new ModbusAdapter(config, mockLogger);
       
-      const dataPointsFirst: SensorDataPoint[] = [
+      const dataPointsFirst: DeviceDataPoint[] = [
         {
           deviceName: 'test_device',
           timestamp: new Date().toISOString(),
@@ -411,7 +411,7 @@ describe('ModbusAdapter', () => {
       (adapter as any).trackRegisterChanges('test_device', dataPointsFirst);
       
       // Second poll with different value
-      const dataPointsSecond: SensorDataPoint[] = [
+      const dataPointsSecond: DeviceDataPoint[] = [
         {
           deviceName: 'test_device',
           timestamp: new Date().toISOString(),

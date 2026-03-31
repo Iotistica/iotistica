@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { BACnetAdapterConfig, BACnetDevice } from './types';
 import { BACnetClient } from './client';
-import { SensorDataPoint, DeviceStatus, Logger } from '../types.js';
+import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
 import { DeviceMetrics } from '../metrics.js';
 import { DeviceModel } from '../../../db/models/device.model.js';
 
@@ -335,7 +335,7 @@ export class BACnetAdapter extends EventEmitter {
       const results = await client.readObjects(enabledObjects);
 
       // Convert results to SensorDataPoint[]
-      const dataPoints: SensorDataPoint[] = [];
+      const dataPoints: DeviceDataPoint[] = [];
       let updatedCount = 0;
 
       const lastValuesMap = this.lastValues.get(deviceName) || new Map();
