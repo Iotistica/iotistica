@@ -19,26 +19,21 @@ export interface FirewallConfig {
   mode: 'on' | 'off' | 'auto';
   deviceApiPort: number;
   mqttPort?: number;
-  allowedInterfaces?: string[];
-  allowedNetworks?: string[];
+  allowedLanNetworks?: string[];
+  allowedDockerNetworks?: string[];
 }
 
 const FIREWALL_CHAIN = 'IOTISTIC-FIREWALL';
 
-// Default safe interfaces (loopback, Docker networks)
-const DEFAULT_ALLOWED_INTERFACES = [
-  'lo',           // Loopback
-  'docker0',      // Default Docker bridge
-  'br-+',         // Custom Docker bridges
-  'veth+',        // Docker virtual ethernet
+// Default LAN ranges. Keep Docker separate so container access can be controlled independently.
+const DEFAULT_ALLOWED_LAN_NETWORKS = [
+  '10.0.0.0/8',
+  '192.168.0.0/16',
 ];
 
-// Default private network ranges (RFC 1918)
-const DEFAULT_ALLOWED_NETWORKS = [
-  '10.0.0.0/8',
-  '172.16.0.0/12',
-  '192.168.0.0/16',
-  '127.0.0.0/8',
+// Default Docker bridge. User-defined bridge networks should be configured explicitly.
+const DEFAULT_ALLOWED_DOCKER_NETWORKS = [
+  '172.17.0.0/16',
 ];
 
 export class AgentFirewall {
@@ -49,8 +44,8 @@ export class AgentFirewall {
   constructor(config: FirewallConfig, logger: AgentLogger) {
     this.config = {
       ...config,
-      allowedInterfaces: config.allowedInterfaces || DEFAULT_ALLOWED_INTERFACES,
-      allowedNetworks: config.allowedNetworks || DEFAULT_ALLOWED_NETWORKS,
+      allowedLanNetworks: config.allowedLanNetworks || DEFAULT_ALLOWED_LAN_NETWORKS,
+      allowedDockerNetworks: config.allowedDockerNetworks || DEFAULT_ALLOWED_DOCKER_NETWORKS,
     };
     this.logger = logger;
   }
@@ -212,38 +207,25 @@ export class AgentFirewall {
 
   /**
    * Device API protection rules
-   * Only allow access from safe interfaces (Docker, loopback)
+   * Device API is host-local only.
    */
   private getDeviceApiRules(): Rule[] {
-    const rules: Rule[] = [];
-    const allowedInterfaces = this.config.allowedInterfaces!;
-
-    // Allow Device API from each safe interface
-    allowedInterfaces.forEach((intf) => {
-      rules.push({
-        comment: `Device API from ${intf}`,
+    return [
+      // Base rules already allow loopback and locally-originated traffic.
+      // Reject any non-local attempt to reach the Device API.
+      {
+        comment: 'Block Device API from external networks',
         action: RuleAction.Append,
         proto: 'tcp',
-        matches: [`--dport ${this.config.deviceApiPort}`, `-i ${intf}`],
-        target: 'ACCEPT',
-      });
-    });
-
-    // Block Device API from all other interfaces
-    rules.push({
-      comment: 'Block Device API from external networks',
-      action: RuleAction.Append,
-      proto: 'tcp',
-      matches: [`--dport ${this.config.deviceApiPort}`],
-      target: 'REJECT',
-    });
-
-    return rules;
+        matches: [`--dport ${this.config.deviceApiPort}`],
+        target: 'REJECT',
+      },
+    ];
   }
 
   /**
    * MQTT protection rules
-   * Only allow from private networks
+   * Only allow from explicitly trusted LAN and Docker networks.
    */
   private getMqttRules(): Rule[] {
     if (!this.config.mqttPort) {
@@ -251,13 +233,27 @@ export class AgentFirewall {
     }
 
     const rules: Rule[] = [];
-    const allowedNetworks = this.config.allowedNetworks!;
+    const allowedLanNetworks = this.config.allowedLanNetworks!;
+    const allowedDockerNetworks = this.config.allowedDockerNetworks!;
 
-    // Allow MQTT from each private network
-    allowedNetworks.forEach((network) => {
+    // Allow MQTT from each trusted LAN network.
+    allowedLanNetworks.forEach((network) => {
       rules.push({
-        comment: `MQTT from ${network}`,
+        comment: `MQTT from LAN ${network}`,
         action: RuleAction.Append,
+        family: 4,
+        proto: 'tcp',
+        matches: [`--dport ${this.config.mqttPort}`, `-s ${network}`],
+        target: 'ACCEPT',
+      });
+    });
+
+    // Allow MQTT from explicitly trusted Docker bridge networks.
+    allowedDockerNetworks.forEach((network) => {
+      rules.push({
+        comment: `MQTT from Docker ${network}`,
+        action: RuleAction.Append,
+        family: 4,
         proto: 'tcp',
         matches: [`--dport ${this.config.mqttPort}`, `-s ${network}`],
         target: 'ACCEPT',

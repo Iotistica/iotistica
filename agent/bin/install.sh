@@ -776,10 +776,12 @@ EOF
 
     # Allow install-time override for service memory cap.
     AGENT_MEMORY_LIMIT="${AGENT_MEMORY_LIMIT:-300M}"
+    AGENT_MEMORY_HIGH="${AGENT_MEMORY_HIGH:-250M}"
     echo "Service memory limit: ${AGENT_MEMORY_LIMIT}"
+    echo "Service memory high watermark: ${AGENT_MEMORY_HIGH}"
 
     SERVICE_TYPE="notify"
-    WATCHDOG_DIRECTIVES=$'# Watchdog configuration (health-gated automatic restart)\nWatchdogSec=30\nNotifyAccess=main'
+    WATCHDOG_DIRECTIVES=$'# Watchdog configuration (health-gated automatic restart)\nWatchdogSec=60\nNotifyAccess=main'
     STARTUP_TIMEOUT="120"
 
     if [ "$CI" = "true" ]; then
@@ -832,6 +834,7 @@ TimeoutStartSec=${STARTUP_TIMEOUT}
 
 # Graceful shutdown timeout (kill misbehaving services)
 TimeoutStopSec=20
+KillMode=control-group
 
 StandardOutput=journal
 StandardError=journal
@@ -851,6 +854,7 @@ CPUAccounting=true
 # Resource limits (prevent memory leaks from killing device)
 LimitNOFILE=65536
 LimitNPROC=65536
+MemoryHigh=${AGENT_MEMORY_HIGH}
 MemoryMax=${AGENT_MEMORY_LIMIT}
 TasksMax=512
 CPUQuota=80%
