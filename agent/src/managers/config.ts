@@ -13,7 +13,6 @@ import { EventEmitter } from 'events';
 import _ from 'lodash';
 import { models as db } from '../db/connection.js';
 import { EndpointModel, type Endpoint } from '../db/models/endpoint.model.js';
-import { MqttAuthModel } from '../db/models/mqtt-auth.model.js';
 import { MqttFileAuthReconciler, resolveMosquittoAuthDir, type ContainerManager } from '../mqtt/auth.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents, type LogLevel } from '../logging/types.js';
@@ -175,7 +174,6 @@ export class ConfigManager extends EventEmitter {
 		// Ensure local MQTT auth tables are initialized immediately at startup.
 		// This guarantees bootstrap MQTT credentials exist before endpoint-driven
 		// reconciliation runs.
-		await this.syncMqttAuthToDatabase(this.currentConfig.endpoints || []);
 		await this.syncMosquittoAuthToFiles(this.currentConfig.endpoints || []);
 	}
 
@@ -749,7 +747,6 @@ export class ConfigManager extends EventEmitter {
 		const devices = this.targetConfig.endpoints || [];
 
 		if (!devices || !Array.isArray(devices) || devices.length === 0) {
-			await this.syncMqttAuthToDatabase([]);
 			await this.syncMosquittoAuthToFiles([]);
 			return;
 		}
@@ -992,7 +989,6 @@ export class ConfigManager extends EventEmitter {
 				});
 			}
 
-			await this.syncMqttAuthToDatabase(devices);
 			await this.syncMosquittoAuthToFiles(devices);
 
 		} catch (error) {
@@ -1043,28 +1039,6 @@ export class ConfigManager extends EventEmitter {
 				{
 					component: LogComponents.configManager,
 					operation: 'syncMosquittoAuthToFiles',
-				}
-			);
-		}
-	}
-
-	private async syncMqttAuthToDatabase(devices: any[]): Promise<void> {
-		try {
-			const result = await MqttAuthModel.syncFromTargetEndpoints(devices);
-
-			this.logger?.infoSync('Reconciled MQTT auth manifests to local database', {
-				component: LogComponents.configManager,
-				operation: 'syncMqttAuthToDatabase',
-				users: result.users,
-				acls: result.acls,
-			});
-		} catch (error) {
-			this.logger?.errorSync(
-				'Failed to reconcile MQTT auth manifests',
-				error instanceof Error ? error : new Error(String(error)),
-				{
-					component: LogComponents.configManager,
-					operation: 'syncMqttAuthToDatabase',
 				}
 			);
 		}

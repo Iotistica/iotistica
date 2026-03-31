@@ -20,7 +20,7 @@
  */
 
 import express from 'express';
-import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import {
   AgentModel,
   DeviceTargetStateModel,
@@ -39,6 +39,13 @@ export const router = express.Router();
 
 // Initialize event publisher for audit trail
 const eventPublisher = new EventPublisher();
+
+function generateMosquittoPasswordHash(password: string): string {
+  const iterations = 101;
+  const salt = crypto.randomBytes(12);
+  const key = crypto.pbkdf2Sync(password, salt, iterations, 64, 'sha512');
+  return `$7$${iterations}$${salt.toString('base64')}$${key.toString('base64')}`;
+}
 
 async function applyPendingMqttAuth(config: any): Promise<any> {
   if (!config || typeof config !== 'object') {
@@ -60,8 +67,7 @@ async function applyPendingMqttAuth(config: any): Promise<any> {
 
     const username = typeof mqttAuth.username === 'string' ? mqttAuth.username.trim() : '';
     const password = typeof mqttAuth.password === 'string' ? mqttAuth.password : '';
-    const existingHash = typeof mqttAuth.passwordHash === 'string' ? mqttAuth.passwordHash : '';
-    const existingAlgo = typeof mqttAuth.hashAlgo === 'string' ? mqttAuth.hashAlgo : '';
+    const existingFileHash = typeof mqttAuth.passwordFileHash === 'string' ? mqttAuth.passwordFileHash : '';
     const access = Number.isInteger(mqttAuth.access) ? mqttAuth.access : 2;
     const topic = endpoint?.connection?.topic;
 
@@ -77,21 +83,14 @@ async function applyPendingMqttAuth(config: any): Promise<any> {
       throw new Error(`MQTT access must be 1, 2, or 3 for endpoint ${endpoint?.name || 'unknown'}`);
     }
 
-    let passwordHash = existingHash;
-    let hashAlgo = existingAlgo;
-    let hashParams: any = mqttAuth.hashParams && typeof mqttAuth.hashParams === 'object'
-      ? mqttAuth.hashParams
-      : undefined;
+    let passwordFileHash = existingFileHash;
 
     if (password) {
-      const bcryptCost = 12;
-      passwordHash = await bcrypt.hash(password, bcryptCost);
-      hashAlgo = 'bcrypt';
-      hashParams = { cost: bcryptCost };
+      passwordFileHash = generateMosquittoPasswordHash(password);
     }
 
-    if (!passwordHash || !hashAlgo) {
-      throw new Error(`MQTT auth is missing password or passwordHash for endpoint ${endpoint?.name || 'unknown'}`);
+    if (!passwordFileHash) {
+      throw new Error(`MQTT auth is missing password or passwordFileHash for endpoint ${endpoint?.name || 'unknown'}`);
     }
 
     endpoint.connection = {
@@ -103,9 +102,7 @@ async function applyPendingMqttAuth(config: any): Promise<any> {
       ...(endpoint.auth || {}),
       mqtt: {
         username,
-        passwordHash,
-        hashAlgo,
-        hashParams,
+        passwordFileHash,
         access,
       },
     };

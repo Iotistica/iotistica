@@ -432,10 +432,10 @@ services:
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
             - MQTT_USERNAME=mqtt-user-1
-            - MQTT_PASSWORD=iotistic42!
+            - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-1
             - MQTT_DEVICE_UUID=a6c87211-7e40-4229-8632-d238daf58296
-            - MQTT_TOPIC=iot/73eddd385ce8/agent/02866bcf-f2f7-4432-967f-b5a85e63a89a/mqtt/1ebec2cf-8062-4f7b-a46b-3367d63651e4
+            - MQTT_TOPIC=iot/73eddd385ce8/agent/5196da95-fbb8-4fd1-8dec-5b296c8e8e91/mqtt/6e9d2d5e-f088-4247-b70b-fc4bde798adf
             - MQTT_METRIC_NAMES=temperature,humidity
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
@@ -460,10 +460,10 @@ services:
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
             - MQTT_USERNAME=mqtt-user-2
-            - MQTT_PASSWORD=iotistic42!
+            - MQTT_PASSWORD=test1234
             - MQTT_CLIENT_ID=mqtt-device-2
             - MQTT_DEVICE_UUID=253bd0b3-61e0-4109-a490-29f91ddbf381
-            - MQTT_TOPIC=iot/73eddd385ce8/agent/02866bcf-f2f7-4432-967f-b5a85e63a89a/mqtt/a8b7c9cd-9f2e-45bf-b6dd-df730b2542ce
+            - MQTT_TOPIC=iot/73eddd385ce8/agent/5196da95-fbb8-4fd1-8dec-5b296c8e8e91/mqtt/fa831271-198e-4c5a-86ba-62c55363c9b8
             - MQTT_METRIC_NAMES=pressure,vibration,temperature2
             - MQTT_METRIC_UNITS=temperature2:C
             - MQTT_METRIC_BASES=temperature2:26
@@ -490,10 +490,10 @@ services:
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
             - MQTT_USERNAME=mqtt-user-3
-            - MQTT_PASSWORD=iotistic42!
+            - MQTT_PASSWORD=test12345
             - MQTT_CLIENT_ID=mqtt-device-3
             - MQTT_DEVICE_UUID=7451b394-efc5-471d-9c4c-8fa13711566c
-            - MQTT_TOPIC=iot/73eddd385ce8/agent/02866bcf-f2f7-4432-967f-b5a85e63a89a/mqtt/5f65fc41-bd8d-46f3-affe-0017cee83857
+            - MQTT_TOPIC=iot/73eddd385ce8/agent/5196da95-fbb8-4fd1-8dec-5b296c8e8e91/mqtt/d1f7c01f-8bf8-41a2-a733-31f07e3afd37
             - MQTT_METRIC_NAMES=temperature3
             - MQTT_METRIC_UNITS=temperature3:C
             - MQTT_METRIC_BASES=temperature3:29

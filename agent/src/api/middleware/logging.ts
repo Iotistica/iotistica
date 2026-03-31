@@ -18,7 +18,7 @@ function isHealthCheckPath(path: string): boolean {
 }
 
 function isSilentDebugPath(path: string): boolean {
-	return path === '/api/mqtt/auth/user' || path === '/api/mqtt/auth/acl';
+	return false;
 }
 
 export function setLogger(agentLogger?: AgentLogger) {

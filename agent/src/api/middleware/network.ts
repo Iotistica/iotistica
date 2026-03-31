@@ -81,14 +81,6 @@ function getClientIP(req: Request): string {
 }
 
 /**
- * Check if request is an internal MQTT broker auth callback.
- * These routes are called by mosquitto-go-auth from the broker container.
- */
-function isMqttAuthCallback(path: string): boolean {
-	return path === '/api/mqtt/auth/user' || path === '/api/mqtt/auth/acl';
-}
-
-/**
  * Network-based security middleware
  */
 export default function networkSecurity(req: Request, res: Response, next: NextFunction) {

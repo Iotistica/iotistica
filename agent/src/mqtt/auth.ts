@@ -35,8 +35,7 @@ export interface EndpointMqttAuth {
     mqtt?: {
       username?: string;
       passwordPlaintext?: string;  // plaintext available for file-hash generation
-      passwordHash?: string;       // bcrypt hash (used by go-auth path, ignored here)
-      hashAlgo?: string;
+      passwordFileHash?: string;   // native mosquitto password-file hash from target state
       access?: number;
     };
   };
@@ -75,7 +74,8 @@ export function generateMosquittoHash(password: string): string {
 
 interface UserEntry {
   username: string;
-  passwordPlaintext: string;
+  passwordPlaintext?: string;
+  passwordFileHash?: string;
   isSuperuser: boolean;
 }
 
@@ -86,7 +86,8 @@ interface AclEntry {
 }
 
 function buildPasswdContent(users: UserEntry[]): string {
-  return users.map(u => `${u.username}:${generateMosquittoHash(u.passwordPlaintext)}`).join('\n') + '\n';
+  const managed = users.map(u => `${u.username}:${u.passwordFileHash || generateMosquittoHash(u.passwordPlaintext || '')}`);
+  return managed.join('\n') + '\n';
 }
 
 function buildAclContent(users: UserEntry[], acls: AclEntry[]): string {
@@ -147,9 +148,10 @@ export class MqttFileAuthReconciler {
    * Always includes a bootstrap superuser from MQTT_USERNAME / MQTT_PASSWORD
    * env vars so the agent's own MQTT client can authenticate.
    *
-   * Endpoint users require auth.mqtt.passwordPlaintext to be present.
-   * Endpoints without a plaintext password are skipped (bcrypt-only entries
-   * from the legacy cloud path cannot be re-hashed for file auth).
+  * Endpoint users require either auth.mqtt.passwordFileHash or
+  * auth.mqtt.passwordPlaintext to be present.
+  * Bcrypt-only entries from the legacy cloud path are skipped because they
+  * cannot be converted into mosquitto native password-file hashes.
    */
   async reconcile(endpoints: EndpointMqttAuth[], options: FileAuthOptions): Promise<ReconcileResult> {
     const users: UserEntry[] = [];
@@ -169,14 +171,15 @@ export class MqttFileAuthReconciler {
       const mqttAuth = ep.auth?.mqtt;
       const username = mqttAuth?.username?.trim();
       const plaintext = mqttAuth?.passwordPlaintext?.trim();
+      const passwordFileHash = mqttAuth?.passwordFileHash?.trim();
       const topic = ep.connection?.topic?.trim();
       const access = Number.isInteger(mqttAuth?.access) ? Number(mqttAuth?.access) : 2;
 
-      if (!username || !plaintext || !topic) continue;
+      if (!username || (!plaintext && !passwordFileHash) || !topic) continue;
       if (![1, 2, 3].includes(access)) continue;
       if (bootstrapUsername && username === bootstrapUsername) continue;
 
-      users.push({ username, passwordPlaintext: plaintext, isSuperuser: false });
+      users.push({ username, passwordPlaintext: plaintext, passwordFileHash, isSuperuser: false });
       acls.push({ username, topic, access });
     }
 

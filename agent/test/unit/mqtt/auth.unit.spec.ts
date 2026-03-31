@@ -169,12 +169,31 @@ describe('MqttFileAuthReconciler.reconcile', () => {
 		expect(acl).toContain('topic write sensors/temp');
 	});
 
+	it('includes endpoint user when passwordFileHash is present', async () => {
+		const endpoints: EndpointMqttAuth[] = [
+			{
+				protocol: 'mqtt',
+				connection: { topic: 'sensors/file-hash' },
+				auth: { mqtt: { username: 'sensor2', passwordFileHash: '$7$101$abc$def', access: 2 } },
+			},
+		];
+		const reconciler = new MqttFileAuthReconciler();
+		await reconciler.reconcile(endpoints, opts(tmpDir));
+
+		const passwd = fs.readFileSync(path.join(tmpDir, 'passwd'), 'utf8');
+		expect(passwd).toContain('sensor2:$7$101$abc$def');
+
+		const acl = fs.readFileSync(path.join(tmpDir, 'acl'), 'utf8');
+		expect(acl).toContain('user sensor2');
+		expect(acl).toContain('topic write sensors/file-hash');
+	});
+
 	it('skips endpoint user when passwordPlaintext is absent', async () => {
 		const endpoints: EndpointMqttAuth[] = [
 			{
 				protocol: 'mqtt',
 				connection: { topic: 'sensors/temp' },
-				auth: { mqtt: { username: 'sensor1', passwordHash: '$2b$12$xyz', hashAlgo: 'bcrypt', access: 2 } },
+				auth: { mqtt: { username: 'sensor1', access: 2 } },
 			},
 		];
 		const reconciler = new MqttFileAuthReconciler();
@@ -232,8 +251,22 @@ describe('MqttFileAuthReconciler.reconcile', () => {
 		const files = fs.readdirSync(tmpDir);
 		expect(files.some(f => f.endsWith('.tmp'))).toBe(false);
 	});
-});
 
+	it('does not preserve stale dynamic users from existing managed passwd and acl files', async () => {
+		fs.writeFileSync(path.join(tmpDir, 'passwd'), 'admin:old-admin-hash\nstale-user:stale-hash\n', 'utf8');
+		fs.writeFileSync(path.join(tmpDir, 'acl'), '# header\n\nuser admin\ntopic readwrite #\n\nuser stale-user\ntopic write stale/topic\n', 'utf8');
+
+		const reconciler = new MqttFileAuthReconciler();
+		await reconciler.reconcile([], opts(tmpDir));
+
+		const passwd = fs.readFileSync(path.join(tmpDir, 'passwd'), 'utf8');
+		expect(passwd).not.toContain('stale-user:stale-hash');
+
+		const acl = fs.readFileSync(path.join(tmpDir, 'acl'), 'utf8');
+		expect(acl).not.toContain('user stale-user');
+		expect(acl).not.toContain('stale/topic');
+	});
+});
 // ---------------------------------------------------------------------------
 // SIGHUP signalling
 // ---------------------------------------------------------------------------

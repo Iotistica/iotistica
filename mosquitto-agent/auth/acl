@@ -3,3 +3,12 @@
 
 user admin
 topic readwrite #
+
+user mqtt-user-1
+topic write iot/73eddd385ce8/agent/5196da95-fbb8-4fd1-8dec-5b296c8e8e91/mqtt/6e9d2d5e-f088-4247-b70b-fc4bde798adf
+
+user mqtt-user-2
+topic write iot/73eddd385ce8/agent/5196da95-fbb8-4fd1-8dec-5b296c8e8e91/mqtt/fa831271-198e-4c5a-86ba-62c55363c9b8
+
+user mqtt-user-3
+topic write iot/73eddd385ce8/agent/5196da95-fbb8-4fd1-8dec-5b296c8e8e91/mqtt/d1f7c01f-8bf8-41a2-a733-31f07e3afd37
