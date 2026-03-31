@@ -1365,6 +1365,35 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     };
   };
 
+  const duplicateMetricWidget = (widget: DashboardWidget) => {
+    if (widget.type !== 'METRIC_DATA' || !widget.metricConfig) return;
+
+    const widgetConfig = WIDGET_TYPES.METRIC_DATA;
+    const placement = getNextMetricWidgetPlacement(widgets);
+    const duplicateConfig = typeof structuredClone === 'function'
+      ? structuredClone(widget.metricConfig)
+      : JSON.parse(JSON.stringify(widget.metricConfig)) as MetricDataCardConfig;
+
+    const duplicateWidget: DashboardWidget = {
+      ...widget,
+      i: `metric-${crypto.randomUUID()}`,
+      x: placement.x,
+      y: placement.y,
+      w: widget.w ?? widgetConfig.defaultW,
+      h: widget.h ?? widgetConfig.defaultH,
+      minW: widget.minW ?? widgetConfig.minW,
+      minH: widget.minH ?? widgetConfig.minH,
+      title: widget.title ? `${widget.title} Copy` : widget.title,
+      metricConfig: duplicateConfig,
+      _metricData: undefined,
+      _refreshTrigger: Date.now(),
+      _aiFeedback: undefined,
+    };
+
+    setWidgets([...widgets, duplicateWidget]);
+    setHasUnsavedChanges(true);
+  };
+
   const getWidgetMetricSignature = (widget: DashboardWidget): string | null => {
     if (widget.type === 'METRIC_DATA' && widget.metricConfig) {
       const deviceKey = (widget.metricConfig.deviceUuid || widget.metricConfig.deviceName || '').trim().toLowerCase();
@@ -1641,6 +1670,27 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                         </TooltipTrigger>
                         <TooltipContent>
                           <p>{(widget.metricConfig.showStats ?? true) ? 'Hide' : 'Show'} aggregate cards</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              duplicateMetricWidget(widget);
+                            }}
+                          >
+                            <Copy className="w-4 h-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Duplicate metric card</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
