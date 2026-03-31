@@ -806,6 +806,8 @@ Documentation=https://github.com/Iotistica/iotistic
 After=${UNIT_AFTER}
 Requires=${UNIT_REQUIRES}
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
 
 [Service]
 # Service type differs between production and CI mode
