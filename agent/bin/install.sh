@@ -12,6 +12,7 @@ set -e
 #   IOTISTICA_API   - Cloud API endpoint (e.g., https://api.iotistica.com)
 #   IOTISTICA_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
 #   IOTISTICA_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
+#   IOTISTICA_INSTALL_MOSQUITTO    - Set to yes/true/1 to install and manage a local Mosquitto broker
 #   FORCE_INSTALL                 - Legacy opt-in flag; set to 1 to allow automatic Docker installation
 
 # Note: This script is POSIX-compliant and works with both sh and bash
@@ -160,15 +161,32 @@ install_mosquitto_if_needed() {
     systemctl enable mosquitto
 }
 
+should_manage_mosquitto() {
+    SHOULD_INSTALL_MOSQUITTO="no"
+
+    if [ "$IOTISTICA_INSTALL_MOSQUITTO" = "yes" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "true" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "1" ]; then
+        SHOULD_INSTALL_MOSQUITTO="yes"
+    elif [ "$IOTISTICA_INSTALL_MOSQUITTO" = "no" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "false" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "0" ]; then
+        SHOULD_INSTALL_MOSQUITTO="no"
+    elif [ -t 0 ]; then
+        echo ""
+        echo -n "Install and manage a local Mosquitto broker? (yes/no): "
+        read SHOULD_INSTALL_MOSQUITTO
+    fi
+
+    if [ "$SHOULD_INSTALL_MOSQUITTO" = "yes" ] || [ "$SHOULD_INSTALL_MOSQUITTO" = "y" ]; then
+        return 0
+    fi
+
+    return 1
+}
+
 configure_mosquitto_file_auth() {
     echo ""
     echo "=================================="
     echo "MQTT Broker Setup (Mosquitto)"
     echo "=================================="
 
-    MQTT_BROKER_HOST_VALUE="${MQTT_BROKER_HOST:-localhost}"
-    MQTT_BROKER_PORT_VALUE="${MQTT_BROKER_PORT:-1883}"
-    MQTT_BROKER_URL_VALUE="mqtt://${MQTT_BROKER_HOST_VALUE}:${MQTT_BROKER_PORT_VALUE}"
     MQTT_AUTH_DIR_VALUE="/etc/mosquitto"
     MQTT_USERNAME_VALUE="${MQTT_USERNAME:-admin}"
 
@@ -177,6 +195,10 @@ configure_mosquitto_file_auth() {
     else
         MQTT_PASSWORD_VALUE="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
     fi
+
+    MQTT_BROKER_HOST_VALUE="${MQTT_BROKER_HOST:-localhost}"
+    MQTT_BROKER_PORT_VALUE="${MQTT_BROKER_PORT:-1883}"
+    MQTT_BROKER_URL_VALUE="mqtt://${MQTT_BROKER_HOST_VALUE}:${MQTT_BROKER_PORT_VALUE}"
 
     export MQTT_BROKER_HOST_VALUE MQTT_BROKER_PORT_VALUE MQTT_BROKER_URL_VALUE
     export MQTT_AUTH_DIR_VALUE MQTT_USERNAME_VALUE MQTT_PASSWORD_VALUE
@@ -378,7 +400,20 @@ echo ""
         usermod -aG docker iotistic 2>/dev/null || true
     fi
 
-    configure_mosquitto_file_auth
+    MQTT_BROKER_URL_VALUE="${MQTT_BROKER_URL:-}"
+    MQTT_AUTH_DIR_VALUE=""
+    MQTT_USERNAME_VALUE="${MQTT_USERNAME:-}"
+    MQTT_PASSWORD_VALUE="${MQTT_PASSWORD:-}"
+    MANAGE_LOCAL_MOSQUITTO="no"
+
+    if should_manage_mosquitto; then
+        MANAGE_LOCAL_MOSQUITTO="yes"
+        configure_mosquitto_file_auth
+    else
+        echo ""
+        echo "Skipping local Mosquitto installation/configuration"
+        echo "To enable it explicitly, rerun with IOTISTICA_INSTALL_MOSQUITTO=yes"
+    fi
 
     # Create directories
     echo ""
@@ -669,11 +704,23 @@ ORCHESTRATOR_INTERVAL=30000
 DATA_DIR=/var/lib/iotistic/agent
 STATE_FILE=/var/lib/iotistic/agent/target-state.json
 DATABASE_PATH=/var/lib/iotistic/agent/agent.sqlite
-MQTT_BROKER_URL=${MQTT_BROKER_URL_VALUE}
-MQTT_AUTH_DIR=${MQTT_AUTH_DIR_VALUE}
-MQTT_USERNAME=${MQTT_USERNAME_VALUE}
-MQTT_PASSWORD=${MQTT_PASSWORD_VALUE}
 EOF
+
+    if [ -n "$MQTT_BROKER_URL_VALUE" ]; then
+        echo "MQTT_BROKER_URL=${MQTT_BROKER_URL_VALUE}" >> /etc/iotistic/agent.env
+    fi
+
+    if [ -n "$MQTT_AUTH_DIR_VALUE" ]; then
+        echo "MQTT_AUTH_DIR=${MQTT_AUTH_DIR_VALUE}" >> /etc/iotistic/agent.env
+    fi
+
+    if [ -n "$MQTT_USERNAME_VALUE" ]; then
+        echo "MQTT_USERNAME=${MQTT_USERNAME_VALUE}" >> /etc/iotistic/agent.env
+    fi
+
+    if [ -n "$MQTT_PASSWORD_VALUE" ]; then
+        echo "MQTT_PASSWORD=${MQTT_PASSWORD_VALUE}" >> /etc/iotistic/agent.env
+    fi
 
     # Write CI mode flag if set (for testing environments)
     if [ "$CI" = "true" ]; then
@@ -741,13 +788,23 @@ EOF
         WATCHDOG_DIRECTIVES="# Watchdog disabled in CI service mode"
         STARTUP_TIMEOUT="60"
     fi
+
+    UNIT_AFTER="network-online.target docker.service"
+    UNIT_REQUIRES="docker.service"
+    SERVICE_READWRITE_PATHS="/var/lib/iotistic /var/log/iotistic /opt/iotistic/agent /var/run/docker.sock"
+
+    if [ "$MANAGE_LOCAL_MOSQUITTO" = "yes" ]; then
+        UNIT_AFTER="$UNIT_AFTER mosquitto.service"
+        UNIT_REQUIRES="$UNIT_REQUIRES mosquitto.service"
+        SERVICE_READWRITE_PATHS="$SERVICE_READWRITE_PATHS /etc/mosquitto"
+    fi
     
     cat > /etc/systemd/system/${SERVICE_NAME}.service << EOFSVC
 [Unit]
 Description=Iotistic Agent - IoT Device Management Service
 Documentation=https://github.com/Iotistica/iotistic
-After=network-online.target docker.service mosquitto.service
-Requires=docker.service mosquitto.service
+After=${UNIT_AFTER}
+Requires=${UNIT_REQUIRES}
 Wants=network-online.target
 
 [Service]
@@ -783,7 +840,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/iotistic /var/log/iotistic /opt/iotistic/agent /var/run/docker.sock /etc/mosquitto
+ReadWritePaths=${SERVICE_READWRITE_PATHS}
 CapabilityBoundingSet=
 LockPersonality=true
 MemoryAccounting=true
