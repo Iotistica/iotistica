@@ -101,8 +101,8 @@ jobs:
           push: true
           provenance: false
           platforms: linux/amd64
-          cache-from: type=registry,ref=iotistic/api:buildcache
-          cache-to: type=registry,ref=iotistic/api:buildcache,mode=max
+          cache-from: type=gha,scope=api-ci
+          cache-to: type=gha,scope=api-ci,mode=max
           tags: |
             iotistic/api:ci-${{ steps.sha.outputs.short_sha }}
             iotistic/api:ci-latest
