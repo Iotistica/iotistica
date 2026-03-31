@@ -130,7 +130,7 @@ export class MqttAdapter extends EventEmitter {
     this.running = true;
     
     this.emit('started');
-    this.logger.info('MQTT Adapter started (connection state tracked via events)');
+
   }
 
   /**
@@ -254,7 +254,7 @@ export class MqttAdapter extends EventEmitter {
     this.client.on('connect', (connack) => {
       this.connected = true;
       
-      this.logger.info(`MQTT broker connected: ${brokerUrl}`);
+
       this.emit('device-connected', 'mqtt-broker');
 
       // Overwrite retained LWT offline marker with current online status.
@@ -599,6 +599,33 @@ export class MqttAdapter extends EventEmitter {
     return fallback;
   }
 
+  private resolveMetricUnit(parsed: unknown, metric: string, fallback: string = ''): string {
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const parsedObj = parsed as Record<string, unknown>;
+
+      const units = parsedObj.units;
+      if (units && typeof units === 'object' && !Array.isArray(units)) {
+        const mappedUnit = (units as Record<string, unknown>)[metric];
+        if (typeof mappedUnit === 'string' && mappedUnit.trim()) {
+          return mappedUnit.trim();
+        }
+      }
+
+      const suffixedUnit = parsedObj[`${metric}_unit`];
+      if (typeof suffixedUnit === 'string' && suffixedUnit.trim()) {
+        return suffixedUnit.trim();
+      }
+
+      const payloadName = parsedObj.name;
+      const payloadUnit = parsedObj.unit;
+      if (payloadName === metric && typeof payloadUnit === 'string' && payloadUnit.trim()) {
+        return payloadUnit.trim();
+      }
+    }
+
+    return fallback;
+  }
+
   private buildMetricPoint(
     device: MqttDevice,
     metric: string,
@@ -710,7 +737,7 @@ export class MqttAdapter extends EventEmitter {
                 device,
                 metricConfig.metric,
                 rawValue,
-                metricConfig.unit || '',
+                this.resolveMetricUnit(parsed, metricConfig.metric, metricConfig.unit || ''),
                 metricConfig.type,
                 resolvedDeviceId,
                 topic,
@@ -746,7 +773,7 @@ export class MqttAdapter extends EventEmitter {
               device,
               key,
               rawValue,
-              '',
+              this.resolveMetricUnit(parsed, key, ''),
               undefined,
               resolvedDeviceId,
               topic,
@@ -763,7 +790,8 @@ export class MqttAdapter extends EventEmitter {
         }
       }
 
-      // Backward-compatible fallback: single metric per message.
+      // Default behavior without explicit metric mapping:
+      // emit every primitive field from JSON object payloads.
       if (points.length === 0) {
         let singleMetric = device.metric || topic;
         let singleType = device.dataType;
@@ -777,29 +805,39 @@ export class MqttAdapter extends EventEmitter {
           } else {
             const metadataKeys = new Set([
               'timestamp', 'ts', 'time', 'name', 'unit',
-              'deviceId', 'device_id', 'device_uuid', 'topic',
+              'deviceId', 'device_id', 'device_uuid', 'topic', 'units',
             ]);
 
             const primitiveEntries = Object.entries(parsedObj).filter(([key, value]) => {
               if (metadataKeys.has(key)) {
                 return false;
               }
+              if (key.endsWith('_unit')) {
+                return false;
+              }
               return value === null || ['string', 'number', 'boolean'].includes(typeof value);
             });
 
             if (primitiveEntries.length > 0) {
-              const [metricName, metricValue] = primitiveEntries[0];
-              singleMetric = metricName;
-              singleSource = metricValue;
-
-              if (primitiveEntries.length > 1) {
-                this.logger.debug('MQTT single-metric fallback picked first primitive field from object payload', {
+              for (const [metricName, metricValue] of primitiveEntries) {
+                points.push(this.buildMetricPoint(
+                  device,
+                  metricName,
+                  metricValue,
+                  this.resolveMetricUnit(parsedObj, metricName, ''),
+                  undefined,
+                  resolvedDeviceId,
                   topic,
-                  deviceName: device.name,
-                  chosenField: metricName,
-                  availableFields: primitiveEntries.map(([k]) => k),
-                });
+                  payloadTimestamp,
+                  retain
+                ));
               }
+
+              this.logger.debug('MQTT emitted primitive fields from object payload', {
+                topic,
+                deviceName: device.name,
+                fields: primitiveEntries.map(([key]) => key),
+              });
             } else {
               // No scalar field to coerce; preserve payload as JSON text.
               singleSource = JSON.stringify(parsedObj);
@@ -808,17 +846,19 @@ export class MqttAdapter extends EventEmitter {
           }
         }
 
-        points.push(this.buildMetricPoint(
-          device,
-          singleMetric,
-          singleSource,
-          device.unit || '',
-          singleType,
-          resolvedDeviceId,
-          topic,
-          payloadTimestamp,
-          retain
-        ));
+        if (points.length === 0) {
+          points.push(this.buildMetricPoint(
+            device,
+            singleMetric,
+            singleSource,
+            this.resolveMetricUnit(parsed, singleMetric, device.unit || ''),
+            singleType,
+            resolvedDeviceId,
+            topic,
+            payloadTimestamp,
+            retain
+          ));
+        }
       }
       
       // Emit data through bounded queue for real backpressure handling.

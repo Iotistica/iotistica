@@ -414,6 +414,18 @@ export class FeatureInitializer {
           });
         }
       }
+
+      // MQTT adapter starts whenever MQTT_BROKER_URL is set, even with zero DB endpoints.
+      // It connects as a superuser to mosquitto-agent for device data collection and discovery.
+      // The startMQTTAdapter() implementation already handles the zero-devices case gracefully.
+      if (!enabledProtocols.includes('mqtt') && process.env.MQTT_BROKER_URL) {
+        enabledProtocols.push('mqtt');
+        devicesConfig.mqtt = { enabled: true };
+        logger.infoSync('Enabling MQTT adapter via MQTT_BROKER_URL (no DB endpoints required)', {
+          component: LogComponents.agent,
+          brokerUrl: process.env.MQTT_BROKER_URL
+        });
+      }
       
       // ALWAYS create SensorsFeature even if no protocols are enabled initially
       // This ensures health reporting works when endpoints are discovered later

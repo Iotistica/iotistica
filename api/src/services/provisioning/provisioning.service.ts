@@ -1,8 +1,8 @@
 /**
  * Provisioning Service
  * 
- * Handles device provisioning business logic including:
- * - Device registration
+ * Handles agent provisioning business logic including:
+ * - Agent registration
  * - Key exchange
  * - MQTT credential generation
  * - VPN configuration (if enabled)
@@ -76,7 +76,7 @@ export interface ProvisioningResponse {
   deviceName: string;
   deviceType: string;
   tenantId: string; // Tenant identifier for MQTT topic construction
-  fleetUuid?: string | null; // Changed from fleetId to fleetUuid (UUID)
+  fleetUuid?: string | null; // Fleet UUID returned to the agent
   challenge?: string; // PoP challenge (if public key provided)
   createdAt: string;
   mqtt: {
@@ -387,7 +387,7 @@ export class ProvisioningService {
                            (existingDevice.type === 'virtual' || !!existingDevice.deployment_status);
     
     if (isVirtualAgent) {
-      logger.info('Virtual agent registration detected - using existing device record', {
+      logger.info('Virtual agent registration detected - using existing agent record', {
         deviceUuid: uuid.substring(0, 8) + '...',
         existingName: existingDevice.name,
         existingType: existingDevice.type,
@@ -481,8 +481,8 @@ export class ProvisioningService {
       const isFullyProvisioned = existingDevice.provisioned_at && existingDevice.provisioning_state === 'registered';
       
       if (isFullyProvisioned) {
-        await logProvisioningAttempt(ipAddress!, uuid, existingDevice.provisioned_by_key_id || null, false, 'Device already registered', userAgent);
-        throw new Error('Device already registered');
+        await logProvisioningAttempt(ipAddress!, uuid, existingDevice.provisioned_by_key_id || null, false, 'Agent already registered', userAgent);
+        throw new Error('Agent already registered');
       }
       
       // Use existing provisioning key if present
@@ -605,9 +605,15 @@ export class ProvisioningService {
 
     await this.createDefaultTargetState(uuid, agentVersion, keyRecord.id);
 
-    // Increment provisioning key usage for new physical agents
+    // Increment provisioning key usage for new physical agents.
+    // The UPDATE is conditional (agents_provisioned < max_agents) so it acts as
+    // an atomic gate — concurrent registrations that race past validateProvisioningKey
+    // are rejected here rather than exceeding the limit.
     if (!existingDevice || !existingDevice.provisioned_by_key_id) {
-      await incrementProvisioningKeyUsage(keyRecord.id);
+      const accepted = await incrementProvisioningKeyUsage(keyRecord.id);
+      if (!accepted) {
+        throw new Error('Provisioning key agent limit exceeded');
+      }
     }
 
     // fire and forget
@@ -647,7 +653,7 @@ export class ProvisioningService {
         uuid,
         keyRecord.id,
         true,
-        'Device registered successfully',
+        'Agent registered successfully',
         userAgent
    ).catch(err => logger.error('Failed to log successful provisioning', err));
 
@@ -656,7 +662,7 @@ export class ProvisioningService {
     challenge = crypto.randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
     
-    logger.info('Generating PoP challenge for device', {
+    logger.info('Generating PoP challenge for agent', {
       agentUuid: uuid.substring(0, 8) + '...',
       challengeLength: challenge.length,
       expiresAt: expiresAt.toISOString(),
@@ -943,7 +949,7 @@ export class ProvisioningService {
       deviceName,
       deviceType,
       tenantId: getTenantId(), // Pass tenant ID to agent for topic construction
-      fleetUuid: agent.fleet_uuid, // Use the resolved UUID from device
+      fleetUuid: agent.fleet_uuid, // Fleet UUID
       ...(challenge && { challenge }), // Include challenge if PoP enabled
       createdAt: agent.created_at.toISOString(),
       mqtt: {

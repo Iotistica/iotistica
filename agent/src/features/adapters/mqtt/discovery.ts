@@ -91,7 +91,10 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
   async discover(options?: MqttDiscoveryOptions, signal?: AbortSignal): Promise<DiscoveredDevice[]> {
     this.validatedTopics.clear();
 
-    const brokerUrl = options?.brokerUrl || process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883';
+    const brokerUrl = options?.brokerUrl || process.env.MQTT_BROKER_URL;
+    if (!brokerUrl) {
+      throw new Error('MQTT_BROKER_URL is required for MQTT discovery');
+    }
     const topics = options?.topics || [];
     const samplingDurationMs = options?.samplingDurationMs || 10000; // 10 seconds default
     const qos = options?.qos ?? 0;
@@ -442,7 +445,10 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     try {
       // Use broker config from discover() for consistent authentication
-      const brokerUrl = this.brokerConfig?.brokerUrl || process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883';
+      const brokerUrl = this.brokerConfig?.brokerUrl || process.env.MQTT_BROKER_URL;
+      if (!brokerUrl) {
+        throw new Error('MQTT_BROKER_URL is required for MQTT topic validation');
+      }
       
       // Short validation: 5 seconds to receive at least one message
       const validationResult = await this.quickValidateTopic(

@@ -1,15 +1,16 @@
 /**
- * Device Provisioning and Authentication Routes
- * Handles two-phase device authentication and provisioning key management
+ * Agent Provisioning and Authentication Routes
+ * Handles two-phase agent authentication and provisioning key management
  * 
  * Provisioning Key Management:
- * - POST /api/v1/provisioning-keys - Create new provisioning key for fleet
- * - GET /api/v1/provisioning-keys?fleetId=xxx - List provisioning keys for a fleet
+ * - POST /api/v1/provisioning-keys - Create new provisioning key for fleet (body: fleetUuid = fleet UUID)
+ * - GET /api/v1/provisioning-keys?fleetUuid=<uuid> - List provisioning keys for a fleet
  * - DELETE /api/v1/provisioning-keys/:keyId - Revoke a provisioning key
- * 
- * Two-Phase Device Authentication:
- * - POST /api/v1/device/register - Register new device (phase 1: provisioning key)
- * - POST /api/v1/device/:uuid/key-exchange - Exchange keys (phase 2: device key verification)
+ * - POST /api/v1/provisioning-keys/generate - Generate single-agent key (body: fleetUuid = fleet UUID)
+ *
+ * Two-Phase Agent Authentication:
+ * - POST /api/v1/device/register - Register new agent (phase 1: provisioning key)
+ * - POST /api/v1/device/:uuid/key-exchange - Exchange keys (phase 2: agent key verification)
  */
 
 import express from 'express';
@@ -100,6 +101,13 @@ const keyExchangeLimiter = rateLimit({
   message: 'Too many key exchange attempts, please try again later'
 });
 
+// Rate limit for challenge issuance - prevents enumeration and DoS via DB/memory pressure
+const challengeLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: process.env.NODE_ENV === 'development' ? 1000 : 30,
+  message: 'Too many challenge requests, please try again later'
+});
+
 // ============================================================================
 // Provisioning Key Management Endpoints
 // ============================================================================
@@ -109,7 +117,7 @@ const keyExchangeLimiter = rateLimit({
  * POST /api/v1/provisioning-keys
  * 
  * Body:
- * - fleetId: Fleet/application identifier (required)
+ * - fleetUuid: Fleet UUID (required)
  * - maxDevices: Maximum number of agents (default: 100)
  * - expiresInDays: Expiration in days (default: 365)
  * - description: Key description (optional)
@@ -118,13 +126,13 @@ const keyExchangeLimiter = rateLimit({
  */
 router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res) => {
   try {
-    const { fleetId, maxDevices = 100, expiresInDays = 365, description } = req.body;
+    const { fleetUuid, maxDevices = 100, expiresInDays = 365, description } = req.body;
 
     // Basic validation
-    if (!fleetId || typeof fleetId !== 'string') {
+    if (!fleetUuid || typeof fleetUuid !== 'string') {
       return res.status(400).json({
         error: 'Invalid request',
-        message: 'fleetId is required and must be a string'
+        message: 'fleetUuid (fleet UUID) is required and must be a string'
       });
     }
 
@@ -142,7 +150,7 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
       });
     }
 
-    // Check license device limit before creating provisioning key
+    // Check license agent limit before creating provisioning key
     const licenseValidator = (req as any).licenseValidator;
     if (licenseValidator) {
       const license = licenseValidator.getLicense();
@@ -157,16 +165,16 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
           eventType: AuditEventType.PROVISIONING_FAILED,
           severity: AuditSeverity.WARNING,
           details: {
-            reason: 'Device limit exceeded - cannot create provisioning key',
+            reason: 'Agent limit exceeded - cannot create provisioning key',
             currentDevices: currentDeviceCount,
             maxDevices: maxDevicesAllowed,
             plan: license.plan,
-            fleetId
+            fleetUuid
           }
         });
 
         return res.status(403).json({
-          error: 'Device limit exceeded',
+          error: 'Agent limit exceeded',
           message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} agents. You currently have ${currentDeviceCount} active agents. Please upgrade your plan to add more agents.`,
           details: {
             currentDevices: currentDeviceCount,
@@ -179,26 +187,26 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
       logger.info(`License check passed: ${currentDeviceCount}/${maxDevicesAllowed} agents`);
     }
 
-    logger.info(`🔑 Creating provisioning key for fleet: ${fleetId}`);
+    logger.info(`🔑 Creating provisioning key for fleet: ${fleetUuid}`);
 
     // Resolve fleet UUID from identifier
     const fleetResult = await query(
       'SELECT fleet_uuid FROM fleets WHERE fleet_uuid::text = $1',
-      [fleetId]
+      [fleetUuid]
     );
     
     if (fleetResult.rows.length === 0) {
       return res.status(404).json({
         error: 'Fleet not found',
-        message: `Fleet with identifier '${fleetId}' does not exist. Create the fleet first.`
+        message: `Fleet with identifier '${fleetUuid}' does not exist. Create the fleet first.`
       });
     }
     
-    const fleetUuid = fleetResult.rows[0].fleet_uuid;
-    logger.info(`Resolved fleet UUID: ${fleetUuid}`);
+    const resolvedFleetUuid = fleetResult.rows[0].fleet_uuid;
+    logger.info(`Resolved fleet UUID: ${resolvedFleetUuid}`);
 
     const { id, key } = await createProvisioningKey(
-      fleetUuid,
+      resolvedFleetUuid,
       maxDevices,
       expiresInDays,
       description,
@@ -213,7 +221,7 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
     res.status(201).json({
       id,
       key, // WARNING: Only returned once!
-      fleetId,
+      fleetUuid,
       maxDevices,
       expiresAt: expiresAt.toISOString(),
       description,
@@ -230,39 +238,39 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
 
 /**
  * List provisioning keys for a fleet
- * GET /api/v1/provisioning-keys?fleetId=xxx
+ * GET /api/v1/provisioning-keys?fleetUuid=xxx
  * 
  * Returns key metadata (NOT the actual keys)
  */
 router.get('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res) => {
   try {
-    const { fleetId } = req.query;
+    const { fleetUuid } = req.query;
 
-    if (!fleetId || typeof fleetId !== 'string') {
+    if (!fleetUuid || typeof fleetUuid !== 'string') {
       return res.status(400).json({
         error: 'Invalid request',
-        message: 'fleetId query parameter is required'
+        message: 'fleetUuid (fleet UUID) query parameter is required'
       });
     }
 
-    logger.info(`Listing provisioning keys for fleet: ${fleetId}`);
+    logger.info(`Listing provisioning keys for fleet: ${fleetUuid}`);
 
     // Resolve fleet UUID from identifier
     const fleetResult = await query(
       'SELECT fleet_uuid FROM fleets WHERE fleet_uuid::text = $1',
-      [fleetId]
+      [fleetUuid]
     );
     
     if (fleetResult.rows.length === 0) {
       return res.status(404).json({
         error: 'Fleet not found',
-        message: `Fleet with identifier '${fleetId}' does not exist.`
+        message: `Fleet with identifier '${fleetUuid}' does not exist.`
       });
     }
     
-    const fleetUuid = fleetResult.rows[0].fleet_uuid;
+    const resolvedFleetUuid = fleetResult.rows[0].fleet_uuid;
 
-    const keys = await listProvisioningKeys(fleetUuid);
+    const keys = await listProvisioningKeys(resolvedFleetUuid);
 
     // Remove sensitive data before sending
     const sanitizedKeys = keys.map(k => ({
@@ -332,15 +340,15 @@ router.delete('/provisioning-keys/:keyId', jwtAuth, requireRole('admin'), async 
 });
 
 /**
- * Generate a single-device provisioning key
+ * Generate a single-agent provisioning key
  * POST /api/v1/provisioning-keys/generate
- * 
+ *
  * Simplified endpoint for dashboard to generate provisioning keys for individual agents.
  * Automatically invalidates previous keys if newKey=true in request body.
- * 
+ *
  * Body:
- * - fleetId: Fleet/application identifier (optional, defaults to 'default-fleet')
- * - newKey: If true, invalidates previous key for this device (optional, defaults to false)
+ * - fleetUuid: Fleet UUID (required)
+ * - newKey: If true, invalidates previous key for this agent (optional, defaults to false)
  * - previousKeyId: ID of previous key to invalidate (optional, used when newKey=true)
  * - deploymentType: Deployment type ('k8s-fleet' | 'edge-device' | 'standalone') (optional)
  * - metadata: Additional metadata about the deployment (optional)
@@ -367,6 +375,13 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
       simulatorConfig
     } = req.body;
 
+    if (!fleetUuid || typeof fleetUuid !== 'string') {
+      return res.status(400).json({
+        error: 'Invalid request',
+        message: 'fleetUuid (fleet UUID) is required and must be a string'
+      });
+    }
+
     // If regenerating, invalidate the previous key first
     if (newKey && previousKeyId) {
       try {
@@ -378,7 +393,7 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
       }
     }
 
-    // Check license device limit
+    // Check license agent limit
     const licenseValidator = (req as any).licenseValidator;
     if (licenseValidator) {
       const license = licenseValidator.getLicense();
@@ -389,7 +404,7 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
       
       if (currentDeviceCount >= maxDevicesAllowed) {
         return res.status(403).json({
-          error: 'Device limit exceeded',
+          error: 'Agent limit exceeded',
           message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} agents. Please upgrade to add more.`,
           details: {
             currentDevices: currentDeviceCount,
@@ -400,7 +415,7 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
       }
     }
 
-    // Resolve fleet UUID from identifier
+    // Resolve fleet by UUID
     const fleetResult = await query(
       'SELECT fleet_uuid, fleet_name FROM fleets WHERE fleet_uuid::text = $1',
       [fleetUuid]
@@ -412,12 +427,13 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
         message: `Fleet with identifier '${fleetUuid}' does not exist. Create the fleet first.`
       });
     }
-    
 
-    // Create new provisioning key (1 device, 30 days expiry)
+    const resolvedFleetUuid = fleetResult.rows[0].fleet_uuid;
+
+    // Create new provisioning key (1 agent, 30 days expiry)
     const { id, key } = await createProvisioningKey(
-      fleetUuid,
-      1, // maxDevices - single device
+      resolvedFleetUuid,
+      1, // maxAgents - single agent
       30, // expiresInDays - 30 days
       'Dashboard-generated provisioning key',
       'dashboard-user' // TODO: Replace with actual authenticated user
@@ -451,7 +467,7 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    logger.info(`Single-device provisioning key generated: ${id}`, { deploymentType });
+    logger.info(`Single-agent provisioning key generated: ${id}`, { deploymentType });
 
     const response: any = {
       id,
@@ -479,44 +495,44 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
 });
 
 // ============================================================================
-// Two-Phase Device Authentication
+// Two-Phase Agent Authentication
 // ============================================================================
 
 /**
- * Issue a PoP challenge to device
+ * Issue a PoP challenge to agent
  * POST /api/v1/device/:uuid/challenge
- * 
+ *
  * Phase 2a: Challenge issuance for proof-of-possession
  * - Generates cryptographically secure nonce
  * - Stores challenge with 5-minute TTL
- * - Device signs this challenge to prove it owns the private key
+ * - Agent signs this challenge to prove it owns the private key
  * 
  * Security Features:
  * - Cryptographically secure random nonce (32 bytes)
  * - Short-lived challenge (5 minutes)
  * - Replay protection via expiration
  */
-router.post('/device/:uuid/challenge', async (req, res) => {
+router.post('/device/:uuid/challenge', challengeLimiter, async (req, res) => {
   const { uuid } = req.params;
   const ipAddress = req.ip;
   const userAgent = req.headers['user-agent'];
 
   try {
-    // Verify device exists
-    const device = await AgentModel.getByUuid(uuid);
-    
-    if (!device) {
+    // Verify agent exists
+    const agent = await AgentModel.getByUuid(uuid);
+
+    if (!agent) {
       await logAuditEvent({
         eventType: AuditEventType.AUTHENTICATION_FAILED,
         agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
-        details: { reason: 'Device not found', endpoint: 'challenge' }
+        details: { reason: 'Agent not found', endpoint: 'challenge' }
       });
       return res.status(404).json({
-        error: 'Device not found',
-        message: `Device ${uuid} not registered`
+        error: 'Agent not found',
+        message: `Agent ${uuid} not registered`
       });
     }
 
@@ -524,21 +540,31 @@ router.post('/device/:uuid/challenge', async (req, res) => {
     const challenge = crypto.randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
+    // Reject if an active challenge already exists to prevent race-condition overwrites.
+    // A client that signed a challenge that was overwritten would get a false failure.
+    if (agent.last_challenge && agent.last_challenge_expires_at && new Date(agent.last_challenge_expires_at) > new Date()) {
+      return res.status(409).json({
+        error: 'Challenge already issued',
+        message: 'An active challenge already exists for this agent. Wait for it to expire or complete key exchange first.',
+        expiresAt: new Date(agent.last_challenge_expires_at).toISOString()
+      });
+    }
+
     logger.info('Generating new PoP challenge', {
-      deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.name,
+      agentUuid: uuid.substring(0, 8) + '...',
+      agentName: agent.name,
       challengeLength: challenge.length,
       expiresAt: expiresAt.toISOString(),
-      hasPublicKey: !!device.device_public_key,
-      currentlyVerified: device.pop_verified
+      hasPublicKey: !!agent.device_public_key,
+      currentlyVerified: agent.pop_verified
     });
 
     // Store challenge for verification
     await AgentModel.storeChallenge(uuid, challenge, expiresAt);
 
-    logger.info('PoP challenge stored and issued to device', {
-      deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.name,
+    logger.info('PoP challenge stored and issued to agent', {
+      agentUuid: uuid.substring(0, 8) + '...',
+      agentName: agent.name,
       expiresAt: expiresAt.toISOString()
     });
 
@@ -578,21 +604,21 @@ router.post('/device/:uuid/challenge', async (req, res) => {
 });
 
 /**
- * Register new device with provisioning API key
+ * Register new agent with provisioning API key
  * POST /api/v1/device/register
- * 
+ *
  * Phase 1 of two-phase authentication:
  * 1. Validates provisioning key against database
  * 2. Hashes device API key before storage
  * 3. Rate limits provisioning attempts
  * 4. Logs all provisioning events for audit trail
- * 
+ *
  * Security Features:
  * - Provisioning key validation
  * - Rate limiting (5 attempts per 15 minutes per IP)
  * - Device API key hashing (bcrypt)
  * - Comprehensive audit logging
- * - Event sourcing for device lifecycle
+ * - Event sourcing for agent lifecycle
  */
 router.post('/device/register', provisioningLimiter, async (req, res) => {
   const ipAddress = req.ip;
@@ -601,7 +627,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
   try {
     // Extract request data
     const { uuid, deviceName, deviceType, deviceApiKey, devicePublicKey, macAddress, osVersion, agentVersion } = req.body;
-    const provisioningApiKey = req.headers.authorization?.replace('Bearer ', '');
+    const provisioningApiKey = (req.headers['x-provisioning-key'] as string) ?? undefined;
 
     // Validate required fields
     if (!uuid || !deviceName || !deviceType || !deviceApiKey) {
@@ -620,7 +646,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
 
     // Validate devicePublicKey format if provided (for PoP)
     if (devicePublicKey) {
-      logger.info('Received device registration with public key', {
+      logger.info('Received agent registration with public key', {
         uuid: uuid?.substring(0, 8) + '...',
         publicKeyLength: devicePublicKey.length,
         hasBeginMarker: devicePublicKey.includes('BEGIN PUBLIC KEY'),
@@ -647,7 +673,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
         });
       }
     } else {
-      logger.info('Device registration without public key (legacy mode)', {
+      logger.info('Agent registration without public key (legacy mode)', {
         uuid: uuid?.substring(0, 8) + '...'
       });
     }
@@ -663,8 +689,38 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
       });
       return res.status(401).json({
         error: 'Unauthorized',
-        message: 'Provisioning API key required in Authorization header'
+        message: 'Provisioning key required in x-provisioning-key header'
       });
+    }
+
+    // Enforce license agent limit at registration time (not just at key creation).
+    // A key created before a plan downgrade must still be blocked here.
+    const registrationLicenseValidator = (req as any).licenseValidator;
+    if (registrationLicenseValidator) {
+      const license = registrationLicenseValidator.getLicense();
+      const maxDevicesAllowed = license.features.maxDevices;
+      const deviceCountResult = await query('SELECT COUNT(*) as count FROM agents WHERE is_active = true');
+      const currentDeviceCount = parseInt(deviceCountResult.rows[0].count);
+
+      if (currentDeviceCount >= maxDevicesAllowed) {
+        await logAuditEvent({
+          eventType: AuditEventType.PROVISIONING_FAILED,
+          ipAddress,
+          userAgent,
+          severity: AuditSeverity.WARNING,
+          details: {
+            reason: 'Agent limit exceeded at registration',
+            currentDevices: currentDeviceCount,
+            maxDevices: maxDevicesAllowed,
+            plan: license.plan
+          }
+        });
+        return res.status(403).json({
+          error: 'Agent limit exceeded',
+          message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} agents. You currently have ${currentDeviceCount} active agents. Please upgrade your plan to add more agents.`,
+          details: { currentDevices: currentDeviceCount, maxDevices: maxDevicesAllowed, plan: license.plan }
+        });
+      }
     }
 
     // Call service layer for business logic
@@ -684,11 +740,11 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
       userAgent
     );
 
-    logger.info('Device registered successfully:', response.id);
+    logger.info('Agent registered successfully:', response.id);
     res.status(200).json(response);
 
   } catch (error: any) {
-    logger.error('Error registering device:', error);
+    logger.error('Error registering agent:', error);
     
     // Determine appropriate status code
     let statusCode = 500;
@@ -701,14 +757,14 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
     }
 
     res.status(statusCode).json({
-      error: 'Failed to register device',
+      error: 'Failed to register agent',
       message: error.message
     });
   }
 });
 
 /**
- * Exchange keys - verify device can authenticate with deviceApiKey
+ * Exchange keys - verify agent can authenticate with deviceApiKey
  * POST /api/v1/device/:uuid/key-exchange
  * 
  * Phase 2b of two-phase authentication:
@@ -732,7 +788,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
   try {
     const { uuid } = req.params;
     const { deviceApiKey, signature } = req.body;
-    const authKey = req.headers.authorization?.replace('Bearer ', '');
+    const authKey = (req.headers['x-device-key'] as string) ?? undefined;
 
     // PoP mode: requires signature (deviceApiKey not needed)
     // Bcrypt fallback: requires deviceApiKey
@@ -745,11 +801,11 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
-        details: { reason: 'Missing Authorization header' }
+        details: { reason: 'Missing x-device-key header' }
       });
       return res.status(400).json({
         error: 'Missing credentials',
-        message: 'Authorization header required'
+        message: 'x-device-key header required'
       });
     }
 
@@ -769,42 +825,42 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     }
 
     logger.info('Key exchange request received', {
-      deviceUuid: uuid.substring(0, 8) + '...',
+      agentUuid: uuid.substring(0, 8) + '...',
       hasSignature: !!signature
     });
 
-    // Verify device exists
-    const device = await AgentModel.getByUuid(uuid);
+    // Verify agent exists
+    const agent = await AgentModel.getByUuid(uuid);
     
-    if (!device) {
+    if (!agent) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
         agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
-        details: { reason: 'Device not found' }
+        details: { reason: 'Agent not found' }
       });
       return res.status(404).json({
-        error: 'Device not found',
-        message: `Device ${uuid} not registered`
+        error: 'Agent not found',
+        message: `Agent ${uuid} not registered`
       });
     }
 
     // ========================================================================
     // PROOF OF POSSESSION: Verify signature if public key and signature provided
     // ========================================================================
-    if (device.device_public_key && signature) {
+    if (agent.device_public_key && signature) {
       logger.info('Attempting PoP verification with signature', {
-        deviceUuid: uuid.substring(0, 8) + '...',
+        agentUuid: uuid.substring(0, 8) + '...',
         hasPublicKey: true,
         signatureLength: signature.length,
-        hasChallenge: !!device.last_challenge,
-        challengeExpiry: device.last_challenge_expires_at?.toISOString()
+        hasChallenge: !!agent.last_challenge,
+        challengeExpiry: agent.last_challenge_expires_at?.toISOString()
       });
       
       // Check challenge exists and not expired
-      if (!device.last_challenge || !device.last_challenge_expires_at) {
+      if (!agent.last_challenge || !agent.last_challenge_expires_at) {
         await logAuditEvent({
           eventType: AuditEventType.KEY_EXCHANGE_FAILED,
           agentUuid: uuid,
@@ -819,7 +875,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         });
       }
 
-      if (device.last_challenge_expires_at < new Date()) {
+      if (agent.last_challenge_expires_at < new Date()) {
         await logAuditEvent({
           eventType: AuditEventType.KEY_EXCHANGE_FAILED,
           agentUuid: uuid,
@@ -837,16 +893,16 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       // Verify signature using public key
       try {
         logger.info('Verifying PoP signature', {
-          deviceUuid: uuid.substring(0, 8) + '...',
-          challengeLength: device.last_challenge.length,
+          agentUuid: uuid.substring(0, 8) + '...',
+          challengeLength: agent.last_challenge.length,
           signatureLength: signature.length,
-          publicKeyLength: device.device_public_key.length
+          publicKeyLength: agent.device_public_key.length
         });
         
         // 🔐 HARDENING: Enforce public key algorithm allowlist
         // Only allow Ed25519 or ECDSA P-256 (reject weak RSA, algorithm downgrades)
         const publicKeyObject = crypto.createPublicKey({
-          key: device.device_public_key,
+          key: agent.device_public_key,
           format: 'pem'
         });
         
@@ -855,7 +911,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         
         if (!allowedAlgorithms.includes(keyType)) {
           logger.warn('Rejecting disallowed public key algorithm', {
-            deviceUuid: uuid.substring(0, 8) + '...',
+            agentUuid: uuid.substring(0, 8) + '...',
             algorithm: keyType,
             allowed: allowedAlgorithms
           });
@@ -880,7 +936,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           const keyDetails = publicKeyObject.asymmetricKeyDetails;
           if (keyDetails?.namedCurve !== 'prime256v1' && keyDetails?.namedCurve !== 'P-256') {
             logger.warn('Rejecting ECDSA key with non-P-256 curve', {
-              deviceUuid: uuid.substring(0, 8) + '...',
+              agentUuid: uuid.substring(0, 8) + '...',
               curve: keyDetails?.namedCurve
             });
             
@@ -900,20 +956,20 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           }
         }
         
-        // Bind device UUID to signature payload to prevent cross-device replay
+        // Bind agent UUID to signature payload to prevent cross-agent replay
         // Client signs: uuid:challenge
         // Server verifies: same payload construction
-        const payload = `${uuid}:${device.last_challenge}`;
+        const payload = `${uuid}:${agent.last_challenge}`;
         
         const isValid = crypto.verify(
           null, // Algorithm detected from key
           Buffer.from(payload, 'utf-8'),
-          device.device_public_key,
+          agent.device_public_key,
           Buffer.from(signature, 'base64')
         );
 
         logger.info('Signature verification result', {
-          deviceUuid: uuid.substring(0, 8) + '...',
+          agentUuid: uuid.substring(0, 8) + '...',
           isValid,
           payloadLength: payload.length
         });
@@ -936,16 +992,16 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         // ✅ PoP verified - invalidate challenge immediately (single-use)
         // Set challenge expiry to now to prevent replay
         logger.info('Invalidating challenge after successful PoP verification', {
-          deviceUuid: uuid.substring(0, 8) + '...',
+          agentUuid: uuid.substring(0, 8) + '...',
           reason: 'single-use challenge enforcement'
         });
         
         await AgentModel.storeChallenge(uuid, null, new Date()); // Expire challenge immediately
 
-        // Mark device as PoP verified
-        logger.info('Marking device as PoP verified', {
-          deviceUuid: uuid.substring(0, 8) + '...',
-          deviceName: device.name
+        // Mark agent as PoP verified
+        logger.info('Marking agent as PoP verified', {
+          agentUuid: uuid.substring(0, 8) + '...',
+          agentName: agent.name
         });
         
         await AgentModel.markPopVerified(uuid);
@@ -954,8 +1010,8 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         await AgentModel.recordAuthMethod(uuid, 'pop');
 
         logger.info('PoP verification successful and persisted', {
-          deviceUuid: uuid.substring(0, 8) + '...',
-          deviceName: device.name,
+          agentUuid: uuid.substring(0, 8) + '...',
+          agentName: agent.name,
           authMethod: 'proof-of-possession'
         });
 
@@ -966,7 +1022,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           userAgent,
           severity: AuditSeverity.INFO,
           details: { 
-            deviceName: device.name,
+            agentName: agent.name,
             authMethod: 'proof-of-possession'
           }
         });
@@ -975,9 +1031,9 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           status: 'ok',
           message: 'Proof of possession verified',
           device: {
-            id: device.id,
-            uuid: device.uuid,
-            deviceName: device.name,
+            id: agent.id,
+            uuid: agent.uuid,
+            deviceName: agent.name,
           }
         });
       } catch (verifyError: any) {
@@ -1003,22 +1059,22 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     // FALLBACK: Legacy bcrypt verification (for backward compatibility)
     // ========================================================================
     logger.warn('⚠️ Using LEGACY bcrypt verification (not PoP)', {
-      deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.name,
-      hasPublicKey: !!device.device_public_key,
+      agentUuid: uuid.substring(0, 8) + '...',
+      agentName: agent.name,
+      hasPublicKey: !!agent.device_public_key,
       hasSignature: !!signature,
-      reason: !device.device_public_key ? 'device has no public key (not PoP-enabled)' : !signature ? 'no signature provided' : 'unknown',
+      reason: !agent.device_public_key ? 'agent has no public key (not PoP-enabled)' : !signature ? 'no signature provided' : 'unknown',
       recommendation: 'Update agent to send devicePublicKey during registration for PoP authentication'
     });
     
-    if (!device.device_api_key_hash) {
+    if (!agent.device_api_key_hash) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
         agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.ERROR,
-        details: { reason: 'No API key hash stored for device' }
+        details: { reason: 'No API key hash stored for agent' }
       });
       return res.status(500).json({
         error: 'Configuration error',
@@ -1026,7 +1082,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       });
     }
 
-    const keyMatches = await bcrypt.compare(deviceApiKey, device.device_api_key_hash);
+    const keyMatches = await bcrypt.compare(deviceApiKey, agent.device_api_key_hash);
     
     if (!keyMatches) {
       await logAuditEvent({
@@ -1044,8 +1100,8 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
     }
 
     logger.info('Legacy key exchange successful (bcrypt)', {
-      deviceUuid: uuid.substring(0, 8) + '...',
-      deviceName: device.name
+      agentUuid: uuid.substring(0, 8) + '...',
+      agentName: agent.name
     });
     
     // Record authentication method for fleet-level policy enforcement
@@ -1059,7 +1115,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       userAgent,
       severity: AuditSeverity.INFO,
       details: { 
-        deviceName: device.name,
+        agentName: agent.name,
         authMethod: 'bcrypt-fallback'
       }
     });
@@ -1068,9 +1124,9 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       status: 'ok',
       message: 'Key exchange successful',
       device: {
-        id: device.id,
-        uuid: device.uuid,
-        deviceName: device.name,
+        id: agent.id,
+        uuid: agent.uuid,
+        deviceName: agent.name,
       }
     });
   } catch (error: any) {

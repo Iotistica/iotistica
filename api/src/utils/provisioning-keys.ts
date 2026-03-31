@@ -76,7 +76,7 @@ export async function validateProvisioningKey(
       return { valid: false, error: 'Invalid provisioning key' };
     }
 
-    // Check device limit
+    // Check agent limit
     if (record.agents_provisioned >= record.max_agents) {
       await logAuditEvent({
         eventType: AuditEventType.PROVISIONING_LIMIT_EXCEEDED,
@@ -91,7 +91,7 @@ export async function validateProvisioningKey(
       });
       return { 
         valid: false, 
-        error: 'Provisioning key device limit exceeded',
+        error: 'Provisioning key agent limit exceeded',
         keyRecord: record
       };
     }
@@ -145,15 +145,21 @@ export async function validateProvisioningKey(
 }
 
 /**
- * Increment the agents_provisioned counter for a provisioning key
+ * Atomically increment the agents_provisioned counter, enforcing max_agents in the DB.
+ * Returns true if the increment succeeded, false if the limit was already reached.
+ * Using a conditional UPDATE with RETURNING prevents concurrent registrations from
+ * exceeding the limit between a separate read and write.
  */
-export async function incrementProvisioningKeyUsage(keyId: string): Promise<void> {
-  await query(
-    `UPDATE provisioning_keys 
-     SET agents_provisioned = agents_provisioned + 1 
-     WHERE id = $1`,
+export async function incrementProvisioningKeyUsage(keyId: string): Promise<boolean> {
+  const result = await query<{ id: string }>(
+    `UPDATE provisioning_keys
+     SET agents_provisioned = agents_provisioned + 1
+     WHERE id = $1
+       AND agents_provisioned < max_agents
+     RETURNING id`,
     [keyId]
   );
+  return result.rows.length > 0;
 }
 
 /**
@@ -161,7 +167,7 @@ export async function incrementProvisioningKeyUsage(keyId: string): Promise<void
  */
 export async function createProvisioningKey(
   fleetUuid: string,
-  maxDevices: number = 100,
+  maxAgents: number = 100,
   expiresInDays: number = 365,
   description?: string,
   createdBy?: string
@@ -178,7 +184,7 @@ export async function createProvisioningKey(
     `INSERT INTO provisioning_keys (key_hash, key_hash_fast, fleet_uuid, description, max_agents, expires_at, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id`,
-    [keyHash, keyHashFast, fleetUuid, description, maxDevices, expiresAt, createdBy]
+    [keyHash, keyHashFast, fleetUuid, description, maxAgents, expiresAt, createdBy]
   );
 
   const keyId = result.rows[0].id;
@@ -190,7 +196,7 @@ export async function createProvisioningKey(
     details: {
       keyId,
       fleetUuid,
-      maxDevices,
+      maxAgents,
       expiresAt: expiresAt.toISOString()
     }
   });

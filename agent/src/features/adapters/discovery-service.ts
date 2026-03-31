@@ -649,7 +649,7 @@ export class DiscoveryService extends EventEmitter {
         return !!process.env.CAN_INTERFACE;
       case 'mqtt':
         // MQTT is enabled if broker URL is configured
-        return !!(process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883');
+        return !!process.env.MQTT_BROKER_URL;
       default:
         return false;
     }

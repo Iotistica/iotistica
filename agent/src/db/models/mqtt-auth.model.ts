@@ -76,6 +76,12 @@ export class MqttAuthModel {
         continue;
       }
 
+      if (bootstrapUsername && username === bootstrapUsername) {
+        throw new Error(
+          `MQTT endpoint username '${username}' conflicts with bootstrap MQTT_USERNAME. Use a distinct endpoint username.`
+        );
+      }
+
       usersByName.set(username, {
         username,
         password_hash: passwordHash,

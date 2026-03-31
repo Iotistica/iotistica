@@ -403,21 +403,21 @@ services:
     #     networks:
     #         - iotistica-net
 
-    sim-mqtt:
+    sim-mqtt-1:
         build:
             context: ./simulators/mqtt-simulator
             dockerfile: Dockerfile
-        container_name: sim-mqtt
+        container_name: sim-mqtt-1
         restart: unless-stopped
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
-            - MQTT_USERNAME=${MQTT_SIM_USERNAME:-admin}
-            - MQTT_PASSWORD=${MQTT_SIM_PASSWORD:-iotistic42!}
-            - MQTT_CLIENT_ID=${MQTT_SIM_CLIENT_ID:-admin}
-            - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
+            - MQTT_USERNAME=mqtt-user-1
+            - MQTT_PASSWORD=iotistic42!
+            - MQTT_CLIENT_ID=mqtt-device-1
+            - MQTT_DEVICE_ID=mqtt-device-1
             - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
-            - MQTT_TOPIC=${MQTT_SIM_TOPIC}
-            - MQTT_METRIC_NAMES=temperature
+            - MQTT_TOPIC=iot/73eddd385ce8/agent/02866bcf-f2f7-4432-967f-b5a85e63a89a/mqtt/1ebec2cf-8062-4f7b-a46b-3367d63651e4
+            - MQTT_METRIC_NAMES=temperature,humidity
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
@@ -432,25 +432,6 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
-    sim-mqtt-1:
-        build:
-            context: ./simulators/mqtt-simulator
-            dockerfile: Dockerfile
-        container_name: sim-mqtt-1
-        restart: unless-stopped
-        environment:
-            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
-            - MQTT_USERNAME=mqtt-user-1
-            - MQTT_PASSWORD=test123!
-            - MQTT_CLIENT_ID=mqtt-device-1
-            - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
-            - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
-            - MQTT_TOPIC=iot/73eddd385ce8/agent/8602805f-50b1-40cb-acdc-3f4eb084bfcf/mqtt/c83394fa-7d9b-4f55-817e-5dfc36a79533
-            - MQTT_METRIC_NAMES=humidity
-            - MQTT_QOS=${MQTT_SIM_QOS:-0}
-            - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
-            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
-            - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
     sim-mqtt-2:
         build:
             context: ./simulators/mqtt-simulator
@@ -462,7 +443,36 @@ services:
             - MQTT_USERNAME=mqtt-user-2
             - MQTT_PASSWORD=test123!
             - MQTT_CLIENT_ID=mqtt-device-2
-            - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim}
+            - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim-2}
+            - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
+            - MQTT_TOPIC=iot/73eddd385ce8/agent/8602805f-50b1-40cb-acdc-3f4eb084bfcf/mqtt/c83394fa-7d9b-4f55-817e-5dfc36a79533
+            - MQTT_METRIC_NAMES=humidity
+            - MQTT_QOS=${MQTT_SIM_QOS:-0}
+            - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
+            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
+            - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
+        depends_on:
+            mosquitto:
+                condition: service_started
+        networks:
+            - iotistica-net
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "5m"
+                max-file: "2"
+    sim-mqtt-3:
+        build:
+            context: ./simulators/mqtt-simulator
+            dockerfile: Dockerfile
+        container_name: sim-mqtt-3
+        restart: unless-stopped
+        environment:
+            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
+            - MQTT_USERNAME=mqtt-user-3
+            - MQTT_PASSWORD=test123!
+            - MQTT_CLIENT_ID=mqtt-device-3
+            - MQTT_DEVICE_ID=${MQTT_SIM_DEVICE_ID:-iotistic-mqtt-sim-3}
             - MQTT_DEVICE_UUID=${MQTT_SIM_DEVICE_UUID:-}
             - MQTT_TOPIC=iot/73eddd385ce8/agent/8602805f-50b1-40cb-acdc-3f4eb084bfcf/mqtt/7254291f-ab6f-4dca-bbbd-6946deb1aa67
             - MQTT_METRIC_NAMES=pressure,humidity

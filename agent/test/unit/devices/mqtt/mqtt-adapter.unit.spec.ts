@@ -161,6 +161,50 @@ describe('MqttAdapter', () => {
   });
 
   describe('handleMessage - Backpressure', () => {
+    it('should emit all primitive fields from a JSON payload when no explicit MQTT metric mapping is configured', () => {
+      const config = {
+        ...mockConfig,
+        devices: [{
+          name: 'test_device',
+          enabled: true,
+          topic: 'test/topic',
+          dataType: 'number'
+        }]
+      };
+
+      const adapter = new MqttAdapter(config, mockLogger);
+      const dataSpy = jest.fn();
+      adapter.on('data', dataSpy);
+
+      const device = config.devices[0];
+      (adapter as any).subscriptions.set('test/topic', device);
+
+      (adapter as any).handleMessage(
+        'test/topic',
+        Buffer.from(JSON.stringify({
+          ts: 1711843200000,
+          temperature: 23.5,
+          humidity: 65,
+          units: {
+            temperature: 'C',
+            humidity: '%'
+          }
+        })),
+        false
+      );
+
+      expect(dataSpy).toHaveBeenCalledTimes(1);
+
+      const emittedPoints = dataSpy.mock.calls[0][0];
+      expect(emittedPoints).toHaveLength(2);
+      expect(emittedPoints).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ metric: 'temperature', value: 23.5, unit: 'C' }),
+          expect.objectContaining({ metric: 'humidity', value: 65, unit: '%' }),
+        ])
+      );
+    });
+
     it('should drop messages when queue depth exceeds threshold', () => {
       const config = {
         ...mockConfig,

@@ -190,15 +190,21 @@ class MqttSimulator:
         payload = {
             self.timestamp_field: timestamp_value,
             "deviceId": self.device_id,
-            "device_id": self.device_id,
         }
 
         device_uuid = next((p.device_uuid for p in publishers if p.device_uuid), None)
         if device_uuid:
             payload["device_uuid"] = device_uuid
 
+        units = {}
+
         for pub in publishers:
             payload[pub.name] = pub.next_value(now)
+            if pub.unit:
+                units[pub.name] = pub.unit
+
+        if units:
+            payload["units"] = units
 
         return payload
 
@@ -207,7 +213,6 @@ class MqttSimulator:
             value = pub.next_value(now)
             payload = pub.build_payload(value)
             payload["deviceId"] = self.device_id
-            payload["device_id"] = self.device_id
             msg = json.dumps(payload, separators=(",", ":"))
             info = self.client.publish(pub.topic, msg, qos=pub.qos, retain=pub.retain)
             if info.rc != mqtt.MQTT_ERR_SUCCESS:

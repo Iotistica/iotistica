@@ -374,11 +374,31 @@ export class DeviceManager {
 	}
 
 	/**
-	 * Create authorization headers for API requests
+	 * Create authorization headers for regular authenticated API requests (JWT).
 	 */
 	private createAuthHeaders(apiKey: string): Record<string, string> {
 		return {
 			'Authorization': `Bearer ${apiKey}`,
+		};
+	}
+
+	/**
+	 * Create headers for Phase 1 device registration (provisioning key).
+	 * Uses x-provisioning-key to distinguish from JWT and device-key traffic.
+	 */
+	private createProvisioningHeaders(provisioningKey: string): Record<string, string> {
+		return {
+			'x-provisioning-key': provisioningKey,
+		};
+	}
+
+	/**
+	 * Create headers for Phase 2 key exchange (device API key).
+	 * Uses x-device-key to distinguish from JWT and provisioning-key traffic.
+	 */
+	private createDeviceKeyHeaders(deviceKey: string): Record<string, string> {
+		return {
+			'x-device-key': deviceKey,
 		};
 	}
 
@@ -792,7 +812,7 @@ export class DeviceManager {
 		try {
 			const response = await this.httpClient.post<ProvisionResponse>(url, provisionRequest, {
 				headers: {
-					...this.createAuthHeaders(provisioningApiKey),
+					...this.createProvisioningHeaders(provisioningApiKey),
 					'X-Idempotency-Key': idempotencyKey,
 				},
 			});
@@ -877,7 +897,7 @@ export class DeviceManager {
 				signature,
 			};
 			
-			const headers = this.createAuthHeaders(deviceApiKey);
+			const headers = this.createDeviceKeyHeaders(deviceApiKey);
 			headers['X-Idempotency-Key'] = idempotencyKey;
 			
 			this.logger?.infoSync('Using Ed25519 PoP signature', {

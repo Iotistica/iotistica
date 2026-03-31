@@ -422,7 +422,7 @@ export class ConfigManager extends EventEmitter {
 
 		return {
 			enabled: cloudProtocol?.enabled ?? false,
-			brokerUrl: cloudProtocol?.connection?.brokerUrl ?? process.env.MQTT_BROKER_URL ?? 'mqtt://mosquitto:1883',
+			brokerUrl: cloudProtocol?.connection?.brokerUrl ?? process.env.MQTT_BROKER_URL ?? '',
 			username: cloudProtocol?.connection?.username ?? process.env.MQTT_USERNAME,
 			password: cloudProtocol?.connection?.password ?? process.env.MQTT_PASSWORD,
 			discoveryRoots: cloudProtocol?.discoveryRoots ?? [],

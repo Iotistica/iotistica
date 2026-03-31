@@ -533,13 +533,7 @@ export class SensorsFeature extends BaseFeature {
       } else {
         // Load devices from database
         const dbDevices = await EndpointModel.getEnabled('mqtt');
-        
-        // Start adapter even with no devices (needed for observer + discovery)
-        if (dbDevices.length === 0) {
-          this.logger.info('MQTT ADAPTER: No MQTT devices in database - relying on observerRoots for continuous discovery');
-        } else {
-          this.logger.info(`MQTT ADAPTER: Found ${dbDevices.length} MQTT devices in database`);
-        }
+  
         
         // MQTT broker is infrastructure-level config (not per-endpoint target-state config).
         // Require explicit environment configuration to avoid implicit fallbacks.
