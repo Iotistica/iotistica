@@ -46,7 +46,7 @@ services:
       - ENABLE_HEAP_PROFILING=true
       - PIPELINE_FLOWS_FILE=/app/data/flows/opcua-transform.flows.json
       # Shell security (HMAC signature verification)
-      - AGENT_SHELL_HMAC_KEY=wcw3eFT/zyVZ7HYwP+bApLjJX2gW/e1mHW2+WPG2gBk=
+      - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
 volumes:
   agent-1-data:
