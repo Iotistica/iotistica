@@ -254,6 +254,8 @@ EOFACL
         setfacl -m u:iotistic:rwx /etc/mosquitto || true
         setfacl -m u:iotistic:rw /etc/mosquitto/passwd || true
         setfacl -m u:iotistic:rw /etc/mosquitto/acl || true
+        setfacl -m u:mosquitto:r /etc/mosquitto/passwd || true
+        setfacl -m u:mosquitto:r /etc/mosquitto/acl || true
     else
         echo "Warning: setfacl not available; verify the agent user can update /etc/mosquitto/passwd and /etc/mosquitto/acl"
     fi
@@ -269,6 +271,8 @@ chmod 0644 /etc/mosquitto/acl
 if command -v setfacl >/dev/null 2>&1; then
     setfacl -m u:iotistic:rw /etc/mosquitto/passwd || true
     setfacl -m u:iotistic:rw /etc/mosquitto/acl || true
+    setfacl -m u:mosquitto:r /etc/mosquitto/passwd || true
+    setfacl -m u:mosquitto:r /etc/mosquitto/acl || true
 fi
 
 systemctl reload mosquitto

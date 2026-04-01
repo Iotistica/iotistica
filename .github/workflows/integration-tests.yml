@@ -142,8 +142,8 @@ jobs:
 
       - name: Verify system services
         run: |
-          sudo systemctl status mosquitto --no-pager || true
-          sudo systemctl status iotistica-agent --no-pager || true
+          sudo systemctl status mosquitto --no-pager -l || true
+          sudo systemctl status iotistica-agent --no-pager -l || true
           sudo systemctl is-active --quiet mosquitto
           sudo systemctl is-active --quiet iotistica-agent
 
@@ -172,11 +172,29 @@ jobs:
       - name: Show diagnostics
         if: always()
         run: |
+          echo "=== Mosquitto systemctl status ==="
+          sudo systemctl status mosquitto --no-pager -l || true
+
+          echo "=== Agent systemctl status ==="
+          sudo systemctl status iotistica-agent --no-pager -l || true
+
           echo "=== Agent journal ==="
           sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" || true
 
           echo "=== Mosquitto journal ==="
           sudo journalctl -u mosquitto --no-pager --since "10 minutes ago" || true
+
+          echo "=== Mosquitto main config ==="
+          sudo cat /etc/mosquitto/mosquitto.conf || true
+
+          echo "=== Mosquitto managed config ==="
+          sudo cat /etc/mosquitto/conf.d/iotistica.conf || true
+
+          echo "=== Mosquitto auth file permissions ==="
+          sudo ls -l /etc/mosquitto/passwd /etc/mosquitto/acl || true
+
+          echo "=== Mosquitto auth file ACLs ==="
+          sudo getfacl /etc/mosquitto/passwd /etc/mosquitto/acl || true
 
           echo "=== API logs ==="
           docker compose -f "$COMPOSE_FILE" logs api --tail=200 || true
