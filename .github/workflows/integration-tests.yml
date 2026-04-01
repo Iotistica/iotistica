@@ -154,6 +154,7 @@ jobs:
           MQTT_USERNAME: admin
           MQTT_PASSWORD: iotistic42!
           MQTT_USE_TLS: false
+          AGENT_SHELL_HMAC_KEY: integration-test-shell-hmac-key
           PROVISIONING_KEY: ${{ steps.provision.outputs.provisioning_key }}
         run: |
           chmod +x agent/bin/install.sh

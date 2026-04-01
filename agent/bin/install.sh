@@ -13,6 +13,7 @@ set -e
 #   IOTISTICA_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
 #   IOTISTICA_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
 #   IOTISTICA_INSTALL_MOSQUITTO    - Set to yes/true/1 to install and manage a local Mosquitto broker
+#   AGENT_SHELL_HMAC_KEY           - Optional HMAC secret for remote shell command verification
 #   FORCE_INSTALL                 - Legacy opt-in flag; set to 1 to allow automatic Docker installation
 
 # Note: This script is POSIX-compliant and works with both sh and bash
@@ -755,6 +756,10 @@ EOF
 
     if [ -n "$MQTT_USE_TLS" ]; then
         echo "MQTT_USE_TLS=${MQTT_USE_TLS}" >> /etc/iotistic/agent.env
+    fi
+
+    if [ -n "$AGENT_SHELL_HMAC_KEY" ]; then
+        echo "AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}" >> /etc/iotistic/agent.env
     fi
 
     # Set permissions
