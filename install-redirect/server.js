@@ -6,6 +6,8 @@ const { URL } = require('url');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.set('trust proxy', true);
+
 // Security middleware
 app.use(helmet());
 
@@ -19,9 +21,24 @@ const BLOB_INSTALL_SHA256_PATH = process.env.BLOB_INSTALL_SHA256_PATH || 'agent/
 const INSTALL_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BLOB_INSTALL_PATH}`;
 const INSTALL_SHA256_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BLOB_INSTALL_SHA256_PATH}`;
 
+function getRequestContext(req) {
+  return {
+    method: req.method,
+    path: req.originalUrl,
+    host: req.get('host') || '',
+    ip: req.ip,
+    forwardedFor: req.get('x-forwarded-for') || '',
+    forwardedProto: req.get('x-forwarded-proto') || '',
+    envoyExternalAddress: req.get('x-envoy-external-address') || '',
+    requestId: req.get('x-request-id') || '',
+    userAgent: req.get('user-agent') || ''
+  };
+}
+
 // Helper function to proxy content from Azure Storage
-function proxyFromStorage(url, res, contentType = 'text/plain') {
+function proxyFromStorage(url, req, res, contentType = 'text/plain') {
   const parsedUrl = new URL(url);
+  const requestContext = getRequestContext(req);
   
   const options = {
     hostname: parsedUrl.hostname,
@@ -32,9 +49,17 @@ function proxyFromStorage(url, res, contentType = 'text/plain') {
     }
   };
 
+  console.log(`[${new Date().toISOString()}] Proxy request ${JSON.stringify({
+    ...requestContext,
+    blobUrl: url
+  })}`);
+
   https.get(options, (response) => {
     if (response.statusCode !== 200) {
-      console.error(`[ERROR] Azure Storage returned ${response.statusCode}: ${response.statusMessage}`);
+      console.error(`[ERROR] Azure Storage returned ${response.statusCode}: ${response.statusMessage} ${JSON.stringify({
+        ...requestContext,
+        blobUrl: url
+      })}`);
       res.status(502).json({
         error: 'Bad Gateway',
         message: 'Failed to fetch installation script'
@@ -45,11 +70,21 @@ function proxyFromStorage(url, res, contentType = 'text/plain') {
     // Set appropriate headers
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+
+    console.log(`[${new Date().toISOString()}] Proxy success ${JSON.stringify({
+      ...requestContext,
+      blobUrl: url,
+      statusCode: response.statusCode,
+      contentType
+    })}`);
     
     // Pipe Azure Storage response directly to client
     response.pipe(res);
   }).on('error', (error) => {
-    console.error(`[ERROR] Failed to fetch from Azure Storage: ${error.message}`);
+    console.error(`[ERROR] Failed to fetch from Azure Storage: ${error.message} ${JSON.stringify({
+      ...requestContext,
+      blobUrl: url
+    })}`);
     if (!res.headersSent) {
       res.status(502).json({
         error: 'Bad Gateway',
@@ -66,14 +101,12 @@ app.get('/health', (req, res) => {
 
 // Main proxy endpoint: curl -sfL https://get.iotistica.com/agent | sh
 app.get('/agent', (req, res) => {
-  console.log(`[${new Date().toISOString()}] Install request from ${req.ip}`);
-  proxyFromStorage(INSTALL_URL, res, 'text/x-shellscript');
+  proxyFromStorage(INSTALL_URL, req, res, 'text/x-shellscript');
 });
 
 // SHA256 checksum endpoint
 app.get('/agent.sha256', (req, res) => {
-  console.log(`[${new Date().toISOString()}] Checksum request from ${req.ip}`);
-  proxyFromStorage(INSTALL_SHA256_URL, res, 'text/plain');
+  proxyFromStorage(INSTALL_SHA256_URL, req, res, 'text/plain');
 });
 
 // Info endpoint - shows what would be executed
