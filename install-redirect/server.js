@@ -21,6 +21,22 @@ const BLOB_INSTALL_SHA256_PATH = process.env.BLOB_INSTALL_SHA256_PATH || 'agent/
 const INSTALL_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BLOB_INSTALL_PATH}`;
 const INSTALL_SHA256_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BLOB_INSTALL_SHA256_PATH}`;
 
+function buildStorageUrl(blobPath) {
+  return `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${blobPath}`;
+}
+
+function normalizeArtifactPath(requestPath) {
+  if (!requestPath || requestPath.startsWith('/') || requestPath.includes('..')) {
+    return null;
+  }
+
+  if (!/^[A-Za-z0-9._/-]+$/.test(requestPath)) {
+    return null;
+  }
+
+  return `agent/${requestPath}`;
+}
+
 function getRequestContext(req) {
   return {
     method: req.method,
@@ -36,7 +52,7 @@ function getRequestContext(req) {
 }
 
 // Helper function to proxy content from Azure Storage
-function proxyFromStorage(url, req, res, contentType = 'text/plain') {
+function proxyFromStorage(url, req, res, contentType = 'text/plain', failureMessage = 'Failed to fetch installation script') {
   const parsedUrl = new URL(url);
   const requestContext = getRequestContext(req);
   
@@ -62,7 +78,7 @@ function proxyFromStorage(url, req, res, contentType = 'text/plain') {
       })}`);
       res.status(502).json({
         error: 'Bad Gateway',
-        message: 'Failed to fetch installation script'
+        message: failureMessage
       });
       return;
     }
@@ -88,7 +104,7 @@ function proxyFromStorage(url, req, res, contentType = 'text/plain') {
     if (!res.headersSent) {
       res.status(502).json({
         error: 'Bad Gateway',
-        message: 'Failed to fetch installation script'
+        message: failureMessage
       });
     }
   });
@@ -109,6 +125,34 @@ app.get('/agent.sha256', (req, res) => {
   proxyFromStorage(INSTALL_SHA256_URL, req, res, 'text/plain');
 });
 
+// Tarball proxy endpoint used by install.sh so clients do not need direct Azure URLs.
+app.get('/agent/artifacts/*', (req, res) => {
+  const requestedPath = req.params[0];
+  const blobPath = normalizeArtifactPath(requestedPath);
+
+  if (!blobPath) {
+    res.status(400).json({
+      error: 'Bad Request',
+      message: 'Invalid artifact path'
+    });
+    return;
+  }
+
+  const contentType = blobPath.endsWith('.sha256')
+    ? 'text/plain'
+    : blobPath.endsWith('.json')
+      ? 'application/json'
+      : 'application/gzip';
+
+  proxyFromStorage(
+    buildStorageUrl(blobPath),
+    req,
+    res,
+    contentType,
+    'Failed to fetch agent artifact'
+  );
+});
+
 // Info endpoint - shows what would be executed
 app.get('/agent/info', (req, res) => {
   const publicDomain = req.get('host') || 'get.iotistica.com';
@@ -119,6 +163,7 @@ app.get('/agent/info', (req, res) => {
     usage: `curl -sfL ${protocol}://${publicDomain}/agent | sh`,
     install_url: `${protocol}://${publicDomain}/agent`,
     checksum_url: `${protocol}://${publicDomain}/agent.sha256`,
+    artifacts_base_url: `${protocol}://${publicDomain}/agent/artifacts`,
     verify_integrity: `curl -sfL ${protocol}://${publicDomain}/agent.sha256 | sha256sum -c -`,
     documentation: 'https://iotistica.com/documentation.html#agent-installation'
   });

@@ -5,6 +5,7 @@ Simple, lightweight redirect service that provides a user-friendly install URL f
 ## Features
 
 - ✅ Proxies `https://get.iotistica.com/agent` → Azure Blob Storage
+- ✅ Proxies published agent tarballs via `https://get.iotistica.com/agent/artifacts/...`
 - ✅ Supports integrity verification via SHA256 checksums
 - ✅ Ultra-lightweight (Express + Helmet only)
 - ✅ Health check endpoint for monitoring
@@ -60,6 +61,11 @@ curl -sfL https://get.iotistica.com/agent | sh
 curl -sfL https://get.iotistica.com/agent.sha256 | sha256sum -c -
 ```
 
+### Download published tarball through redirect service
+```bash
+curl -I https://get.iotistica.com/agent/artifacts/agent-latest-x86_64.tar.gz
+```
+
 ### Get installation info
 ```bash
 curl https://iotistica.com/agent/info
@@ -72,6 +78,7 @@ Output:
   "usage": "curl -sfL https://get.iotistica.com/agent | sh",
   "install_url": "https://account.blob.core.windows.net/scripts/agent/install.sh",
   "checksum_url": "https://account.blob.core.windows.net/scripts/agent/install.sh.sha256",
+  "artifacts_base_url": "https://get.iotistica.com/agent/artifacts",
   "documentation": "https://iotistica.com/documentation.html#agent-installation"
 }
 ```
@@ -82,6 +89,7 @@ Output:
 |----------|--------|---------|
 | `/agent` | GET | Proxies the published install.sh from Azure Blob Storage |
 | `/agent.sha256` | GET | Proxies the SHA256 checksum file |
+| `/agent/artifacts/*` | GET | Proxies published tarballs and related artifact files |
 | `/agent/info` | GET | Returns installation info (JSON) |
 | `/health` | GET | Health check for monitoring |
 
@@ -227,6 +235,7 @@ docker logs -f iotistic-redirector
 - Ensure `AZURE_STORAGE_ACCOUNT` env var is set
 - Check Azure Blob Storage has the `agent/install.sh` blob
 - Check the running pod has `BLOB_INSTALL_PATH=agent/install.sh`
+- Check `https://get.iotistica.com/agent/artifacts/agent-latest-x86_64.tar.gz` if the installer cannot download artifacts
 
 ### 301 redirects not working
 - Verify curl is installed and supports HTTPS

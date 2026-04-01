@@ -11,6 +11,7 @@ set -e
 #   IOTISTICA_DEVICE_PORT          - Device API port (default: 48484)
 #   IOTISTICA_API   - Cloud API endpoint (e.g., https://api.iotistica.com)
 #   IOTISTICA_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
+#   IOTISTICA_DOWNLOAD_BASE_URL    - Base URL for published agent tarballs (default: https://get.iotistica.com/agent/artifacts)
 #   IOTISTICA_INSTALL_SOURCE       - Install source: auto | repo | artifact (default: auto)
 #   IOTISTICA_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
 #   IOTISTICA_INSTALL_MOSQUITTO    - Set to yes/true/1 to install and manage a local Mosquitto broker
@@ -570,16 +571,18 @@ echo ""
                 ;;
         esac
         
+        DOWNLOAD_BASE_URL="${IOTISTICA_DOWNLOAD_BASE_URL:-https://get.iotistica.com/agent/artifacts}"
+
         # Determine download URL
         if [ -n "$IOTISTICA_DOWNLOAD_URL" ]; then
             # Custom URL provided
             DOWNLOAD_URL="$IOTISTICA_DOWNLOAD_URL"
         elif [ "$AGENT_VERSION" = "dev" ] || [ "$AGENT_VERSION" = "latest" ]; then
             # Use latest version with architecture suffix
-            DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/agent-latest${TARBALL_SUFFIX}.tar.gz"
+            DOWNLOAD_URL="${DOWNLOAD_BASE_URL}/agent-latest${TARBALL_SUFFIX}.tar.gz"
         else
             # Use specific version with architecture suffix
-            DOWNLOAD_URL="https://iotistic.blob.core.windows.net/scripts/agent/versions/agent-${AGENT_VERSION}${TARBALL_SUFFIX}.tar.gz"
+            DOWNLOAD_URL="${DOWNLOAD_BASE_URL}/versions/agent-${AGENT_VERSION}${TARBALL_SUFFIX}.tar.gz"
         fi
         
         cd /tmp
