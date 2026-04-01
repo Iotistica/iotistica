@@ -31,8 +31,8 @@ jobs:
           IOTISTIC_LICENSE_KEY="${{ secrets.IOTISTIC_LICENSE_KEY }}" \
           .github/scripts/setup-env.sh
 
-      - name: Start core backend services
-        run: docker compose -f "$COMPOSE_FILE" up -d --build postgres redis mosquitto api
+      - name: Start database, cache, and API
+        run: docker compose -f "$COMPOSE_FILE" up -d --build postgres redis api
 
       - name: Wait for backend readiness
         run: |
@@ -50,17 +50,29 @@ jobs:
             done
           '
 
-          echo "Waiting for cloud Mosquitto..."
-          timeout 60 bash -c '
-            until docker inspect --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}" iotistic-mosquitto-e2e 2>/dev/null | grep -q healthy; do
-              sleep 2
-            done
-          '
-
           echo "Waiting for API..."
           timeout 180 bash -c '
             until curl -fsS http://localhost:4002/health > /dev/null; do
               sleep 3
+            done
+          '
+
+      - name: Start cloud Mosquitto broker
+        run: docker compose -f "$COMPOSE_FILE" up -d mosquitto
+
+      - name: Wait for cloud Mosquitto
+        run: |
+          echo "Waiting for cloud Mosquitto container..."
+          timeout 60 bash -c '
+            until docker inspect --format="{{.State.Status}}" iotistic-mosquitto-e2e 2>/dev/null | grep -q running; do
+              sleep 2
+            done
+          '
+
+          echo "Waiting for cloud Mosquitto port..."
+          timeout 60 bash -c '
+            until timeout 5 bash -c "</dev/tcp/127.0.0.1/5883" > /dev/null 2>&1; do
+              sleep 2
             done
           '
 
