@@ -1212,6 +1212,11 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const handleSaveMetricConfig = (config: MetricDataCardConfig) => {
     if (!configuringWidgetId) return;
 
+    // Always ensure widgetId matches the actual widget slot — duplicate cards
+    // carry the original's widgetId inside their cloned metricConfig, which must
+    // be corrected here so chart SVG IDs and references are unique.
+    const correctedConfig: MetricDataCardConfig = { ...config, widgetId: configuringWidgetId };
+
     const existingWidget = widgets.find(w => w.i === configuringWidgetId);
     
     if (existingWidget) {
@@ -1220,8 +1225,8 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         w.i === configuringWidgetId
           ? { 
               ...w, 
-              metricConfig: config, 
-              title: config.title || [config.deviceName, config.metricName].filter(Boolean).join(' - '),
+              metricConfig: correctedConfig, 
+              title: correctedConfig.title || [correctedConfig.deviceName, correctedConfig.metricName].filter(Boolean).join(' - '),
               _refreshTrigger: Date.now() // Trigger re-render to show threshold changes
             }
           : w
@@ -1240,13 +1245,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         minW: widgetConfig.minW,
         minH: widgetConfig.minH,
         type: 'METRIC_DATA',
-        title: config.title || [config.deviceName, config.metricName].filter(Boolean).join(' - '),
-        metricConfig: config
+        title: correctedConfig.title || [correctedConfig.deviceName, correctedConfig.metricName].filter(Boolean).join(' - '),
+        metricConfig: correctedConfig
       };
       setWidgets([...widgets, newWidget]);
     }
 
-    syncMetricAnomalyFromWidgetConfig(config);
+    syncMetricAnomalyFromWidgetConfig(correctedConfig);
 
     setHasUnsavedChanges(true);
     setConfiguringWidgetId(null);
@@ -1374,6 +1379,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       ? structuredClone(widget.metricConfig)
       : JSON.parse(JSON.stringify(widget.metricConfig)) as MetricDataCardConfig;
 
+    const newTitle = widget.title ? `${widget.title} Copy` : widget.title;
+
+    // Keep metricConfig.title in sync so the settings dialog pre-fills the correct title
+    if (newTitle) {
+      duplicateConfig.title = newTitle;
+    }
+
     const duplicateWidget: DashboardWidget = {
       ...widget,
       i: `metric-${crypto.randomUUID()}`,
@@ -1383,7 +1395,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       h: widget.h ?? widgetConfig.defaultH,
       minW: widget.minW ?? widgetConfig.minW,
       minH: widget.minH ?? widgetConfig.minH,
-      title: widget.title ? `${widget.title} Copy` : widget.title,
+      title: newTitle,
       metricConfig: duplicateConfig,
       _metricData: undefined,
       _refreshTrigger: Date.now(),
