@@ -17,7 +17,8 @@
  */
 
 import { randomUUID } from 'crypto';
-import { getKnex } from '../connection';
+import Database from 'better-sqlite3';
+import { getDatabase } from '../sqlite';
 import type { Endpoint } from './endpoint.model';
 
 export interface Device {
@@ -41,14 +42,23 @@ export interface Device {
   updated_at?: Date | string;
 }
 
+type DeviceRow = Omit<Device, 'enabled' | 'metadata'> & {
+  enabled: number;
+  metadata?: string | Record<string, any> | null;
+};
+
 export class DeviceModel {
   private static readonly table = 'devices';
 
+  private static getDb(): Database.Database {
+    return getDatabase();
+  }
+
   static async getAll(protocol?: string): Promise<Device[]> {
-    const knex = getKnex();
-    const query = knex(this.table).select('*');
-    if (protocol) query.where('protocol', protocol);
-    const rows = await query.orderBy('name');
+    const rows = protocol
+      ? this.getDb().prepare(`SELECT * FROM ${this.table} WHERE protocol = ? ORDER BY name ASC`).all(protocol) as DeviceRow[]
+      : this.getDb().prepare(`SELECT * FROM ${this.table} ORDER BY name ASC`).all() as DeviceRow[];
+
     return rows.map(this.parse);
   }
 
@@ -58,30 +68,39 @@ export class DeviceModel {
    * cloud can store agent-reported devices without re-parsing endpoint metadata.
    */
   static async getAllWithEndpointUuid(): Promise<Array<Device & { endpoint_uuid: string }>> {
-    const knex = getKnex();
-    const rows = await knex('devices as d')
-      .join('endpoints as e', 'e.id', 'd.endpoint_id')
-      .select('d.*', 'e.uuid as endpoint_uuid')
-      .orderBy('d.name');
-    return rows.map(row => ({ ...this.parse(row), endpoint_uuid: row.endpoint_uuid }));
+    const rows = this.getDb()
+      .prepare(`
+        SELECT d.*, e.uuid as endpoint_uuid
+        FROM devices d
+        JOIN endpoints e ON e.id = d.endpoint_id
+        ORDER BY d.name ASC
+      `)
+      .all() as Array<DeviceRow & { endpoint_uuid: string }>;
+
+    return rows.map((row) => ({ ...this.parse(row), endpoint_uuid: row.endpoint_uuid }));
   }
 
   static async getByEndpointId(endpointId: number): Promise<Device[]> {
-    const knex = getKnex();
-    const rows = await knex(this.table).where('endpoint_id', endpointId).select('*');
+    const rows = this.getDb()
+      .prepare(`SELECT * FROM ${this.table} WHERE endpoint_id = ?`)
+      .all(endpointId) as DeviceRow[];
+
     return rows.map(this.parse);
   }
 
   static async getByUuid(uuid: string): Promise<Device | null> {
-    const knex = getKnex();
-    const row = await knex(this.table).where('uuid', uuid).first();
+    const row = this.getDb()
+      .prepare(`SELECT * FROM ${this.table} WHERE uuid = ? LIMIT 1`)
+      .get(uuid) as DeviceRow | undefined;
+
     return row ? this.parse(row) : null;
   }
 
   static async updateLastSeen(uuid: string): Promise<void> {
-    const knex = getKnex();
     const now = new Date().toISOString();
-    await knex(this.table).where('uuid', uuid).update({ lastSeenAt: now, updated_at: now });
+    this.getDb()
+      .prepare(`UPDATE ${this.table} SET lastSeenAt = ?, updated_at = ? WHERE uuid = ?`)
+      .run(now, now, uuid);
   }
 
   /**
@@ -89,11 +108,16 @@ export class DeviceModel {
    * Called from the poll adapters on each successful read.
    */
   static async updateLastSeenByEndpointName(endpointName: string): Promise<void> {
-    const knex = getKnex();
+    const db = this.getDb();
     const now = new Date().toISOString();
-    const endpoint = await knex('endpoints').where('name', endpointName).select('id').first();
+    const endpoint = db
+      .prepare('SELECT id FROM endpoints WHERE name = ? LIMIT 1')
+      .get(endpointName) as { id: number } | undefined;
+
     if (!endpoint) return;
-    await knex(this.table).where('endpoint_id', endpoint.id).update({ lastSeenAt: now, updated_at: now });
+
+    db.prepare(`UPDATE ${this.table} SET lastSeenAt = ?, updated_at = ? WHERE endpoint_id = ?`)
+      .run(now, now, endpoint.id);
   }
 
   /**
@@ -101,23 +125,30 @@ export class DeviceModel {
    * For 1:1 protocols (identifier null/undefined), matches on endpoint_id alone.
    */
   static async upsertDevice(device: Omit<Device, 'id'>): Promise<void> {
-    const knex = getKnex();
+    const db = this.getDb();
     const now = new Date().toISOString();
 
     const hasIdentifier = device.identifier !== undefined && device.identifier !== null;
 
     const existing = hasIdentifier
-      ? await knex(this.table)
-          .where('endpoint_id', device.endpoint_id)
-          .where('identifier', device.identifier)
-          .first()
-      : await knex(this.table)
-          .where('endpoint_id', device.endpoint_id)
-          .whereNull('identifier')
-          .first();
+      ? db
+          .prepare(`SELECT id FROM ${this.table} WHERE endpoint_id = ? AND identifier = ? LIMIT 1`)
+          .get(device.endpoint_id, device.identifier) as { id: number } | undefined
+      : db
+          .prepare(`SELECT id FROM ${this.table} WHERE endpoint_id = ? AND identifier IS NULL LIMIT 1`)
+          .get(device.endpoint_id) as { id: number } | undefined;
 
     if (existing) {
-      await knex(this.table).where('id', existing.id).update({
+      db.prepare(`
+        UPDATE ${this.table}
+        SET name = @name,
+            enabled = @enabled,
+            metadata = @metadata,
+            lastSeenAt = @lastSeenAt,
+            updated_at = @updated_at
+        WHERE id = @id
+      `).run({
+        id: existing.id,
         name: device.name,
         enabled: device.enabled ? 1 : 0,
         metadata: device.metadata ? JSON.stringify(device.metadata) : null,
@@ -125,7 +156,31 @@ export class DeviceModel {
         updated_at: now,
       });
     } else {
-      await knex(this.table).insert({
+      db.prepare(`
+        INSERT INTO ${this.table} (
+          uuid,
+          endpoint_id,
+          name,
+          protocol,
+          enabled,
+          identifier,
+          metadata,
+          lastSeenAt,
+          created_at,
+          updated_at
+        ) VALUES (
+          @uuid,
+          @endpoint_id,
+          @name,
+          @protocol,
+          @enabled,
+          @identifier,
+          @metadata,
+          @lastSeenAt,
+          @created_at,
+          @updated_at
+        )
+      `).run({
         uuid: device.uuid,
         endpoint_id: device.endpoint_id,
         name: device.name,
@@ -240,7 +295,7 @@ export class DeviceModel {
     }
   }
 
-  private static parse(row: any): Device {
+  private static parse(row: DeviceRow): Device {
     return {
       ...row,
       enabled: Boolean(row.enabled),

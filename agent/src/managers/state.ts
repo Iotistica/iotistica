@@ -14,9 +14,9 @@
  */
 
 import { EventEmitter } from 'events';
-import _ from 'lodash';
 import crypto from 'crypto';
-import { models as db } from '../db/connection.js';
+import { getDatabase } from '../db/sqlite.js';
+import { cloneDeep, deepEqual } from '../lib/collection-utils.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 import { ContainerManager } from '../docker/container-manager.js';
@@ -59,6 +59,10 @@ export class StateManager extends EventEmitter {
 	private pendingReconcile = false;
 	private reconcileTimer?: NodeJS.Timeout;
 	private readonly reconcileDelayMs = 500; // Debounce to coalesce rapid updates from cloud
+
+	private getDb() {
+		return getDatabase();
+	}
 
 	/**
 	 * Set logger (called after logger is initialized)
@@ -173,8 +177,8 @@ export class StateManager extends EventEmitter {
 		});
 
 		// Store previous state before updating
-		this.previousState = _.cloneDeep(this.targetState);
-		this.targetState = _.cloneDeep(state);
+		this.previousState = cloneDeep(this.targetState);
+		this.targetState = cloneDeep(state);
 		
 		// Ensure config field exists
 		if (!this.targetState.config) {
@@ -219,7 +223,7 @@ export class StateManager extends EventEmitter {
 		});
 
 		// Update target state without triggering events or reconciliation
-		this.targetState = _.cloneDeep(state);
+		this.targetState = cloneDeep(state);
 		
 		// Ensure config field exists
 		if (!this.targetState.config) {
@@ -263,7 +267,7 @@ export class StateManager extends EventEmitter {
 	 * Get target state
 	 */
 	public getTargetState(): AgentState {
-		return _.cloneDeep(this.targetState);
+		return cloneDeep(this.targetState);
 	}
 
 	/**
@@ -481,10 +485,15 @@ export class StateManager extends EventEmitter {
 	 */
 	private async loadTargetStateFromDB(): Promise<void> {
 		try {
-			const snapshots = await db('stateSnapshot')
-				.where({ type: 'target' })
-				.orderBy('createdAt', 'desc')
-				.limit(1);
+			const snapshots = this.getDb()
+				.prepare(`
+					SELECT state, stateHash
+					FROM stateSnapshot
+					WHERE type = ?
+					ORDER BY createdAt DESC
+					LIMIT 1
+				`)
+				.all('target') as Array<{ state: string; stateHash?: string | null }>;
 
 		if (snapshots.length > 0) {
 			this.targetState = JSON.parse(snapshots[0].state);
@@ -540,24 +549,34 @@ export class StateManager extends EventEmitter {
 
 			const stateJson = JSON.stringify(this.targetState);
 
-			// Insert new snapshot first, then trim to keep the most recent two
-			await db('stateSnapshot').insert({
-				type: 'target',
-				state: stateJson,
-				stateHash: stateHash,
+			const persistSnapshot = this.getDb().transaction(() => {
+				this.getDb()
+					.prepare(`
+						INSERT INTO stateSnapshot (type, state, stateHash)
+						VALUES (?, ?, ?)
+					`)
+					.run('target', stateJson, stateHash);
+
+				const oldSnapshots = this.getDb()
+					.prepare(`
+						SELECT id
+						FROM stateSnapshot
+						WHERE type = ?
+						ORDER BY createdAt DESC
+						LIMIT -1 OFFSET 2
+					`)
+					.all('target') as Array<{ id?: number }>;
+
+				const oldIds = oldSnapshots.map((snapshot) => snapshot.id).filter((id): id is number => typeof id === 'number');
+				if (oldIds.length > 0) {
+					const placeholders = oldIds.map(() => '?').join(', ');
+					this.getDb()
+						.prepare(`DELETE FROM stateSnapshot WHERE id IN (${placeholders})`)
+						.run(...oldIds);
+				}
 			});
 
-			// Keep only the latest 2 target snapshots to survive power loss without bloat
-			const oldSnapshots = await db('stateSnapshot')
-				.where({ type: 'target' })
-				.orderBy('createdAt', 'desc')
-				.offset(2);
-			if (oldSnapshots.length > 0) {
-				const oldIds = oldSnapshots.map((s: any) => s.id).filter(Boolean);
-				if (oldIds.length > 0) {
-					await db('stateSnapshot').whereIn('id', oldIds).delete();
-				}
-			}
+			persistSnapshot();
 
 		} catch (error) {
 			this.logger?.errorSync(
@@ -592,23 +611,34 @@ export class StateManager extends EventEmitter {
 			this.lastSavedCurrentStateHash = stateHash;
 			const stateJson = JSON.stringify(currentState);
 
-			await db('stateSnapshot').insert({
-				type: 'current',
-				state: stateJson,
-				stateHash: stateHash,
+			const persistSnapshot = this.getDb().transaction(() => {
+				this.getDb()
+					.prepare(`
+						INSERT INTO stateSnapshot (type, state, stateHash)
+						VALUES (?, ?, ?)
+					`)
+					.run('current', stateJson, stateHash);
+
+				const oldSnapshots = this.getDb()
+					.prepare(`
+						SELECT id
+						FROM stateSnapshot
+						WHERE type = ?
+						ORDER BY createdAt DESC
+						LIMIT -1 OFFSET 2
+					`)
+					.all('current') as Array<{ id?: number }>;
+
+				const oldIds = oldSnapshots.map((snapshot) => snapshot.id).filter((id): id is number => typeof id === 'number');
+				if (oldIds.length > 0) {
+					const placeholders = oldIds.map(() => '?').join(', ');
+					this.getDb()
+						.prepare(`DELETE FROM stateSnapshot WHERE id IN (${placeholders})`)
+						.run(...oldIds);
+				}
 			});
 
-			// Keep only latest 2 current snapshots to limit DB growth.
-			const oldSnapshots = await db('stateSnapshot')
-				.where({ type: 'current' })
-				.orderBy('createdAt', 'desc')
-				.offset(2);
-			if (oldSnapshots.length > 0) {
-				const oldIds = oldSnapshots.map((s: any) => s.id).filter(Boolean);
-				if (oldIds.length > 0) {
-					await db('stateSnapshot').whereIn('id', oldIds).delete();
-				}
-			}
+			persistSnapshot();
 		} catch (error) {
 			this.logger?.errorSync(
 				'Failed to save current state to DB',
@@ -631,7 +661,7 @@ export class StateManager extends EventEmitter {
 	}
 
 	private canonicalizeState(state: AgentState): AgentState {
-		const clone = _.cloneDeep(state);
+		const clone = cloneDeep(state);
 
 		// Sort apps by numeric key to stabilize hashing
 		if (clone.apps) {
@@ -680,7 +710,7 @@ export class StateManager extends EventEmitter {
 		const newConfig = newState.config || {};
 
 		// Check logging config changes
-		if (!_.isEqual(oldConfig.logging, newConfig.logging)) {
+		if (!deepEqual(oldConfig.logging, newConfig.logging)) {
 			this.logger?.debugSync('Logging configuration changed - emitConfigChangeEvents', {
 				component: LogComponents.stateReconciler,
 				operation: 'emitConfigChangeEvents',
@@ -694,7 +724,7 @@ export class StateManager extends EventEmitter {
 		}
 
 		// Check intervals changes
-		if (!_.isEqual(oldConfig.intervals, newConfig.intervals)) {
+		if (!deepEqual(oldConfig.intervals, newConfig.intervals)) {
 			this.logger?.debugSync('Intervals configuration changed - emitConfigChangeEvents', {
 				component: LogComponents.stateReconciler,
 				operation: 'emitConfigChangeEvents',
@@ -716,7 +746,7 @@ export class StateManager extends EventEmitter {
 			memoryThresholdMb: newConfig.settings?.memoryThresholdMb,
 			memoryCheckIntervalMs: newConfig.settings?.memoryCheckIntervalMs,
 		};
-		if (!_.isEqual(oldMemoryConfig, newMemoryConfig)) {
+		if (!deepEqual(oldMemoryConfig, newMemoryConfig)) {
 			this.logger?.debugSync('Memory configuration changed', {
 				component: LogComponents.stateReconciler,
 				operation: 'emitConfigChangeEvents',
@@ -728,7 +758,7 @@ export class StateManager extends EventEmitter {
 		}
 
 		// Check scheduled restart changes
-		if (!_.isEqual(oldConfig.settings?.scheduledRestart, newConfig.settings?.scheduledRestart)) {
+		if (!deepEqual(oldConfig.settings?.scheduledRestart, newConfig.settings?.scheduledRestart)) {
 			this.logger?.debugSync('Scheduled restart configuration changed', {
 				component: LogComponents.stateReconciler,
 				operation: 'emitConfigChangeEvents',
@@ -740,7 +770,7 @@ export class StateManager extends EventEmitter {
 		}
 
 		// Check endpoints changes
-		if (!_.isEqual(oldConfig.endpoints, newConfig.endpoints)) {
+		if (!deepEqual(oldConfig.endpoints, newConfig.endpoints)) {
 			this.logger?.debugSync('Endpoints configuration changed', {
 				component: LogComponents.stateReconciler,
 				operation: 'emitConfigChangeEvents',

@@ -1,4 +1,4 @@
-import _ from 'lodash';
+import { isEmpty, isObject } from './collection-utils';
 export interface CheckIntOptions {
 	positive?: boolean;
 }
@@ -94,7 +94,7 @@ export function checkFalsey(v: unknown): boolean {
  * Ensure a string is either undefined, or a non-empty string
  */
 export function validStringOrUndefined(s: string | undefined): boolean {
-	return s == null || (typeof s === 'string' && !_.isEmpty(s));
+	return s == null || (typeof s === 'string' && !isEmpty(s));
 }
 
 /**
@@ -103,5 +103,5 @@ export function validStringOrUndefined(s: string | undefined): boolean {
  * Ensure an object is either undefined or an actual object
  */
 export function validObjectOrUndefined(o: object | undefined): boolean {
-	return o == null || _.isObject(o);
+	return o == null || isObject(o);
 }

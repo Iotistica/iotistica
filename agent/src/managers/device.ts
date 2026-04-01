@@ -11,7 +11,7 @@
  * 
  * Refactored for testability with dependency injection:
  * - HttpClient abstraction for API calls (no global fetch stubbing needed)
- * - DatabaseClient abstraction for database operations (no Knex mocking needed)
+ * - DatabaseClient abstraction for database operations (no DB driver stubbing needed)
  */
 
 import type { 
@@ -35,7 +35,7 @@ import { LogComponents } from '../logging/types';
 import type { HttpClient } from '../lib/http-client.js';
 import { createHttpClient, FetchHttpClient } from '../lib/http-client.js';
 import type { DatabaseClient } from '../db/client.js';
-import { KnexDatabaseClient } from '../db/client.js';
+import { SqliteDatabaseClient } from '../db/client.js';
 import { PopCryptoManager } from '../security/pop-crypto.js';
 
 export class DeviceManager {
@@ -61,7 +61,7 @@ export class DeviceManager {
 	) {
 		this.logger = logger;
 		this.httpClient = httpClient || this.createHttpClient(cloudApiEndpoint);
-		this.dbClient = dbClient || new KnexDatabaseClient();
+		this.dbClient = dbClient || new SqliteDatabaseClient();
 		this.uuidGenerator = uuidGenerator || new DefaultUuidGenerator();
 	}
 

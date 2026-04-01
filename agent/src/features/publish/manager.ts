@@ -26,8 +26,8 @@ const MAX_BATCH_BYTES = (() => {
 // ============================================================================
 
 export class PublishManager extends EventEmitter {
-  private messageBufferModel?: typeof import('../../db/models/message-buffer.model.js').MessageBufferModel;
-  private messageBufferModelPromise?: Promise<typeof import('../../db/models/message-buffer.model.js').MessageBufferModel>;
+  private messageBufferModel?: typeof import('../../db/models/buffer.model.js').MessageBufferModel;
+  private messageBufferModelPromise?: Promise<typeof import('../../db/models/buffer.model.js').MessageBufferModel>;
   private readonly batcher: MessageBatcher;
   private readonly connection: DeviceConnection;
   private readonly compressor: PayloadCompressor;
@@ -332,7 +332,7 @@ export class PublishManager extends EventEmitter {
     try {
       const MessageBufferModel = await this.getMessageBufferModel();
       const jsonPayload = JSON.stringify(data);
-      await MessageBufferModel.enqueue({
+      MessageBufferModel.enqueue({
         endpoint_name: name,
         topic,
         qos: 1,
@@ -345,7 +345,7 @@ export class PublishManager extends EventEmitter {
     }
   }
 
-  private async getMessageBufferModel(): Promise<typeof import('../../db/models/message-buffer.model.js').MessageBufferModel> {
+  private async getMessageBufferModel(): Promise<typeof import('../../db/models/buffer.model.js').MessageBufferModel> {
     if (this.messageBufferModel) {
       return this.messageBufferModel;
     }

@@ -624,10 +624,10 @@ echo ""
         echo "Building agent..."
         npx tsc --project tsconfig.build.json
         
-        echo "Copying migrations..."
-        npm run copy:migrations
-        if [ ! -d dist/db/migrations ]; then
-            echo "✗ Error: Migrations copy failed - dist/db/migrations not found"
+        echo "Copying database assets..."
+        npm run copy:db-assets
+        if [ ! -f dist/db/template.sqlite.sql ]; then
+            echo "✗ Error: Database asset copy failed - dist/db/template.sqlite.sql not found"
             exit 1
         fi
 

@@ -6,7 +6,7 @@
  * Uses the existing agent.sqlite database with dedicated tables.
  */
 
-type Knex = any;
+import type Database from 'better-sqlite3';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import type { AnomalyAlert, CanonicalDeviceState, StatisticalBuffer } from './types';
@@ -59,17 +59,164 @@ export interface AnomalyBaselineRecord {
 	updated_at?: Date;
 }
 
+type AnomalyAlertRow = Omit<AnomalyAlertRecord, 'created_at'> & {
+	created_at?: string | Date | null;
+};
+
+type AnomalyBaselineRow = Omit<AnomalyBaselineRecord, 'created_at' | 'updated_at'> & {
+	created_at?: string | Date | null;
+	updated_at?: string | Date | null;
+};
+
 export class AnomalyStorageService {
-	private db: Knex;
+	private db: Database.Database;
 	private logger?: AgentLogger;
 	private retention: number;
 	private cleanupIntervalMs: number = 86400000; // 24 hours
 	private cleanupTimer?: NodeJS.Timeout;
+	private readonly tableColumns = new Map<string, Set<string>>();
 
-	constructor(db: Knex, retention: number, logger?: AgentLogger) {
+	constructor(db: Database.Database, retention: number, logger?: AgentLogger) {
 		this.db = db;
 		this.retention = retention;
 		this.logger = logger;
+	}
+
+	private hasTable(tableName: 'anomaly_alerts' | 'anomaly_baselines'): boolean {
+		const row = this.db
+			.prepare(`
+				SELECT name
+				FROM sqlite_master
+				WHERE type = 'table' AND name = ?
+				LIMIT 1
+			`)
+			.get(tableName) as { name?: string } | undefined;
+
+		return row?.name === tableName;
+	}
+
+	private getTableColumns(tableName: 'anomaly_alerts' | 'anomaly_baselines'): Set<string> {
+		const cached = this.tableColumns.get(tableName);
+		if (cached) {
+			return cached;
+		}
+
+		const rows = this.db
+			.prepare(`PRAGMA table_info(${tableName})`)
+			.all() as Array<{ name: string }>;
+
+		const columns = new Set(rows.map((row) => row.name));
+		this.tableColumns.set(tableName, columns);
+		return columns;
+	}
+
+	private hasColumn(tableName: 'anomaly_alerts' | 'anomaly_baselines', columnName: string): boolean {
+		return this.getTableColumns(tableName).has(columnName);
+	}
+
+	private mapAlertRow(row: AnomalyAlertRow): AnomalyAlertRecord {
+		return {
+			...row,
+			created_at: row.created_at ? new Date(row.created_at) : undefined,
+		};
+	}
+
+	private mapBaselineRow(row: AnomalyBaselineRow): AnomalyBaselineRecord {
+		return {
+			...row,
+			created_at: row.created_at ? new Date(row.created_at) : undefined,
+			updated_at: row.updated_at ? new Date(row.updated_at) : undefined,
+		};
+	}
+
+	private buildInsertStatement(
+		tableName: string,
+		record: Record<string, unknown>,
+		conflictColumns?: string[],
+	): { sql: string; values: unknown[] } {
+		const columns = Object.keys(record);
+		const placeholders = columns.map(() => '?').join(', ');
+		const values = columns.map((column) => record[column]);
+		let sql = `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
+
+		if (conflictColumns && conflictColumns.length > 0) {
+			const updateColumns = columns.filter((column) => !conflictColumns.includes(column));
+			const updateClause = updateColumns
+				.map((column) => `${column} = excluded.${column}`)
+				.join(', ');
+			sql += ` ON CONFLICT(${conflictColumns.join(', ')}) DO UPDATE SET ${updateClause}`;
+		}
+
+		return { sql, values };
+	}
+
+	private getBaselineSchema() {
+		return {
+			hasTimeSlot: this.hasColumn('anomaly_baselines', 'time_slot'),
+			hasDeviceState: this.hasColumn('anomaly_baselines', 'device_state'),
+			hasDeviceId: this.hasColumn('anomaly_baselines', 'device_id'),
+		};
+	}
+
+	private buildMetricMatchClause(metrics: string[]): { clause: string; params: unknown[] } {
+		const exactClause = metrics.map(() => '?').join(', ');
+		const likeClause = metrics.map(() => 'metric LIKE ?').join(' OR ');
+		return {
+			clause: `(metric IN (${exactClause}) OR ${likeClause})`,
+			params: [...metrics, ...metrics.map((metric) => `%_${metric}`)],
+		};
+	}
+
+	private queryBaseline(
+		metric: string,
+		options: {
+			timeSlot?: number;
+			profile?: string | null;
+			deviceState?: CanonicalDeviceState;
+			deviceId?: string;
+			minimumSamples?: number;
+		},
+	): AnomalyBaselineRecord | null {
+		const whereParts = ['metric = ?'];
+		const params: unknown[] = [metric];
+		const schema = this.getBaselineSchema();
+
+		if (typeof options.minimumSamples === 'number') {
+			whereParts.push('sample_count >= ?');
+			params.push(options.minimumSamples);
+		}
+
+		if (schema.hasTimeSlot && typeof options.timeSlot === 'number') {
+			whereParts.push('time_slot = ?');
+			params.push(options.timeSlot);
+		}
+
+		if (options.profile !== null && options.profile !== undefined) {
+			whereParts.push('profile = ?');
+			params.push(options.profile);
+		}
+
+		if (schema.hasDeviceState && options.deviceState) {
+			whereParts.push('device_state = ?');
+			params.push(options.deviceState);
+		}
+
+		if (schema.hasDeviceId && options.deviceId) {
+			whereParts.push('device_id = ?');
+			params.push(options.deviceId);
+		}
+
+		const row = this.db
+			.prepare(`
+				SELECT *
+				FROM anomaly_baselines
+				WHERE ${whereParts.join(' AND ')}
+				ORDER BY calculated_at DESC
+				LIMIT 1
+			`)
+			.get(...params) as AnomalyBaselineRow | undefined;
+
+		return row ? this.mapBaselineRow(row) : null;
 	}
 
 	/**
@@ -77,8 +224,8 @@ export class AnomalyStorageService {
 	 */
 	async initialize(): Promise<void> {
 		// Verify tables exist
-		const alertsTableExists = await this.db.schema.hasTable('anomaly_alerts');
-		const baselinesTableExists = await this.db.schema.hasTable('anomaly_baselines');
+		const alertsTableExists = this.hasTable('anomaly_alerts');
+		const baselinesTableExists = this.hasTable('anomaly_baselines');
 
 		if (!alertsTableExists || !baselinesTableExists) {
 			throw new Error(
@@ -126,27 +273,25 @@ export class AnomalyStorageService {
 				consecutive_count: alert.consecutiveCount,
 			};
 
-			try {
-				await this.db('anomaly_alerts').insert(record);
-			} catch (insertError: any) {
-				// Backward compatibility: if suppression columns don't exist, insert without them
-				if (insertError?.message?.includes('no such column: cooldown_sec') ||
-				    insertError?.message?.includes('no such column: first_seen') ||
-				    insertError?.message?.includes('no such column: consecutive_count') ||
-				    insertError?.message?.includes('has no column named cooldown_sec')) {
+			const hasSuppressionMetadata =
+				this.hasColumn('anomaly_alerts', 'cooldown_sec') &&
+				this.hasColumn('anomaly_alerts', 'first_seen') &&
+				this.hasColumn('anomaly_alerts', 'consecutive_count');
+
+			const insertRecord = hasSuppressionMetadata
+				? record
+				: (() => {
 					this.logger?.debugSync('Inserting alert without suppression metadata (legacy schema)', {
 						component: LogComponents.anomaly,
 						alert_id: alert.id,
 						note: 'Run migration 003_add_alert_suppression_metadata.sql to enable suppression tracking',
 					});
-					
-					// Create record without suppression fields
 					const { cooldown_sec, first_seen, consecutive_count, ...legacyRecord } = record;
-					await this.db('anomaly_alerts').insert(legacyRecord);
-				} else {
-					throw insertError;
-				}
-			}
+					return legacyRecord;
+				})();
+
+			const { sql, values } = this.buildInsertStatement('anomaly_alerts', insertRecord);
+			this.db.prepare(sql).run(...values);
 
 			this.logger?.debugSync('Stored anomaly alert', {
 				component: LogComponents.anomaly,
@@ -175,6 +320,7 @@ export class AnomalyStorageService {
 		deviceId: string = 'unknown-device'
 	): Promise<void> {
 		try {
+			const schema = this.getBaselineSchema();
 			// Calculate percentiles for IQR
 			const sortedValues = [...buffer.values].slice(0, buffer.size).sort((a, b) => a - b);
 			const q1Index = Math.floor(buffer.size * 0.25);
@@ -183,12 +329,9 @@ export class AnomalyStorageService {
 			const q3 = sortedValues[q3Index] || null;
 			const iqr = q1 !== null && q3 !== null ? q3 - q1 : null;
 
-			const record: AnomalyBaselineRecord = {
+			const record: Record<string, unknown> = {
 				metric,
-				device_id: deviceId,
 				profile,
-				time_slot: timeSlot,
-				device_state: deviceState,
 				mean: buffer.mean,
 				median: getMedian(buffer),
 				std_dev: Math.sqrt(buffer.variance),
@@ -204,6 +347,16 @@ export class AnomalyStorageService {
 				window_end: buffer.timestamps[buffer.size - 1] || null,
 			};
 
+			if (schema.hasTimeSlot) {
+				record.time_slot = timeSlot;
+			}
+			if (schema.hasDeviceState) {
+				record.device_state = deviceState;
+			}
+			if (schema.hasDeviceId) {
+				record.device_id = deviceId;
+			}
+
 			this.logger?.debugSync('Inserting baseline record', {
 				component: LogComponents.anomaly,
 				metric,
@@ -214,37 +367,29 @@ export class AnomalyStorageService {
 				median: record.median,
 			});
 
-		// Use INSERT OR REPLACE to handle updates (SQLite upsert)
-		// MEMORY LEAK FIX: Use Knex query builder instead of raw() to avoid template string accumulation
-		try {
-			await this.db('anomaly_baselines')
-				.insert(record)
-				.onConflict(['metric', 'profile', 'time_slot', 'device_state', 'device_id'])
-				.merge();
-		} catch (insertError: any) {
-			if (
-				insertError?.message?.includes('no such column: device_state') ||
-				insertError?.message?.includes('has no column named device_state') ||
-				insertError?.message?.includes('no such column: device_id') ||
-				insertError?.message?.includes('has no column named device_id')
-			) {
-				this.logger?.debugSync('Storing baseline without device_state/device_id (legacy schema)', {
+			if (!schema.hasDeviceState || !schema.hasDeviceId) {
+				this.logger?.debugSync('Storing baseline without full state/device schema', {
 					component: LogComponents.anomaly,
 					metric,
 					device_id: deviceId,
 					device_state: deviceState,
-					note: 'Run migration 20260316000000_add_anomaly_baseline_device_state.js to enable state-aware baselines',
+					note: 'Run anomaly baseline schema migrations to enable full state-aware baselines',
 				});
-
-				const { device_state, device_id, ...legacyRecord } = record;
-				await this.db('anomaly_baselines')
-					.insert(legacyRecord)
-					.onConflict(['metric', 'profile', 'time_slot'])
-					.merge();
-			} else {
-				throw insertError;
 			}
-		}
+
+			const conflictColumns = ['metric', 'profile'];
+			if (schema.hasTimeSlot) {
+				conflictColumns.push('time_slot');
+			}
+			if (schema.hasDeviceState) {
+				conflictColumns.push('device_state');
+			}
+			if (schema.hasDeviceId) {
+				conflictColumns.push('device_id');
+			}
+
+			const { sql, values } = this.buildInsertStatement('anomaly_baselines', record, conflictColumns);
+			this.db.prepare(sql).run(...values);
 	} catch (error) {
 		this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
 			component: LogComponents.anomaly,
@@ -266,12 +411,17 @@ export class AnomalyStorageService {
 		limit: number = 100
 	): Promise<AnomalyAlertRecord[]> {
 		try {
-			const alerts = await this.db('anomaly_alerts')
-				.where({ metric })
-				.orderBy('timestamp', 'desc')
-				.limit(limit);
+			const alerts = this.db
+				.prepare(`
+					SELECT *
+					FROM anomaly_alerts
+					WHERE metric = ?
+					ORDER BY timestamp DESC
+					LIMIT ?
+				`)
+				.all(metric, limit) as AnomalyAlertRow[];
 
-			return alerts;
+			return alerts.map((alert) => this.mapAlertRow(alert));
 		} catch (error) {
 			this.logger?.errorSync('Failed to fetch recent alerts', error as Error, {
 				component: LogComponents.anomaly,
@@ -290,15 +440,24 @@ export class AnomalyStorageService {
 		metric?: string
 	): Promise<AnomalyAlertRecord[]> {
 		try {
-			let query = this.db('anomaly_alerts')
-				.whereBetween('timestamp', [startTimestamp, endTimestamp])
-				.orderBy('timestamp', 'desc');
+			const whereParts = ['timestamp BETWEEN ? AND ?'];
+			const params: unknown[] = [startTimestamp, endTimestamp];
 
 			if (metric) {
-				query = query.where({ metric });
+				whereParts.push('metric = ?');
+				params.push(metric);
 			}
 
-			return await query;
+			const alerts = this.db
+				.prepare(`
+					SELECT *
+					FROM anomaly_alerts
+					WHERE ${whereParts.join(' AND ')}
+					ORDER BY timestamp DESC
+				`)
+				.all(...params) as AnomalyAlertRow[];
+
+			return alerts.map((alert) => this.mapAlertRow(alert));
 		} catch (error) {
 			this.logger?.errorSync('Failed to fetch alerts by time range', error as Error, {
 				component: LogComponents.anomaly,
@@ -321,21 +480,17 @@ export class AnomalyStorageService {
 		}
 
 		try {
+			const { clause, params } = this.buildMetricMatchClause(metrics);
 			// Find metrics with ANY baselines (have been collected at least once)
 			// Support both exact matches (e.g., "temperature") and canonical keys (e.g., "8602805f-..._c11224a6-..._temperature")
-			let anyBaselinesQuery = this.db('anomaly_baselines');
-			
-			// Build OR condition: exact match OR metric ends with "_<metricName>"
-			anyBaselinesQuery = anyBaselinesQuery.where((qb: any) => {
-				qb.whereIn('metric', metrics); // Exact match for short names
-				for (const metric of metrics) {
-					qb.orWhere('metric', 'like', `%_${metric}`); // Canonical key match
-				}
-			});
-			
-			const anyBaselines = await anyBaselinesQuery
-				.select('metric')
-				.groupBy('metric');
+			const anyBaselines = this.db
+				.prepare(`
+					SELECT metric
+					FROM anomaly_baselines
+					WHERE ${clause}
+					GROUP BY metric
+				`)
+				.all(...params) as Array<{ metric: string }>;
 			
 			const collectibleMetrics = anyBaselines.length;
 			
@@ -345,20 +500,15 @@ export class AnomalyStorageService {
 			}
 			
 			// Find metrics with SUFFICIENT baselines (minSamples+)
-			let sufficientBaselinesQuery = this.db('anomaly_baselines')
-				.where('sample_count', '>=', minSamples);
-		
-			// Build OR condition: exact match OR metric ends with "_<metricName>"
-			sufficientBaselinesQuery = sufficientBaselinesQuery.where((qb: any) => {
-				qb.whereIn('metric', metrics); // Exact match for short names
-				for (const metric of metrics) {
-					qb.orWhere('metric', 'like', `%_${metric}`); // Canonical key match
-				}
-			});
-		
-			const sufficientBaselines = await sufficientBaselinesQuery
-				.select('metric')
-				.groupBy('metric');
+			const sufficientBaselines = this.db
+				.prepare(`
+					SELECT metric
+					FROM anomaly_baselines
+					WHERE sample_count >= ?
+					  AND ${clause}
+					GROUP BY metric
+				`)
+				.all(minSamples, ...params) as Array<{ metric: string }>;
 
 			const metricsWithBaselines = sufficientBaselines.length;
 			// Coverage = sufficient / collectible (excludes never-collected metrics like cpu_temp on Windows)
@@ -383,12 +533,7 @@ export class AnomalyStorageService {
 		metric: string,
 		minimumSamples: number = 10,
 	): Promise<AnomalyBaselineRecord | null> {
-		const result = await this.db('anomaly_baselines')
-			.where({ metric })
-			.where('sample_count', '>=', minimumSamples)
-			.orderBy('calculated_at', 'desc')
-			.first();
-		return result ?? null;
+		return this.queryBaseline(metric, { minimumSamples });
 	}
 
 	/**
@@ -405,147 +550,80 @@ export class AnomalyStorageService {
 		deviceState: CanonicalDeviceState = 'unknown',
 		deviceId: string = 'unknown-device'
 	): Promise<AnomalyBaselineRecord | null> {
+		const schema = this.getBaselineSchema();
 		const deviceCandidates = [deviceId];
-		if (deviceId !== 'unknown-device') {
+		if (schema.hasDeviceId && deviceId !== 'unknown-device') {
 			deviceCandidates.push('unknown-device');
 		}
 
 		// Try to get seasonal baseline first
-		if (timeSlot !== -1) {
-			try {
-				let seasonalBaseline: AnomalyBaselineRecord | null = null;
-				for (const candidateDeviceId of deviceCandidates) {
-					const query = this.db('anomaly_baselines')
-						.where({
-							metric,
-							time_slot: timeSlot,
-							device_state: deviceState,
-							device_id: candidateDeviceId,
-						});
-					if (profile !== null) {
-						query.where({ profile });
-					}
-
-					seasonalBaseline = await query
-						.orderBy('calculated_at', 'desc')
-						.first();
-
-					if (!seasonalBaseline && deviceState !== 'unknown') {
-						const unknownStateQuery = this.db('anomaly_baselines')
-							.where({
-								metric,
-								time_slot: timeSlot,
-								device_state: 'unknown',
-								device_id: candidateDeviceId,
-							});
-						if (profile !== null) {
-							unknownStateQuery.where({ profile });
-						}
-						seasonalBaseline = await unknownStateQuery
-							.orderBy('calculated_at', 'desc')
-							.first();
-					}
-
-					if (seasonalBaseline) {
-						break;
-					}
-				}
-				
-				// Use seasonal baseline if it has enough samples
-				if (seasonalBaseline && seasonalBaseline.sample_count >= minimumSamples) {
-					return seasonalBaseline;
-				}
-				
-				// Fall back to overall baseline if seasonal baseline insufficient
-				this.logger?.debugSync('Seasonal baseline insufficient, falling back to overall', {
-					component: LogComponents.anomaly,
-					metric,
-					deviceState,
+		if (schema.hasTimeSlot && timeSlot !== -1) {
+			let seasonalBaseline: AnomalyBaselineRecord | null = null;
+			for (const candidateDeviceId of deviceCandidates) {
+				seasonalBaseline = this.queryBaseline(metric, {
 					timeSlot,
-					samples: seasonalBaseline?.sample_count || 0,
-					minimumSamples,
+					profile,
+					deviceState: schema.hasDeviceState ? deviceState : undefined,
+					deviceId: schema.hasDeviceId ? candidateDeviceId : undefined,
 				});
-			} catch (seasonalError: any) {
-				// Backward compatibility: if time_slot column doesn't exist, fall back to old schema
-				if (seasonalError?.message?.includes('no such column: time_slot')) {
-					this.logger?.debugSync('Seasonality not supported (time_slot column missing), using legacy baseline', {
-						component: LogComponents.anomaly,
-						metric,
-						note: 'Run migration 002_add_seasonality_support.sql to enable seasonality',
+
+				if (!seasonalBaseline && schema.hasDeviceState && deviceState !== 'unknown') {
+					seasonalBaseline = this.queryBaseline(metric, {
+						timeSlot,
+						profile,
+						deviceState: 'unknown',
+						deviceId: schema.hasDeviceId ? candidateDeviceId : undefined,
 					});
-					// Fall through to overall baseline query without time_slot
-				} else if (
-					seasonalError?.message?.includes('no such column: device_state') ||
-					seasonalError?.message?.includes('no such column: device_id')
-				) {
-					this.logger?.debugSync('State/device-aware baselines not supported (device_state/device_id column missing), using legacy baseline', {
-						component: LogComponents.anomaly,
-						metric,
-						deviceState,
-						deviceId,
-						note: 'Run migration 20260316000000_add_anomaly_baseline_device_state.js to enable state-aware baselines',
-					});
-				} else {
-					throw seasonalError;
+				}
+
+				if (seasonalBaseline) {
+					break;
 				}
 			}
+
+			if (seasonalBaseline && seasonalBaseline.sample_count >= minimumSamples) {
+				return seasonalBaseline;
+			}
+
+			this.logger?.debugSync('Seasonal baseline insufficient, falling back to overall', {
+				component: LogComponents.anomaly,
+				metric,
+				deviceState,
+				timeSlot,
+				samples: seasonalBaseline?.sample_count || 0,
+				minimumSamples,
+			});
 		}
 		
 		// Get overall baseline (time_slot = -1) or legacy baseline (no time_slot)
 		try {
-			for (const candidateDeviceId of deviceCandidates) {
-				const query = this.db('anomaly_baselines')
-					.where({
-						metric,
-						time_slot: -1,
-						device_state: deviceState,
-						device_id: candidateDeviceId,
+			if (schema.hasTimeSlot) {
+				for (const candidateDeviceId of deviceCandidates) {
+					let baseline = this.queryBaseline(metric, {
+						timeSlot: -1,
+						profile,
+						deviceState: schema.hasDeviceState ? deviceState : undefined,
+						deviceId: schema.hasDeviceId ? candidateDeviceId : undefined,
 					});
 
-				if (profile !== null) {
-					query.where({ profile });
-				}
-
-				let baseline = await query
-					.orderBy('calculated_at', 'desc')
-					.first();
-
-				if (!baseline && deviceState !== 'unknown') {
-					const unknownStateQuery = this.db('anomaly_baselines')
-						.where({
-							metric,
-							time_slot: -1,
-							device_state: 'unknown',
-							device_id: candidateDeviceId,
+					if (!baseline && schema.hasDeviceState && deviceState !== 'unknown') {
+						baseline = this.queryBaseline(metric, {
+							timeSlot: -1,
+							profile,
+							deviceState: 'unknown',
+							deviceId: schema.hasDeviceId ? candidateDeviceId : undefined,
 						});
-					if (profile !== null) {
-						unknownStateQuery.where({ profile });
 					}
-					baseline = await unknownStateQuery
-						.orderBy('calculated_at', 'desc')
-						.first();
-				}
 
-				if (baseline) {
-					return baseline;
+					if (baseline) {
+						return baseline;
+					}
 				}
+				return null;
 			}
 
-			return null;
+			return this.queryBaseline(metric, { minimumSamples: undefined });
 		} catch (overallError: any) {
-			// Backward compatibility: if time_slot column doesn't exist, query without it
-			if (
-				overallError?.message?.includes('no such column: time_slot') ||
-				overallError?.message?.includes('no such column: device_state') ||
-				overallError?.message?.includes('no such column: device_id')
-			) {
-				const legacyBaseline = await this.db('anomaly_baselines')
-					.where({ metric })
-					.orderBy('calculated_at', 'desc')
-					.first();
-				
-				return legacyBaseline || null;
-			}
 			throw overallError;
 		}
 	}
@@ -562,9 +640,13 @@ export class AnomalyStorageService {
 		try {
 			const cutoffTimestamp = Date.now() - days * 24 * 60 * 60 * 1000;
 
-			const alerts = await this.db('anomaly_alerts')
-				.where({ metric })
-				.where('timestamp', '>=', cutoffTimestamp);
+			const alerts = this.db
+				.prepare(`
+					SELECT severity, detection_method
+					FROM anomaly_alerts
+					WHERE metric = ? AND timestamp >= ?
+				`)
+				.all(metric, cutoffTimestamp) as Array<{ severity: string; detection_method: string }>;
 
 			const stats = {
 				total: alerts.length,
@@ -600,14 +682,17 @@ export class AnomalyStorageService {
 	 */
 	async clearBaselinesForProfile(profile: string, metricPattern?: string): Promise<number> {
 		try {
-			const query = this.db('anomaly_baselines').where({ profile });
-			
-			// Optional: filter by metric pattern (SQLite LIKE)
+			const whereParts = ['profile = ?'];
+			const params: unknown[] = [profile];
+
 			if (metricPattern) {
-				query.where('metric', 'like', metricPattern);
+				whereParts.push('metric LIKE ?');
+				params.push(metricPattern);
 			}
-			
-			const deleted = await query.delete();
+
+			const deleted = this.db
+				.prepare(`DELETE FROM anomaly_baselines WHERE ${whereParts.join(' AND ')}`)
+				.run(...params).changes;
 			
 			if (deleted > 0) {
 				this.logger?.infoSync('Cleared baselines after profile change', {
@@ -637,14 +722,14 @@ export class AnomalyStorageService {
 			const cutoffTimestamp = Date.now() - this.retention * 24 * 60 * 60 * 1000;
 
 			// Delete old alerts
-			const deletedAlerts = await this.db('anomaly_alerts')
-				.where('timestamp', '<', cutoffTimestamp)
-				.delete();
+			const deletedAlerts = this.db
+				.prepare('DELETE FROM anomaly_alerts WHERE timestamp < ?')
+				.run(cutoffTimestamp).changes;
 
 			// Delete old baselines
-			const deletedBaselines = await this.db('anomaly_baselines')
-				.where('calculated_at', '<', cutoffTimestamp)
-				.delete();
+			const deletedBaselines = this.db
+				.prepare('DELETE FROM anomaly_baselines WHERE calculated_at < ?')
+				.run(cutoffTimestamp).changes;
 
 			if (deletedAlerts > 0 || deletedBaselines > 0) {
 				this.logger?.infoSync('Cleaned up old anomaly records', {

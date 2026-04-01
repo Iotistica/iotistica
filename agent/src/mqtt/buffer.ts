@@ -223,7 +223,7 @@ export class MessageBufferSync {
    * Get buffer statistics
    */
   async getStats() {
-    return await MessageBufferModel.getStats();
+    return MessageBufferModel.getStats();
   }
 
   private flushNow(): void {
@@ -460,7 +460,7 @@ export class MessageBufferSync {
     switch (this.config.dropPolicy) {
       case 'oldest': {
         const needed = (currentCount - this.config.maxBufferRecords) + 1;
-        const deleted = await MessageBufferModel.deleteOldest(Math.max(needed, 100), true);
+        const deleted = MessageBufferModel.deleteOldest(Math.max(needed, 100), true);
 
         if (deleted > 0) {
           this.logger?.warnSync('Buffer full, dropped oldest buffered records', {
@@ -471,7 +471,7 @@ export class MessageBufferSync {
           return true;
         }
 
-        await MessageBufferModel.incrementDropped(1);
+        MessageBufferModel.incrementDropped(1);
         this.logger?.warnSync('Buffer full and only critical topics buffered, dropping newest message', {
           component: LogComponents.agent,
           topic,
@@ -480,7 +480,7 @@ export class MessageBufferSync {
         return false;
       }
       case 'newest':
-        await MessageBufferModel.incrementDropped(1);
+        MessageBufferModel.incrementDropped(1);
         this.logger?.warnSync('Buffer full, dropping newest message by policy', {
           component: LogComponents.agent,
           topic,
@@ -488,7 +488,7 @@ export class MessageBufferSync {
         });
         return false;
       case 'error': {
-        await MessageBufferModel.incrementDropped(1);
+        MessageBufferModel.incrementDropped(1);
         throw new Error(`Message buffer is full (${currentCount}/${this.config.maxBufferRecords})`);
       }
       default:
@@ -529,7 +529,7 @@ export class MessageBufferSync {
 
   private async withSqliteBusyRetry<T>(
     operation: string,
-    work: () => Promise<T>,
+    work: () => T | Promise<T>,
     maxAttempts = 4
   ): Promise<T> {
     let attempt = 0;

@@ -12,7 +12,8 @@
  * - Audit trail
  */
 
-import { getKnex } from '../connection';
+import Database from 'better-sqlite3';
+import { getDatabase } from '../sqlite';
 
 export type DictionaryDomain = 'key' | 'metric' | 'unit' | 'quality' | 'device';
 
@@ -42,10 +43,41 @@ export interface DictionaryMetadata {
   updated_at?: Date;
 }
 
+type DictionaryEntryRow = Omit<DictionaryEntry, 'created_at'> & {
+  created_at?: string | Date;
+};
+
+type DictionaryDeltaRow = Omit<DictionaryDelta, 'synced_to_cloud' | 'synced_at' | 'created_at'> & {
+  synced_to_cloud: number;
+  synced_at?: string | Date | null;
+  created_at?: string | Date;
+};
+
+type DictionaryMetadataRow = Omit<DictionaryMetadata, 'updated_at'> & {
+  updated_at?: string | Date;
+};
+
 export class DictionaryModel {
   private static readonly ENTRIES_TABLE = 'dictionary_entries';
   private static readonly METADATA_TABLE = 'dictionary_metadata';
   private static readonly DELTAS_TABLE = 'dictionary_deltas';
+
+  private static getDb(): Database.Database {
+    return getDatabase();
+  }
+
+  private static parseDelta(row: DictionaryDeltaRow): DictionaryDelta {
+    return {
+      ...row,
+      synced_to_cloud: !!row.synced_to_cloud,
+      synced_at: row.synced_at ? new Date(row.synced_at) : undefined,
+      created_at: row.created_at ? new Date(row.created_at) : undefined,
+    };
+  }
+
+  private static now(): string {
+    return new Date().toISOString();
+  }
 
   /**
    * Load entire dictionary from database
@@ -58,11 +90,9 @@ export class DictionaryModel {
     quality: Map<string, number>;
     device: Map<string, number>;
   }> {
-    const knex = getKnex();
-    
-    const entries = await knex(this.ENTRIES_TABLE)
-      .select('field_name', 'field_index', 'domain')
-      .orderBy('field_index', 'asc');
+    const entries = this.getDb()
+      .prepare(`SELECT field_name, field_index, domain FROM ${this.ENTRIES_TABLE} ORDER BY field_index ASC`)
+      .all() as Array<Pick<DictionaryEntryRow, 'field_name' | 'field_index' | 'domain'>>;
 
     // Initialize domain maps
     const domains = {
@@ -86,60 +116,61 @@ export class DictionaryModel {
    * Save a single field entry to dictionary
    */
   static async saveEntry(fieldName: string, fieldIndex: number, versionAdded: number, domain: DictionaryDomain = 'key'): Promise<void> {
-    const knex = getKnex();
-    
-    await knex(this.ENTRIES_TABLE).insert({
-      field_name: fieldName,
-      field_index: fieldIndex,
-      version_added: versionAdded,
-      domain,
-      created_at: knex.fn.now()
-    });
+    this.getDb()
+      .prepare(`
+        INSERT INTO ${this.ENTRIES_TABLE} (field_name, field_index, version_added, domain, created_at)
+        VALUES (@field_name, @field_index, @version_added, @domain, @created_at)
+      `)
+      .run({
+        field_name: fieldName,
+        field_index: fieldIndex,
+        version_added: versionAdded,
+        domain,
+        created_at: this.now(),
+      });
   }
 
   /**
    * Record a delta (new field addition) for sync tracking
    */
   static async saveDelta(fieldName: string, fieldIndex: number, version: number, domain: DictionaryDomain = 'metric'): Promise<number> {
-    const knex = getKnex();
-    
-    const [id] = await knex(this.DELTAS_TABLE).insert({
-      version,
-      field_name: fieldName,
-      field_index: fieldIndex,
-      domain,
-      synced_to_cloud: false,
-      created_at: knex.fn.now()
-    });
-    
-    
-    return id;
+    const result = this.getDb()
+      .prepare(`
+        INSERT INTO ${this.DELTAS_TABLE} (version, field_name, field_index, domain, synced_to_cloud, created_at)
+        VALUES (@version, @field_name, @field_index, @domain, @synced_to_cloud, @created_at)
+      `)
+      .run({
+        version,
+        field_name: fieldName,
+        field_index: fieldIndex,
+        domain,
+        synced_to_cloud: 0,
+        created_at: this.now(),
+      });
+
+    return Number(result.lastInsertRowid);
   }
 
   /**
    * Get all deltas not yet synced to cloud
    */
   static async getUnsyncedDeltas(): Promise<DictionaryDelta[]> {
-    const knex = getKnex();
-    
-    const deltas = await knex(this.DELTAS_TABLE)
-      .where('synced_to_cloud', false)
-      .orderBy('version', 'asc')
-      .select('*');
-    
-    return deltas;
+    const deltas = this.getDb()
+      .prepare(`SELECT * FROM ${this.DELTAS_TABLE} WHERE synced_to_cloud = 0 ORDER BY version ASC`)
+      .all() as DictionaryDeltaRow[];
+
+    return deltas.map((delta) => this.parseDelta(delta));
   }
 
   /**
    * Get deltas for a specific version
    */
   static async getDeltasByVersion(version: number): Promise<DictionaryDelta[]> {
-    const knex = getKnex();
-    
-    return knex(this.DELTAS_TABLE)
-      .where('version', version)
-      .orderBy('field_index', 'asc')
-      .select('*');
+    const deltas = this.getDb()
+      .prepare(`SELECT * FROM ${this.DELTAS_TABLE} WHERE version = ? ORDER BY field_index ASC`)
+      .all(version) as DictionaryDeltaRow[];
+
+    return deltas.map((delta) => this.parseDelta(delta));
   }
 
   /**
@@ -147,41 +178,29 @@ export class DictionaryModel {
    */
   static async markDeltasSynced(deltaIds: number[]): Promise<void> {
     if (deltaIds.length === 0) return;
-    
-    const knex = getKnex();
-    
-    await knex(this.DELTAS_TABLE)
-      .whereIn('id', deltaIds)
-      .update({
-        synced_to_cloud: true,
-        synced_at: knex.fn.now()
-      });
+
+    const placeholders = deltaIds.map(() => '?').join(', ');
+    this.getDb()
+      .prepare(`UPDATE ${this.DELTAS_TABLE} SET synced_to_cloud = 1, synced_at = ? WHERE id IN (${placeholders})`)
+      .run(this.now(), ...deltaIds);
   }
 
   /**
    * Mark all deltas up to a version as synced
    */
   static async markDeltasSyncedUpToVersion(version: number): Promise<void> {
-    const knex = getKnex();
-    
-    await knex(this.DELTAS_TABLE)
-      .where('version', '<=', version)
-      .where('synced_to_cloud', false)
-      .update({
-        synced_to_cloud: true,
-        synced_at: knex.fn.now()
-      });
+    this.getDb()
+      .prepare(`UPDATE ${this.DELTAS_TABLE} SET synced_to_cloud = 1, synced_at = ? WHERE version <= ? AND synced_to_cloud = 0`)
+      .run(this.now(), version);
   }
 
   /**
    * Get current dictionary version from metadata
    */
   static async getCurrentVersion(): Promise<number> {
-    const knex = getKnex();
-    
-    const result = await knex(this.METADATA_TABLE)
-      .where('key', 'current_version')
-      .first();
+    const result = this.getDb()
+      .prepare(`SELECT value FROM ${this.METADATA_TABLE} WHERE key = 'current_version' LIMIT 1`)
+      .get() as Pick<DictionaryMetadataRow, 'value'> | undefined;
     
     return result ? parseInt(result.value, 10) : 1;
   }
@@ -190,25 +209,16 @@ export class DictionaryModel {
    * Update current dictionary version in metadata
    */
   static async setCurrentVersion(version: number): Promise<void> {
-    const knex = getKnex();
-    
-    await knex(this.METADATA_TABLE)
-      .where('key', 'current_version')
-      .update({
-        value: version.toString(),
-        updated_at: knex.fn.now()
-      });
+    await this.setMetadata('current_version', version.toString());
   }
 
   /**
    * Get metadata value by key
    */
   static async getMetadata(key: string): Promise<string | null> {
-    const knex = getKnex();
-    
-    const result = await knex(this.METADATA_TABLE)
-      .where('key', key)
-      .first();
+    const result = this.getDb()
+      .prepare(`SELECT value FROM ${this.METADATA_TABLE} WHERE key = ? LIMIT 1`)
+      .get(key) as Pick<DictionaryMetadataRow, 'value'> | undefined;
     
     return result ? result.value : null;
   }
@@ -217,38 +227,28 @@ export class DictionaryModel {
    * Set metadata value
    */
   static async setMetadata(key: string, value: string): Promise<void> {
-    const knex = getKnex();
-    
-    const exists = await knex(this.METADATA_TABLE)
-      .where('key', key)
-      .first();
-    
-    if (exists) {
-      await knex(this.METADATA_TABLE)
-        .where('key', key)
-        .update({
-          value,
-          updated_at: knex.fn.now()
-        });
-    } else {
-      await knex(this.METADATA_TABLE).insert({
+    this.getDb()
+      .prepare(`
+        INSERT INTO ${this.METADATA_TABLE} (key, value, updated_at)
+        VALUES (@key, @value, @updated_at)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = excluded.updated_at
+      `)
+      .run({
         key,
         value,
-        updated_at: knex.fn.now()
+        updated_at: this.now(),
       });
-    }
   }
 
   /**
    * Get count of unsynced deltas
    */
   static async getUnsyncedDeltaCount(): Promise<number> {
-    const knex = getKnex();
-    
-    const result = await knex(this.DELTAS_TABLE)
-      .where('synced_to_cloud', false)
-      .count('* as count')
-      .first();
+    const result = this.getDb()
+      .prepare(`SELECT COUNT(*) as count FROM ${this.DELTAS_TABLE} WHERE synced_to_cloud = 0`)
+      .get() as { count: number | string } | undefined;
     
     return result ? parseInt(result.count as string, 10) : 0;
   }
@@ -264,17 +264,15 @@ export class DictionaryModel {
     oldestEntryDate?: Date;
     newestEntryDate?: Date;
   }> {
-    const knex = getKnex();
-    
+    const db = this.getDb();
     const [entriesCount, deltasCount, unsyncedCount, version, dateRange] = await Promise.all([
-      knex(this.ENTRIES_TABLE).count('* as count').first(),
-      knex(this.DELTAS_TABLE).count('* as count').first(),
+      Promise.resolve(db.prepare(`SELECT COUNT(*) as count FROM ${this.ENTRIES_TABLE}`).get() as { count: number | string } | undefined),
+      Promise.resolve(db.prepare(`SELECT COUNT(*) as count FROM ${this.DELTAS_TABLE}`).get() as { count: number | string } | undefined),
       this.getUnsyncedDeltaCount(),
       this.getCurrentVersion(),
-      knex(this.ENTRIES_TABLE)
-        .min('created_at as oldest')
-        .max('created_at as newest')
-        .first()
+      Promise.resolve(
+        db.prepare(`SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM ${this.ENTRIES_TABLE}`).get() as { oldest?: string | null; newest?: string | null } | undefined,
+      ),
     ]);
     
     return {
@@ -291,10 +289,13 @@ export class DictionaryModel {
    * Clear all dictionary data (for reset)
    */
   static async clearAll(): Promise<void> {
-    const knex = getKnex();
-    
-    await knex(this.DELTAS_TABLE).del();
-    await knex(this.ENTRIES_TABLE).del();
+    const db = this.getDb();
+    const clear = db.transaction(() => {
+      db.prepare(`DELETE FROM ${this.DELTAS_TABLE}`).run();
+      db.prepare(`DELETE FROM ${this.ENTRIES_TABLE}`).run();
+    });
+
+    clear();
     await this.setCurrentVersion(1);
     await this.setMetadata('last_full_sync', '0');
     await this.setMetadata('last_delta_sync', '0');
@@ -313,9 +314,6 @@ export class DictionaryModel {
     value: string,
     index: number
   ): Promise<void> {
-    const knex = getKnex();
-    const metadata = this.METADATA_TABLE;
-    
     // Store as JSON in metadata table (key = "enum:{type}:{protocol}")
     const key = protocol ? `enum:${type}:${protocol}` : `enum:${type}`;
     
@@ -340,8 +338,6 @@ export class DictionaryModel {
     count: number,
     firstSeen: number
   ): Promise<void> {
-    const knex = getKnex();
-    
     // Store as JSON in metadata table (key = "stats:{type}:{protocol}")
     const key = protocol ? `stats:${type}:${protocol}` : `stats:${type}`;
     
@@ -364,12 +360,9 @@ export class DictionaryModel {
     metrics: Record<string, Record<string, number>>; // protocol -> value -> index
     devices: Record<string, Record<string, number>>; // protocol -> value -> index
   }> {
-    const knex = getKnex();
-    
-    // Load all enum: keys from metadata
-    const enumKeys = await knex(this.METADATA_TABLE)
-      .where('key', 'like', 'enum:%')
-      .select('key', 'value');
+    const enumKeys = this.getDb()
+      .prepare(`SELECT key, value FROM ${this.METADATA_TABLE} WHERE key LIKE 'enum:%'`)
+      .all() as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
     
     const result = {
       qualityCodes: {},
@@ -409,12 +402,9 @@ export class DictionaryModel {
     metrics: Record<string, { count: number; firstSeen: number; protocol: string }>;
     devices: Record<string, { count: number; firstSeen: number; protocol: string }>;
   }> {
-    const knex = getKnex();
-    
-    // Load all stats: keys from metadata
-    const statsKeys = await knex(this.METADATA_TABLE)
-      .where('key', 'like', 'stats:%')
-      .select('key', 'value');
+    const statsKeys = this.getDb()
+      .prepare(`SELECT key, value FROM ${this.METADATA_TABLE} WHERE key LIKE 'stats:%'`)
+      .all() as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
     
     const result = {
       qualityCodes: {},

@@ -1,7 +1,6 @@
-import _ from 'lodash';
-
 import * as constants from '../lib/constants';
 import { docker } from '../lib/docker-utils';
+import { unionBy } from '../lib/collection-utils';
 import { isNotFoundError } from '../lib/errors';
 
 import * as logger from '../logging';
@@ -428,5 +427,5 @@ async function getWithBothLabels() {
 			},
 		}),
 	]);
-	return _.unionBy(currentNetworks, legacyNetworks, 'Id');
+	return unionBy('Id', currentNetworks, legacyNetworks);
 }

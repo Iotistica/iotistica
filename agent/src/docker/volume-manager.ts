@@ -1,7 +1,7 @@
-import _ from 'lodash';
 import path from 'path';
 import type { VolumeInspectInfo } from 'dockerode';
 
+import { difference, uniq } from '../lib/collection-utils';
 import { isNotFoundError, InternalInconsistencyError } from '../lib/errors';
 import { docker } from '../lib/docker-utils';
 import * as logger from '../logging';
@@ -418,14 +418,12 @@ export async function removeOrphanedVolumes(
 			docker.listVolumes(),
 		]);
 
-		const containerVolumes = _(dockerContainers)
-			.flatMap((c) => c.Mounts)
-			.filter((m) => m.Type === 'volume')
-			// We know that the name must be set, if the mount is
-			// a volume
-			.map((m) => m.Name as string)
-			.uniq()
-			.value();
+		const containerVolumes = uniq(
+			dockerContainers
+				.flatMap((c) => c.Mounts)
+				.filter((m) => m.Type === 'volume')
+				.map((m) => m.Name as string),
+		);
 		
 		// CRITICAL: Only consider volumes we own (edge rule: never delete what you didn't create)
 		// Filter for volumes with our ownership label to avoid deleting:
@@ -433,12 +431,11 @@ export async function removeOrphanedVolumes(
 		// - User-created volumes (manual docker volume create)
 		// - Debugging leftovers from other tools
 		// - System volumes from other orchestrators
-		const volumeNames = _(dockerVolumes.Volumes)
+		const volumeNames = dockerVolumes.Volumes
 			.filter((v) => v.Labels?.['iotistic.managed'] === 'true')
-			.map('Name')
-			.value();
+			.map((v) => v.Name);
 
-		const volumesToRemove = _.difference(
+		const volumesToRemove = difference(
 			volumeNames,
 			containerVolumes,
 			// Don't remove any volume which is still referenced

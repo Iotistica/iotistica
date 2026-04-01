@@ -182,14 +182,14 @@ CREATE TABLE IF NOT EXISTS "enum_quality_codes" (
 	"inactive"	boolean NOT NULL DEFAULT '0',
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
-CREATE TABLE IF NOT EXISTS "knex_migrations" (
+CREATE TABLE IF NOT EXISTS "schema_migrations" (
 	"id"	integer NOT NULL,
 	"name"	varchar(255),
 	"batch"	integer,
 	"migration_time"	datetime,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
-CREATE TABLE IF NOT EXISTS "knex_migrations_lock" (
+CREATE TABLE IF NOT EXISTS "schema_migrations_lock" (
 	"index"	integer NOT NULL,
 	"is_locked"	integer,
 	PRIMARY KEY("index" AUTOINCREMENT)

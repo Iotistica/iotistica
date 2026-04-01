@@ -10,9 +10,9 @@
  */
 
 import { EventEmitter } from "events";
-import _ from "lodash";
-import { models as db } from "../db/connection.js";
+import { getDatabase } from "../db/sqlite.js";
 import { EndpointModel, type Endpoint } from "../db/models/endpoint.model.js";
+import { cloneDeep, deepEqual } from "../lib/collection-utils.js";
 import {
   MqttFileAuthReconciler,
   resolveMosquittoAuthDir,
@@ -146,6 +146,10 @@ interface ConfigManagerEvents {
 }
 
 export class ConfigManager extends EventEmitter {
+    private getDb() {
+      return getDatabase();
+    }
+
   private targetConfig: DeviceConfig = {};
   private currentConfig: DeviceConfig = {};
   private logger?: AgentLogger;
@@ -216,14 +220,14 @@ export class ConfigManager extends EventEmitter {
    * Used during initialization to populate targetConfig from database
    */
   public loadTarget(config: DeviceConfig): void {
-    this.targetConfig = _.cloneDeep(config);
+    this.targetConfig = cloneDeep(config);
   }
 
   /**
    * Set target configuration
    */
   public async setTarget(config: DeviceConfig): Promise<void> {
-    this.targetConfig = _.cloneDeep(config);
+    this.targetConfig = cloneDeep(config);
 
     // Trigger reconciliation
     await this.reconcile();
@@ -233,7 +237,7 @@ export class ConfigManager extends EventEmitter {
    * Get target configuration
    */
   public getTargetConfig(): DeviceConfig {
-    return _.cloneDeep(this.targetConfig);
+    return cloneDeep(this.targetConfig);
   }
 
   /**
@@ -272,7 +276,7 @@ export class ConfigManager extends EventEmitter {
     );
 
     const result: DeviceConfig = {
-      ..._.cloneDeep(this.currentConfig),
+      ...cloneDeep(this.currentConfig),
       endpoints: endpointsConfig,
     };
 
@@ -694,7 +698,7 @@ export class ConfigManager extends EventEmitter {
       // Emit feature change event if features changed OR if this is first-time config load
       if (
         newFeatures &&
-        (!oldFeatures || !_.isEqual(oldFeatures, newFeatures))
+        (!oldFeatures || !deepEqual(oldFeatures, newFeatures))
       ) {
         this.emit("features-changed", {
           old: oldFeatures || {},
@@ -721,7 +725,7 @@ export class ConfigManager extends EventEmitter {
         otherCurrentFields.anomalyDetection ?? otherCurrentFields.anomaly;
       const newAnomalyConfig =
         otherTargetFields.anomalyDetection ?? otherTargetFields.anomaly;
-      if (newAnomalyConfig && !_.isEqual(oldAnomalyConfig, newAnomalyConfig)) {
+      if (newAnomalyConfig && !deepEqual(oldAnomalyConfig, newAnomalyConfig)) {
         this.emit("anomaly-config-changed", {
           old: oldAnomalyConfig,
           new: newAnomalyConfig,
@@ -855,9 +859,9 @@ export class ConfigManager extends EventEmitter {
 
       // Enforce canonical identity: endpoints must have UUID.
       // Rows without UUID cannot participate in strict target-state reconciliation.
-      const removedInvalidCount = await db("endpoints")
-        .whereNull("uuid")
-        .delete();
+      const removedInvalidCount = this.getDb()
+        .prepare("DELETE FROM endpoints WHERE uuid IS NULL")
+        .run().changes;
       if (removedInvalidCount > 0) {
         this.logger?.warnSync(
           "Removed invalid endpoints from database (missing UUID)",
@@ -1300,7 +1304,7 @@ export class ConfigManager extends EventEmitter {
     for (const targetDevice of targetDevices) {
       const targetDeviceId = targetDevice.id || (targetDevice as any).uuid;
       const currentDevice = currentMap.get(targetDeviceId);
-      if (currentDevice && !_.isEqual(targetDevice, currentDevice)) {
+      if (currentDevice && !deepEqual(targetDevice, currentDevice)) {
         this.logger?.debugSync("Device needs to be updated", {
           component: LogComponents.configManager,
           operation: "calculateSteps",
@@ -1426,7 +1430,7 @@ export class ConfigManager extends EventEmitter {
       this.currentConfig.endpoints = [];
     }
 
-    this.currentConfig.endpoints.push(_.cloneDeep(device));
+    this.currentConfig.endpoints.push(cloneDeep(device));
 
     // Persist current config to database
     await this.saveCurrentConfigToDB();
@@ -1578,7 +1582,7 @@ export class ConfigManager extends EventEmitter {
     );
 
     if (endpointIndex !== -1) {
-      this.currentConfig.endpoints[endpointIndex] = _.cloneDeep(device);
+      this.currentConfig.endpoints[endpointIndex] = cloneDeep(device);
     }
 
     // Persist current config to database
@@ -1718,10 +1722,15 @@ export class ConfigManager extends EventEmitter {
    */
   private async loadCurrentConfigFromDB(): Promise<void> {
     try {
-      const snapshots = await db("stateSnapshot")
-        .where({ type: "config" })
-        .orderBy("createdAt", "desc")
-        .limit(1);
+      const snapshots = this.getDb()
+        .prepare(`
+          SELECT state, createdAt
+          FROM stateSnapshot
+          WHERE type = ?
+          ORDER BY createdAt DESC
+          LIMIT 1
+        `)
+        .all("config") as Array<{ state: string; createdAt?: string | Date | null }>;
 
       if (snapshots.length > 0) {
         this.currentConfig = JSON.parse(snapshots[0].state);
@@ -1770,12 +1779,20 @@ export class ConfigManager extends EventEmitter {
       const configJson = JSON.stringify(this.currentConfig);
 
       // Delete old config snapshots and insert new
-      await db("stateSnapshot").where({ type: "config" }).delete();
+      const writeSnapshot = this.getDb().transaction(() => {
+        this.getDb()
+          .prepare("DELETE FROM stateSnapshot WHERE type = ?")
+          .run("config");
 
-      await db("stateSnapshot").insert({
-        type: "config",
-        state: configJson,
+        this.getDb()
+          .prepare(`
+            INSERT INTO stateSnapshot (type, state)
+            VALUES (?, ?)
+          `)
+          .run("config", configJson);
       });
+
+      writeSnapshot();
 
       this.logger?.infoSync("Current config saved to database", {
         component: LogComponents.configManager,
@@ -1818,7 +1835,7 @@ export class ConfigManager extends EventEmitter {
     const modified = newEndpoints.filter((e) => {
       if (!e.uuid) return false;
       const oldEndpoint = oldMap.get(e.uuid);
-      return oldEndpoint && !_.isEqual(oldEndpoint, e);
+      return oldEndpoint && !deepEqual(oldEndpoint, e);
     });
 
     return { added, removed, modified };

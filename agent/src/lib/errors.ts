@@ -1,4 +1,3 @@
-import { endsWith } from 'lodash';
 import { TypedError } from 'typed-error';
 
 import { checkInt } from './validation';
@@ -63,7 +62,7 @@ export const isEPERM = (e: unknown): e is CodedSysError =>
 	isCodedSysError(e) && e.code === 'EPERM';
 
 export function UnitNotLoadedError(err: string[]): boolean {
-	return endsWith(err[0], 'not loaded.');
+	return err[0]?.endsWith('not loaded.') ?? false;
 }
 
 export class InvalidNetGatewayError extends TypedError {}

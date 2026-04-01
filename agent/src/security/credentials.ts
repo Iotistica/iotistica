@@ -98,7 +98,7 @@ export interface CredentialManagerConfig {
  *   deviceUuid: 'abc-123',
  *   initialKey: 'key_abc123...',
  *   cloudEndpoint: 'https://api.example.com',
- *   dbClient: new KnexDatabaseClient()
+ *   dbClient: new SqliteDatabaseClient()
  * });
  * 
  * // Subscribe to rotation events

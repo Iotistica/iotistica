@@ -21,8 +21,8 @@ export type { DeviceEndpointOutput as DeviceSensorOutput } from './endpoint-outp
 export { MetadataModel } from './metadata.model';
 
 // Message buffer (offline queue for MQTT)
-export { MessageBufferModel } from './message-buffer.model';
-export type { MessageBufferRecord, BufferStats } from './message-buffer.model';
+export { MessageBufferModel } from './buffer.model';
+export type { MessageBufferRecord, BufferStats } from './buffer.model';
 
 // Dictionary persistence (MQTT key compression)
 export { DictionaryModel } from './dictionary.model';

@@ -12,7 +12,7 @@ import type { SimulationOrchestrator } from '../anomaly/simulator';
 import type { SensorsFeature } from '../features/adapters';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/health-arbiter';
-import { MessageBufferModel } from '../db/models/message-buffer.model';
+import { MessageBufferModel } from '../db/models/buffer.model';
 import { MqttManager } from '../mqtt/manager';
 
 let containerManager: ContainerManager;
@@ -137,7 +137,7 @@ export async function getBufferStatusPayload(): Promise<{
 	const info = deviceManager.getDeviceInfo();
 	const mqttConnected = MqttManager.getInstance().isConnected();
 	const cloudOnline = cloudSync?.isOnline() === true;
-	const mqttStats = await MessageBufferModel.getStats();
+	const mqttStats = MessageBufferModel.getStats();
 	const cloudStats = cloudSync
 		? await cloudSync.getBufferStatus()
 		: { cloudReportQueueCount: 0 };

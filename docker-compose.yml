@@ -431,11 +431,11 @@ services:
         restart: unless-stopped
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
-            - MQTT_USERNAME=mqtt-user-1
+            - MQTT_USERNAME=mqtt-user-111
             - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-1
             - MQTT_DEVICE_UUID=a6c87211-7e40-4229-8632-d238daf58296
-            - MQTT_TOPIC=i/c-3dOFzo/a/SB910wqiRFSPauq9bVVV8A/d/f8f4QRpRQOWvjy56xvF2FQ
+            - MQTT_TOPIC=i/c-3dOFzo/a/-6uEtwBqQnS2ALf7Pc_XRA/d/6L5qJDDNS6etg1A2Z45aEg
             - MQTT_METRIC_NAMES=temperature,humidity
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}

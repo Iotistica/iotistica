@@ -55,8 +55,8 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 		const config = loadConfigFromTargetState(targetConfig);
 		const enabledMetrics = config.metrics.filter((metric) => metric.enabled);
 
-		const { getKnex } = await import('../db/connection.js');
-		const dbInstance = getKnex();
+		const { getDatabase } = await import('../db/sqlite.js');
+		const dbInstance = getDatabase();
 
 		ctx.agentLogger?.debugSync('Anomaly metrics configured (single list)', {
 			component: LogComponents.agent,

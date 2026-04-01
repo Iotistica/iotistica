@@ -1,7 +1,13 @@
-import _ from 'lodash';
 import type dockerode from 'dockerode';
 
 import { docker } from '../lib/docker-utils';
+import {
+	deepEqual,
+	getPath,
+	mergeObjects,
+	some,
+	omitKeys,
+} from '../lib/collection-utils';
 import * as logger from '../logging';
 import * as ComposeUtils from './utils';
 
@@ -103,9 +109,9 @@ class NetworkImpl implements NetworkIface {
 			},
 			enableIPv6: network.EnableIPv6,
 			internal: network.Internal,
-			labels: _.omit(ComposeUtils.normalizeLabels(labels), [
+			labels: omitKeys(ComposeUtils.normalizeLabels(labels), [
 				'iotistic.managed',
-			]),
+			]) as Record<string, string>,
 			options: network.Options ?? {},
 			configOnly: network.ConfigOnly,
 		};
@@ -208,7 +214,7 @@ class NetworkImpl implements NetworkIface {
 			},
 			EnableIPv6: this.config.enableIPv6,
 			Internal: this.config.internal,
-			Labels: _.merge(
+			Labels: mergeObjects(
 				{},
 				{
 					'iotistic.managed': 'true',
@@ -282,7 +288,7 @@ class NetworkImpl implements NetworkIface {
 			configToCompare.driver = network.config.driver;
 		}
 
-		return _.isEqual(configToCompare, network.config);
+		return deepEqual(configToCompare, network.config);
 	}
 
 	private static validateComposeConfig(
@@ -292,8 +298,8 @@ class NetworkImpl implements NetworkIface {
 	): void {
 		// Check if every ipam config entry has both a subnet and a gateway
 		if (
-			_.some(
-				_.get(config, 'ipam.config', []),
+			some(
+				getPath(config, 'ipam.config', [] as Array<{ subnet?: string; gateway?: string }>),
 				({ subnet, gateway }) => !subnet || !gateway,
 			)
 		) {

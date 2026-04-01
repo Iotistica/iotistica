@@ -4,7 +4,8 @@
  */
 
 import { randomUUID } from 'crypto';
-import { models, getKnex } from '../connection';
+import Database from 'better-sqlite3';
+import { getDatabase } from '../sqlite';
 import { EndpointOutputModel } from './endpoint-outputs.model';
 
 export interface Endpoint {
@@ -23,45 +24,79 @@ export interface Endpoint {
   updated_at?: Date;
 }
 
+type EndpointRow = Omit<Endpoint, 'enabled' | 'connection' | 'data_points' | 'metadata'> & {
+  enabled: number;
+  connection: string | Record<string, any>;
+  data_points?: string | any[] | null;
+  metadata?: string | Record<string, any> | null;
+};
+
 export class EndpointModel {
   private static table = 'endpoints';
+
+  private static getDb(): Database.Database {
+    return getDatabase();
+  }
+
+  private static parseRow(row: EndpointRow | undefined): Endpoint | null {
+    if (!row) {
+      return null;
+    }
+
+    return {
+      ...row,
+      enabled: !!row.enabled,
+      connection: typeof row.connection === 'string' ? JSON.parse(row.connection) : row.connection,
+      data_points: row.data_points ? (typeof row.data_points === 'string' ? JSON.parse(row.data_points) : row.data_points) : null,
+      metadata: row.metadata ? (typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata) : null,
+    };
+  }
+
+  private static parseRows(rows: EndpointRow[]): Endpoint[] {
+    return rows
+      .map((row) => this.parseRow(row))
+      .filter((row): row is Endpoint => row !== null);
+  }
+
+  private static serializeEndpoint(endpoint: Partial<Endpoint>, includeDefaults: boolean = false): Record<string, unknown> {
+    const serialized: Record<string, unknown> = {};
+
+    if (endpoint.uuid !== undefined || includeDefaults) serialized.uuid = endpoint.uuid ?? null;
+    if (endpoint.fingerprint !== undefined || includeDefaults) serialized.fingerprint = endpoint.fingerprint ?? null;
+    if (endpoint.name !== undefined) serialized.name = endpoint.name;
+    if (endpoint.protocol !== undefined) serialized.protocol = endpoint.protocol;
+    if (endpoint.enabled !== undefined || includeDefaults) serialized.enabled = endpoint.enabled === undefined ? 1 : (endpoint.enabled ? 1 : 0);
+    if (endpoint.poll_interval !== undefined || includeDefaults) serialized.poll_interval = endpoint.poll_interval ?? 5000;
+    if (endpoint.connection !== undefined) serialized.connection = JSON.stringify(endpoint.connection);
+    if (endpoint.data_points !== undefined) serialized.data_points = endpoint.data_points ? JSON.stringify(endpoint.data_points) : null;
+    if (endpoint.metadata !== undefined) serialized.metadata = endpoint.metadata ? JSON.stringify(endpoint.metadata) : null;
+    if (endpoint.lastSeenAt !== undefined) {
+      serialized.lastSeenAt = endpoint.lastSeenAt instanceof Date ? endpoint.lastSeenAt.toISOString() : endpoint.lastSeenAt;
+    }
+
+    return serialized;
+  }
 
   /**
    * Get all protocol adapter devices
    */
   static async getAll(protocol?: string): Promise<Endpoint[]> {
-    const query = models(this.table).select('*');
-    if (protocol) {
-      query.where('protocol', protocol);
-    }
-    const devices = await query.orderBy('name');
-    
-    // Parse JSON fields (SQLite stores as TEXT)
-    return devices.map((d: any) => ({
-      ...d,
-      connection: typeof d.connection === 'string' ? JSON.parse(d.connection) : d.connection,
-      data_points: d.data_points ? (typeof d.data_points === 'string' ? JSON.parse(d.data_points) : d.data_points) : null,
-      metadata: d.metadata ? (typeof d.metadata === 'string' ? JSON.parse(d.metadata) : d.metadata) : null,
-    }));
+    const devices = protocol
+      ? this.getDb().prepare(`SELECT * FROM ${this.table} WHERE protocol = ? ORDER BY name ASC`).all(protocol) as EndpointRow[]
+      : this.getDb().prepare(`SELECT * FROM ${this.table} ORDER BY name ASC`).all() as EndpointRow[];
+
+    return this.parseRows(devices);
   }
 
   /**
    * Get device by name
    */
   static async getByName(name: string): Promise<Endpoint | null> {
-    const device = await models(this.table)
-      .where('name', name)
-      .first();
-    
-    if (!device) return null;
-    
-    // Parse JSON fields (SQLite stores as TEXT)
-    return {
-      ...device,
-      connection: typeof device.connection === 'string' ? JSON.parse(device.connection) : device.connection,
-      data_points: device.data_points ? (typeof device.data_points === 'string' ? JSON.parse(device.data_points) : device.data_points) : null,
-      metadata: device.metadata ? (typeof device.metadata === 'string' ? JSON.parse(device.metadata) : device.metadata) : null,
-    };
+    const device = this.getDb()
+      .prepare(`SELECT * FROM ${this.table} WHERE name = ? LIMIT 1`)
+      .get(name) as EndpointRow | undefined;
+
+    return this.parseRow(device);
   }
 
   /**
@@ -75,21 +110,11 @@ export class EndpointModel {
     }
     
     try {
-  
-      
-      const device = await models(this.table)
-        .where('uuid', uuid)
-        .first();
-      
-      if (!device) return null;
-      
-      // Parse JSON fields (SQLite stores as TEXT)
-      return {
-        ...device,
-        connection: typeof device.connection === 'string' ? JSON.parse(device.connection) : device.connection,
-        data_points: device.data_points ? (typeof device.data_points === 'string' ? JSON.parse(device.data_points) : device.data_points) : null,
-        metadata: device.metadata ? (typeof device.metadata === 'string' ? JSON.parse(device.metadata) : device.metadata) : null,
-      };
+      const device = this.getDb()
+        .prepare(`SELECT * FROM ${this.table} WHERE uuid = ? LIMIT 1`)
+        .get(uuid) as EndpointRow | undefined;
+
+      return this.parseRow(device);
     } catch (error: any) {
       console.error('[ERROR] getByUuid failed', {
         uuid,
@@ -106,52 +131,43 @@ export class EndpointModel {
    * This is the RECOMMENDED lookup method for discovery - survives name changes
    */
   static async getByFingerprint(fingerprint: string): Promise<Endpoint | null> {
-    const device = await models(this.table)
-      .where('fingerprint', fingerprint)
-      .first();
-    
-    if (!device) return null;
-    
-    // Parse JSON fields (SQLite stores as TEXT)
-    return {
-      ...device,
-      connection: typeof device.connection === 'string' ? JSON.parse(device.connection) : device.connection,
-      data_points: device.data_points ? (typeof device.data_points === 'string' ? JSON.parse(device.data_points) : device.data_points) : null,
-      metadata: device.metadata ? (typeof device.metadata === 'string' ? JSON.parse(device.metadata) : device.metadata) : null,
-    };
+    const device = this.getDb()
+      .prepare(`SELECT * FROM ${this.table} WHERE fingerprint = ? LIMIT 1`)
+      .get(fingerprint) as EndpointRow | undefined;
+
+    return this.parseRow(device);
   }
 
   /**
    * Get enabled devices for a protocol
    */
   static async getEnabled(protocol: string): Promise<Endpoint[]> {
-    const devices = await models(this.table)
-      .where({ protocol, enabled: true })
-      .orderBy('name');
-    
-    // Parse JSON fields (SQLite stores as TEXT)
-    return devices.map((d: any) => ({
-      ...d,
-      connection: typeof d.connection === 'string' ? JSON.parse(d.connection) : d.connection,
-      data_points: d.data_points ? (typeof d.data_points === 'string' ? JSON.parse(d.data_points) : d.data_points) : null,
-      metadata: d.metadata ? (typeof d.metadata === 'string' ? JSON.parse(d.metadata) : d.metadata) : null,
-    }));
+    const devices = this.getDb()
+      .prepare(`SELECT * FROM ${this.table} WHERE protocol = ? AND enabled = 1 ORDER BY name ASC`)
+      .all(protocol) as EndpointRow[];
+
+    return this.parseRows(devices);
   }
 
   /**
    * Create new endpoint
    */
   static async create(device: Endpoint): Promise<Endpoint> {
-    const [id] = await models(this.table).insert({
+    const serialized = this.serializeEndpoint({
       ...device,
-      uuid: device.uuid || randomUUID(), // Generate UUID if not provided
-      connection: JSON.stringify(device.connection),
-      data_points: device.data_points ? JSON.stringify(device.data_points) : null,
-      metadata: device.metadata ? JSON.stringify(device.metadata) : null,
-      lastSeenAt: device.lastSeenAt ? (device.lastSeenAt instanceof Date ? device.lastSeenAt.toISOString() : device.lastSeenAt) : null,
-    });
+      uuid: device.uuid || randomUUID(),
+      enabled: device.enabled,
+      poll_interval: device.poll_interval,
+    }, true);
 
-    return await this.getById(id);
+    const columns = Object.keys(serialized);
+    const result = this.getDb()
+      .prepare(
+        `INSERT INTO ${this.table} (${columns.map((column) => `"${column}"`).join(', ')}) VALUES (${columns.map((column) => `@${column}`).join(', ')})`,
+      )
+      .run(serialized);
+
+    return await this.getById(Number(result.lastInsertRowid));
   }
 
   /**
@@ -184,27 +200,15 @@ export class EndpointModel {
    * Update endpoint (by name - legacy method)
    */
   static async update(name: string, updates: Partial<Endpoint>): Promise<Endpoint | null> {
-    const updateData: any = {
-      ...updates,
-      updated_at: new Date(),
+    const updateData = {
+      ...this.serializeEndpoint(updates),
+      updated_at: new Date().toISOString(),
     };
 
-    if (updates.connection) {
-      updateData.connection = JSON.stringify(updates.connection);
-    }
-    if (updates.data_points) {
-      updateData.data_points = JSON.stringify(updates.data_points);
-    }
-    if (updates.metadata) {
-      updateData.metadata = JSON.stringify(updates.metadata);
-    }
-    if (updates.lastSeenAt) {
-      updateData.lastSeenAt = updates.lastSeenAt instanceof Date ? updates.lastSeenAt.toISOString() : updates.lastSeenAt;
-    }
-
-    await models(this.table)
-      .where('name', name)
-      .update(updateData);
+    const columns = Object.keys(updateData);
+    this.getDb()
+      .prepare(`UPDATE ${this.table} SET ${columns.map((column) => `"${column}" = @${column}`).join(', ')} WHERE name = @lookup_name`)
+      .run({ ...updateData, lookup_name: name });
 
     return await this.getByName(name);
   }
@@ -218,27 +222,15 @@ export class EndpointModel {
       console.warn('[WARN] updateByUuid called with undefined/empty uuid');
       return null;
     }
-    const updateData: any = {
-      ...updates,
-      updated_at: new Date(),
+    const updateData = {
+      ...this.serializeEndpoint(updates),
+      updated_at: new Date().toISOString(),
     };
 
-    if (updates.connection) {
-      updateData.connection = JSON.stringify(updates.connection);
-    }
-    if (updates.data_points) {
-      updateData.data_points = JSON.stringify(updates.data_points);
-    }
-    if (updates.metadata) {
-      updateData.metadata = JSON.stringify(updates.metadata);
-    }
-    if (updates.lastSeenAt) {
-      updateData.lastSeenAt = updates.lastSeenAt instanceof Date ? updates.lastSeenAt.toISOString() : updates.lastSeenAt;
-    }
-
-    await models(this.table)
-      .where('uuid', uuid)
-      .update(updateData);
+    const columns = Object.keys(updateData);
+    this.getDb()
+      .prepare(`UPDATE ${this.table} SET ${columns.map((column) => `"${column}" = @${column}`).join(', ')} WHERE uuid = @lookup_uuid`)
+      .run({ ...updateData, lookup_uuid: uuid });
 
     return await this.getByUuid(uuid);
   }
@@ -248,27 +240,15 @@ export class EndpointModel {
    * Uses fingerprint for lookup, preserves UUID and other stable fields
    */
   static async updateByFingerprint(fingerprint: string, updates: Partial<Endpoint>): Promise<Endpoint | null> {
-    const updateData: any = {
-      ...updates,
-      updated_at: new Date(),
+    const updateData = {
+      ...this.serializeEndpoint(updates),
+      updated_at: new Date().toISOString(),
     };
 
-    if (updates.connection) {
-      updateData.connection = JSON.stringify(updates.connection);
-    }
-    if (updates.data_points) {
-      updateData.data_points = JSON.stringify(updates.data_points);
-    }
-    if (updates.metadata) {
-      updateData.metadata = JSON.stringify(updates.metadata);
-    }
-    if (updates.lastSeenAt) {
-      updateData.lastSeenAt = updates.lastSeenAt instanceof Date ? updates.lastSeenAt.toISOString() : updates.lastSeenAt;
-    }
-
-    await models(this.table)
-      .where('fingerprint', fingerprint)
-      .update(updateData);
+    const columns = Object.keys(updateData);
+    this.getDb()
+      .prepare(`UPDATE ${this.table} SET ${columns.map((column) => `"${column}" = @${column}`).join(', ')} WHERE fingerprint = @lookup_fingerprint`)
+      .run({ ...updateData, lookup_fingerprint: fingerprint });
 
     return await this.getByFingerprint(fingerprint);
   }
@@ -277,10 +257,10 @@ export class EndpointModel {
    * Delete endpoint (by name - legacy method)
    */
   static async delete(name: string): Promise<boolean> {
-    const deleted = await models(this.table)
-      .where('name', name)
-      .delete();
-    return deleted > 0;
+    const result = this.getDb()
+      .prepare(`DELETE FROM ${this.table} WHERE name = ?`)
+      .run(name);
+    return result.changes > 0;
   }
 
   /**
@@ -292,27 +272,21 @@ export class EndpointModel {
       console.warn('[WARN] deleteByUuid called with undefined/empty uuid');
       return false;
     }
-    const deleted = await models(this.table)
-      .where('uuid', uuid)
-      .delete();
-    return deleted > 0;
+    const result = this.getDb()
+      .prepare(`DELETE FROM ${this.table} WHERE uuid = ?`)
+      .run(uuid);
+    return result.changes > 0;
   }
 
   /**
    * Get endpoint by ID
    */
   private static async getById(id: number): Promise<Endpoint> {
-    const device = await models(this.table)
-      .where('id', id)
-      .first();
-    
-    // Parse JSON fields (SQLite stores as TEXT)
-    return {
-      ...device,
-      connection: typeof device.connection === 'string' ? JSON.parse(device.connection) : device.connection,
-      data_points: device.data_points ? (typeof device.data_points === 'string' ? JSON.parse(device.data_points) : device.data_points) : null,
-      metadata: device.metadata ? (typeof device.metadata === 'string' ? JSON.parse(device.metadata) : device.metadata) : null,
-    };
+    const device = this.getDb()
+      .prepare(`SELECT * FROM ${this.table} WHERE id = ? LIMIT 1`)
+      .get(id) as EndpointRow | undefined;
+
+    return this.parseRow(device) as Endpoint;
   }
 
   /**
@@ -323,17 +297,11 @@ export class EndpointModel {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysThreshold);
 
-    const devices = await models(this.table)
-      .where('lastSeenAt', '<', cutoffDate.toISOString())
-      .orWhereNull('lastSeenAt')
-      .orderBy('lastSeenAt', 'asc');
+    const devices = this.getDb()
+      .prepare(`SELECT * FROM ${this.table} WHERE lastSeenAt < ? OR lastSeenAt IS NULL ORDER BY lastSeenAt ASC`)
+      .all(cutoffDate.toISOString()) as EndpointRow[];
 
-    return devices.map((d: any) => ({
-      ...d,
-      connection: typeof d.connection === 'string' ? JSON.parse(d.connection) : d.connection,
-      data_points: d.data_points ? (typeof d.data_points === 'string' ? JSON.parse(d.data_points) : d.data_points) : null,
-      metadata: d.metadata ? (typeof d.metadata === 'string' ? JSON.parse(d.metadata) : d.metadata) : null,
-    }));
+    return this.parseRows(devices);
   }
 
   /**
@@ -341,9 +309,9 @@ export class EndpointModel {
    * Uses fingerprint column for fast indexed lookup
    */
   static async updateLastSeen(fingerprint: string): Promise<void> {
-    await models(this.table)
-      .where('fingerprint', fingerprint)
-      .update({ lastSeenAt: new Date().toISOString() });
+    this.getDb()
+      .prepare(`UPDATE ${this.table} SET lastSeenAt = ? WHERE fingerprint = ?`)
+      .run(new Date().toISOString(), fingerprint);
   }
 
   /**
@@ -351,53 +319,82 @@ export class EndpointModel {
    * Fallback for devices without fingerprints (cloud-synced devices)
    */
   static async updateLastSeenByName(name: string): Promise<void> {
-    await models(this.table)
-      .where('name', name)
-      .update({ lastSeenAt: new Date().toISOString() });
+    this.getDb()
+      .prepare(`UPDATE ${this.table} SET lastSeenAt = ? WHERE name = ?`)
+      .run(new Date().toISOString(), name);
   }
 
   /**
    * Import endpoints from JSON config (migration helper)
    */
   static async importFromJson(protocol: string, config: any): Promise<void> {
-    const knex = getKnex();
-    
-    await knex.transaction(async (trx) => {
+    const db = this.getDb();
+
+    const transaction = db.transaction(() => {
       // Import devices
       if (config.devices && Array.isArray(config.devices)) {
         for (const device of config.devices) {
-          const existing = await trx(this.table).where('name', device.name).first();
+          const existing = db
+            .prepare(`SELECT id FROM ${this.table} WHERE name = ? LIMIT 1`)
+            .get(device.name);
           
           if (!existing) {
-            await trx(this.table).insert({
-              name: device.name,
-              protocol,
-              enabled: device.enabled !== undefined ? device.enabled : true,
-              poll_interval: device.pollInterval || 5000,
-              connection: JSON.stringify(device.connection),
-              data_points: device.registers ? JSON.stringify(device.registers) : null,
-              metadata: device.slaveId ? JSON.stringify({ slaveId: device.slaveId }) : null,
-            });
+            db
+              .prepare(`
+                INSERT INTO ${this.table} (
+                  uuid,
+                  name,
+                  protocol,
+                  enabled,
+                  poll_interval,
+                  connection,
+                  data_points,
+                  metadata
+                ) VALUES (
+                  @uuid,
+                  @name,
+                  @protocol,
+                  @enabled,
+                  @poll_interval,
+                  @connection,
+                  @data_points,
+                  @metadata
+                )
+              `)
+              .run({
+                uuid: randomUUID(),
+                name: device.name,
+                protocol,
+                enabled: device.enabled !== undefined ? (device.enabled ? 1 : 0) : 1,
+                poll_interval: device.pollInterval || 5000,
+                connection: JSON.stringify(device.connection),
+                data_points: device.registers ? JSON.stringify(device.registers) : null,
+                metadata: device.slaveId ? JSON.stringify({ slaveId: device.slaveId }) : null,
+              });
           }
         }
       }
 
-      // Import output config (using SensorOutputModel)
-      if (config.output) {
-        const existingOutput = await EndpointOutputModel.getOutput(protocol);
-        
-        if (!existingOutput) {
-          await EndpointOutputModel.setOutput({
-            protocol: protocol as 'modbus' | 'can' | 'opcua',
-            socket_path: config.output.socketPath || config.output.socket_path,
-            data_format: config.output.dataFormat || 'json',
-            delimiter: config.output.delimiter || '\n',
-            include_timestamp: config.output.includeTimestamp !== false,
-            include_device_name: config.output.includeDeviceName !== false,
-            logging: config.output.logging,
-          });
-        }
-      }
-    });
+	});
+
+	transaction();
+
+  // Import output config after the device transaction. EndpointOutputModel now
+  // uses the shared direct SQLite helper and exposes an async API.
+  if (config.output) {
+    const existingOutput = await EndpointOutputModel.getOutput(protocol);
+
+    if (!existingOutput) {
+      await EndpointOutputModel.setOutput({
+        protocol: protocol as 'modbus' | 'can' | 'opcua',
+        socket_path: config.output.socketPath || config.output.socket_path,
+        data_format: config.output.dataFormat || 'json',
+        delimiter: config.output.delimiter || '\n',
+        include_timestamp: config.output.includeTimestamp !== false,
+        include_device_name: config.output.includeDeviceName !== false,
+        logging: config.output.logging,
+      });
+    }
+  }
   }
 }

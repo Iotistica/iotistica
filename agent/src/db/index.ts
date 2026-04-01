@@ -2,10 +2,11 @@
  * Database Module
  * ===============
  * 
- * Exports database connection, models, and client interface
+ * Exports database initialization/shutdown helpers and client interface.
+ * Runtime CRUD should use direct SQLite helpers or model files instead of connection helpers.
  */
 
-// Re-export everything from connection (Knex instance, models, utilities)
+// Re-export connection lifecycle helpers (migrations, init/shutdown, database path)
 export * from './connection';
 
 // Re-export database client interface (for device-manager abstraction)

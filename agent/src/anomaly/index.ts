@@ -5,7 +5,7 @@
  * Edge-appropriate anomaly detection for sensor data and system metrics
  */
 
-type Knex = any;
+import type Database from 'better-sqlite3';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import type { MqttManager } from '../mqtt/manager';
@@ -69,7 +69,7 @@ export class AnomalyDetectionService {
 	private startupTimestamp: number = Date.now();
 	private warmupPeriodMs: number;
 	
-	constructor(config: AnomalyConfig, db?: Knex, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string, deviceName?: string, deviceType?: import('./types').Protocol) {
+	constructor(config: AnomalyConfig, db?: Database.Database, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string, deviceName?: string, deviceType?: import('./types').Protocol) {
 		this.config = config;
 		this.logger = logger;
 		this.mqttManager = mqttManager;

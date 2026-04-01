@@ -1,8 +1,8 @@
-import _ from 'lodash';
 import { spawn } from 'child_process';
 import { Readable } from 'stream';
 import { TypedError } from 'typed-error';
 
+import { castArray } from './collection-utils';
 
 import { exec } from './fs-utils';
 
@@ -68,9 +68,15 @@ export function convertToRestoreRulesFormat(rules: Rule[]): string {
 	const iptablesRestore = ['# iptables-restore -- Balena Firewall'];
 
 	// build rules for each table we have rules for...
-	const tables = _(rules)
-		.groupBy((rule) => rule.table ?? 'filter')
-		.value();
+	const tables = rules.reduce<Record<string, Rule[]>>((grouped, rule) => {
+		const table = rule.table ?? 'filter';
+		if (!grouped[table]) {
+			grouped[table] = [];
+		}
+
+		grouped[table].push(rule);
+		return grouped;
+	}, {});
 
 	// for each table, build the rules...
 	for (const table of Object.keys(tables)) {
@@ -161,10 +167,22 @@ export function convertToRestoreRulesFormat(rules: Rule[]): string {
 const iptablesRestoreAdaptor: RuleAdaptor = async (
 	rules: Rule[],
 ): Promise<void> => {
-	const rulesFiles = _(rules)
-		.groupBy((rule) => `v${rule.family}`)
-		.mapValues((ruleset) => convertToRestoreRulesFormat(ruleset))
-		.value();
+	const rulesByFamily = rules.reduce<Record<string, Rule[]>>((grouped, rule) => {
+		const family = `v${rule.family}`;
+		if (!grouped[family]) {
+			grouped[family] = [];
+		}
+
+		grouped[family].push(rule);
+		return grouped;
+	}, {});
+
+	const rulesFiles = Object.fromEntries(
+		Object.entries(rulesByFamily).map(([family, familyRules]) => [
+			family,
+			convertToRestoreRulesFormat(familyRules),
+		]),
+	) as Record<string, string>;
 
 	// run the iptables-restore command...
 	for (const family of Object.getOwnPropertyNames(rulesFiles)) {
@@ -241,7 +259,7 @@ export function build(): TableBuilder {
 				forChain: (chain, chainCtx) => {
 					const ruleBuilder: RuleBuilder = {
 						addRule: (r: Rule) => {
-							const newRules = _.castArray(r);
+							const newRules = castArray(r);
 							rules.push(
 								...newRules.map((rule) => {
 									return {
@@ -302,7 +320,7 @@ async function applyRules(rules: Rule | Rule[], adaptor: RuleAdaptor) {
 	};
 
 	const processedRules: Rule[] = [];
-	_.castArray(rules).forEach((rule) => processRule(rule, processedRules));
+	castArray(rules).forEach((rule) => processRule(rule, processedRules));
 
 	await adaptor(processedRules);
 }

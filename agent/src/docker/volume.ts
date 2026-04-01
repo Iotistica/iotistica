@@ -1,7 +1,6 @@
 import type Docker from 'dockerode';
-import isEqual = require('lodash/isEqual');
-import omitBy = require('lodash/omitBy');
 
+import { deepEqual, omitBy } from '../lib/collection-utils';
 import * as constants from '../lib/constants';
 import { docker } from '../lib/docker-utils';
 import { InternalInconsistencyError } from '../lib/errors';
@@ -75,9 +74,9 @@ class VolumeImpl implements Volume {
 
 	public isEqualConfig(volume: Volume): boolean {
 		return (
-			isEqual(this.config.driver, volume.config.driver) &&
-			isEqual(this.config.driverOpts, volume.config.driverOpts) &&
-			isEqual(
+			deepEqual(this.config.driver, volume.config.driver) &&
+			deepEqual(this.config.driverOpts, volume.config.driverOpts) &&
+			deepEqual(
 				Volume.omitSupervisorLabels(this.config.labels),
 				Volume.omitSupervisorLabels(volume.config.labels),
 			)

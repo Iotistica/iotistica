@@ -25,7 +25,7 @@ export interface DatabaseClient {
 /**
  * Default implementation using DeviceModel
  */
-export class KnexDatabaseClient implements DatabaseClient {
+export class SqliteDatabaseClient implements DatabaseClient {
   async loadDevice(): Promise<DeviceRecord | null> {
     return await DeviceModel.get();
   }

@@ -4,7 +4,7 @@
  * 
  * Demonstrates testability improvements using dependency injection:
  * - MockHttpClient for API calls (no global fetch stubbing)
- * - MockDatabaseClient for database operations (no Knex mocking)
+ * - MockDatabaseClient for database operations (no DB driver stubbing)
  * - Clean, isolated tests with predictable behavior
  */
 
