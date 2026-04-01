@@ -33,11 +33,13 @@ DB_POOL_SIZE=20
 DB_SSL=false
 DB_SSL_REJECT_UNAUTHORIZED=false
 
-# MQTT broker address used by the API container to reach the host-installed broker
-MQTT_BROKER_HOST=host.docker.internal
+# Cloud MQTT broker address used by the API container inside docker-compose.e2e.yml
+MQTT_BROKER_HOST=mosquitto
 MQTT_BROKER_PORT=1883
 MQTT_BROKER_PROTOCOL=mqtt
 MQTT_BROKER_USE_TLS=false
+MOSQUITTO_PORT_EXT=5883
+MOSQUITTO_WS_PORT_EXT=59002
 MQTT_USERNAME=admin
 MQTT_PASSWORD=iotistic42!
 MQTT_PERSIST_TO_DB=true

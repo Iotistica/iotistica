@@ -1,13 +1,14 @@
 # Docker Compose configuration for core integration testing
 #
-# This stack intentionally runs only the backend core services needed for
-# provisioning a systemd-installed edge agent:
+# This stack runs the cloud-side core services needed for provisioning and
+# testing a systemd-installed edge agent:
 #   - PostgreSQL 16 for device state and provisioning data
 #   - Redis for API workers and realtime features
+#   - Mosquitto Go-Auth as the cloud broker
 #   - API server built from local source
 #
-# The agent and Mosquitto broker are installed on the host via agent/bin/install.sh.
-# They are not part of this Compose stack.
+# The agent and its separate local vanilla Mosquitto broker are installed on
+# the host via agent/bin/install.sh.
 #
 # Usage:
 #   docker compose -f docker-compose.e2e.yml up -d --build
@@ -63,6 +64,23 @@ services:
     networks:
       - iotistica-net
 
+  mosquitto:
+    image: iegomez/mosquitto-go-auth
+    container_name: iotistic-mosquitto-e2e
+    restart: unless-stopped
+    ports:
+      - "${MOSQUITTO_PORT_EXT:-5883}:1883"
+      - "${MOSQUITTO_WS_PORT_EXT:-59002}:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/etc/mosquitto/mosquitto.conf:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - iotistica-net
+
   api:
     build:
       context: ./api
@@ -95,7 +113,7 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_USERNAME=${REDIS_USERNAME:-}
-      - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-host.docker.internal}
+      - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-mosquitto}
       - MQTT_BROKER_PORT=${MQTT_BROKER_PORT:-1883}
       - MQTT_BROKER_PROTOCOL=${MQTT_BROKER_PROTOCOL:-mqtt}
       - MQTT_BROKER_USE_TLS=${MQTT_BROKER_USE_TLS:-false}
@@ -111,8 +129,6 @@ services:
       - TAILSCALE_ENABLED=false
     ports:
       - "${API_PORT_EXT:-4002}:3002"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
       interval: 10s
@@ -124,6 +140,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mosquitto:
+        condition: service_started
     networks:
       - iotistica-net
 

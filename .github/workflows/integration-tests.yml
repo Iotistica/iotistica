@@ -32,7 +32,7 @@ jobs:
           .github/scripts/setup-env.sh
 
       - name: Start core backend services
-        run: docker compose -f "$COMPOSE_FILE" up -d --build postgres redis api
+        run: docker compose -f "$COMPOSE_FILE" up -d --build postgres redis mosquitto api
 
       - name: Wait for backend readiness
         run: |
@@ -46,6 +46,13 @@ jobs:
           echo "Waiting for Redis..."
           timeout 60 bash -c '
             until docker compose -f "$COMPOSE_FILE" exec -T redis redis-cli ping | grep -q PONG; do
+              sleep 2
+            done
+          '
+
+          echo "Waiting for cloud Mosquitto..."
+          timeout 60 bash -c '
+            until docker compose -f "$COMPOSE_FILE" logs mosquitto --tail=20 2>/dev/null | grep -q "mosquitto version"; do
               sleep 2
             done
           '
@@ -92,7 +99,7 @@ jobs:
                  is_default = true,
                  updated_at = CURRENT_TIMESTAMP
              WHERE is_default = true`,
-            ['localhost', 1883, 'mqtt', false, 'admin']
+            ['localhost', 5883, 'mqtt', false, 'admin']
           );
 
           const created = await createProvisioningKey(
@@ -198,6 +205,9 @@ jobs:
 
           echo "=== API logs ==="
           docker compose -f "$COMPOSE_FILE" logs api --tail=200 || true
+
+          echo "=== Cloud Mosquitto logs ==="
+          docker compose -f "$COMPOSE_FILE" logs mosquitto --tail=200 || true
 
       - name: Cleanup system services
         if: always()
