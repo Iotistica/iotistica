@@ -235,9 +235,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Wait for Docker daemon
+        run: |
+          for i in $(seq 1 15); do
+            docker info > /dev/null 2>&1 && echo "Docker daemon ready" && break
+            echo "Waiting for Docker daemon... ($i/15)"
+            sleep 2
+          done
+          docker info
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
+          cleanup: true
           driver-opts: |
             image=moby/buildkit:buildx-stable-1
             network=host

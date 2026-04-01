@@ -87,7 +87,7 @@ function resolvePollIntervalForPersistence(endpoint: EndpointDeviceConfig, exist
   return 5000;
 }
 
-export class DeviceSensorSyncService {
+export class AgentDeviceSyncService {
   private static refreshInFlight: Promise<void> | null = null;
 
   /**
@@ -134,11 +134,11 @@ export class DeviceSensorSyncService {
   private async refreshMetricCatalog(): Promise<void> {
     // Per-process guard: collapses concurrent calls within this pod into one
     // DB round trip. Cross-pod coordination is handled by the UPDATE throttle below.
-    if (DeviceSensorSyncService.refreshInFlight) {
+    if (AgentDeviceSyncService.refreshInFlight) {
       return;
     }
 
-    DeviceSensorSyncService.refreshInFlight = (async () => {
+    AgentDeviceSyncService.refreshInFlight = (async () => {
       let leaseAcquired = false;
 
       try {
@@ -180,10 +180,10 @@ export class DeviceSensorSyncService {
         }
       }
     })().finally(() => {
-      DeviceSensorSyncService.refreshInFlight = null;
+      AgentDeviceSyncService.refreshInFlight = null;
     });
 
-    await DeviceSensorSyncService.refreshInFlight;
+    await AgentDeviceSyncService.refreshInFlight;
   }
 
   /**
@@ -1758,7 +1758,7 @@ export class DeviceSensorSyncService {
 }
 
 // Export singleton instance
-export const deviceSensorSync = new DeviceSensorSyncService();
+export const deviceSensorSync = new AgentDeviceSyncService();
 
 /**
  * Upsert agent-reported physical/logical devices into cloud table.

@@ -880,10 +880,7 @@ export class DiscoveryService extends EventEmitter {
         lastTrigger: data['discovery.lastTrigger'] as DiscoveryTrigger | undefined
       };
 
-      this.logger?.debugSync('Discovery metadata loaded from database', {
-        component: LogComponents.discovery,
-        metadata: this.metadata
-      });
+
     } catch (error) {
       this.logger?.warnSync('Failed to load discovery metadata, using defaults', {
         component: LogComponents.discovery,

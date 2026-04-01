@@ -290,14 +290,6 @@ export class DeviceManager {
 			apiTlsConfig: record.apiTlsConfig ? JSON.parse(record.apiTlsConfig) : undefined,
 		};
 		
-		// Debug: log parsed deviceInfo
-		this.logger?.debugSync('Parsed deviceInfo from database', {
-			component: LogComponents.deviceManager,
-			operation: 'loadDeviceInfo',
-			hasDeviceInfo: !!this.deviceInfo,
-			hasApiTlsConfig: !!this.deviceInfo?.apiTlsConfig,
-			apiTlsConfigKeys: this.deviceInfo?.apiTlsConfig ? Object.keys(this.deviceInfo.apiTlsConfig) : []
-		});
 	}
 }
 	/**

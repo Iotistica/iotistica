@@ -1589,19 +1589,11 @@ export class CloudSync extends EventEmitter {
 		if (mqttHealthy && topic) {
 			try {
 				const payload = stableStringify(report);
-				const payloadSize = Buffer.byteLength(payload, 'utf8');
+		
+				// QoS 1 is better - will help for small network blips
+				await this.mqttManager!.publishNoQueue(topic, payload, { qos: 1 });
 			
-			// QoS 1 is better - will help for small network blips
-			await this.mqttManager!.publishNoQueue(topic, payload, { qos: 1 });
-			
-			this.logger?.infoSync('State report delivered via MQTT', {
-				component: LogComponents.cloudSync,
-				operation: 'mqtt-success',
-				topic,
-				bytes: payloadSize,
-				transport: 'mqtt'
-			});
-			return 'mqtt'; // Success - no need for HTTP fallback
+			    return 'mqtt'; // Success - no need for HTTP fallback
 				
 			} catch (mqttError) {
 				// MQTT failed (timeout or publish error) - log and fall through to HTTP
@@ -1820,17 +1812,6 @@ export class CloudSync extends EventEmitter {
 		try {
 			// getAllDeviceStatuses() queries database + overlays adapter runtime status
 			const health = await this.endpoints.getAllDeviceStatuses();
-			
-			const endpointKeys = Object.keys(health);
-			// Only log when there's actual health data to avoid noise
-			if (endpointKeys.length > 0) {
-				this.logger?.debugSync('Collected endpoint health', {
-					component: LogComponents.cloudSync,
-					operation: 'collect-endpoint-health',
-					healthCount: endpointKeys.length,
-					firstEndpointId: endpointKeys[0]
-				});
-			}
 			
 			return health;
 		} catch (error) {

@@ -25,7 +25,7 @@ import logger from '../utils/logger';
 
 const eventPublisher = new EventPublisher();
 
-export interface DeviceStateReport {
+export interface AgentStateReport {
   [uuid: string]: {
     apps?: any;
     config?: any;
@@ -73,7 +73,7 @@ export interface ProcessingOptions {
  * Can be called from both HTTP endpoint and MQTT handler
  */
 export async function processAgentStateReport(
-  stateReport: DeviceStateReport,
+  stateReport: AgentStateReport,
   options: ProcessingOptions
 ): Promise<void> {
   for (const uuid in stateReport) {

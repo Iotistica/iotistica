@@ -6,7 +6,7 @@
 import { query, transaction } from './connection';
 import { PoolClient } from 'pg';
 import crypto from 'crypto';
-import { DeviceSensorSyncService } from '../services/agent-devices';
+import { AgentDeviceSyncService } from '../services/agent-devices';
 import logger from '../utils/logger';
 
 // Types
@@ -505,7 +505,7 @@ export class DeviceTargetStateModel {
 
     // Sync config to table for NEW sensors only (avoid flipping existing statuses on deploy)
     if (deployedState.config && deployedState.config.endpoints) {
-      const syncService = new DeviceSensorSyncService();
+      const syncService = new AgentDeviceSyncService();
       const existingSensors = await query(
         'SELECT uuid, name FROM endpoints WHERE agent_uuid = $1',
         [deviceUuid]

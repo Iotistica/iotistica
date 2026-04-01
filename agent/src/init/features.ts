@@ -625,16 +625,8 @@ export class FeatureInitializer {
           // Without this, CloudSync tries to collect health from the old (stopped) instance
           if (this.cloudSync && this.features.sensors) {
             this.cloudSync.setDevices(this.features.sensors);
-            logger.infoSync('Updated CloudSync endpoints reference after reload', {
-              component: LogComponents.agent
-            });
           }
 
-          logger.infoSync('Protocol adapters and Sensor Publish reloaded successfully', {
-            component: LogComponents.agent,
-            trigger: data.trigger,
-            deviceCount: data.deviceCount
-          });
         } catch (error) {
           logger.errorSync('Failed to reload protocol adapters after discovery', error as Error, {
             component: LogComponents.agent
