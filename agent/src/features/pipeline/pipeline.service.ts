@@ -112,8 +112,17 @@ export class PipelineService {
       functionGlobalContext: {},
     };
 
-    // node-red is CJS; require() is always available in this CJS-output project
-    this.red = require('node-red');
+    // node-red is intentionally optional. Keep the runtime out of the default
+    // agent install and require an explicit plugin-style install when needed.
+    try {
+      this.red = require('node-red');
+    } catch (error: any) {
+      if (error?.code === 'MODULE_NOT_FOUND' || String(error?.message || '').includes("Cannot find module 'node-red'")) {
+        throw new Error('Embedded Node-RED runtime is not installed. Install node-red separately and set ENABLE_EMBEDDED_NODE_RED=true to enable the optional pipeline runtime.');
+      }
+
+      throw error;
+    }
     this.red.init(null, settings);
 
     // Wait for flows to be fully deployed before resolving

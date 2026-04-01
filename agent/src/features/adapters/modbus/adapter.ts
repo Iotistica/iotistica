@@ -6,6 +6,7 @@ import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
 import { DeviceMetrics, MetricsSummary } from '../metrics.js';
 import { EndpointModel } from '../../../db/models/endpoint.model.js';
 import { DeviceModel } from '../../../db/models/device.model.js';
+import { pLimit } from '../../../lib/p-limit.js';
 
 /**
  * Main Modbus Adapter class that coordinates Modbus devices
@@ -68,7 +69,6 @@ export class ModbusAdapter extends EventEmitter {
     try {
       // Parallelize device initialization with concurrency control
       // At scale (50-100 devices), sequential init blocks startup
-      const { default: pLimit } = await import('p-limit');
       const limit = pLimit(10); // Max 10 concurrent device initializations
       
       const enabledDevices = this.config.devices.filter(d => d.enabled);
@@ -380,7 +380,6 @@ export class ModbusAdapter extends EventEmitter {
             this.logger.debug(`Global poll tick: ${devicesToPoll.length} devices due for poll`);
             
             // Poll devices with concurrency control
-            const { default: pLimit } = await import('p-limit');
             const limit = pLimit(this.POLL_CONCURRENCY);
             
             const pollPromises = devicesToPoll.map(deviceConfig => 

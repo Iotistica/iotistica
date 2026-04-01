@@ -7,18 +7,30 @@ import type { AgentInitContext } from './context.js';
  * Initialize the Node-RED payload transform pipeline.
  *
  * Controlled entirely by environment variables - no DB/config-system changes needed:
+ *   ENABLE_EMBEDDED_NODE_RED - must be set to 'true' to allow the in-process runtime
  *   PIPELINE_FLOWS_FILE  - absolute or cwd-relative path to a flows JSON file (required to enable)
  *   PIPELINE_TIMEOUT_MS  - per-transform timeout in ms (default: 5000)
  *
- * If PIPELINE_FLOWS_FILE is not set the pipeline is simply skipped (fail-open).
+ * If PIPELINE_FLOWS_FILE is not set, or embedded Node-RED is not explicitly enabled,
+ * the pipeline is skipped (fail-open).
  */
 export async function initPipeline(ctx: AgentInitContext): Promise<void> {
 	const logger = ctx.agentLogger;
 	const flowsFile = process.env['PIPELINE_FLOWS_FILE'];
+	const embeddedNodeRedEnabled = process.env['ENABLE_EMBEDDED_NODE_RED'] === 'true';
 
 	if (!flowsFile) {
 		logger?.debugSync('Pipeline not configured (PIPELINE_FLOWS_FILE not set)', {
 			component: LogComponents.agent,
+		});
+		return;
+	}
+
+	if (!embeddedNodeRedEnabled) {
+		logger?.warnSync('Pipeline configured but embedded Node-RED is disabled', {
+			component: LogComponents.agent,
+			message: 'Set ENABLE_EMBEDDED_NODE_RED=true to allow the in-process pipeline runtime',
+			flowsFile,
 		});
 		return;
 	}
@@ -79,7 +91,17 @@ export async function initPipeline(ctx: AgentInitContext): Promise<void> {
 			component: LogComponents.agent,
 			flowsFile: resolvedFlows,
 		});
-	} catch (error) {
+	} catch (error: any) {
+		if (error?.code === 'MODULE_NOT_FOUND' || String(error?.message || '').includes("Cannot find module 'node-red'")) {
+			logger?.warnSync('Embedded Node-RED runtime not installed', {
+				component: LogComponents.agent,
+				flowsFile: resolvedFlows,
+				message: 'Install node-red separately if you need the optional pipeline runtime',
+			});
+			ctx.pipelineService = undefined;
+			return;
+		}
+
 		logger?.errorSync(
 			'Failed to initialize pipeline — continuing without transform',
 			error as Error,

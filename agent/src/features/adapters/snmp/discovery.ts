@@ -23,6 +23,7 @@ import type { ConfigManager } from '../../../managers/config.js';
 import * as net from 'net';
 import * as dns from 'dns';
 import { promisify } from 'util';
+import { pLimit } from '../../../lib/p-limit.js';
 
 const dnsLookup = promisify(dns.lookup);
 
@@ -126,7 +127,6 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
 
     // Concurrent scanning with rate limiting
     const concurrency = options?.concurrency || 10;
-    const { default: pLimit } = await import('p-limit');
     const limit = pLimit(concurrency);
 
     const scanResults = await Promise.allSettled(

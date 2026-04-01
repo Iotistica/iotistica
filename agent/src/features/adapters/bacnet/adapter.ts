@@ -4,6 +4,7 @@ import { BACnetClient } from './client';
 import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
 import { DeviceMetrics } from '../metrics.js';
 import { DeviceModel } from '../../../db/models/device.model.js';
+import { pLimit } from '../../../lib/p-limit.js';
 
 /**
  * Main BACnet Adapter class that coordinates BACnet devices
@@ -64,7 +65,6 @@ export class BACnetAdapter extends EventEmitter {
       this.logger.debug(`Initializing ${enabledDevices.length} BACnet devices...`);
       
       // Initialize devices in parallel with concurrency limit
-      const { default: pLimit } = await import('p-limit');
       const limit = pLimit(this.config.maxConcurrentDevices);
       
       const results = await Promise.allSettled(
@@ -290,7 +290,6 @@ export class BACnetAdapter extends EventEmitter {
 
       if (devicesToPoll.length > 0) {
         // Poll devices in parallel with concurrency limit
-        const { default: pLimit } = await import('p-limit');
         const limit = pLimit(this.config.maxConcurrentDevices);
 
         await Promise.all(

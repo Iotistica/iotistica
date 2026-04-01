@@ -37,7 +37,7 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const db = knex({
-	client: 'sqlite3',
+	client: 'better-sqlite3',
 	connection: {
 		filename: databasePath,
 	},
@@ -52,28 +52,23 @@ const db = knex({
 		acquireTimeoutMillis: 30000,
 		idleTimeoutMillis: 30000,
 		// Critical for concurrent writes: enable WAL mode and busy timeout
+		// better-sqlite3 is synchronous - use pragma() instead of conn.run()
 		afterCreate: (conn: any, done: any) => {
 			const busyTimeoutMs = Number.parseInt(process.env.SQLITE_BUSY_TIMEOUT_MS || '15000', 10);
 			const safeBusyTimeoutMs = Number.isFinite(busyTimeoutMs) && busyTimeoutMs > 0 ? busyTimeoutMs : 15000;
-			// Enable WAL mode for concurrent read/write
-			conn.run('PRAGMA journal_mode = WAL;', (err: any) => {
-				if (err) return done(err, conn);
+			try {
+				// Enable WAL mode for concurrent read/write
+				conn.pragma('journal_mode = WAL');
 				// Set busy timeout (SQLite waits and retries lock acquisition)
-				conn.run(`PRAGMA busy_timeout = ${safeBusyTimeoutMs};`, (err2: any) => {
-					if (err2) return done(err2, conn);
-					
-					// Optional: Enable readonly mode for diagnostics or fail-safe degraded operation
-					// Useful for: read-only diagnostics, preventing writes during recovery, fail-safe mode
-					// Set SQLITE_READONLY_MODE=true to enable
-					if (process.env.SQLITE_READONLY_MODE === 'true') {
-						conn.run('PRAGMA query_only = ON;', (err3: any) => {
-							done(err3, conn);
-						});
-					} else {
-						done(null, conn);
-					}
-				});
-			});
+				conn.pragma(`busy_timeout = ${safeBusyTimeoutMs}`);
+				// Optional: Enable readonly mode for diagnostics or fail-safe degraded operation
+				if (process.env.SQLITE_READONLY_MODE === 'true') {
+					conn.pragma('query_only = ON');
+				}
+				done(null, conn);
+			} catch (err) {
+				done(err, conn);
+			}
 		},
 	},
 });

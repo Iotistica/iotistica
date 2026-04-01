@@ -1,5 +1,6 @@
 import { BACnetDevice, BACnetObject, BACnetProperty } from './types';
 import { Logger } from '../types';
+import { pLimit } from '../../../lib/p-limit.js';
 
 interface BACnetReadResult {
   objectId: {
@@ -194,7 +195,6 @@ export class BACnetClient {
     const results = new Map<string, { value: any; quality: 'GOOD' | 'BAD'; error?: string }>();
 
     // Use maxConcurrentReads to limit concurrency
-    const { default: pLimit } = await import('p-limit');
     const limit = pLimit(this.config.maxConcurrentReads);
 
     const readPromises = objects.map(obj =>
