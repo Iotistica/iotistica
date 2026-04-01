@@ -13,7 +13,7 @@ set -e
 #   IOTISTICA_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
 #   IOTISTICA_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
 #   IOTISTICA_INSTALL_MOSQUITTO    - Set to yes/true/1 to install and manage a local Mosquitto broker
-#   AGENT_SHELL_HMAC_KEY           - Optional HMAC secret for remote shell command verification
+#   AGENT_SHELL_HMAC_KEY           - HMAC secret for remote shell command verification (required when remote shell access is enabled)
 #   FORCE_INSTALL                 - Legacy opt-in flag; set to 1 to allow automatic Docker installation
 
 # Note: This script is POSIX-compliant and works with both sh and bash
