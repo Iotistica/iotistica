@@ -460,10 +460,10 @@ services:
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
             - MQTT_USERNAME=mqtt-user-2
-            - MQTT_PASSWORD=test1234
+            - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-2
             - MQTT_DEVICE_UUID=253bd0b3-61e0-4109-a490-29f91ddbf381
-            - MQTT_TOPIC=iot/73eddd385ce8/agent/5196da95-fbb8-4fd1-8dec-5b296c8e8e91/mqtt/fa831271-198e-4c5a-86ba-62c55363c9b8
+            - MQTT_TOPIC=i/c-3dOFzo/a/SB910wqiRFSPauq9bVVV8A/d/xlokRCK5RKuxJG4DYGrmWQ
             - MQTT_METRIC_NAMES=pressure,vibration,temperature2
             - MQTT_METRIC_UNITS=temperature2:C
             - MQTT_METRIC_BASES=temperature2:26

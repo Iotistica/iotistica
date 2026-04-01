@@ -250,7 +250,7 @@ export class MqttFileAuthReconciler {
         return;
       }
       await container.kill({ signal: 'SIGHUP' });
-      this.logger?.infoSync(`Sent SIGHUP to '${options.containerName}' — broker reloading auth files`, {
+      this.logger?.debugSync(`Sent SIGHUP to '${options.containerName}' — broker reloading auth files`, {
         component: LogComponents.configManager,
         operation: 'signalMosquittoReload',
       });

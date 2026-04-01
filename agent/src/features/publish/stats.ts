@@ -74,8 +74,8 @@ export class PublishStats {
     }
 
     const label = info.isBaseline
-      ? `Published ${messageCount} messages from '${deviceName}' (no-op baseline)`
-      : `Published ${messageCount} messages from '${deviceName}'`;
+      ? `Published ${messageCount} messages (no-op baseline)`
+      : `Published ${messageCount} messages`;
 
     logger.info(label, { messages: messageCount, batchBytes, compression: compressionLog });
   }

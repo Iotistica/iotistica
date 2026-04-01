@@ -117,6 +117,10 @@
     "node-opcua-client": "^2.130.0"
   },
   "overrides": {
-    "tar": "7.5.11"
+    "tar": "7.5.11",
+    "brace-expansion": "5.0.5",
+    "jsrsasign": "11.1.1",
+    "path-to-regexp": "0.1.13",
+    "picomatch": "4.0.4"
   }
 }

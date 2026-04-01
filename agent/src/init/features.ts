@@ -482,12 +482,6 @@ export class FeatureInitializer {
           }
         });
       }
-
-      logger.debugSync('Protocol Adapters initialized (database-driven)', {
-        component: LogComponents.agent,
-        enabledProtocols,
-        source: 'config.endpoints'
-      });
     } catch (error) {
       logger.errorSync('Failed to initialize Protocol Adapters', error as Error, {
         component: LogComponents.agent,

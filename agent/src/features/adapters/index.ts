@@ -550,7 +550,7 @@ export class SensorsFeature extends BaseFeature {
           const url = new URL(brokerUrl);
           brokerHost = url.hostname;
           brokerPort = parseInt(url.port) || 1883;
-          this.logger.info(`MQTT ADAPTER: Using broker ${brokerHost}:${brokerPort} from MQTT_BROKER_URL`);
+         
         } catch (error) {
           throw new Error(`Failed to parse MQTT broker URL '${brokerUrl}': ${error}`);
         }

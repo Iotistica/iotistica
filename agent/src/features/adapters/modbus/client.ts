@@ -324,7 +324,7 @@ export class ModbusClient {
 
       // Log successful connection with register info
       this.logger.info(
-        `[MODBUS] ✓ Connected to device: ${this.device.name} | Registers: ${this.device.registers.length} | ` +
+        `Connected to device: ${this.device.name} | Registers: ${this.device.registers.length} | ` +
         `Function codes: ${Array.from(this.precomputedBatches.keys()).join(',')} | ` +
         `Batches: ${Array.from(this.precomputedBatches.values()).flat().length}`
       );

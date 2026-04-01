@@ -53,11 +53,6 @@ export async function initPipeline(ctx: AgentInitContext): Promise<void> {
 
 	const timeoutMs = parseInt(process.env['PIPELINE_TIMEOUT_MS'] ?? '5000', 10);
 
-	logger?.infoSync('Initializing Node-RED pipeline', {
-		component: LogComponents.agent,
-		flowsFile: resolvedFlows,
-		timeoutMs,
-	});
 
 	try {
 		const { PipelineService } = await import('../features/pipeline/index.js');

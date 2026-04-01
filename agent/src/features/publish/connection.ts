@@ -67,7 +67,6 @@ export class DeviceConnection extends EventEmitter {
     this._state = DeviceState.CONNECTED;
     this._attempts = 0;
     this.currentDelay = this.INITIAL_DELAY_MS;
-    this.logger?.info(`Connected to device '${this.config.name || 'unknown'}'`);
     this.emit('connected');
   }
 

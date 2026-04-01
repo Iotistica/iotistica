@@ -6,3 +6,6 @@ topic readwrite #
 
 user mqtt-user-1
 topic write i/c-3dOFzo/a/SB910wqiRFSPauq9bVVV8A/d/f8f4QRpRQOWvjy56xvF2FQ/#
+
+user mqtt-user-2
+topic write i/c-3dOFzo/a/SB910wqiRFSPauq9bVVV8A/d/xlokRCK5RKuxJG4DYGrmWQ/#
