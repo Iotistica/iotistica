@@ -52,7 +52,7 @@ jobs:
 
           echo "Waiting for cloud Mosquitto..."
           timeout 60 bash -c '
-            until docker compose -f "$COMPOSE_FILE" logs mosquitto --tail=20 2>/dev/null | grep -q "mosquitto version"; do
+            until docker inspect --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}starting{{end}}" iotistic-mosquitto-e2e 2>/dev/null | grep -q healthy; do
               sleep 2
             done
           '
