@@ -19,6 +19,15 @@ spec:
             type: Exact
             value: /agent.sha256
         - path:
+            type: Exact
+            value: /agent/info
+        - path:
+            type: Exact
+            value: /agent/artifacts
+        - path:
+            type: PathPrefix
+            value: /agent/artifacts/
+        - path:
             type: PathPrefix
             value: /agent/
       backendRefs:

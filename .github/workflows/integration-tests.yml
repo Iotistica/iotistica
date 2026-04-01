@@ -155,6 +155,17 @@ jobs:
           echo "fleet_uuid=$FLEET_UUID" >> "$GITHUB_OUTPUT"
           echo "provisioning_key=$PROVISIONING_KEY" >> "$GITHUB_OUTPUT"
 
+      - name: Verify published installer and artifact endpoints
+        run: |
+          echo "=== Fetch published installer ==="
+          curl -fsSL https://get.iotistica.com/agent -o /tmp/iotistica-install.sh
+
+          echo "=== Installer artifact URL markers ==="
+          grep -nE 'IOTISTICA_DOWNLOAD_BASE_URL|get\.iotistica\.com/agent/artifacts|blob\.core\.windows\.net/scripts/agent' /tmp/iotistica-install.sh || true
+
+          echo "=== Check redirected artifact endpoint ==="
+          curl -fsSI https://get.iotistica.com/agent/artifacts/agent-latest-x86_64.tar.gz
+
       - name: Install Mosquitto and agent with install.sh
         env:
           CI: true

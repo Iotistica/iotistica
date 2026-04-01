@@ -117,11 +117,13 @@ app.get('/health', (req, res) => {
 
 // Main proxy endpoint: curl -sfL https://get.iotistica.com/agent | sh
 app.get('/agent', (req, res) => {
+  console.log(`[${new Date().toISOString()}] Install script endpoint hit ${JSON.stringify(getRequestContext(req))}`);
   proxyFromStorage(INSTALL_URL, req, res, 'text/x-shellscript');
 });
 
 // SHA256 checksum endpoint
 app.get('/agent.sha256', (req, res) => {
+  console.log(`[${new Date().toISOString()}] Installer checksum endpoint hit ${JSON.stringify(getRequestContext(req))}`);
   proxyFromStorage(INSTALL_SHA256_URL, req, res, 'text/plain');
 });
 
@@ -129,6 +131,12 @@ app.get('/agent.sha256', (req, res) => {
 app.get('/agent/artifacts/*', (req, res) => {
   const requestedPath = req.params[0];
   const blobPath = normalizeArtifactPath(requestedPath);
+
+  console.log(`[${new Date().toISOString()}] Artifact endpoint hit ${JSON.stringify({
+    ...getRequestContext(req),
+    requestedPath,
+    resolvedBlobPath: blobPath || ''
+  })}`);
 
   if (!blobPath) {
     res.status(400).json({
@@ -171,6 +179,7 @@ app.get('/agent/info', (req, res) => {
 
 // Catch-all 404
 app.use((req, res) => {
+  console.warn(`[${new Date().toISOString()}] Unmatched route ${JSON.stringify(getRequestContext(req))}`);
   res.status(404).json({ 
     error: 'Not Found',
     message: 'Use: curl -sfL https://get.iotistica.com/agent | sh'
