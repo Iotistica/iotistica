@@ -102,7 +102,7 @@ jobs:
           provenance: false
           platforms: linux/amd64
           cache-from: type=gha,scope=api-ci
-          cache-to: type=gha,scope=api-ci,mode=max
+          cache-to: type=gha,scope=api-ci,mode=min,ignore-error=true
           tags: |
             iotistic/api:ci-${{ steps.sha.outputs.short_sha }}
             iotistic/api:ci-latest
