@@ -13,7 +13,7 @@ app.use(helmet());
 const AZURE_STORAGE_ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT || 'iotistic';
 const AZURE_STORAGE_CONTAINER = process.env.AZURE_STORAGE_CONTAINER || 'scripts';
 const BLOB_INSTALL_PATH = process.env.BLOB_INSTALL_PATH || 'agent/install.sh';
-const BLOB_INSTALL_SHA256_PATH = process.env.BLOB_INSTALL_SHA256_PATH || 'agent/install.sha256';
+const BLOB_INSTALL_SHA256_PATH = process.env.BLOB_INSTALL_SHA256_PATH || 'agent/install.sh.sha256';
 
 // Construct Azure Blob Storage URLs
 const INSTALL_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BLOB_INSTALL_PATH}`;

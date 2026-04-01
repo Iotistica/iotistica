@@ -156,6 +156,10 @@ jobs:
             sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
 
             VERSION=$(jq -r '.version' "${{ github.workspace }}/agent/package.json")
+            STAMPED_INSTALL=/tmp/iotistic-artifacts/install.sh
+            sed "s/AGENT_VERSION_PLACEHOLDER/${VERSION}/g" "${{ github.workspace }}/agent/bin/install.sh" > "$STAMPED_INSTALL"
+            sha256sum "$STAMPED_INSTALL" > /tmp/iotistic-artifacts/install.sh.sha256
+
             SHA_SHORT=$(printf '%s' "${{ github.sha }}" | cut -c1-7)
             jq -n \
               --arg commit "${{ github.sha }}" \
@@ -221,6 +225,24 @@ jobs:
             --overwrite true \
             --auth-mode key \
             --content-type application/json
+
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/install.sh \
+            --file /tmp/iotistic-artifacts/install.sh \
+            --overwrite true \
+            --auth-mode key \
+            --content-type text/x-shellscript
+
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent/install.sh.sha256 \
+            --file /tmp/iotistic-artifacts/install.sh.sha256 \
+            --overwrite true \
+            --auth-mode key \
+            --content-type text/plain
 
   docker:
     name: Docker Build, Scan & Push

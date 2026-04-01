@@ -43,7 +43,7 @@ Set environment variables:
 export AZURE_STORAGE_ACCOUNT="your-storage-account"
 export AZURE_STORAGE_CONTAINER="scripts"
 export BLOB_INSTALL_PATH="agent/install.sh"
-export BLOB_INSTALL_SHA256_PATH="agent/install.sha256"
+export BLOB_INSTALL_SHA256_PATH="agent/install.sh.sha256"
 export PORT=3000
 export NODE_ENV=production
 ```
@@ -71,7 +71,7 @@ Output:
   "description": "Iotistic Device Agent Installer",
   "usage": "curl -sfL https://get.iotistica.com/agent | sh",
   "install_url": "https://account.blob.core.windows.net/scripts/agent/install.sh",
-  "checksum_url": "https://account.blob.core.windows.net/scripts/agent/install.sha256",
+  "checksum_url": "https://account.blob.core.windows.net/scripts/agent/install.sh.sha256",
   "documentation": "https://iotistica.com/documentation.html#agent-installation"
 }
 ```
@@ -149,7 +149,7 @@ services:
       AZURE_STORAGE_ACCOUNT: your-account
       AZURE_STORAGE_CONTAINER: scripts
       BLOB_INSTALL_PATH: agent/install.sh
-      BLOB_INSTALL_SHA256_PATH: agent/install.sha256
+      BLOB_INSTALL_SHA256_PATH: agent/install.sh.sha256
       NODE_ENV: production
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
@@ -225,11 +225,17 @@ docker logs -f iotistic-redirector
 
 ### Service returns 404
 - Ensure `AZURE_STORAGE_ACCOUNT` env var is set
-- Check Azure Blob Storage has the `agent/install` blob
+- Check Azure Blob Storage has the `agent/install.sh` blob
+- Check the running pod has `BLOB_INSTALL_PATH=agent/install.sh`
 
 ### 301 redirects not working
 - Verify curl is installed and supports HTTPS
-- Test directly: `curl -sfL https://iotistica.com/agent/install`
+- Test directly: `curl -sfL https://get.iotistica.com/agent`
+
+### Service returns 502 Bad Gateway
+- Restart the deployment after updating the ConfigMap or image
+- Verify the running pod environment with `kubectl exec -n iotistica-utils deploy/install-redirect -- printenv | grep BLOB_`
+- Verify the blob directly with `curl -I https://iotistic.blob.core.windows.net/scripts/agent/install.sh`
 
 ### Azure authentication errors
 - If using managed identity, ensure container has proper permissions

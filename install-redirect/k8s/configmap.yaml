@@ -6,6 +6,6 @@ metadata:
 data:
   AZURE_STORAGE_CONTAINER: "scripts"
   BLOB_INSTALL_PATH: "agent/install.sh"
-  BLOB_INSTALL_SHA256_PATH: "agent/install.sha256"
+  BLOB_INSTALL_SHA256_PATH: "agent/install.sh.sha256"
   NODE_ENV: "production"
   PORT: "3000"
