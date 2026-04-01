@@ -2,17 +2,7 @@ name: Integration Tests
 
 on:
   workflow_call:
-    inputs:
-      agent_version:
-        description: Agent version label to stamp into the install environment
-        required: false
-        type: string
   workflow_dispatch:
-    inputs:
-      agent_version:
-        description: Agent version label to stamp into the install environment
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -123,7 +113,6 @@ jobs:
       - name: Install Mosquitto and agent with install.sh
         env:
           CI: true
-          IOTISTICA_AGENT_VERSION: ${{ inputs.agent_version || github.sha }}
           IOTISTICA_DEVICE_PORT: 48484
           IOTISTICA_API: http://localhost:4002
           IOTISTICA_INSTALL_MOSQUITTO: yes
