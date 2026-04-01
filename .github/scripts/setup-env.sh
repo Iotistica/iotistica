@@ -33,8 +33,8 @@ DB_POOL_SIZE=20
 DB_SSL=false
 DB_SSL_REJECT_UNAUTHORIZED=false
 
-# MQTT broker returned to provisioned edge agents
-MQTT_BROKER_HOST=localhost
+# MQTT broker address used by the API container to reach the host-installed broker
+MQTT_BROKER_HOST=host.docker.internal
 MQTT_BROKER_PORT=1883
 MQTT_BROKER_PROTOCOL=mqtt
 MQTT_BROKER_USE_TLS=false

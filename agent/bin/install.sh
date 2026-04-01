@@ -229,11 +229,6 @@ allow_anonymous false
 
 password_file /etc/mosquitto/passwd
 acl_file /etc/mosquitto/acl
-
-persistence true
-persistence_location /var/lib/mosquitto/
-
-log_dest file /var/log/mosquitto/mosquitto.log
 EOFMOSQ
 
     echo "Initializing MQTT auth files..."

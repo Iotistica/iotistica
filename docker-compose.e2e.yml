@@ -95,7 +95,7 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_USERNAME=${REDIS_USERNAME:-}
-      - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-localhost}
+      - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-host.docker.internal}
       - MQTT_BROKER_PORT=${MQTT_BROKER_PORT:-1883}
       - MQTT_BROKER_PROTOCOL=${MQTT_BROKER_PROTOCOL:-mqtt}
       - MQTT_BROKER_USE_TLS=${MQTT_BROKER_USE_TLS:-false}
@@ -111,6 +111,8 @@ services:
       - TAILSCALE_ENABLED=false
     ports:
       - "${API_PORT_EXT:-4002}:3002"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
       interval: 10s

@@ -81,6 +81,20 @@ jobs:
             ]
           );
 
+          await query(
+            `UPDATE mqtt_broker_config
+             SET host = $1,
+                 port = $2,
+                 protocol = $3,
+                 use_tls = $4,
+                 username = $5,
+                 is_active = true,
+                 is_default = true,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE is_default = true`,
+            ['localhost', 1883, 'mqtt', false, 'admin']
+          );
+
           const created = await createProvisioningKey(
             fleetUuid,
             1,
