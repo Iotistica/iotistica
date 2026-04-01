@@ -17,7 +17,7 @@ function buildCommands(args: string[]): CommandMap {
       _default: (key?: string) => {
         if (!key) {
           throw new CLIError('Provisioning key is required', 1, {
-            usage: 'iotctl provision <key> [--api <endpoint>] [--name <device-name>]',
+            usage: 'iotctl provision <key> --api <endpoint> [--name <device-name>] [--type <device-type>]',
           });
         }
         return provisionWithKey(key);

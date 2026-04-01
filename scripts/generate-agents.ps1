@@ -968,7 +968,7 @@ $networkConfig
       - MQTT_PASSWORD=$MqttPassword
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=$RequireProvisioning
-      - PROVISIONING_KEY=$apiKey
+            - PROVISIONING_KEY=
       - API_SECURITY_MODE=$ApiSecurityMode
       - FIREWALL_ENABLED=$FirewallEnabled
       # Testing & Development (not dashboard-controlled)

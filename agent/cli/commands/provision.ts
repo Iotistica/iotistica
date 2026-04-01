@@ -1,9 +1,9 @@
-import { DEVICE_API_BASE, DEVICE_API_V1, CLIError, logger, apiCached, apiRequest, clearApiCache, redact, requireConfirmation } from '../core';
+import { DEVICE_API_BASE, DEVICE_API_V1, CLIError, logger, apiCached, apiRequest, clearApiCache, redact, requireConfirmation, validateUrl } from '../core';
 
 export async function provisionWithKey(key: string): Promise<void> {
   if (!key) {
     throw new CLIError('Provisioning key is required', 1, {
-      usage: 'iotctl provision <key> [--api <endpoint>] [--name <device-name>]',
+      usage: 'iotctl provision <key> --api <endpoint> [--name <device-name>] [--type <device-type>]',
     });
   }
 
@@ -17,8 +17,19 @@ export async function provisionWithKey(key: string): Promise<void> {
       provisioningApiKey: key,
     };
 
-    if (apiIndex !== -1 && args[apiIndex + 1]) {
-      config.apiEndpoint = args[apiIndex + 1];
+    if (apiIndex === -1 || !args[apiIndex + 1]) {
+      throw new CLIError('The --api argument is required for provisioning', 1, {
+        usage: 'iotctl provision <key> --api <endpoint> [--name <device-name>] [--type <device-type>]',
+        hint: 'Example: iotctl provision <key> --api https://localhost:3443',
+      });
+    }
+
+    config.apiEndpoint = args[apiIndex + 1];
+    if (!validateUrl(config.apiEndpoint)) {
+      throw new CLIError('Invalid --api endpoint', 1, {
+        apiEndpoint: config.apiEndpoint,
+        hint: 'Use a full http:// or https:// URL',
+      });
     }
 
     if (nameIndex !== -1 && args[nameIndex + 1]) {
@@ -30,7 +41,7 @@ export async function provisionWithKey(key: string): Promise<void> {
     }
 
     logger.info('Provisioning device', {
-      apiEndpoint: config.apiEndpoint || 'default',
+      apiEndpoint: config.apiEndpoint,
       deviceName: config.deviceName || 'auto-generated',
     });
 
@@ -44,6 +55,10 @@ export async function provisionWithKey(key: string): Promise<void> {
       deviceId: redact(result.device.deviceId),
       deviceName: result.device.deviceName,
       mqttBrokerUrl: redact(result.device.mqttBrokerUrl),
+    });
+
+    logger.warn('Restart the agent to apply provisioned cloud configuration', {
+      hint: 'Provisioning state is saved immediately, but MQTT/cloud-dependent features initialize on startup',
     });
   } catch {
     throw new CLIError('Provisioning failed', 1);
@@ -66,7 +81,7 @@ export async function provisionStatus(): Promise<void> {
 
     if (!status.provisioned) {
       logger.info('Device not provisioned', {
-        hint: 'Use "iotctl provision <key>" to provision this device',
+        hint: 'Use "iotctl provision <key> --api <endpoint>" to provision this device',
       });
     }
   } catch {

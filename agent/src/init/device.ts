@@ -6,6 +6,19 @@ import { getPackageVersion } from '../utils/api-utils.js';
 import { getMacAddress, getOsVersion } from '../system/metrics.js';
 import { CloudLogBackend } from '../logging/cloud-backend.js';
 
+function normalizeOptionalEnvValue(value?: string): string | undefined {
+	if (typeof value !== 'string') {
+		return undefined;
+	}
+
+	const trimmed = value.trim();
+	if (!trimmed || trimmed === "''" || trimmed === '""') {
+		return undefined;
+	}
+
+	return trimmed;
+}
+
 export async function initDevice(ctx: AgentInitContext): Promise<void> {
 	ctx.sharedHttpClient = createHttpClient(ctx.configManager!.getCloudApiEndpoint());
 
@@ -69,7 +82,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 	await ctx.deviceManager.initialize();
 
 	let deviceInfo = ctx.deviceManager.getDeviceInfo();
-	const provisioningApiKey = process.env.PROVISIONING_KEY;
+	const provisioningApiKey = normalizeOptionalEnvValue(process.env.PROVISIONING_KEY);
 	const cloudEndpoint = process.env.IOTISTICA_API || ctx.configManager!.getCloudApiEndpoint();
 
 	if (!deviceInfo.provisioned && provisioningApiKey && cloudEndpoint) {
