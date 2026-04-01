@@ -12,7 +12,7 @@
  * - Type-safe generic implementation
  */
 
-import { getDatabase } from '../db/sqlite';
+import { OfflineQueueModel, type OfflineQueueRecord } from '../db/models';
 import type { AgentLogger } from './agent-logger';
 import { LogComponents } from './types';
 
@@ -30,14 +30,6 @@ export interface QueueStats {
 	oldestAgeHours?: number;
 }
 
-type OfflineQueueRow = {
-	id: number;
-	queueName: string;
-	payload: string;
-	createdAt: number | string;
-	attempts: number;
-};
-
 export class OfflineQueue<T> {
 	private queueName: string;
 	private maxSize: number;
@@ -51,19 +43,8 @@ export class OfflineQueue<T> {
 		this.logger = logger;
 	}
 
-	private getDb() {
-		return getDatabase();
-	}
-
-	private getRowsOrdered(): OfflineQueueRow[] {
-		return this.getDb()
-			.prepare(`
-				SELECT id, queueName, payload, createdAt, attempts
-				FROM offline_queue
-				WHERE queueName = ?
-				ORDER BY createdAt ASC
-			`)
-			.all(this.queueName) as OfflineQueueRow[];
+	private getRowsOrdered(): OfflineQueueRecord[] {
+		return OfflineQueueModel.getRowsOrdered(this.queueName);
 	}
 	
 	/**
@@ -75,29 +56,9 @@ export class OfflineQueue<T> {
 		}
 		
 		try {
-			const db = this.getDb();
-			const existingTable = db
-				.prepare(`
-					SELECT name
-					FROM sqlite_master
-					WHERE type = 'table' AND name = 'offline_queue'
-					LIMIT 1
-				`)
-				.get() as { name?: string } | undefined;
+			const createdTable = OfflineQueueModel.ensureTable();
 
-			db.exec(`
-				CREATE TABLE IF NOT EXISTS offline_queue (
-					id INTEGER PRIMARY KEY AUTOINCREMENT,
-					queueName VARCHAR(255) NOT NULL,
-					payload TEXT NOT NULL,
-					createdAt BIGINT NOT NULL,
-					attempts INTEGER DEFAULT 0
-				);
-				CREATE INDEX IF NOT EXISTS offline_queue_queuename_createdat_index
-				ON offline_queue (queueName, createdAt);
-			`);
-
-			if (!existingTable?.name) {
+			if (createdTable) {
 				this.logger?.infoSync('Created offline_queue table', {
 					component: LogComponents.offlineQueue
 				});
@@ -142,30 +103,15 @@ export class OfflineQueue<T> {
 					maxSize: this.maxSize
 				});
 
-				const oldestInDb = this.getDb()
-					.prepare(`
-						SELECT id
-						FROM offline_queue
-						WHERE queueName = ?
-						ORDER BY createdAt ASC
-						LIMIT 1
-					`)
-					.get(this.queueName) as { id?: number } | undefined;
+				const oldestInDb = OfflineQueueModel.getOldest(this.queueName);
 
 				if (typeof oldestInDb?.id === 'number') {
-					this.getDb()
-						.prepare(`DELETE FROM offline_queue WHERE id = ?`)
-						.run(oldestInDb.id);
+					OfflineQueueModel.deleteById(oldestInDb.id);
 				}
 			}
 			
 			// Persist to disk
-			this.getDb()
-				.prepare(`
-					INSERT INTO offline_queue (queueName, payload, createdAt, attempts)
-					VALUES (?, ?, ?, ?)
-				`)
-				.run(this.queueName, JSON.stringify(item), Date.now(), 0);
+			OfflineQueueModel.insert(this.queueName, JSON.stringify(item), Date.now(), 0);
 			
 		} catch (error) {
 			this.logger?.errorSync('Failed to enqueue item', error instanceof Error ? error : new Error(String(error)), {
@@ -319,32 +265,18 @@ export class OfflineQueue<T> {
 			await this.init();
 		}
 
-		const countRow = this.getDb()
-			.prepare(`SELECT COUNT(*) AS count FROM offline_queue WHERE queueName = ?`)
-			.get(this.queueName) as { count?: number | string } | undefined;
 
-		const oldestRow = this.getDb()
-			.prepare(`
-				SELECT createdAt
-				FROM offline_queue
-				WHERE queueName = ?
-				ORDER BY createdAt ASC
-				LIMIT 1
-			`)
-			.get(this.queueName) as { createdAt?: number | string } | undefined;
+		const count = OfflineQueueModel.getCount(this.queueName);
+		const oldestCreatedAt = OfflineQueueModel.getOldestCreatedAt(this.queueName);
 
 		let oldestAgeHours: number | undefined;
-		const oldestCreatedAt = oldestRow?.createdAt;
 		if (oldestCreatedAt !== undefined && oldestCreatedAt !== null) {
-			const createdAtMs = Number(oldestCreatedAt);
-			if (!Number.isNaN(createdAtMs)) {
-				oldestAgeHours = Math.floor((Date.now() - createdAtMs) / (1000 * 60 * 60));
-			}
+			oldestAgeHours = Math.floor((Date.now() - oldestCreatedAt) / (1000 * 60 * 60));
 		}
 
 		return {
 			queueName: this.queueName,
-			currentCount: parseInt(String(countRow?.count || '0'), 10),
+			currentCount: count,
 			oldestAgeHours,
 		};
 	}
@@ -359,9 +291,7 @@ export class OfflineQueue<T> {
 		
 		this.inMemoryQueue = [];
 
-		this.getDb()
-			.prepare(`DELETE FROM offline_queue WHERE queueName = ?`)
-			.run(this.queueName);
+		OfflineQueueModel.deleteByQueueName(this.queueName);
 		
 		this.logger?.infoSync('Queue cleared', {
 			component: LogComponents.offlineQueue,
@@ -374,14 +304,7 @@ export class OfflineQueue<T> {
 	 */
 	private async loadFromDisk(): Promise<void> {
 		try {
-			const items = this.getDb()
-				.prepare(`
-					SELECT payload
-					FROM offline_queue
-					WHERE queueName = ?
-					ORDER BY createdAt ASC
-				`)
-				.all(this.queueName) as Array<{ payload: string }>;
+			const items = OfflineQueueModel.getPayloads(this.queueName);
 
 			this.inMemoryQueue = items.map((item) => JSON.parse(item.payload) as T);
 		} catch (error) {
@@ -397,20 +320,10 @@ export class OfflineQueue<T> {
 	 * Remove oldest item from disk
 	 */
 	private async removeOldestFromDisk(): Promise<void> {
-		const oldest = this.getDb()
-			.prepare(`
-				SELECT id
-				FROM offline_queue
-				WHERE queueName = ?
-				ORDER BY createdAt ASC
-				LIMIT 1
-			`)
-			.get(this.queueName) as { id?: number } | undefined;
+		const oldest = OfflineQueueModel.getOldest(this.queueName);
 
 		if (typeof oldest?.id === 'number') {
-			this.getDb()
-				.prepare(`DELETE FROM offline_queue WHERE id = ?`)
-				.run(oldest.id);
+			OfflineQueueModel.deleteById(oldest.id);
 		}
 	}
 	
@@ -421,9 +334,7 @@ export class OfflineQueue<T> {
 		const items = this.getRowsOrdered();
 
 		if (items[index]) {
-			this.getDb()
-				.prepare(`UPDATE offline_queue SET attempts = ? WHERE id = ?`)
-				.run(items[index].attempts + 1, items[index].id);
+			OfflineQueueModel.updateAttempts(items[index].id, items[index].attempts + 1);
 		}
 	}
 	

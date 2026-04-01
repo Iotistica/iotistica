@@ -18,7 +18,7 @@ import { startWatchdog, notifySystemd, notifyReady } from './system/watchdog';
 import { HealthArbiter } from './health/health-arbiter';
 import { healthcheck } from './system/memory';
 import { MqttManager } from './mqtt';
-import { getDatabase } from './db/sqlite';
+import { DatabaseModel } from './db/models';
 import { setHealthReporter } from './api/actions';
 
 // Heap profiling for memory leak investigation
@@ -102,8 +102,7 @@ function registerRuntimeHealthSubsystems(): void {
 
 	health.registerSubsystem('database', async () => {
 		try {
-			getDatabase().prepare('SELECT 1 AS ok').get();
-			return true;
+			return DatabaseModel.ping();
 		} catch {
 			return false;
 		}

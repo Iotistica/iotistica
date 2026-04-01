@@ -10,7 +10,7 @@
  * - Jitter: Randomized backoff to prevent thundering herd (Kubernetes-style)
  */
 
-import { getDatabase } from '../db/sqlite';
+import { RetryStateModel, type RetryStateRecord } from '../db/models';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 
@@ -26,15 +26,6 @@ export interface RetryPolicy {
 	maxRetries: number;
 	backoffIntervals: number[]; // Milliseconds for each retry attempt
 }
-
-type RetryStateRow = {
-	key: string;
-	count: number;
-	next_retry: string;
-	last_error: string;
-	terminal: number;
-	retryable: number;
-};
 
 // Default policy: Kubernetes-style exponential backoff
 const DEFAULT_POLICY: RetryPolicy = {
@@ -121,10 +112,6 @@ export class RetryManager {
 	private initialized = false;
 	private readonly policy: RetryPolicy;
 
-	private getDb() {
-		return getDatabase();
-	}
-	
 	constructor(
 		private logger?: AgentLogger,
 		policy?: RetryPolicy
@@ -145,12 +132,7 @@ export class RetryManager {
 	 */
 	private async loadStateFromDatabase(): Promise<void> {
 		try {
-			const rows = this.getDb()
-				.prepare(`
-					SELECT key, count, next_retry, last_error, terminal, retryable
-					FROM retry_state
-				`)
-				.all() as RetryStateRow[];
+			const rows = RetryStateModel.getAll();
 			
 			for (const row of rows) {
 				this.retryState.set(row.key, {
@@ -183,34 +165,17 @@ export class RetryManager {
 	 */
 	private async persistToDatabase(key: string, state: RetryState): Promise<void> {
 		try {
-			this.getDb()
-				.prepare(`
-					INSERT INTO retry_state (
-						key,
-						count,
-						next_retry,
-						last_error,
-						terminal,
-						retryable,
-						updated_at
-					) VALUES (?, ?, ?, ?, ?, ?, ?)
-					ON CONFLICT(key) DO UPDATE SET
-						count = excluded.count,
-						next_retry = excluded.next_retry,
-						last_error = excluded.last_error,
-						terminal = excluded.terminal,
-						retryable = excluded.retryable,
-						updated_at = excluded.updated_at
-				`)
-				.run(
-					key,
-					state.count,
-					state.nextRetry.toISOString(),
-					state.lastError,
-					state.terminal ? 1 : 0,
-					state.retryable ? 1 : 0,
-					new Date().toISOString(),
-				);
+			const record: RetryStateRecord = {
+				key,
+				count: state.count,
+				next_retry: state.nextRetry.toISOString(),
+				last_error: state.lastError,
+				terminal: state.terminal ? 1 : 0,
+				retryable: state.retryable ? 1 : 0,
+				updated_at: new Date().toISOString(),
+			};
+
+			RetryStateModel.upsert(record);
 		} catch (err: any) {
 			this.logger?.warnSync('Failed to persist retry state', {
 				component: LogComponents.containerManager,
@@ -225,9 +190,7 @@ export class RetryManager {
 	 */
 	private async deleteFromDatabase(key: string): Promise<void> {
 		try {
-			this.getDb()
-				.prepare('DELETE FROM retry_state WHERE key = ?')
-				.run(key);
+			RetryStateModel.delete(key);
 		} catch (err: any) {
 			this.logger?.warnSync('Failed to delete retry state', {
 				component: LogComponents.containerManager,
@@ -430,9 +393,7 @@ export class RetryManager {
 	public async clearAllStates(): Promise<void> {
 		this.retryState.clear();
 		try {
-			this.getDb()
-				.prepare('DELETE FROM retry_state')
-				.run();
+			RetryStateModel.clearAll();
 		} catch (err: any) {
 			this.logger?.warnSync('Failed to clear retry state from database', {
 				component: LogComponents.containerManager,

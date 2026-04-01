@@ -278,6 +278,12 @@ export class EndpointModel {
     return result.changes > 0;
   }
 
+  static deleteMissingUuid(): number {
+    return this.getDb()
+      .prepare(`DELETE FROM ${this.table} WHERE uuid IS NULL`)
+      .run().changes;
+  }
+
   /**
    * Get endpoint by ID
    */

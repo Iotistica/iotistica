@@ -15,8 +15,8 @@
 
 import { EventEmitter } from 'events';
 import crypto from 'crypto';
-import { getDatabase } from '../db/sqlite.js';
 import { cloneDeep, deepEqual } from '../lib/collection-utils.js';
+import { StateSnapshotModel } from '../db/models/index.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 import { ContainerManager } from '../docker/container-manager.js';
@@ -59,10 +59,6 @@ export class StateManager extends EventEmitter {
 	private pendingReconcile = false;
 	private reconcileTimer?: NodeJS.Timeout;
 	private readonly reconcileDelayMs = 500; // Debounce to coalesce rapid updates from cloud
-
-	private getDb() {
-		return getDatabase();
-	}
 
 	/**
 	 * Set logger (called after logger is initialized)
@@ -485,18 +481,10 @@ export class StateManager extends EventEmitter {
 	 */
 	private async loadTargetStateFromDB(): Promise<void> {
 		try {
-			const snapshots = this.getDb()
-				.prepare(`
-					SELECT state, stateHash
-					FROM stateSnapshot
-					WHERE type = ?
-					ORDER BY createdAt DESC
-					LIMIT 1
-				`)
-				.all('target') as Array<{ state: string; stateHash?: string | null }>;
+			const snapshot = StateSnapshotModel.getLatest('target');
 
-		if (snapshots.length > 0) {
-			this.targetState = JSON.parse(snapshots[0].state);
+		if (snapshot) {
+			this.targetState = JSON.parse(snapshot.state);
 
 			// Ensure config field exists (backward compatibility)
 			if (!this.targetState.config) {
@@ -504,8 +492,8 @@ export class StateManager extends EventEmitter {
 			}
 
 			// Load the hash for future comparisons
-			if (snapshots[0].stateHash) {
-				this.lastSavedStateHash = snapshots[0].stateHash;
+			if (snapshot.stateHash) {
+				this.lastSavedStateHash = snapshot.stateHash;
 			}
 
 		this.logger?.infoSync('Loaded target state from database', {
@@ -549,34 +537,7 @@ export class StateManager extends EventEmitter {
 
 			const stateJson = JSON.stringify(this.targetState);
 
-			const persistSnapshot = this.getDb().transaction(() => {
-				this.getDb()
-					.prepare(`
-						INSERT INTO stateSnapshot (type, state, stateHash)
-						VALUES (?, ?, ?)
-					`)
-					.run('target', stateJson, stateHash);
-
-				const oldSnapshots = this.getDb()
-					.prepare(`
-						SELECT id
-						FROM stateSnapshot
-						WHERE type = ?
-						ORDER BY createdAt DESC
-						LIMIT -1 OFFSET 2
-					`)
-					.all('target') as Array<{ id?: number }>;
-
-				const oldIds = oldSnapshots.map((snapshot) => snapshot.id).filter((id): id is number => typeof id === 'number');
-				if (oldIds.length > 0) {
-					const placeholders = oldIds.map(() => '?').join(', ');
-					this.getDb()
-						.prepare(`DELETE FROM stateSnapshot WHERE id IN (${placeholders})`)
-						.run(...oldIds);
-				}
-			});
-
-			persistSnapshot();
+			StateSnapshotModel.appendAndTrim('target', stateJson, stateHash, 2);
 
 		} catch (error) {
 			this.logger?.errorSync(
@@ -611,34 +572,7 @@ export class StateManager extends EventEmitter {
 			this.lastSavedCurrentStateHash = stateHash;
 			const stateJson = JSON.stringify(currentState);
 
-			const persistSnapshot = this.getDb().transaction(() => {
-				this.getDb()
-					.prepare(`
-						INSERT INTO stateSnapshot (type, state, stateHash)
-						VALUES (?, ?, ?)
-					`)
-					.run('current', stateJson, stateHash);
-
-				const oldSnapshots = this.getDb()
-					.prepare(`
-						SELECT id
-						FROM stateSnapshot
-						WHERE type = ?
-						ORDER BY createdAt DESC
-						LIMIT -1 OFFSET 2
-					`)
-					.all('current') as Array<{ id?: number }>;
-
-				const oldIds = oldSnapshots.map((snapshot) => snapshot.id).filter((id): id is number => typeof id === 'number');
-				if (oldIds.length > 0) {
-					const placeholders = oldIds.map(() => '?').join(', ');
-					this.getDb()
-						.prepare(`DELETE FROM stateSnapshot WHERE id IN (${placeholders})`)
-						.run(...oldIds);
-				}
-			});
-
-			persistSnapshot();
+			StateSnapshotModel.appendAndTrim('current', stateJson, stateHash, 2);
 		} catch (error) {
 			this.logger?.errorSync(
 				'Failed to save current state to DB',

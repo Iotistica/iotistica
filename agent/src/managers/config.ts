@@ -10,8 +10,8 @@
  */
 
 import { EventEmitter } from "events";
-import { getDatabase } from "../db/sqlite.js";
 import { EndpointModel, type Endpoint } from "../db/models/endpoint.model.js";
+import { StateSnapshotModel } from "../db/models/index.js";
 import { cloneDeep, deepEqual } from "../lib/collection-utils.js";
 import {
   MqttFileAuthReconciler,
@@ -146,10 +146,6 @@ interface ConfigManagerEvents {
 }
 
 export class ConfigManager extends EventEmitter {
-    private getDb() {
-      return getDatabase();
-    }
-
   private targetConfig: DeviceConfig = {};
   private currentConfig: DeviceConfig = {};
   private logger?: AgentLogger;
@@ -859,9 +855,7 @@ export class ConfigManager extends EventEmitter {
 
       // Enforce canonical identity: endpoints must have UUID.
       // Rows without UUID cannot participate in strict target-state reconciliation.
-      const removedInvalidCount = this.getDb()
-        .prepare("DELETE FROM endpoints WHERE uuid IS NULL")
-        .run().changes;
+      const removedInvalidCount = EndpointModel.deleteMissingUuid();
       if (removedInvalidCount > 0) {
         this.logger?.warnSync(
           "Removed invalid endpoints from database (missing UUID)",
@@ -1722,18 +1716,10 @@ export class ConfigManager extends EventEmitter {
    */
   private async loadCurrentConfigFromDB(): Promise<void> {
     try {
-      const snapshots = this.getDb()
-        .prepare(`
-          SELECT state, createdAt
-          FROM stateSnapshot
-          WHERE type = ?
-          ORDER BY createdAt DESC
-          LIMIT 1
-        `)
-        .all("config") as Array<{ state: string; createdAt?: string | Date | null }>;
+      const snapshot = StateSnapshotModel.getLatest("config");
 
-      if (snapshots.length > 0) {
-        this.currentConfig = JSON.parse(snapshots[0].state);
+      if (snapshot) {
+        this.currentConfig = JSON.parse(snapshot.state);
 
         // DETAILED DEBUG: Log what was loaded from database
         this.logger?.infoSync("=== LOADED CONFIG FROM DATABASE ===", {
@@ -1747,7 +1733,7 @@ export class ConfigManager extends EventEmitter {
             connection: e.connection,
             dataPointsCount: e.dataPoints?.length || 0,
           })),
-          createdAt: snapshots[0].createdAt,
+          createdAt: snapshot.createdAt,
         });
       } else {
         this.logger?.debugSync(
@@ -1778,21 +1764,7 @@ export class ConfigManager extends EventEmitter {
     try {
       const configJson = JSON.stringify(this.currentConfig);
 
-      // Delete old config snapshots and insert new
-      const writeSnapshot = this.getDb().transaction(() => {
-        this.getDb()
-          .prepare("DELETE FROM stateSnapshot WHERE type = ?")
-          .run("config");
-
-        this.getDb()
-          .prepare(`
-            INSERT INTO stateSnapshot (type, state)
-            VALUES (?, ?)
-          `)
-          .run("config", configJson);
-      });
-
-      writeSnapshot();
+      StateSnapshotModel.replace("config", configJson);
 
       this.logger?.infoSync("Current config saved to database", {
         component: LogComponents.configManager,

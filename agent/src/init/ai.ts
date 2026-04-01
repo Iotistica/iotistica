@@ -1,4 +1,5 @@
 import { LogComponents } from '../logging/types.js';
+import { DatabaseModel } from '../db/models/index.js';
 import { loadConfigFromTargetState } from '../anomaly/utils.js';
 import { MqttManager } from '../mqtt/manager.js';
 import type { AgentInitContext } from './context.js';
@@ -55,8 +56,7 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 		const config = loadConfigFromTargetState(targetConfig);
 		const enabledMetrics = config.metrics.filter((metric) => metric.enabled);
 
-		const { getDatabase } = await import('../db/sqlite.js');
-		const dbInstance = getDatabase();
+		const dbInstance = DatabaseModel.getConnection();
 
 		ctx.agentLogger?.debugSync('Anomaly metrics configured (single list)', {
 			component: LogComponents.agent,

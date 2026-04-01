@@ -19,10 +19,17 @@ export type { DeviceEndpointOutput as DeviceSensorOutput } from './endpoint-outp
 
 // Agent metadata (discovery, etc.)
 export { MetadataModel } from './metadata.model';
+export { StateSnapshotModel } from './state-snapshot.model';
+export type { StateSnapshotRecord, StateSnapshotType } from './state-snapshot.model';
+export { RetryStateModel } from './retry-state.model';
+export type { RetryStateRecord } from './retry-state.model';
+export { DatabaseModel } from './database.model';
+export { OfflineQueueModel } from './offline-queue.model';
+export type { OfflineQueueRecord } from './offline-queue.model';
 
 // Message buffer (offline queue for MQTT)
 export { MessageBufferModel } from './buffer.model';
-export type { MessageBufferRecord, BufferStats } from './buffer.model';
+export type { MessageBufferRecord, BufferStats, BufferAdmissionDecision } from './buffer.model';
 
 // Dictionary persistence (MQTT key compression)
 export { DictionaryModel } from './dictionary.model';

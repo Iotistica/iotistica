@@ -44,6 +44,18 @@ export interface BufferStats {
   oldest_record_age_hours?: number;
 }
 
+export interface BufferAdmissionDecision {
+  canAccept: boolean;
+  current_count: number;
+  current_bytes: number;
+  max_records: number;
+  max_bytes: number;
+  projected_count: number;
+  projected_bytes: number;
+  exceeds_count: boolean;
+  exceeds_bytes: boolean;
+}
+
 type MessageBufferRow = Omit<MessageBufferRecord, 'created_at' | 'expires_at' | 'locked_at' | 'last_retry_at' | 'next_retry_at'> & {
   created_at: string | Date;
   expires_at: string | Date;
@@ -55,8 +67,9 @@ type MessageBufferRow = Omit<MessageBufferRecord, 'created_at' | 'expires_at' | 
 export class MessageBufferModel {
   private static readonly TABLE = 'message_buffer';
   private static readonly META_TABLE = 'message_buffer_metadata';
-  private static readonly TTL_CACHE_MS = 60_000;
+  private static readonly TTL_CACHE_MS = 10_000;
   private static readonly DEFAULT_LOCK_TIMEOUT_MS = 15 * 60 * 1000;
+  private static readonly ID_DELETE_CHUNK_SIZE = 500;
   private static ttlCacheHours?: number;
   private static ttlCacheAt?: number;
 
@@ -82,8 +95,8 @@ export class MessageBufferModel {
     record: Omit<MessageBufferRecord, 'id' | 'created_at' | 'retry_count' | 'expires_at'>
   ): number {
     const db = this.getDb();
-    const ttlHours = this.getTtlHoursSync();
-    const payloadBytes = Math.max(0, Math.min(Buffer.byteLength(record.payload, 'utf-8'), 1_000_000));
+    const ttlHours = this.getTtlHours();
+    const payloadBytes = Buffer.byteLength(record.payload, 'utf-8');
     
     // Calculate expiration
     const expiresAt = new Date();
@@ -127,8 +140,13 @@ export class MessageBufferModel {
           expiresAt.toISOString(),
         );
 
-      this.incrementMetricSync('total_buffered');
-      this.enforceQuotasSync();
+      this.incrementMetric('total_buffered');
+      // canAcceptMessage() is advisory only. Concurrent writers can still
+      // race between the read-side admission check and this insert.
+      // Final quota enforcement happens in this transaction via enforceQuotas().
+      // enforceQuotas() is responsible for updating total_dropped
+      // for any quota-based deletions in this transaction.
+      this.enforceQuotas();
 
       return Number(result.lastInsertRowid);
     });
@@ -142,7 +160,8 @@ export class MessageBufferModel {
   static dequeueReady(
     limit: number = 100,
     now: Date = new Date(),
-    lockTimeoutMs: number = this.DEFAULT_LOCK_TIMEOUT_MS
+    lockTimeoutMs: number = this.DEFAULT_LOCK_TIMEOUT_MS,
+    maxRetries?: number,
   ): MessageBufferRecord[] {
     if (limit <= 0) {
       return [];
@@ -163,10 +182,11 @@ export class MessageBufferModel {
             OR (status = 'sending' AND locked_at < ?)
           )
           AND (next_retry_at IS NULL OR next_retry_at <= ?)
+          AND (? IS NULL OR retry_count < ?)
           ORDER BY created_at ASC
           LIMIT ?
         `)
-        .all(lockCutoffIso, nowIso, limit) as Array<{ id: number }>;
+        .all(lockCutoffIso, nowIso, maxRetries ?? null, maxRetries ?? null, limit) as Array<{ id: number }>;
 
       if (candidateRows.length === 0) {
         return [];
@@ -196,6 +216,7 @@ export class MessageBufferModel {
           SELECT *
           FROM ${this.TABLE}
           WHERE lock_id = ?
+            AND status = 'sending'
           ORDER BY created_at ASC
         `)
         .all(lockId) as MessageBufferRow[];
@@ -213,17 +234,53 @@ export class MessageBufferModel {
     return this.dequeueReady(limit);
   }
 
+  static canAcceptMessage(payloadBytes: number): BufferAdmissionDecision {
+    // NOTE: This is advisory only. It is intended for upstream backpressure
+    // signaling, not as a strict admission guarantee under concurrency.
+    // Actual limits are enforced in enqueue() via enforceQuotas().
+    // This also uses live COUNT/SUM queries instead of metadata counters.
+    // That keeps admission decisions derived from the source of truth and
+    // avoids counter drift, at the cost of a full aggregate scan per call.
+    // For the edge-agent workload this is acceptable today; if ingest volume
+    // grows materially, current_count/current_bytes metadata can be added.
+    const db = this.getDb();
+    const stats = db
+      .prepare(`
+        SELECT COUNT(*) AS count, COALESCE(SUM(payload_bytes), 0) AS bytes
+        FROM ${this.TABLE}
+      `)
+      .get() as { count?: number | string; bytes?: number | string } | undefined;
+
+    const currentCount = parseInt(String(stats?.count ?? '0'), 10);
+    const currentBytes = parseInt(String(stats?.bytes ?? '0'), 10);
+    const maxRecords = this.getMetric('max_records');
+    const maxBytes = this.getMetric('max_bytes');
+    const sanitizedPayloadBytes = Math.max(0, payloadBytes);
+    const projectedCount = currentCount + 1;
+    const projectedBytes = currentBytes + sanitizedPayloadBytes;
+    const exceedsCount = projectedCount > maxRecords;
+    const exceedsBytes = projectedBytes > maxBytes;
+
+    return {
+      canAccept: !exceedsCount && !exceedsBytes,
+      current_count: currentCount,
+      current_bytes: currentBytes,
+      max_records: maxRecords,
+      max_bytes: maxBytes,
+      projected_count: projectedCount,
+      projected_bytes: projectedBytes,
+      exceeds_count: exceedsCount,
+      exceeds_bytes: exceedsBytes,
+    };
+  }
+
   /**
    * Delete records by IDs (after successful publish)
    */
   static deleteByIds(ids: number[]): number {
     if (ids.length === 0) return 0;
 
-    const db = this.getDb();
-    const placeholders = ids.map(() => '?').join(', ');
-    const deleted = db
-      .prepare(`DELETE FROM ${this.TABLE} WHERE id IN (${placeholders})`)
-      .run(...ids).changes;
+    const deleted = this.deleteIdsInChunks(ids);
 
     if (deleted > 0) {
 	  this.incrementMetric('total_flushed', deleted);
@@ -318,11 +375,7 @@ export class MessageBufferModel {
       return 0;
     }
 
-    const db = this.getDb();
-    const placeholders = ids.map(() => '?').join(', ');
-    const deleted = db
-      .prepare(`DELETE FROM ${this.TABLE} WHERE id IN (${placeholders})`)
-      .run(...ids).changes;
+    const deleted = this.deleteIdsInChunks(ids);
 
     if (deleted > 0) {
 	  this.incrementMetric('total_dropped', deleted);
@@ -416,7 +469,7 @@ export class MessageBufferModel {
       if (typeof maxRetries === 'number') {
         return db.prepare(`
           DELETE FROM ${this.TABLE}
-          WHERE expires_at < ? OR retry_count > ?
+          WHERE expires_at < ? OR retry_count >= ?
         `).run(new Date().toISOString(), maxRetries).changes;
       }
 
@@ -437,17 +490,6 @@ export class MessageBufferModel {
   /**
    * Enforce quota limits (drop oldest if exceeded)
    */
-  private static enforceQuotas(): void {
-    const dropped = this.getDb().transaction(() => this.enforceQuotasSync()).immediate();
-
-    if (dropped <= 0) {
-      return;
-    }
-  }
-
-  /**
-   * Get metadata value
-   */
   private static getMetric(key: string): number {
     const result = this.getDb()
       .prepare(`SELECT value FROM ${this.META_TABLE} WHERE key = ? LIMIT 1`)
@@ -457,10 +499,6 @@ export class MessageBufferModel {
   }
 
   private static getTtlHours(): number {
-    return this.getTtlHoursSync();
-  }
-
-  private static getTtlHoursSync(): number {
     const now = Date.now();
     if (
       typeof this.ttlCacheHours === 'number' &&
@@ -492,16 +530,16 @@ export class MessageBufferModel {
         WHERE key = ?
       `)
       .run(value, new Date().toISOString(), key);
+
+    if (key === 'ttl_hours') {
+      this.invalidateTtlCache();
+    }
   }
 
   /**
    * Increment metadata counter
    */
   private static incrementMetric(key: string, amount: number = 1): void {
-    this.incrementMetricSync(key, amount);
-  }
-
-  private static incrementMetricSync(key: string, amount: number = 1): void {
     this.getDb()
       .prepare(`
         INSERT INTO ${this.META_TABLE} (key, value, updated_at)
@@ -517,10 +555,10 @@ export class MessageBufferModel {
       .run(key, amount, new Date().toISOString());
   }
 
-  private static enforceQuotasSync(): number {
+  private static enforceQuotas(): number {
     const db = this.getDb();
-    const maxRecords = this.getMetricSync('max_records');
-    const maxBytes = this.getMetricSync('max_bytes');
+    const maxRecords = this.getMetric('max_records');
+    const maxBytes = this.getMetric('max_bytes');
 
     const stats = db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(payload_bytes), 0) AS bytes
@@ -532,15 +570,25 @@ export class MessageBufferModel {
       FROM ${this.TABLE}
       WHERE status = 'queued' AND lock_id IS NULL
       ORDER BY created_at ASC
+      LIMIT ?
     `);
 
     let currentCount = parseInt(String(stats?.count ?? '0'), 10);
     let currentBytes = parseInt(String(stats?.bytes ?? '0'), 10);
     let deletedCount = 0;
 
-    if (currentCount > maxRecords) {
+    while (currentCount > maxRecords) {
       const excess = currentCount - maxRecords;
-      const oldestRecords = getQueuedOldest.all() as Array<{ id: number; topic?: string; is_critical?: number; payload_bytes: number }>;
+      const oldestRecords = getQueuedOldest.all(Math.max(excess * 3, excess, 100)) as Array<{
+        id: number;
+        topic?: string;
+        is_critical?: number;
+        payload_bytes: number;
+      }>;
+
+      if (oldestRecords.length === 0) {
+        break;
+      }
 
       const oldestIds: number[] = [];
       for (const record of oldestRecords) {
@@ -549,22 +597,34 @@ export class MessageBufferModel {
         oldestIds.push(record.id);
       }
 
-      if (oldestIds.length > 0) {
-        const placeholders = oldestIds.map(() => '?').join(', ');
-        deletedCount += db.prepare(`DELETE FROM ${this.TABLE} WHERE id IN (${placeholders})`).run(...oldestIds).changes;
-
-        const postRecordStats = db.prepare(`
-          SELECT COALESCE(SUM(payload_bytes), 0) AS bytes
-          FROM ${this.TABLE}
-        `).get() as { bytes?: number | string } | undefined;
-        currentBytes = parseInt(String(postRecordStats?.bytes ?? '0'), 10);
-        currentCount -= oldestIds.length;
+      if (oldestIds.length === 0) {
+        break;
       }
+
+      deletedCount += this.deleteIdsInChunks(oldestIds);
+
+      const postRecordStats = db.prepare(`
+        SELECT COUNT(*) AS count, COALESCE(SUM(payload_bytes), 0) AS bytes
+        FROM ${this.TABLE}
+      `).get() as { count?: number | string; bytes?: number | string } | undefined;
+      currentCount = parseInt(String(postRecordStats?.count ?? '0'), 10);
+      currentBytes = parseInt(String(postRecordStats?.bytes ?? '0'), 10);
     }
 
-    if (currentBytes > maxBytes) {
+    while (currentBytes > maxBytes) {
       let bytesRemoved = 0;
-      const oldestRecords = getQueuedOldest.all() as Array<{ id: number; payload_bytes: number; topic?: string; is_critical?: number }>;
+      const averagePayloadBytes = currentCount > 0 ? Math.max(1, Math.ceil(currentBytes / currentCount)) : 1;
+      const estimatedRecordsNeeded = Math.max(1, Math.ceil((currentBytes - maxBytes) / averagePayloadBytes));
+      const oldestRecords = getQueuedOldest.all(Math.max(estimatedRecordsNeeded * 3, 100)) as Array<{
+        id: number;
+        payload_bytes: number;
+        topic?: string;
+        is_critical?: number;
+      }>;
+
+      if (oldestRecords.length === 0) {
+        break;
+      }
 
       const idsToDelete: number[] = [];
       for (const record of oldestRecords) {
@@ -574,25 +634,42 @@ export class MessageBufferModel {
         bytesRemoved += record.payload_bytes;
       }
 
-      if (idsToDelete.length > 0) {
-        const placeholders = idsToDelete.map(() => '?').join(', ');
-        deletedCount += db.prepare(`DELETE FROM ${this.TABLE} WHERE id IN (${placeholders})`).run(...idsToDelete).changes;
+      if (idsToDelete.length === 0) {
+        break;
       }
+
+      deletedCount += this.deleteIdsInChunks(idsToDelete);
+      currentCount = Math.max(0, currentCount - idsToDelete.length);
+      currentBytes = Math.max(0, currentBytes - bytesRemoved);
     }
 
     if (deletedCount > 0) {
-      this.incrementMetricSync('total_dropped', deletedCount);
+      // Quota-based drops are counted here so callers must not increment
+      // total_dropped again for the same deletion path.
+      this.incrementMetric('total_dropped', deletedCount);
     }
 
     return deletedCount;
   }
 
-  private static getMetricSync(key: string): number {
-    const result = this.getDb()
-      .prepare(`SELECT value FROM ${this.META_TABLE} WHERE key = ? LIMIT 1`)
-      .get(key) as { value?: string | number } | undefined;
+  private static invalidateTtlCache(): void {
+    this.ttlCacheHours = undefined;
+    this.ttlCacheAt = undefined;
+  }
 
-    return parseInt(String(result?.value ?? '0'), 10);
+  private static deleteIdsInChunks(ids: number[]): number {
+    const db = this.getDb();
+    let deleted = 0;
+
+    for (let start = 0; start < ids.length; start += this.ID_DELETE_CHUNK_SIZE) {
+      const chunk = ids.slice(start, start + this.ID_DELETE_CHUNK_SIZE);
+      const placeholders = chunk.map(() => '?').join(', ');
+      deleted += db
+        .prepare(`DELETE FROM ${this.TABLE} WHERE id IN (${placeholders})`)
+        .run(...chunk).changes;
+    }
+
+    return deleted;
   }
 
   /**

@@ -16,6 +16,7 @@
 import type { MqttManager } from './manager';
 import { createJsonPayload, serializePayload } from './codec';
 import { MessageBufferModel } from '../db/models';
+import type { BufferAdmissionDecision } from '../db/models';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import type { IClientPublishOptions } from 'mqtt';
@@ -171,18 +172,27 @@ export class MessageBufferSync {
       return false;
     }
 
-    const stats = await this.withSqliteBusyRetry(
-      'buffer-stats-before-enqueue',
-      () => MessageBufferModel.getStats()
+    const payloadText = payload.toString('utf-8');
+    const payloadBytes = payload.length;
+    const isCritical = this.isCriticalTopic(topic);
+    const admission = await this.withSqliteBusyRetry(
+      'buffer-check-admission',
+      () => MessageBufferModel.canAcceptMessage(payloadBytes)
     );
-    if (stats.current_count >= this.config.maxBufferRecords) {
-      const spaceFreed = await this.applyBackpressurePolicy(topic, stats.current_count);
-      if (!spaceFreed) {
+
+    const exceedsConfigCount = admission.projected_count > this.config.maxBufferRecords;
+    if (!admission.canAccept || exceedsConfigCount) {
+      const accepted = await this.handleAdmissionPressure(
+        topic,
+        payloadBytes,
+        isCritical,
+        admission,
+        exceedsConfigCount,
+      );
+      if (!accepted) {
         return true;
       }
     }
-
-    const payloadText = payload.toString('utf-8');
 
     await this.withSqliteBusyRetry('buffer-enqueue', () => MessageBufferModel.enqueue({
       endpoint_name: this.extractEndpointName(topic),
@@ -190,8 +200,8 @@ export class MessageBufferSync {
       qos: options?.qos ?? 0,
       payload: payloadText,
       msg_id: this.extractMsgId(payloadText),
-      is_critical: this.isCriticalTopic(topic) ? 1 : 0,
-      payload_bytes: payload.length,
+      is_critical: isCritical ? 1 : 0,
+      payload_bytes: payloadBytes,
     }));
 
     const newStats = await this.withSqliteBusyRetry(
@@ -205,7 +215,7 @@ export class MessageBufferSync {
     this.logger?.debugSync('Buffered MQTT publish while offline', {
       component: LogComponents.agent,
       topic,
-      payloadBytes: payload.length,
+      payloadBytes,
       qos: options?.qos ?? 0
     });
 
@@ -289,7 +299,12 @@ export class MessageBufferSync {
 
         const records = await this.withSqliteBusyRetry(
           'buffer-dequeue-ready',
-          () => MessageBufferModel.dequeueReady(this.config.flushBatchSize, new Date())
+          () => MessageBufferModel.dequeueReady(
+            this.config.flushBatchSize,
+            new Date(),
+            undefined,
+            this.config.maxRetries,
+          )
         );
         
         if (records.length === 0) {
@@ -454,6 +469,82 @@ export class MessageBufferSync {
 
   private isCriticalTopic(topic: string): boolean {
     return topic.startsWith('alerts/') || topic.startsWith('events/');
+  }
+
+  private async handleAdmissionPressure(
+    topic: string,
+    payloadBytes: number,
+    isCritical: boolean,
+    admission: BufferAdmissionDecision,
+    exceedsConfigCount: boolean,
+  ): Promise<boolean> {
+    if (!isCritical) {
+      return this.rejectUnderPressure(topic, payloadBytes, admission, exceedsConfigCount);
+    }
+
+    const spaceFreed = await this.applyBackpressurePolicy(topic, admission.current_count);
+    if (!spaceFreed) {
+      return false;
+    }
+
+    const postPressureAdmission = await this.withSqliteBusyRetry(
+      'buffer-check-admission-after-pressure',
+      () => MessageBufferModel.canAcceptMessage(payloadBytes)
+    );
+
+    if (postPressureAdmission.projected_count > this.config.maxBufferRecords || !postPressureAdmission.canAccept) {
+      MessageBufferModel.incrementDropped(1);
+      this.logger?.warnSync('Critical message still rejected after buffer pressure handling', {
+        component: LogComponents.agent,
+        topic,
+        payloadBytes,
+        currentCount: postPressureAdmission.current_count,
+        currentBytes: postPressureAdmission.current_bytes,
+        maxBufferRecords: this.config.maxBufferRecords,
+        maxRecords: postPressureAdmission.max_records,
+        maxBytes: postPressureAdmission.max_bytes,
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  private rejectUnderPressure(
+    topic: string,
+    payloadBytes: number,
+    admission: BufferAdmissionDecision,
+    exceedsConfigCount: boolean,
+  ): boolean {
+    const pressureContext = {
+      component: LogComponents.agent,
+      topic,
+      payloadBytes,
+      currentCount: admission.current_count,
+      currentBytes: admission.current_bytes,
+      projectedCount: admission.projected_count,
+      projectedBytes: admission.projected_bytes,
+      maxBufferRecords: this.config.maxBufferRecords,
+      maxRecords: admission.max_records,
+      maxBytes: admission.max_bytes,
+      exceedsConfigCount,
+      exceedsRecordQuota: admission.exceeds_count,
+      exceedsByteQuota: admission.exceeds_bytes,
+    };
+
+    switch (this.config.dropPolicy) {
+      case 'error':
+        MessageBufferModel.incrementDropped(1);
+        throw new Error(
+          `Message buffer rejected non-critical message under pressure (${admission.projected_count}/${Math.min(this.config.maxBufferRecords, admission.max_records)} records, ${admission.projected_bytes}/${admission.max_bytes} bytes)`
+        );
+      case 'newest':
+      case 'oldest':
+      default:
+        MessageBufferModel.incrementDropped(1);
+        this.logger?.warnSync('Rejected non-critical message before enqueue due to buffer pressure', pressureContext);
+        return false;
+    }
   }
 
   private async applyBackpressurePolicy(topic: string, currentCount: number): Promise<boolean> {

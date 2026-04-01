@@ -28,7 +28,7 @@ import { RetryManager } from './retry-manager';
 import { HealthCheckManager } from './health-check-manager';
 import { ContainerHealthProbe as HealthProbe } from './types';
 import { cloneDeep, uniq } from '../lib/collection-utils';
-import { getDatabase } from '../db/sqlite';
+import { StateSnapshotModel } from '../db/models';
 import type { ContainerLogMonitor } from '../logging/docker-monitor';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
@@ -338,27 +338,15 @@ export class ContainerManager extends EventEmitter {
 		return crypto.createHash('sha256').update(stateJson).digest('hex');
 	}
 
-	private getDb() {
-		return getDatabase();
-	}
-
 	/**
 	 * Load target state from database
 	 */
 	private async loadTargetStateFromDB(): Promise<void> {
 		try {
-			const snapshots = this.getDb()
-				.prepare(`
-					SELECT state, stateHash
-					FROM stateSnapshot
-					WHERE type = ?
-					ORDER BY createdAt DESC
-					LIMIT 1
-				`)
-				.all('target') as Array<{ state: string; stateHash?: string | null }>;
+			const snapshot = StateSnapshotModel.getLatest('target');
 
-		if (snapshots.length > 0) {
-			this.targetState = JSON.parse(snapshots[0].state);
+		if (snapshot) {
+			this.targetState = JSON.parse(snapshot.state);
 			
 			// Ensure config field exists (for backward compatibility with old snapshots)
 			if (!this.targetState.config) {
@@ -366,8 +354,8 @@ export class ContainerManager extends EventEmitter {
 			}
 			
 			// Load the hash for future comparisons
-			if (snapshots[0].stateHash) {
-				this.lastSavedTargetStateHash = snapshots[0].stateHash;
+			if (snapshot.stateHash) {
+				this.lastSavedTargetStateHash = snapshot.stateHash;
 			}
 			
 			// Sanitize loaded state to ensure ports are strings
@@ -436,18 +424,7 @@ export class ContainerManager extends EventEmitter {
 		});
 		
 		// Delete old target snapshots and insert new (with hash)
-		this.getDb().transaction(() => {
-			this.getDb()
-				.prepare('DELETE FROM stateSnapshot WHERE type = ?')
-				.run('target');
-
-			this.getDb()
-				.prepare(`
-					INSERT INTO stateSnapshot (type, state, stateHash)
-					VALUES (?, ?, ?)
-				`)
-				.run('target', stateJson, stateHash);
-		})();
+		StateSnapshotModel.replace('target', stateJson, stateHash);
 			
 		} catch (error) {
 			this.logger?.errorSync(
@@ -473,18 +450,7 @@ export class ContainerManager extends EventEmitter {
 			const stateJson = JSON.stringify(this.currentState);
 			
 			// Delete old current snapshots and insert new (with hash)
-			this.getDb().transaction(() => {
-				this.getDb()
-					.prepare('DELETE FROM stateSnapshot WHERE type = ?')
-					.run('current');
-
-				this.getDb()
-					.prepare(`
-						INSERT INTO stateSnapshot (type, state, stateHash)
-						VALUES (?, ?, ?)
-					`)
-					.run('current', stateJson, stateHash);
-			})();
+			StateSnapshotModel.replace('current', stateJson, stateHash);
 		} catch (error) {
 			this.logger?.errorSync(
 				'Failed to save current state to DB',
