@@ -249,13 +249,16 @@ user ${MQTT_USERNAME_VALUE}
 topic readwrite #
 EOFACL
 
-    chown iotistic:mosquitto /etc/mosquitto/passwd /etc/mosquitto/acl
-    chmod 640 /etc/mosquitto/passwd /etc/mosquitto/acl
+    chown root:root /etc/mosquitto/passwd /etc/mosquitto/acl
+    chmod 0700 /etc/mosquitto/passwd
+    chmod 0644 /etc/mosquitto/acl
     chown mosquitto:mosquitto /var/log/mosquitto/mosquitto.log
     chmod 640 /var/log/mosquitto/mosquitto.log
 
     if command -v setfacl >/dev/null 2>&1; then
         setfacl -m u:iotistic:rwx /etc/mosquitto || true
+        setfacl -m u:iotistic:rw /etc/mosquitto/passwd || true
+        setfacl -m u:iotistic:rw /etc/mosquitto/acl || true
     else
         echo "Warning: setfacl not available; verify the agent user can update /etc/mosquitto/passwd and /etc/mosquitto/acl"
     fi
@@ -264,12 +267,23 @@ EOFACL
 #!/bin/bash
 set -e
 
-chmod 640 /etc/mosquitto/passwd /etc/mosquitto/acl
-chown iotistic:mosquitto /etc/mosquitto/passwd /etc/mosquitto/acl
+chown root:root /etc/mosquitto/passwd /etc/mosquitto/acl
+chmod 0700 /etc/mosquitto/passwd
+chmod 0644 /etc/mosquitto/acl
+
+if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m u:iotistic:rw /etc/mosquitto/passwd || true
+    setfacl -m u:iotistic:rw /etc/mosquitto/acl || true
+fi
 
 systemctl reload mosquitto
 EOFRELOAD
     chmod +x /usr/local/bin/iotistica-mqtt-reload.sh
+
+    cat > /etc/sudoers.d/iotistica-mqtt-reload << 'EOFSUDO'
+iotistic ALL=(root) NOPASSWD: /usr/local/bin/iotistica-mqtt-reload.sh
+EOFSUDO
+    chmod 440 /etc/sudoers.d/iotistica-mqtt-reload
 
     systemctl daemon-reload
     systemctl restart mosquitto

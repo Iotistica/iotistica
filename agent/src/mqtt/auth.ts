@@ -18,8 +18,13 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
+
+const execFileAsync = promisify(execFile);
+const SYSTEMD_RELOAD_HELPER = '/usr/local/bin/iotistica-mqtt-reload.sh';
 
 // Minimal interface so the reconciler doesn't take a hard dep on DockerManager.
 export interface ContainerManager {
@@ -236,27 +241,44 @@ export class MqttFileAuthReconciler {
    * without restarting or dropping existing connections.
    */
   private async signalMosquittoReload(options: FileAuthOptions): Promise<void> {
-    if (!options.dockerManager || !options.containerName) return;
-
-    try {
-      const container = await options.dockerManager.findContainerByName(
-        options.containerName
-      );
-      if (!container) {
-        this.logger?.warnSync(`Mosquitto container '${options.containerName}' not found — skipping SIGHUP`, {
+    if (options.dockerManager && options.containerName) {
+      try {
+        const container = await options.dockerManager.findContainerByName(
+          options.containerName
+        );
+        if (!container) {
+          this.logger?.warnSync(`Mosquitto container '${options.containerName}' not found — skipping SIGHUP`, {
+            component: LogComponents.configManager,
+            operation: 'signalMosquittoReload',
+          });
+          return;
+        }
+        await container.kill({ signal: 'SIGHUP' });
+        this.logger?.debugSync(`Sent SIGHUP to '${options.containerName}' — broker reloading auth files`, {
           component: LogComponents.configManager,
           operation: 'signalMosquittoReload',
         });
         return;
+      } catch (err) {
+        // Non-fatal: broker may not be running (systemd mode, cold start, etc.)
+        this.logger?.warnSync(`Failed to send SIGHUP to mosquitto: ${(err as Error).message}`, {
+          component: LogComponents.configManager,
+          operation: 'signalMosquittoReload',
+        });
       }
-      await container.kill({ signal: 'SIGHUP' });
-      this.logger?.debugSync(`Sent SIGHUP to '${options.containerName}' — broker reloading auth files`, {
-        component: LogComponents.configManager,
-        operation: 'signalMosquittoReload',
-      });
+    }
+
+    try {
+      if (fs.existsSync(SYSTEMD_RELOAD_HELPER)) {
+        await execFileAsync('sudo', [SYSTEMD_RELOAD_HELPER]);
+        this.logger?.debugSync('Invoked systemd Mosquitto reload helper', {
+          component: LogComponents.configManager,
+          operation: 'signalMosquittoReload',
+          helper: SYSTEMD_RELOAD_HELPER,
+        });
+      }
     } catch (err) {
-      // Non-fatal: broker may not be running (systemd mode, cold start, etc.)
-      this.logger?.warnSync(`Failed to send SIGHUP to mosquitto: ${(err as Error).message}`, {
+      this.logger?.warnSync(`Failed to run systemd mosquitto reload helper: ${(err as Error).message}`, {
         component: LogComponents.configManager,
         operation: 'signalMosquittoReload',
       });
