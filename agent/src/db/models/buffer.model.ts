@@ -70,11 +70,33 @@ export class MessageBufferModel {
   private static readonly TTL_CACHE_MS = 10_000;
   private static readonly DEFAULT_LOCK_TIMEOUT_MS = 15 * 60 * 1000;
   private static readonly ID_DELETE_CHUNK_SIZE = 500;
+  private static readonly DEFAULT_METADATA: Readonly<Record<string, string>> = {
+    max_records: '10000',
+    max_bytes: '52428800',
+    ttl_hours: '72',
+    last_cleanup_at: '1970-01-01T00:00:00.000Z',
+    total_buffered: '0',
+    total_flushed: '0',
+    total_dropped: '0',
+  };
   private static ttlCacheHours?: number;
   private static ttlCacheAt?: number;
 
   private static getDb(): Database.Database {
     return getDatabase();
+  }
+
+  private static ensureMetadataDefaults(): void {
+    const db = this.getDb();
+    const updatedAt = new Date().toISOString();
+    const insertDefault = db.prepare(`
+      INSERT OR IGNORE INTO ${this.META_TABLE} (key, value, updated_at)
+      VALUES (?, ?, ?)
+    `);
+
+    for (const [key, value] of Object.entries(this.DEFAULT_METADATA)) {
+      insertDefault.run(key, value, updatedAt);
+    }
   }
 
   private static mapRow(row: MessageBufferRow): MessageBufferRecord {
@@ -95,6 +117,7 @@ export class MessageBufferModel {
     record: Omit<MessageBufferRecord, 'id' | 'created_at' | 'retry_count' | 'expires_at'>
   ): number {
     const db = this.getDb();
+    this.ensureMetadataDefaults();
     const ttlHours = this.getTtlHours();
     const payloadBytes = Buffer.byteLength(record.payload, 'utf-8');
     
@@ -243,6 +266,7 @@ export class MessageBufferModel {
     // avoids counter drift, at the cost of a full aggregate scan per call.
     // For the edge-agent workload this is acceptable today; if ingest volume
     // grows materially, current_count/current_bytes metadata can be added.
+    this.ensureMetadataDefaults();
     const db = this.getDb();
     const stats = db
       .prepare(`
@@ -399,6 +423,7 @@ export class MessageBufferModel {
    * Get current buffer statistics
    */
   static getStats(): BufferStats {
+    this.ensureMetadataDefaults();
     const db = this.getDb();
 
     const queueStats = db
@@ -443,6 +468,7 @@ export class MessageBufferModel {
    */
   static cleanupExpired(maxRetries?: number, lockTimeoutMs: number = 15 * 60 * 1000): number {
     const db = this.getDb();
+    this.ensureMetadataDefaults();
     const lockedCutoff = new Date(Date.now() - lockTimeoutMs).toISOString();
     const retryFutureCutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -491,6 +517,7 @@ export class MessageBufferModel {
    * Enforce quota limits (drop oldest if exceeded)
    */
   private static getMetric(key: string): number {
+    this.ensureMetadataDefaults();
     const result = this.getDb()
       .prepare(`SELECT value FROM ${this.META_TABLE} WHERE key = ? LIMIT 1`)
       .get(key) as { value?: string | number } | undefined;
@@ -522,14 +549,16 @@ export class MessageBufferModel {
    * Set metadata value
    */
   private static setMetric(key: string, value: string): void {
+    this.ensureMetadataDefaults();
     this.getDb()
       .prepare(`
-        UPDATE ${this.META_TABLE}
-        SET value = ?,
-            updated_at = ?
-        WHERE key = ?
+        INSERT INTO ${this.META_TABLE} (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET
+          value = excluded.value,
+          updated_at = excluded.updated_at
       `)
-      .run(value, new Date().toISOString(), key);
+      .run(key, value, new Date().toISOString());
 
     if (key === 'ttl_hours') {
       this.invalidateTtlCache();
@@ -540,6 +569,7 @@ export class MessageBufferModel {
    * Increment metadata counter
    */
   private static incrementMetric(key: string, amount: number = 1): void {
+    this.ensureMetadataDefaults();
     this.getDb()
       .prepare(`
         INSERT INTO ${this.META_TABLE} (key, value, updated_at)

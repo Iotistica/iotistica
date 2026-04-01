@@ -220,6 +220,14 @@ CREATE TABLE IF NOT EXISTS "message_buffer_metadata" (
 	"updated_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY("key")
 );
+INSERT OR IGNORE INTO "message_buffer_metadata" ("key", "value", "updated_at") VALUES
+	('max_records', '10000', CURRENT_TIMESTAMP),
+	('max_bytes', '52428800', CURRENT_TIMESTAMP),
+	('ttl_hours', '72', CURRENT_TIMESTAMP),
+	('last_cleanup_at', '1970-01-01T00:00:00.000Z', CURRENT_TIMESTAMP),
+	('total_buffered', '0', CURRENT_TIMESTAMP),
+	('total_flushed', '0', CURRENT_TIMESTAMP),
+	('total_dropped', '0', CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS "mqtt_acls" (
 	"id"	integer NOT NULL,
 	"username"	varchar(255),
