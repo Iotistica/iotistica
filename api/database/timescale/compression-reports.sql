@@ -559,6 +559,45 @@ SELECT
     ROUND(((original_size_mb - compressed_size_mb) / 1024.0) * cost_per_gb_month * 12, 2) AS annual_savings_usd
 FROM storage_costs;
 
+-- ============================================================================
+-- 12. DATABASE SIZE BEFORE vs AFTER COMPRESSION
+-- ============================================================================
+
+-- Shows the total database size as it is now (after compression) and reconstructs
+-- what it would have been without compression by adding back the saved bytes.
+-- Formula: size_before = current_db_size + SUM(space_reclaimed_by_compression)
+WITH existing_hypertables AS (
+    SELECT hypertable_schema, hypertable_name
+    FROM timescaledb_information.hypertables
+    WHERE hypertable_name IN ('agent_logs', 'mqtt_topic_metrics', 'mqtt_broker_stats', 'readings')
+), compression_stats AS (
+    SELECT
+        e.hypertable_name,
+        c.number_compressed_chunks,
+        COALESCE(c.before_compression_total_bytes, 0) AS before_bytes,
+        COALESCE(c.after_compression_total_bytes, 0)  AS after_bytes
+    FROM existing_hypertables e
+    CROSS JOIN LATERAL hypertable_compression_stats(e.hypertable_name::text) c
+), totals AS (
+    SELECT
+        SUM(CASE WHEN number_compressed_chunks > 0 THEN before_bytes - after_bytes ELSE 0 END) AS reclaimed_bytes
+    FROM compression_stats
+)
+SELECT
+    pg_size_pretty(pg_database_size(current_database()) + t.reclaimed_bytes) AS db_size_before_compression,
+    pg_size_pretty(pg_database_size(current_database()))                      AS db_size_after_compression,
+    pg_size_pretty(t.reclaimed_bytes)                                         AS space_saved,
+    CASE
+        WHEN (pg_database_size(current_database()) + t.reclaimed_bytes) > 0
+        THEN ROUND(
+            100.0 * t.reclaimed_bytes /
+            NULLIF(pg_database_size(current_database()) + t.reclaimed_bytes, 0),
+            1
+        )
+        ELSE 0
+    END AS compression_ratio_percent
+FROM totals t;
+
 -- Expected savings: ~$2,580/year
 
 -- ============================================================================

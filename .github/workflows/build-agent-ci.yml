@@ -257,7 +257,7 @@ jobs:
           provenance: false
           platforms: linux/amd64
           cache-from: type=registry,ref=iotistic/agent:buildcache
-          cache-to: type=registry,ref=iotistic/agent:buildcache,mode=max
+          cache-to: type=registry,ref=iotistic/agent:buildcache,mode=min,ignore-error=true
           tags: |
             iotistic/agent:${{ needs.build.outputs.sha_short }}
             iotistic/agent:latest

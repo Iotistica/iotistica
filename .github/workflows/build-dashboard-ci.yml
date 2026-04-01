@@ -112,7 +112,7 @@ jobs:
           provenance: false
           platforms: linux/amd64
           cache-from: type=registry,ref=iotistic/dashboard:buildcache
-          cache-to: type=registry,ref=iotistic/dashboard:buildcache,mode=max
+          cache-to: type=registry,ref=iotistic/dashboard:buildcache,mode=min,ignore-error=true
           tags: |
             iotistic/dashboard:ci-${{ steps.sha.outputs.short_sha }}
             iotistic/dashboard:ci-latest

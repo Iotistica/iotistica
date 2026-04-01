@@ -160,7 +160,7 @@ jobs:
           provenance: false
           platforms: linux/amd64
           cache-from: type=registry,ref=iotistic/provisioning-api:buildcache
-          cache-to: type=registry,ref=iotistic/provisioning-api:buildcache,mode=max
+          cache-to: type=registry,ref=iotistic/provisioning-api:buildcache,mode=min,ignore-error=true
           tags: |
             iotistic/provisioning-api:${{ needs.version.outputs.package_version }}
             iotistic/provisioning-api:${{ needs.version.outputs.sha_short }}
@@ -239,7 +239,7 @@ jobs:
           provenance: false
           platforms: linux/amd64
           cache-from: type=registry,ref=iotistic/provisioning-worker:buildcache
-          cache-to: type=registry,ref=iotistic/provisioning-worker:buildcache,mode=max
+          cache-to: type=registry,ref=iotistic/provisioning-worker:buildcache,mode=min,ignore-error=true
           tags: |
             iotistic/provisioning-worker:${{ needs.version.outputs.package_version }}
             iotistic/provisioning-worker:${{ needs.version.outputs.sha_short }}

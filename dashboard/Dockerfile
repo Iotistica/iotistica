@@ -29,7 +29,7 @@ RUN npm run build
 FROM nginx:1.27-alpine
 
 # Ensure runtime OS packages include latest security patches
-RUN apk upgrade --no-cache
+RUN apk upgrade --no-cache && apk add --no-cache "libpng>=1.6.56"
 
 # Copy built assets from builder stage
 COPY --from=builder /app/build /usr/share/nginx/html
