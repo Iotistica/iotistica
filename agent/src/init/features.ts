@@ -170,11 +170,22 @@ export class FeatureInitializer {
     const { logger, deviceInfo, configSettings, cloudApiEndpoint, configFeatures } = this.context;
 
     const deviceJobsEnabled = configFeatures?.enableDeviceJobs !== false;
+    const deviceApiKey = deviceInfo.deviceApiKey || deviceInfo.apiKey;
 
     if (!deviceJobsEnabled) {
       logger.infoSync('Jobs Feature skipped by feature toggle', {
         component: LogComponents.agent,
         enableDeviceJobs: deviceJobsEnabled,
+      });
+      this.features.jobs = undefined;
+      return;
+    }
+
+    if (!deviceInfo.provisioned || !deviceApiKey) {
+      logger.infoSync('Jobs Feature skipped - device not provisioned', {
+        component: LogComponents.agent,
+        provisioned: deviceInfo.provisioned,
+        hasDeviceApiKey: !!deviceApiKey,
       });
       this.features.jobs = undefined;
       return;
@@ -190,7 +201,7 @@ export class FeatureInitializer {
         {
           enabled: deviceJobsEnabled,
           cloudApiUrl,
-          deviceApiKey: deviceInfo.apiKey,
+          deviceApiKey,
           pollingIntervalMs,
           maxRetries: 3,
           handlerDirectory: process.env.JOB_HANDLER_DIR || `${process.env.DATA_DIR || '/app/data'}/job-handlers`,

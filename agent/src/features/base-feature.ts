@@ -22,7 +22,7 @@ export interface FeatureConfig {
 export interface FeatureLogger {
   info(message: string): void;
   warn(message: string): void;
-  error(message: string, error?: any): void;
+  error(message: string, errorOrContext?: any, context?: Record<string, any>): void;
   debug(message: string, ...args: any[]): void;
 }
 
@@ -75,12 +75,33 @@ export abstract class BaseFeature extends EventEmitter {
     return {
       info: (message: string) => agentLogger.infoSync(message, { component: featureName }),
       warn: (message: string) => agentLogger.warnSync(message, { component: featureName }),
-      error: (message: string, error?: any) => {
-        agentLogger.errorSync(
-          message,
-          error instanceof Error ? error : new Error(String(error)),
-          { component: featureName }
-        );
+      error: (message: string, errorOrContext?: any, context?: Record<string, any>) => {
+        if (errorOrContext instanceof Error) {
+          agentLogger.errorSync(message, errorOrContext, {
+            component: featureName,
+            ...context,
+          });
+          return;
+        }
+
+        if (errorOrContext && typeof errorOrContext === 'object') {
+          agentLogger.errorSync(message, undefined, {
+            component: featureName,
+            ...errorOrContext,
+            ...context,
+          });
+          return;
+        }
+
+        if (typeof errorOrContext !== 'undefined') {
+          agentLogger.errorSync(message, new Error(String(errorOrContext)), {
+            component: featureName,
+            ...context,
+          });
+          return;
+        }
+
+        agentLogger.errorSync(message, undefined, { component: featureName });
       },
       debug: (message: string, ...args: any[]) => {
         if (this.isDebugEnabled()) {
