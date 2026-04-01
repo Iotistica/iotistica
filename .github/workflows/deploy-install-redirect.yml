@@ -15,7 +15,7 @@ env:
 jobs:
   build-and-deploy:
     name: Build and Deploy Redirect Service
-    runs-on: ubuntu-latest
+    runs-on: [arc-runner-set-iotistica-light]
     
     steps:
       - name: Checkout repository
