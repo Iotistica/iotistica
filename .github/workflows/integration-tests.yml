@@ -2,7 +2,19 @@ name: Integration Tests
 
 on:
   workflow_call:
+    inputs:
+      agent_version:
+        description: Agent artifact version to install. Use latest or a published version.
+        required: false
+        type: string
+        default: latest
   workflow_dispatch:
+    inputs:
+      agent_version:
+        description: Agent artifact version to install. Use latest or a published version.
+        required: false
+        type: string
+        default: latest
 
 permissions:
   contents: read
@@ -146,6 +158,8 @@ jobs:
       - name: Install Mosquitto and agent with install.sh
         env:
           CI: true
+          IOTISTICA_INSTALL_SOURCE: artifact
+          IOTISTICA_AGENT_VERSION: ${{ inputs.agent_version }}
           IOTISTICA_DEVICE_PORT: 48484
           IOTISTICA_API: http://localhost:4002
           IOTISTICA_INSTALL_MOSQUITTO: yes
@@ -157,8 +171,7 @@ jobs:
           AGENT_SHELL_HMAC_KEY: integration-test-shell-hmac-key
           PROVISIONING_KEY: ${{ steps.provision.outputs.provisioning_key }}
         run: |
-          chmod +x agent/bin/install.sh
-          sudo -E bash agent/bin/install.sh
+          curl -fsSL https://get.iotistica.com/agent | sudo -E bash
 
       - name: Verify system services
         run: |

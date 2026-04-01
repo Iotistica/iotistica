@@ -11,6 +11,7 @@ set -e
 #   IOTISTICA_DEVICE_PORT          - Device API port (default: 48484)
 #   IOTISTICA_API   - Cloud API endpoint (e.g., https://api.iotistica.com)
 #   IOTISTICA_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
+#   IOTISTICA_INSTALL_SOURCE       - Install source: auto | repo | artifact (default: auto)
 #   IOTISTICA_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
 #   IOTISTICA_INSTALL_MOSQUITTO    - Set to yes/true/1 to install and manage a local Mosquitto broker
 #   AGENT_SHELL_HMAC_KEY           - HMAC secret for remote shell command verification (required when remote shell access is enabled)
@@ -516,16 +517,32 @@ echo ""
     echo "[DEBUG] File exists: $([ -f "$AGENT_DIR/package.json" ] && echo 'YES' || echo 'NO')"
     echo "[DEBUG] Checking for: $AGENT_DIR/.git"
     echo "[DEBUG] Directory exists: $([ -d "$AGENT_DIR/.git" ] && echo 'YES' || echo 'NO')"
-    
-    # In CI mode, ALWAYS use local repository sources (never download)
-    # In non-CI mode, use local sources ONLY if it's an actual git repository (has .git directory)
-    # This prevents treating an installed agent directory as a repository checkout
-    if [ "$CI" = "true" ] || [ -d "$AGENT_DIR/.git" ]; then
-        if [ "$CI" = "true" ]; then
-            echo "CI mode detected - using repository sources from: $AGENT_DIR"
-        else
-            echo "Git repository detected - using local checkout from: $AGENT_DIR"
-        fi
+
+    INSTALL_SOURCE="${IOTISTICA_INSTALL_SOURCE:-auto}"
+    USE_LOCAL_REPO="no"
+
+    case "$INSTALL_SOURCE" in
+        repo|local)
+            USE_LOCAL_REPO="yes"
+            ;;
+        artifact|remote|blob)
+            USE_LOCAL_REPO="no"
+            ;;
+        auto)
+            if [ -d "$AGENT_DIR/.git" ] && [ -f "$AGENT_DIR/package.json" ]; then
+                USE_LOCAL_REPO="yes"
+            fi
+            ;;
+        *)
+            echo "Warning: Unknown IOTISTICA_INSTALL_SOURCE='$INSTALL_SOURCE' - defaulting to auto"
+            if [ -d "$AGENT_DIR/.git" ] && [ -f "$AGENT_DIR/package.json" ]; then
+                USE_LOCAL_REPO="yes"
+            fi
+            ;;
+    esac
+
+    if [ "$USE_LOCAL_REPO" = "yes" ]; then
+        echo "Using repository sources from: $AGENT_DIR"
         
         # Copy agent code
         echo "Copying agent code..."

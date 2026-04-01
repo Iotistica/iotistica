@@ -4,7 +4,7 @@ Simple, lightweight redirect service that provides a user-friendly install URL f
 
 ## Features
 
-- ✅ Redirects `https://iotistica.com/agent/install` → Azure Blob Storage
+- ✅ Proxies `https://get.iotistica.com/agent` → Azure Blob Storage
 - ✅ Supports integrity verification via SHA256 checksums
 - ✅ Ultra-lightweight (Express + Helmet only)
 - ✅ Health check endpoint for monitoring
@@ -42,6 +42,8 @@ Set environment variables:
 ```bash
 export AZURE_STORAGE_ACCOUNT="your-storage-account"
 export AZURE_STORAGE_CONTAINER="scripts"
+export BLOB_INSTALL_PATH="agent/install.sh"
+export BLOB_INSTALL_SHA256_PATH="agent/install.sha256"
 export PORT=3000
 export NODE_ENV=production
 ```
@@ -50,12 +52,12 @@ export NODE_ENV=production
 
 ### Install agent (one-liner)
 ```bash
-curl -sfL https://iotistica.com/agent/install | sh
+curl -sfL https://get.iotistica.com/agent | sh
 ```
 
 ### Verify integrity before running
 ```bash
-curl -sfL https://iotistica.com/agent/install.sha256 | sha256sum -c -
+curl -sfL https://get.iotistica.com/agent.sha256 | sha256sum -c -
 ```
 
 ### Get installation info
@@ -67,8 +69,8 @@ Output:
 ```json
 {
   "description": "Iotistic Device Agent Installer",
-  "usage": "curl -sfL https://iotistica.com/agent/install | sh",
-  "install_url": "https://account.blob.core.windows.net/scripts/agent/install",
+  "usage": "curl -sfL https://get.iotistica.com/agent | sh",
+  "install_url": "https://account.blob.core.windows.net/scripts/agent/install.sh",
   "checksum_url": "https://account.blob.core.windows.net/scripts/agent/install.sha256",
   "documentation": "https://iotistica.com/documentation.html#agent-installation"
 }
@@ -78,8 +80,8 @@ Output:
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/agent/install` | GET | Redirects to Azure Blob Storage (install.sh) |
-| `/agent/install.sha256` | GET | Redirects to SHA256 checksum file |
+| `/agent` | GET | Proxies the published install.sh from Azure Blob Storage |
+| `/agent.sha256` | GET | Proxies the SHA256 checksum file |
 | `/agent/info` | GET | Returns installation info (JSON) |
 | `/health` | GET | Health check for monitoring |
 
@@ -146,6 +148,8 @@ services:
     environment:
       AZURE_STORAGE_ACCOUNT: your-account
       AZURE_STORAGE_CONTAINER: scripts
+      BLOB_INSTALL_PATH: agent/install.sh
+      BLOB_INSTALL_SHA256_PATH: agent/install.sha256
       NODE_ENV: production
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
@@ -175,8 +179,8 @@ Add to `marketing/website/agent.html`:
 <div class="install-section">
   <h2>Quick Install</h2>
   <p>Get the agent running in seconds:</p>
-  <pre><code>curl -sfL https://iotistica.com/agent/install | sh</code></pre>
-  <button onclick="copyToClipboard('curl -sfL https://iotistica.com/agent/install | sh')">
+  <pre><code>curl -sfL https://get.iotistica.com/agent | sh</code></pre>
+  <button onclick="copyToClipboard('curl -sfL https://get.iotistica.com/agent | sh')">
     Copy Command
   </button>
 </div>
