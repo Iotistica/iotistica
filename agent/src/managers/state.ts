@@ -442,7 +442,23 @@ export class StateManager extends EventEmitter {
 		}
 		
 		// Delegate to AgentUpdater for reconciliation
-		const isDowngrade = semver.lt(agentConfig.version, currentVersion);
+		const normalizedTargetVersion = semver.valid(agentConfig.version);
+		const normalizedCurrentVersion = semver.valid(currentVersion);
+		const isComparableVersionPair = !!normalizedTargetVersion && !!normalizedCurrentVersion;
+		const isDowngrade = isComparableVersionPair
+			? semver.lt(normalizedTargetVersion, normalizedCurrentVersion)
+			: false;
+
+		if (!isComparableVersionPair) {
+			this.logger?.debugSync('Skipping downgrade check for non-semver agent version', {
+				component: LogComponents.stateReconciler,
+				operation: 'reconcileAgentVersion',
+				currentVersion,
+				targetVersion: agentConfig.version,
+				normalizedCurrentVersion,
+				normalizedTargetVersion,
+			});
+		}
 
 		this.logger?.infoSync('Agent version mismatch detected, triggering reconciliation', {
 			component: LogComponents.stateReconciler,
