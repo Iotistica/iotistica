@@ -1,1160 +1,193 @@
 name: Integration Tests
 
-env:
-  COMPOSE_FILE: docker-compose.e2e.yml
-
-# Concurrency control: Cancel in-progress runs when new commit is pushed
-concurrency:
-  group: integration-tests-${{ github.ref }}
-  cancel-in-progress: true
-
 on:
   workflow_call:
     inputs:
       agent_version:
-        description: 'Agent version to test'
-        required: false
-        type: string
-      api_version:
-        description: 'API version to test'
-        required: false
-        type: string
-      dashboard_version:
-        description: 'Dashboard version to test'
-        required: false
-        type: string
-      modbus_simulator_version:
-        description: 'Modbus Simulator version to test'
-        required: false
-        type: string
-      comap_simulator_version:
-        description: 'COMAP Simulator version to test'
-        required: false
-        type: string
-      mqtt_monitor_version:
-        description: 'MQTT Monitor version to test'
+        description: Agent version label to stamp into the install environment
         required: false
         type: string
   workflow_dispatch:
     inputs:
-      test_mode:
-        description: 'Test mode: incremental (one service) or full-stack (all latest)'
-        required: false
-        type: choice
-        options:
-          - incremental
-          - full-stack
-        default: full-stack
       agent_version:
-        description: 'Agent version to test (default: latest from package.json)'
+        description: Agent version label to stamp into the install environment
         required: false
         type: string
-      api_version:
-        description: 'API version to test (default: latest from package.json)'
-        required: false
-        type: string
-      dashboard_version:
-        description: 'Dashboard version to test (default: latest from package.json)'
-        required: false
-        type: string
-      modbus_simulator_version:
-        description: 'Modbus Simulator version to test (default: latest from package.json)'
-        required: false
-        type: string
-      comap_simulator_version:
-        description: 'COMAP Simulator version to test (default: latest from package.json)'
-        required: false
-        type: string
-      mqtt_monitor_version:
-        description: 'MQTT Monitor version to test (default: latest from package.json)'
-        required: false
-        type: string
-  # release:
-  #   types: [published]
-  # schedule:
-  #   # Run full stack tests nightly at 2 AM UTC
-  #   - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+
+env:
+  COMPOSE_FILE: docker-compose.e2e.yml
+
+concurrency:
+  group: integration-tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  determine-versions:
-    name: Determine Versions to Test
-    runs-on: [ubuntu-latest]
-    outputs:
-      agent_version: ${{ steps.versions.outputs.agent_version }}
-      api_version: ${{ steps.versions.outputs.api_version }}
-      dashboard_version: ${{ steps.versions.outputs.dashboard_version }}
-      modbus_simulator_version: ${{ steps.versions.outputs.modbus_simulator_version }}
-      comap_simulator_version: ${{ steps.versions.outputs.comap_simulator_version }}
-      mqtt_monitor_version: ${{ steps.versions.outputs.mqtt_monitor_version }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: master  # Ensure we're on master
-          fetch-depth: 0  # Get full history
+  test-systemd-agent-core-services:
+    name: Test Agent Provisioning With Core Services
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
 
-      - name: Pull latest changes
-        run: |
-          git pull origin master
-          echo "Latest commit:"
-          git log -1 --oneline
-
-      - name: Determine versions
-        id: versions
-        run: |
-          # Use input versions if provided, otherwise get from package.json
-          if [ -n "${{ inputs.agent_version }}" ]; then
-            AGENT_VERSION="${{ inputs.agent_version }}"
-          else
-            AGENT_VERSION=$(jq -r '.version' agent/package.json)
-          fi
-          
-          if [ -n "${{ inputs.api_version }}" ]; then
-            API_VERSION="${{ inputs.api_version }}"
-          else
-            API_VERSION=$(jq -r '.version' api/package.json)
-          fi
-          
-          if [ -n "${{ inputs.dashboard_version }}" ]; then
-            DASHBOARD_VERSION="${{ inputs.dashboard_version }}"
-          else
-            DASHBOARD_VERSION=$(jq -r '.version' dashboard/package.json)
-          fi
-          
-          if [ -n "${{ inputs.modbus_simulator_version }}" ]; then
-            MODBUS_SIMULATOR_VERSION="${{ inputs.modbus_simulator_version }}"
-          else
-            MODBUS_SIMULATOR_VERSION=$(jq -r '.version' sensors/modbus-simulator/package.json)
-          fi
-          
-          if [ -n "${{ inputs.comap_simulator_version }}" ]; then
-            COMAP_SIMULATOR_VERSION="${{ inputs.comap_simulator_version }}"
-          else
-            # Check if package.json exists
-            if [ -f sensors/comap-simulator/package.json ]; then
-              COMAP_SIMULATOR_VERSION=$(jq -r '.version' sensors/comap-simulator/package.json)
-            else
-              COMAP_SIMULATOR_VERSION="latest"
-            fi
-          fi
-          
-          if [ -n "${{ inputs.mqtt_monitor_version }}" ]; then
-            MQTT_MONITOR_VERSION="${{ inputs.mqtt_monitor_version }}"
-          else
-            MQTT_MONITOR_VERSION=$(jq -r '.version' mqtt-monitor/package.json)
-          fi
-          
-          echo "agent_version=$AGENT_VERSION" >> $GITHUB_OUTPUT
-          echo "api_version=$API_VERSION" >> $GITHUB_OUTPUT
-          echo "dashboard_version=$DASHBOARD_VERSION" >> $GITHUB_OUTPUT
-          echo "modbus_simulator_version=$MODBUS_SIMULATOR_VERSION" >> $GITHUB_OUTPUT
-          echo "comap_simulator_version=$COMAP_SIMULATOR_VERSION" >> $GITHUB_OUTPUT
-          echo "mqtt_monitor_version=$MQTT_MONITOR_VERSION" >> $GITHUB_OUTPUT
-          
-          echo "Testing versions:"
-          echo "  - Agent: $AGENT_VERSION"
-          echo "  - API: $API_VERSION"
-          echo "  - Dashboard: $DASHBOARD_VERSION"
-          echo "  - Modbus Simulator: $MODBUS_SIMULATOR_VERSION"
-          echo "  - COMAP Simulator: $COMAP_SIMULATOR_VERSION"
-          echo "  - MQTT Monitor: $MQTT_MONITOR_VERSION"
-          
-          # Check if images exist on Docker Hub
-          echo ""
-          echo "Checking if images exist on Docker Hub..."
-          
-          # Function to check if image exists
-          check_image() {
-            local image=$1
-            if docker manifest inspect "$image" > /dev/null 2>&1; then
-              echo "✓ $image exists"
-              return 0
-            else
-              echo "✗ $image NOT FOUND"
-              return 1
-            fi
-          }
-          
-          # Check all images
-          MISSING=0
-          check_image "iotistic/agent:$AGENT_VERSION" || MISSING=1
-          check_image "iotistic/api:$API_VERSION" || MISSING=1
-          check_image "iotistic/dashboard:$DASHBOARD_VERSION" || MISSING=1
-          check_image "iotistic/modbus-simulator:$MODBUS_SIMULATOR_VERSION" || MISSING=1
-          
-          if [ $MISSING -eq 1 ]; then
-            echo ""
-            echo "⚠ WARNING: Some images are missing on Docker Hub!"
-            echo "Will attempt to pull 'latest' tag as fallback..."
-          fi
-          
-          echo ""
-          echo "All images found! Proceeding with tests..."
-
-      - name: Display test configuration
-        run: |
-          {
-            echo "## Integration Test Configuration"
-            echo ""
-            echo "### Test Mode"
-            if [ "${{ inputs.test_mode }}" = "full-stack" ] || [ "${{ github.event_name }}" = "schedule" ]; then
-              echo "**Mode**: Full Stack (All Latest Versions)"
-            else
-              echo "**Mode**: Incremental (Mixed Versions - Testing Backward Compatibility)"
-            fi
-            echo ""
-            echo "### Versions Under Test"
-            echo "- **Agent**: \`${{ steps.versions.outputs.agent_version }}\`"
-            echo "- **API**: \`${{ steps.versions.outputs.api_version }}\`"
-            echo "- **Dashboard**: \`${{ steps.versions.outputs.dashboard_version }}\`"
-            echo "- **Modbus Simulator**: \`${{ steps.versions.outputs.modbus_simulator_version }}\`"
-            echo ""
-            echo "### Docker Images"
-            echo "- [\`iotistic/agent:${{ steps.versions.outputs.agent_version }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ steps.versions.outputs.agent_version }})"
-            echo "- [\`iotistic/api:${{ steps.versions.outputs.api_version }}\`](https://hub.docker.com/r/iotistic/api/tags?name=${{ steps.versions.outputs.api_version }})"
-            echo "- [\`iotistic/dashboard:${{ steps.versions.outputs.dashboard_version }}\`](https://hub.docker.com/r/iotistic/dashboard/tags?name=${{ steps.versions.outputs.dashboard_version }})"
-            echo "- [\`iotistic/modbus-simulator:${{ steps.versions.outputs.modbus_simulator_version }}\`](https://hub.docker.com/r/iotistic/modbus-simulator/tags?name=${{ steps.versions.outputs.modbus_simulator_version }})"
-          } >> $GITHUB_STEP_SUMMARY
-
-  setup:
-    name: Setup Environment
-    needs: determine-versions
-    runs-on: [ubuntu-latest]
-    
-    steps:
-      - name: Display test suite information
-        run: |
-          echo "E2E Integration Test Suite"
-          echo "=========================="
-          echo ""
-          echo "Versions:"
-          echo "  - Agent: ${{ needs.determine-versions.outputs.agent_version }}"
-          echo "  - API: ${{ needs.determine-versions.outputs.api_version }}"
-          echo "  - Dashboard: ${{ needs.determine-versions.outputs.dashboard_version }}"
-          echo "  - Modbus Simulator: ${{ needs.determine-versions.outputs.modbus_simulator_version }}"
-          echo ""
-          echo "Test Stack (docker-compose.e2e.yml):"
-          echo "  - PostgreSQL 16"
-          echo "  - Redis 7"
-          echo "  - Mosquitto MQTT Broker"
-          echo "  - API Server (v${{ needs.determine-versions.outputs.api_version }})"
-          echo "  - Dashboard UI (v${{ needs.determine-versions.outputs.dashboard_version }})"
-          echo "  - Protocol Simulators (Modbus)"
-          echo ""
-          echo "Test Jobs:"
-          echo "  1. API server functionality"
-          echo "  2. Agent connectivity and upgrade"
-          echo "  3. Protocol simulators"
-          echo "  4. Dashboard UI"
-          echo ""
-          echo "=========================="
-
-      - name: Pull Docker images
-        run: |
-          echo "Pulling versioned Docker images..."
-          
-          # Try to pull agent image, fallback to latest if not found
-          if docker pull iotistic/agent:${{ needs.determine-versions.outputs.agent_version }} 2>/dev/null; then
-            echo "✓ Pulled iotistic/agent:${{ needs.determine-versions.outputs.agent_version }}"
-          else
-            echo "⚠ Version ${{ needs.determine-versions.outputs.agent_version }} not found, pulling latest..."
-            docker pull iotistic/agent:latest
-            docker tag iotistic/agent:latest iotistic/agent:${{ needs.determine-versions.outputs.agent_version }}
-          fi
-          
-          docker pull iotistic/api:${{ needs.determine-versions.outputs.api_version }}
-          docker pull iotistic/dashboard:${{ needs.determine-versions.outputs.dashboard_version }}
-          
-          # Try to pull modbus-simulator image, fallback to latest if not found
-          if docker pull iotistic/modbus-simulator:${{ needs.determine-versions.outputs.modbus_simulator_version }} 2>/dev/null; then
-            echo "✓ Pulled iotistic/modbus-simulator:${{ needs.determine-versions.outputs.modbus_simulator_version }}"
-          else
-            echo "⚠ Version ${{ needs.determine-versions.outputs.modbus_simulator_version }} not found, pulling latest..."
-            docker pull iotistic/modbus-simulator:latest
-            docker tag iotistic/modbus-simulator:latest iotistic/modbus-simulator:${{ needs.determine-versions.outputs.modbus_simulator_version }}
-          fi
-          
-          echo "Images pulled successfully!"
-
-  # test-api:
-  #   name: Test API Server
-  #   needs: [determine-versions, setup]
-  #   runs-on: [ubuntu-latest]
-  #   timeout-minutes: 10
-    
-  #   env:
-  #     AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
-  #     API_VERSION: ${{ needs.determine-versions.outputs.api_version }}
-  #     DASHBOARD_VERSION: ${{ needs.determine-versions.outputs.dashboard_version }}
-    
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup environment
-  #       run: |
-  #         chmod +x .github/scripts/setup-env.sh
-  #         LICENSE_PUBLIC_KEY="${{ secrets.LICENSE_PUBLIC_KEY }}" \
-  #         IOTISTICA_LICENSE_KEY="${{ secrets.IOTISTICA_LICENSE_KEY }}" \
-  #         .github/scripts/setup-env.sh
-
-  #     - name: Start dependencies and API
-  #       run: docker compose -f $COMPOSE_FILE up -d 
-
-  #     - name: Check PostgreSQL container status
-  #       run: |
-  #         echo "=== PostgreSQL Container Status ==="
-  #         docker compose -f $COMPOSE_FILE ps postgres
-          
-  #         echo ""
-  #         echo "=== PostgreSQL Health Status ==="
-  #         docker inspect iotistic-postgres-e2e --format='{{.State.Health.Status}}' || echo "No health status"
-          
-  #         echo ""
-  #         echo "=== PostgreSQL Container State ==="
-  #         docker inspect iotistic-postgres-e2e --format='{{json .State}}' | jq '.' || echo "Container state check failed"
-          
-  #         echo ""
-  #         echo "=== PostgreSQL Logs ==="
-  #         docker compose -f $COMPOSE_FILE logs postgres --tail=100
-
-  #     - name: Wait for dependencies to be healthy
-  #       run: |
-  #         echo "Waiting for PostgreSQL..."
-  #         if ! timeout 60 bash -c '
-  #           until docker compose -f $COMPOSE_FILE exec -T postgres pg_isready -U postgres > /dev/null 2>&1; do
-  #             echo "PostgreSQL not ready yet..."
-  #             sleep 2
-  #           done
-  #         '; then
-  #           echo "✗ PostgreSQL failed to become ready within 60 seconds"
-  #           echo ""
-  #           echo "=== PostgreSQL logs (last 100 lines) ==="
-  #           docker compose -f $COMPOSE_FILE logs postgres --tail=100
-  #           echo ""
-  #           echo "=== PostgreSQL container inspect ==="
-  #           docker inspect iotistic-postgres-e2e
-  #           exit 1
-  #         fi
-  #         echo "✓ PostgreSQL is ready"
-          
-  #         echo ""
-  #         echo "Waiting for Redis..."
-  #         if ! timeout 30 bash -c '
-  #           until docker compose -f $COMPOSE_FILE exec -T redis redis-cli ping > /dev/null 2>&1; do
-  #             echo "Redis not ready yet..."
-  #             sleep 2
-  #           done
-  #         '; then
-  #           echo "✗ Redis failed to become ready within 30 seconds"
-  #           echo ""
-  #           echo "=== Redis logs ==="
-  #           docker compose -f $COMPOSE_FILE logs redis --tail=50
-  #           exit 1
-  #         fi
-  #         echo "✓ Redis is ready"
-          
-  #         echo ""
-  #         echo "Waiting for Mosquitto (additional time)..."
-  #         sleep 15
-          
-  #         echo ""
-  #         echo "✓ All dependencies are ready!"
-
-  #     - name: Check Mosquitto status and logs
-  #       run: |
-  #         echo "=== Mosquitto Container Status ==="
-  #         docker compose -f $COMPOSE_FILE ps mosquitto
-          
-  #         echo ""
-  #         echo "=== Mosquitto Health Status ==="
-  #         docker inspect iotistic-mosquitto-e2e --format='{{.State.Health.Status}}' || echo "No health status"
-          
-  #         echo ""
-  #         echo "=== Mosquitto Container State ==="
-  #         docker inspect iotistic-mosquitto-e2e --format='{{json .State}}' | jq '.' || echo "Container state check failed"
-          
-  #         echo ""
-  #         echo "=== Mosquitto Logs (last 50 lines) ==="
-  #         docker compose -f $COMPOSE_FILE logs mosquitto --tail=50
-          
-  #         echo ""
-  #         echo "=== Test Mosquitto Port 1883 ==="
-  #         docker compose -f $COMPOSE_FILE exec -T mosquitto sh -c "netstat -tlnp | grep 1883" || echo "netstat not available"
-
-  #     - name: Wait for API to be ready
-  #       run: |
-  #         echo "Waiting for API to be ready..."
-  #         timeout 120 bash -c '
-  #           until curl -f http://localhost:4002/health 2>/dev/null; do
-  #             echo "API not ready yet..."
-  #             sleep 3
-  #           done
-  #         '
-  #         echo "API is ready!"
-
-  #     - name: Run API health checks
-  #       run: |
-  #         echo "Testing API health endpoint..."
-  #         curl -f http://localhost:4002/health
-          
-  #         echo "Testing API devices endpoint..."
-  #         curl -f http://localhost:4002/api/devices || echo "Devices endpoint not ready yet"
-
-  #     - name: Run API integration tests
-  #       working-directory: ./api
-  #       run: |
-  #         echo "Running API integration tests..."
-          
-  #         # Fix npm cache permissions (may have been changed by sudo during setup)
-  #         sudo chown -R $(whoami):$(whoami) $HOME/.npm 2>/dev/null || true
-          
-  #         npm ci
-  #         npm run test:integration || echo "No integration tests configured yet"
-
-  #     - name: Check API logs
-  #       if: always()
-  #       run: |
-  #         echo "=== API logs ==="
-  #         docker compose -f $COMPOSE_FILE logs api --tail=100 || true
-
-  #     - name: Cleanup
-  #       if: always()
-  #       run: docker compose -f $COMPOSE_FILE down -v
-
-  test-agent:
-    name: Test Agent (Systemd Installation)
-    needs: [determine-versions, setup]
-    runs-on: [ubuntu-latest]
-    timeout-minutes: 15
-    
-    env:
-      AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
-      API_VERSION: ${{ needs.determine-versions.outputs.api_version }}
-      DASHBOARD_VERSION: ${{ needs.determine-versions.outputs.dashboard_version }}
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup environment
+      - name: Prepare environment file
         run: |
           chmod +x .github/scripts/setup-env.sh
           LICENSE_PUBLIC_KEY="${{ secrets.LICENSE_PUBLIC_KEY }}" \
-          IOTISTICA_LICENSE_KEY="${{ secrets.IOTISTICA_LICENSE_KEY }}" \
+          IOTISTIC_LICENSE_KEY="${{ secrets.IOTISTIC_LICENSE_KEY }}" \
           .github/scripts/setup-env.sh
 
-      - name: Start infrastructure stack (without agent)
-        run: |
-          echo "Starting infrastructure services (postgres, redis, mosquitto, api, dashboard)..."
-          docker compose -f $COMPOSE_FILE up -d postgres redis mosquitto api dashboard
+      - name: Start core backend services
+        run: docker compose -f "$COMPOSE_FILE" up -d --build postgres redis api
 
-      - name: Wait for infrastructure to be ready
+      - name: Wait for backend readiness
         run: |
           echo "Waiting for PostgreSQL..."
-          timeout 60 bash -c '
-            until docker compose -f $COMPOSE_FILE exec -T postgres pg_isready -U postgres > /dev/null 2>&1; do
+          timeout 90 bash -c '
+            until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U postgres > /dev/null 2>&1; do
               sleep 2
             done
           '
-          
+
           echo "Waiting for Redis..."
-          timeout 30 bash -c '
-            until docker compose -f $COMPOSE_FILE exec -T redis redis-cli ping > /dev/null 2>&1; do
+          timeout 60 bash -c '
+            until docker compose -f "$COMPOSE_FILE" exec -T redis redis-cli ping | grep -q PONG; do
               sleep 2
             done
           '
-          
-          echo "Waiting for Mosquitto..."
-          sleep 15
-          
+
           echo "Waiting for API..."
-          timeout 120 bash -c '
-            until curl -f http://localhost:4002/health 2>/dev/null; do
-              echo "API not ready yet..."
+          timeout 180 bash -c '
+            until curl -fsS http://localhost:4002/health > /dev/null; do
               sleep 3
             done
           '
-          
-          echo "✓ Infrastructure ready!"
 
-      - name: Generate provisioning key via API
+      - name: Seed integration fleet and provisioning key
         id: provision
         run: |
-          echo "Generating provisioning key via API..."
-          
-          RESPONSE=$(curl -s -X POST http://localhost:4002/api/v1/provisioning-keys/generate \
-            -H "Content-Type: application/json" \
-            -d '{"fleetId":"test-fleet","newKey":false}')
-          
-          PROVISIONING_KEY=$(echo "$RESPONSE" | jq -r '.key')
-          
-          if [ -z "$PROVISIONING_KEY" ] || [ "$PROVISIONING_KEY" == "null" ]; then
-            echo "Failed to generate provisioning key"
-            echo "Response: $RESPONSE"
-            exit 1
-          fi
-          
-          echo "✓ Provisioning key generated: ${PROVISIONING_KEY:0:20}..."
-          echo "provisioning_key=$PROVISIONING_KEY" >> $GITHUB_OUTPUT
+          PROVISIONING_JSON=$(docker compose -f "$COMPOSE_FILE" exec -T api node --input-type=module - <<'NODE'
+          import crypto from 'crypto';
+          import { query } from './dist/db/connection.js';
+          import { createProvisioningKey } from './dist/utils/provisioning-keys.js';
 
-      - name: Verify API and MQTT accessibility from host
-        run: |
-          echo "=== Verifying services are accessible from host ==="
-          
-          echo "Testing API endpoint (http://localhost:4002)..."
-          if curl -f http://localhost:4002/health 2>/dev/null; then
-            echo "✓ API is accessible"
-          else
-            echo "✗ API is NOT accessible from host"
-            exit 1
-          fi
-          
-          echo ""
-          echo "Testing MQTT port (localhost:5883)..."
-          if nc -zv localhost 5883 2>&1 | grep -q succeeded || nc -zv localhost 5883 2>&1 | grep -q open; then
-            echo "✓ MQTT port 5883 is accessible"
-          else
-            echo "✗ MQTT port 5883 is NOT accessible from host"
-            echo "Checking Mosquitto container status:"
-            docker compose -f $COMPOSE_FILE ps mosquitto
-            docker compose -f $COMPOSE_FILE logs mosquitto --tail=20
-            exit 1
-          fi
-          
-          echo ""
-          echo "✓ All services are accessible from host"
+          const fleetUuid = crypto.randomUUID();
+          const customerId = crypto.randomUUID();
 
-      - name: Install agent via systemd method
+          await query(
+            `INSERT INTO fleets (fleet_name, customer_id, fleet_type, description, fleet_uuid, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              'Integration Test Fleet',
+              customerId,
+              'physical',
+              'Workflow-seeded fleet for systemd integration testing',
+              fleetUuid,
+              'integration-tests'
+            ]
+          );
+
+          const created = await createProvisioningKey(
+            fleetUuid,
+            1,
+            7,
+            'Workflow-seeded single-device key',
+            'integration-tests'
+          );
+
+          console.log(JSON.stringify({
+            fleetUuid,
+            keyId: created.id,
+            key: created.key
+          }));
+          NODE
+          )
+
+          PROVISIONING_JSON=$(echo "$PROVISIONING_JSON" | tail -n 1)
+          PROVISIONING_KEY=$(echo "$PROVISIONING_JSON" | jq -r '.key')
+          FLEET_UUID=$(echo "$PROVISIONING_JSON" | jq -r '.fleetUuid')
+
+          if [ -z "$PROVISIONING_KEY" ] || [ "$PROVISIONING_KEY" = "null" ]; then
+            echo "Failed to create provisioning key"
+            echo "$PROVISIONING_JSON"
+            exit 1
+          fi
+
+          echo "fleet_uuid=$FLEET_UUID" >> "$GITHUB_OUTPUT"
+          echo "provisioning_key=$PROVISIONING_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Install Mosquitto and agent with install.sh
         env:
           CI: true
-          IOTISTICA_INSTALL_METHOD: systemd
-          IOTISTICA_AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
+          IOTISTICA_AGENT_VERSION: ${{ inputs.agent_version || github.sha }}
           IOTISTICA_DEVICE_PORT: 48484
           IOTISTICA_API: http://localhost:4002
+          IOTISTICA_INSTALL_MOSQUITTO: yes
           MQTT_BROKER_HOST: localhost
-          MQTT_BROKER_PORT: 5883
-          MQTT_USE_TLS: false
+          MQTT_BROKER_PORT: 1883
           MQTT_USERNAME: admin
-          MQTT_PASSWORD: iotistic2024
+          MQTT_PASSWORD: iotistic42!
+          MQTT_USE_TLS: false
           PROVISIONING_KEY: ${{ steps.provision.outputs.provisioning_key }}
         run: |
-          echo "Installing agent with systemd method..."
-          echo "Provisioning key (first 20 chars): ${PROVISIONING_KEY:0:20}..."
-          echo "Cloud API endpoint: $IOTISTICA_API"
-          echo "MQTT broker: mqtt://${MQTT_USERNAME}@${MQTT_BROKER_HOST}:${MQTT_BROKER_PORT}"
-          curl -sfL https://get.iotistica.com/agent | sudo -E sh
-          
-          echo "✓ Agent installed"
+          chmod +x agent/bin/install.sh
+          sudo -E bash agent/bin/install.sh
 
-  
-      - name: Verify environment configuration
+      - name: Verify system services
         run: |
-          echo "=== Checking environment file ==="
-          echo "File: /etc/iotistic/agent.env"
-          if [ -f /etc/iotistic/agent.env ]; then
-            echo "✓ Environment file exists"
-            echo ""
-            echo "Contents (sensitive values masked):"
-            sudo cat /etc/iotistic/agent.env | sed 's/PROVISIONING_KEY=.*/PROVISIONING_KEY=<masked>/'
-            echo ""
-            echo "Verifying MQTT configuration:"
-            if sudo grep -q "MQTT_BROKER_HOST" /etc/iotistic/agent.env; then
-              echo "✓ MQTT_BROKER_HOST is set"
-              sudo grep "MQTT_BROKER_HOST" /etc/iotistic/agent.env
-            else
-              echo "✗ MQTT_BROKER_HOST is NOT set"
-            fi
-            if sudo grep -q "MQTT_BROKER_PORT" /etc/iotistic/agent.env; then
-              echo "✓ MQTT_BROKER_PORT is set"
-              sudo grep "MQTT_BROKER_PORT" /etc/iotistic/agent.env
-            else
-              echo "✗ MQTT_BROKER_PORT is NOT set"
-            fi
-            if sudo grep -q "MQTT_USE_TLS" /etc/iotistic/agent.env; then
-              echo "✓ MQTT_USE_TLS is set"
-              sudo grep "MQTT_USE_TLS" /etc/iotistic/agent.env
-            else
-              echo "✗ MQTT_USE_TLS is NOT set"
-            fi
-            if sudo grep -q "MQTT_USERNAME" /etc/iotistic/agent.env; then
-              echo "✓ MQTT_USERNAME is set"
-              sudo grep "MQTT_USERNAME" /etc/iotistic/agent.env
-            else
-              echo "✗ MQTT_USERNAME is NOT set"
-            fi
-            if sudo grep -q "MQTT_PASSWORD" /etc/iotistic/agent.env; then
-              echo "✓ MQTT_PASSWORD is set (not displaying value)"
-            else
-              echo "✗ MQTT_PASSWORD is NOT set"
-            fi
-          else
-            echo "✗ Environment file NOT found!"
-            exit 1
-          fi
-          
-          echo ""
-          echo "=== Verifying environment variables in agent logs ==="
-          if sudo journalctl -u iotistica-agent --no-pager --since "5 minutes ago" | grep -q "PROVISIONING_KEY"; then
-            echo "⚠ PROVISIONING_KEY found in logs (should be loaded but not logged)"
-          fi
-          
-          if sudo journalctl -u iotistica-agent --no-pager --since "5 minutes ago" | grep -q "IOTISTICA_API"; then
-            echo "✓ IOTISTICA_API environment variable loaded"
-          fi
-          
-          echo ""
-          echo "✓ Environment configuration verified"
-
-      - name: Check systemd service status
-        run: |
-          echo "Checking systemd service status..."
+          sudo systemctl status mosquitto --no-pager || true
           sudo systemctl status iotistica-agent --no-pager || true
-          
-          if sudo systemctl is-active --quiet iotistica-agent; then
-            echo "✓ Agent service is running"
-          else
-            echo "✗ Agent service is not running"
-            sudo journalctl -u iotistica-agent -n 50 --no-pager
-            exit 1
-          fi
-          
-          echo ""
-          echo "Waiting for agent to initialize..."
-          sleep 10
-          
-          echo ""
-          echo "=== Recent agent initialization logs ==="
-          sudo journalctl -u iotistica-agent --no-pager --since "2 minutes ago" --lines 50 | grep -E "(Device manager initialized|MQTT|Failed to initialize|ERROR)" || echo "No relevant initialization logs found"
+          sudo systemctl is-active --quiet mosquitto
+          sudo systemctl is-active --quiet iotistica-agent
 
-     
-      - name: Test agent API
+      - name: Wait for device API readiness
         run: |
-          echo "Testing agent API..."
-          
-          if curl -f http://localhost:48484/v1/healthy 2>/dev/null; then
-            echo "✓ Agent API is responding"
-          else
-            echo "⚠ Agent API not responding"
-            echo "Recent agent logs:"
-            sudo journalctl -u iotistica-agent --no-pager --since "2 minutes ago" --lines 50
-            exit 1
-          fi
+          timeout 120 bash -c '
+            until curl -fsS http://localhost:48484/v1/healthy > /dev/null; do
+              sleep 3
+            done
+          '
 
-      - name: Verify agent provisioning status
+      - name: Verify local provisioning status
         run: |
-          echo "Checking agent provisioning status from logs..."
-          
-          # Wait a bit for device manager to initialize
-          sleep 5
-          
-          # Extract Device manager initialization log from journalctl
-          DEVICE_INFO=$(sudo journalctl -u iotistica-agent --no-pager --since "5 minutes ago" | grep "Device provisioned successfully" | tail -1)
-          
-          if [ -z "$DEVICE_INFO" ]; then
-            echo "✗ Device manager initialization log not found"
-            echo "Showing recent logs:"
-            sudo pm2 logs iotistica-agent --nostream --lines 100
-            exit 1
-          fi
-          
-          echo "Device info found: $DEVICE_INFO"
-          
-          # Parse the JSON from the log line
-          DEVICE_JSON=$(echo "$DEVICE_INFO" | grep -o '{.*}')
-          echo "Device JSON: $DEVICE_JSON"
-          
-          # Check provisioned status
-          PROVISIONED=$(echo "$DEVICE_JSON" | jq -r '.provisioned')
-          HAS_API_KEY=$(echo "$DEVICE_JSON" | jq -r '.hasApiKey')
-          UUID=$(echo "$DEVICE_JSON" | jq -r '.uuid')
-          AGENT_VERSION=$(echo "$DEVICE_JSON" | jq -r '.agentVersion')
-          
-          echo ""
-          echo "Device Configuration:"
-          echo "  UUID: $UUID"
-          echo "  Agent Version: $AGENT_VERSION"
-          echo "  Has API Key: $HAS_API_KEY"
-          echo "  Provisioned: $PROVISIONED"
-          echo ""
-          
-          if [ "$PROVISIONED" != "true" ]; then
-            echo "✗ Agent is NOT provisioned (expected: true, got: $PROVISIONED)"
-            echo ""
-            echo "Full device manager logs:"
-            sudo journalctl -u iotistica-agent --no-pager --since "5 minutes ago" | grep -i "provision"
-            exit 1
-          fi
-          
-          if [ "$HAS_API_KEY" != "true" ]; then
-            echo "✗ Agent does not have API key (expected: true, got: $HAS_API_KEY)"
-            exit 1
-          fi
-          
-          echo "✓ Agent successfully provisioned with API key"
+          STATUS=$(curl -fsS http://localhost:48484/v1/provision/status)
+          echo "$STATUS" | jq '.'
 
-      - name: Verify agent connected to cloud API
+          test "$(echo "$STATUS" | jq -r '.provisioned')" = "true"
+          test "$(echo "$STATUS" | jq -r '.apiEndpoint')" = "http://localhost:4002"
+          test "$(echo "$STATUS" | jq -r '.mqttConfigured')" = "true"
+
+      - name: Verify agent was registered in backend
         run: |
-          echo "Checking if agent registered with API..."
-          
-          # Wait a bit for agent to register
-          sleep 10
-          
-          # Check API for registered devices
-          DEVICES=$(curl -s http://localhost:4002/api/devices || echo "[]")
-          echo "Registered devices: $DEVICES"
-          
-          if echo "$DEVICES" | jq -e 'length > 0' > /dev/null 2>&1; then
-            echo "✓ Agent successfully registered with API"
-          else
-            echo "⚠ No devices registered yet (may need provisioning key)"
-          fi
+          docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -c \
+            "SELECT uuid, fleet_uuid, provisioning_state, provisioned_at IS NOT NULL AS has_provisioned_at FROM agents ORDER BY created_at DESC LIMIT 5;"
 
-      - name: Run agent integration tests
-        working-directory: ./agent
-        run: |
-          echo "Running agent integration tests..."
-          
-          # Fix npm cache permissions (may have been changed by sudo during install)
-          if [ -d "$HOME/.npm" ]; then
-            sudo chown -R $(whoami):$(whoami) $HOME/.npm 2>/dev/null || true
-          fi
-          
-          npm ci
-          npm run test:integration || echo "No integration tests configured yet"
-
-      - name: Show agent logs
+      - name: Show diagnostics
         if: always()
         run: |
-          echo "========================================="
-          echo "Agent Logs (via journalctl):"
-          echo "========================================="
-          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" --lines 200
+          echo "=== Agent journal ==="
+          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" || true
 
-      - name: Check API logs
+          echo "=== Mosquitto journal ==="
+          sudo journalctl -u mosquitto --no-pager --since "10 minutes ago" || true
+
+          echo "=== API logs ==="
+          docker compose -f "$COMPOSE_FILE" logs api --tail=200 || true
+
+      - name: Cleanup system services
         if: always()
         run: |
-          echo "========================================="
-          echo "API Logs:"
-          echo "========================================="
-          docker compose -f $COMPOSE_FILE logs api --tail=100
-
-      - name: Cleanup agent
-        if: always()
-        run: |
-          echo "Stopping agent service..."
           sudo systemctl stop iotistica-agent || true
           sudo systemctl disable iotistica-agent || true
-          sudo rm -f /etc/systemd/system/iotistica-agent.service
-          sudo systemctl daemon-reload
-          echo "✓ Agent service cleaned up"
+          sudo rm -f /etc/systemd/system/iotistica-agent.service || true
+          sudo systemctl stop mosquitto || true
+          sudo systemctl disable mosquitto || true
+          sudo systemctl daemon-reload || true
 
-      - name: Cleanup infrastructure
+      - name: Cleanup containers
         if: always()
-        run: docker compose -f $COMPOSE_FILE down -v
-
-  # test-modbus-discovery:
-  #   name: Test Modbus Discovery (Full Stack)
-  #   needs: [determine-versions, setup]
-  #   runs-on: [ubuntu-latest]
-  #   timeout-minutes: 20
-    
-  #   env:
-  #     AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
-  #     API_VERSION: ${{ needs.determine-versions.outputs.api_version }}
-  #     DASHBOARD_VERSION: ${{ needs.determine-versions.outputs.dashboard_version }}
-  #     MODBUS_SIMULATOR_VERSION: ${{ needs.determine-versions.outputs.modbus_simulator_version }}
-    
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup environment
-  #       run: |
-  #         chmod +x .github/scripts/setup-env.sh
-  #         LICENSE_PUBLIC_KEY="${{ secrets.LICENSE_PUBLIC_KEY }}" \
-  #         IOTISTICA_LICENSE_KEY="${{ secrets.IOTISTICA_LICENSE_KEY }}" \
-  #         .github/scripts/setup-env.sh
-
-  #     - name: Start full infrastructure stack
-  #       run: |
-  #         echo "Starting full stack (postgres, redis, mosquitto, api, dashboard, modbus-simulator)..."
-  #         docker compose -f $COMPOSE_FILE up -d postgres redis mosquitto api dashboard modbus-simulator
-
-  #     - name: Wait for infrastructure to be ready
-  #       run: |
-  #         echo "Waiting for PostgreSQL..."
-  #         timeout 60 bash -c '
-  #           until docker compose -f $COMPOSE_FILE exec -T postgres pg_isready -U postgres > /dev/null 2>&1; do
-  #             sleep 2
-  #           done
-  #         '
-          
-  #         echo "Waiting for Redis..."
-  #         timeout 30 bash -c '
-  #           until docker compose -f $COMPOSE_FILE exec -T redis redis-cli ping > /dev/null 2>&1; do
-  #             sleep 2
-  #           done
-  #         '
-          
-  #         echo "Waiting for Mosquitto..."
-  #         sleep 15
-          
-  #         echo "Waiting for API..."
-  #         timeout 120 bash -c '
-  #           until curl -f http://localhost:4002/health 2>/dev/null; do
-  #             echo "API not ready yet..."
-  #             sleep 3
-  #           done
-  #         '
-          
-  #         echo "Waiting for Modbus simulator..."
-  #         sleep 10
-          
-  #         echo "✓ Full stack ready!"
-
-  #     - name: Verify Modbus simulator is running
-  #       run: |
-  #         echo "=== Checking Modbus Simulator ==="
-  #         docker compose -f $COMPOSE_FILE ps modbus-simulator
-          
-  #         echo ""
-  #         echo "=== Testing Modbus TCP port 502 ==="
-  #         nc -zv localhost 502 || echo "Port check completed"
-          
-  #         echo ""
-  #         echo "=== Modbus Simulator Logs ==="
-  #         docker compose -f $COMPOSE_FILE logs modbus-simulator --tail=50
-
-  #     - name: Copy agent code to /opt/iotistic/agent
-  #       run: |
-  #         sudo mkdir -p /opt/iotistic/agent
-  #         sudo mkdir -p /opt/iotistic/config
-  #         sudo cp -r agent/* /opt/iotistic/agent/
-  #         sudo cp -r config/* /opt/iotistic/config/
-  #         echo "✓ Agent code and config copied"
-
-  #     - name: Make install script executable
-  #       run: chmod +x agent/bin/install.sh
-
-  #     - name: Generate provisioning key via API
-  #       id: provision
-  #       run: |
-  #         echo "Generating provisioning key via API..."
-          
-  #         RESPONSE=$(curl -s -X POST http://localhost:4002/api/v1/provisioning-keys/generate \
-  #           -H "Content-Type: application/json" \
-  #           -d '{"fleetId":"modbus-test-fleet","newKey":false}')
-          
-  #         PROVISIONING_KEY=$(echo "$RESPONSE" | jq -r '.key')
-          
-  #         if [ -z "$PROVISIONING_KEY" ] || [ "$PROVISIONING_KEY" == "null" ]; then
-  #           echo "Failed to generate provisioning key"
-  #           echo "Response: $RESPONSE"
-  #           exit 1
-  #         fi
-          
-  #         echo "✓ Provisioning key generated: ${PROVISIONING_KEY:0:20}..."
-  #         echo "provisioning_key=$PROVISIONING_KEY" >> $GITHUB_OUTPUT
-
-  #     - name: Verify API and MQTT accessibility from host
-  #       run: |
-  #         echo "=== Verifying services are accessible from host ==="
-          
-  #         echo "Testing API endpoint (http://localhost:4002)..."
-  #         if curl -f http://localhost:4002/health 2>/dev/null; then
-  #           echo "✓ API is accessible"
-  #         else
-  #           echo "✗ API is NOT accessible from host"
-  #           exit 1
-  #         fi
-          
-  #         echo ""
-  #         echo "Testing MQTT port (localhost:5883)..."
-  #         if nc -zv localhost 5883 2>&1 | grep -q succeeded || nc -zv localhost 5883 2>&1 | grep -q open; then
-  #           echo "✓ MQTT port 5883 is accessible"
-  #         else
-  #           echo "✗ MQTT port 5883 is NOT accessible from host"
-  #           echo "Checking Mosquitto container status:"
-  #           docker compose -f $COMPOSE_FILE ps mosquitto
-  #           docker compose -f $COMPOSE_FILE logs mosquitto --tail=20
-  #           exit 1
-  #         fi
-          
-  #         echo ""
-  #         echo "✓ All services are accessible from host"
-
-  #     - name: Install agent via systemd method
-  #       env:
-  #         CI: true
-  #         IOTISTICA_INSTALL_METHOD: systemd
-  #         IOTISTICA_AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
-  #         IOTISTICA_DEVICE_PORT: 48484
-  #         IOTISTICA_API: http://localhost:4002
-  #         MQTT_BROKER_HOST: localhost
-  #         MQTT_BROKER_PORT: 5883
-  #         MQTT_USE_TLS: false
-  #         PROVISIONING_KEY: ${{ steps.provision.outputs.provisioning_key }}
-  #       run: |
-  #         echo "Installing agent with systemd method..."
-  #         echo "Provisioning key (first 20 chars): ${PROVISIONING_KEY:0:20}..."
-  #         echo "Cloud API endpoint: $IOTISTICA_API"
-  #         echo "MQTT broker: mqtt://${MQTT_BROKER_HOST}:${MQTT_BROKER_PORT}"
-  #         sudo -E bash agent/bin/install.sh
-          
-  #         echo "✓ Agent installed"
-
-  #     - name: Verify vendors file exists
-  #       run: |
-  #         echo "=== Verifying vendors file after installation ==="
-          
-  #         if [ -f /opt/iotistic/agent/dist/config/vendors/dataPoints.json ]; then
-  #           echo "✓ Vendors file exists at /opt/iotistic/agent/dist/config/vendors/dataPoints.json"
-  #           echo "File size: $(stat -f%z /opt/iotistic/agent/dist/config/vendors/dataPoints.json 2>/dev/null || stat -c%s /opt/iotistic/agent/dist/config/vendors/dataPoints.json)"
-  #         else
-  #           echo "✗ Vendors file NOT FOUND at /opt/iotistic/agent/dist/config/vendors/dataPoints.json"
-  #           echo ""
-  #           echo "Checking source file:"
-  #           ls -la config/vendors/ || echo "Source directory not found"
-  #           echo ""
-  #           echo "Checking dist structure:"
-  #           find /opt/iotistic/agent/dist -name "*.json" | head -20 || echo "No JSON files in dist"
-  #           exit 1
-  #         fi
-
-  #     - name: Configure Modbus discovery
-  #       run: |
-  #         echo "Configuring Modbus discovery for localhost:502..."
-          
-  #         # Add Modbus discovery configuration to environment
-  #         sudo tee -a /etc/iotistic/agent.env > /dev/null << 'EOF'
-  #         ENABLE_FIRST_BOOT_DISCOVERY=true
-  #         MODBUS_TCP_HOST=localhost
-  #         MODBUS_TCP_PORT=502
-  #         MODBUS_SLAVE_RANGE_START=1
-  #         MODBUS_SLAVE_RANGE_END=10
-  #         MODBUS_TIMEOUT=2000
-  #         EOF
-          
-  #         echo "✓ Modbus discovery configured"
-          
-  #         # Restart agent to trigger first-boot discovery
-  #         sudo systemctl restart iotistica-agent
-  #         sleep 65
-  #         echo "✓ Agent restarted with Modbus discovery enabled"
-
-  #     - name: Verify Modbus endpoints discovered
-  #       run: |
-  #         echo "=== Verifying Modbus Discovery Results ==="
-          
-  #         DB_PATH="/var/lib/iotistic/agent/device.sqlite"
-          
-  #         # Check for Modbus endpoints specifically
-  #         MODBUS_COUNT=$(sudo sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM endpoints WHERE protocol = 'modbus';")
-          
-  #         echo "Modbus endpoints discovered: $MODBUS_COUNT"
-          
-  #         if [ "$MODBUS_COUNT" -gt 0 ]; then
-  #           echo "✓ Modbus discovery successful!"
-            
-  #           # Show Modbus endpoint details
-  #           echo ""
-  #           echo "=== Modbus Endpoint Details ==="
-  #           sudo sqlite3 "$DB_PATH" -json "SELECT * FROM endpoints WHERE protocol = 'modbus';" | jq '.'
-            
-  #         else
-  #           echo "✗ No Modbus endpoints discovered"
-  #           echo ""
-  #           echo "Debugging information:"
-  #           echo "1. Modbus Simulator Status:"
-  #           docker compose -f $COMPOSE_FILE ps modbus-simulator
-            
-  #           echo ""
-  #           echo "2. Recent Agent Logs (Modbus discovery):"
-  #           sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -i modbus | tail -100
-            
-  #           echo ""
-  #           echo "3. Agent Configuration:"
-  #           sudo cat /etc/iotistic/agent.env | grep -i modbus
-            
-  #           exit 1
-  #         fi
-
-  #     - name: Show agent logs
-  #       if: always()
-  #       run: |
-  #         echo "========================================="
-  #         echo "Agent Logs (Full):"
-  #         echo "========================================="
-  #         sudo journalctl -u iotistica-agent --no-pager --since "20 minutes ago" --lines 300
-
-
-  #     - name: Cleanup agent
-  #       if: always()
-  #       run: |
-  #         echo "Stopping agent service..."
-  #         sudo systemctl stop iotistica-agent || true
-  #         sudo systemctl disable iotistica-agent || true
-  #         sudo rm -f /etc/systemd/system/iotistica-agent.service
-  #         sudo systemctl daemon-reload
-          
-  #         # Clean up agent files
-  #         sudo rm -rf /opt/iotistic/agent
-  #         sudo rm -rf /var/lib/iotistic/agent
-  #         sudo rm -rf /var/log/iotistic
-  #         sudo rm -rf /etc/iotistic
-          
-  #         echo "✓ Agent cleaned up"
-
-  #     - name: Cleanup infrastructure
-  #       if: always()
-  #       run: docker compose -f $COMPOSE_FILE down -v
-
-  # test-dashboard:
-  #   name: Test Dashboard
-  #   needs: [determine-versions, setup]
-  #   runs-on: [ubuntu-latest]
-  #   timeout-minutes: 10
-    
-  #   env:
-  #     AGENT_VERSION: ${{ needs.determine-versions.outputs.agent_version }}
-  #     API_VERSION: ${{ needs.determine-versions.outputs.api_version }}
-  #     DASHBOARD_VERSION: ${{ needs.determine-versions.outputs.dashboard_version }}
-    
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-
-  #     - name: Setup environment
-  #       run: |
-  #         chmod +x .github/scripts/setup-env.sh
-  #         LICENSE_PUBLIC_KEY="${{ secrets.LICENSE_PUBLIC_KEY }}" \
-  #         IOTISTICA_LICENSE_KEY="${{ secrets.IOTISTICA_LICENSE_KEY }}" \
-  #         .github/scripts/setup-env.sh
-
-  #     - name: Start dependencies
-  #       run: docker compose -f $COMPOSE_FILE up -d 
-
-  #     - name: Wait for API to be ready
-  #       run: |
-  #         echo "Waiting for API to be ready..."
-  #         timeout 120 bash -c '
-  #           until curl -f http://localhost:4002/health 2>/dev/null; do
-  #             echo "API not ready yet..."
-  #             sleep 3
-  #           done
-  #         '
-  #         echo "API is ready!"
-
-  #     - name: Wait for Dashboard to be ready
-  #       run: |
-  #         echo "Waiting for Dashboard to be ready..."
-          
-  #         # Check if container is running
-  #         if ! docker ps | grep -q iotistic-dashboard-e2e; then
-  #           echo "Dashboard container is not running!"
-  #           docker compose -f $COMPOSE_FILE logs dashboard --tail=50
-  #           exit 1
-  #         fi
-          
-  #         # Wait for nginx to fully initialize (with retries)
-  #         echo "Waiting for nginx to start..."
-  #         for i in {1..15}; do
-  #           if docker exec iotistic-dashboard-e2e wget -q -O- http://localhost:80 > /dev/null 2>&1; then
-  #             echo "✓ Dashboard responding inside container (port 80)"
-  #             break
-  #           fi
-  #           if [ $i -eq 15 ]; then
-  #             echo "✗ Dashboard not responding inside container after 15 attempts"
-  #             docker compose -f $COMPOSE_FILE logs dashboard --tail=100
-  #             exit 1
-  #           fi
-  #           echo "Nginx initializing... (attempt $i/15)"
-  #           sleep 2
-  #         done
-          
-  #         # Now check from host (verifies port mapping)
-  #         echo "Checking host connectivity..."
-  #         for i in {1..10}; do
-  #           if curl -f -s http://localhost:3000 > /dev/null 2>&1; then
-  #             echo "✓ Dashboard is ready and accessible from host!"
-  #             break
-  #           fi
-  #           if [ $i -eq 10 ]; then
-  #             echo "✗ Dashboard not accessible from host after 10 attempts"
-  #             echo "Checking port binding..."
-  #             docker ps | grep dashboard
-  #             netstat -tuln | grep 3000 || ss -tuln | grep 3000 || true
-  #             docker compose -f $COMPOSE_FILE logs dashboard --tail=100
-  #             exit 1
-  #           fi
-  #           echo "Waiting for host connectivity... (attempt $i/10)"
-  #           sleep 3
-  #         done
-
-  #     - name: Test Dashboard endpoints
-  #       run: |
-  #         echo "Testing Dashboard home page..."
-  #         RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000)
-  #         if [ "$RESPONSE" = "200" ]; then
-  #           echo "✓ Dashboard returned 200 OK"
-  #         else
-  #           echo "✗ Dashboard returned $RESPONSE"
-  #           docker compose -f $COMPOSE_FILE logs dashboard --tail=50
-  #           exit 1
-  #         fi
-          
-
-  #     - name: Check Dashboard logs
-  #       if: always()
-  #       run: |
-  #         echo "=== Dashboard logs ==="
-  #         docker compose -f $COMPOSE_FILE logs dashboard --tail=100 || true
-
-  #     - name: Cleanup
-  #       if: always()
-  #       run: docker compose -f $COMPOSE_FILE down -v
-
-  cleanup:
-    name: Cleanup Environment
-    needs: [determine-versions, setup,  test-agent]
-    runs-on: [ubuntu-latest]
-    if: always()
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Stop all containers
-        run: |
-          echo "Stopping all E2E containers..."
-          docker compose -f docker-compose.e2e.yml down -v --remove-orphans || true
-
-      - name: Remove dangling images
-        run: |
-          echo "Removing dangling images..."
-          docker image prune -f || true
-
-      - name: Remove unused volumes
-        run: |
-          echo "Removing unused volumes..."
-          docker volume prune -f || true
-
-      - name: Clean up networks
-        run: |
-          echo "Cleaning up networks..."
-          docker network prune -f || true
-
-      - name: Show remaining resources
-        if: always()
-        run: |
-          echo "=== Remaining Docker Resources ==="
-          echo "Containers:"
-          docker ps -a | grep -E "iotistic|e2e" || echo "None"
-          echo ""
-          echo "Volumes:"
-          docker volume ls | grep -E "iotistic|e2e" || echo "None"
-          echo ""
-          echo "Networks:"
-          docker network ls | grep -E "iotistic|e2e" || echo "None"
+        run: docker compose -f "$COMPOSE_FILE" down -v

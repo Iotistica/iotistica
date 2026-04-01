@@ -1,20 +1,19 @@
-# Docker Compose configuration for E2E Integration Testing
+# Docker Compose configuration for core integration testing
 #
-# This stack provides a complete testing environment with:
-#   - PostgreSQL 16 for device state and MQTT ACLs
-#   - Redis for real-time metrics and caching
-#   - Mosquitto MQTT broker with PostgreSQL auth
-#   - API server with health checks
-#   - Dashboard UI
-#   - Agent instances for testing
-#   - Protocol simulators (Modbus)
+# This stack intentionally runs only the backend core services needed for
+# provisioning a systemd-installed edge agent:
+#   - PostgreSQL 16 for device state and provisioning data
+#   - Redis for API workers and realtime features
+#   - API server built from local source
+#
+# The agent and Mosquitto broker are installed on the host via agent/bin/install.sh.
+# They are not part of this Compose stack.
 #
 # Usage:
-#   docker-compose -f docker-compose.e2e.yml up -d
-#   docker-compose -f docker-compose.e2e.yml down -v
+#   docker compose -f docker-compose.e2e.yml up -d --build
+#   docker compose -f docker-compose.e2e.yml down -v
 
 services:
-  # Database Services
   postgres:
     image: timescale/timescaledb:latest-pg16
     container_name: iotistic-postgres-e2e
@@ -30,17 +29,17 @@ services:
       - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
       - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     command: >
-            postgres
-            -c shared_preload_libraries=timescaledb
-            -c config_file=/etc/postgresql/postgresql.conf
-            -c hba_file=/etc/postgresql/pg_hba.conf
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
     healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U postgres"]
-            interval: 10s
-            timeout: 5s
-            retries: 5
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
-      - iotistic-net
+      - iotistica-net
 
   redis:
     image: redis:7-alpine
@@ -62,58 +61,54 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - iotistic-net
+      - iotistica-net
 
-  # MQTT Broker
-  mosquitto:
-    image: iegomez/mosquitto-go-auth
-    container_name: iotistic-mosquitto-e2e
-    restart: unless-stopped
-    ports:
-      - "${MOSQUITTO_PORT_EXT:-5883}:1883"
-      - "${MOSQUITTO_WS_PORT_EXT:-59002}:9001"
-    volumes:
-      - ./mosquitto/mosquitto.conf:/etc/mosquitto/mosquitto.conf
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - iotistic-net
-
-  # API Server
   api:
-    image: iotistic/api:${API_VERSION:-latest}
+    build:
+      context: ./api
+      dockerfile: Dockerfile
     container_name: iotistic-api-e2e
     restart: unless-stopped
     tty: true
     stdin_open: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       - PORT=${PORT:-3002}
       - NODE_ENV=${NODE_ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - JWT_SECRET=${JWT_SECRET:-integration-test-secret}
+      - AUTH0_ENABLED=${AUTH0_ENABLED:-false}
       - DB_HOST=${DB_HOST:-postgres}
       - DB_PORT=${DB_PORT:-5432}
       - DB_NAME=${DB_NAME:-iotistic}
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
+      - DB_SSL=${DB_SSL:-false}
+      - DB_SSL_REJECT_UNAUTHORIZED=${DB_SSL_REJECT_UNAUTHORIZED:-false}
       - FORCE_COLOR=${FORCE_COLOR:-1}
-      - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_USERNAME=${REDIS_USERNAME:-}
       - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-localhost}
-      - MQTT_BROKER_PORT=${MQTT_BROKER_PORT:-5883}
-      - MQTT_BROKER_USE_TLS=${MQTT_BROKER_USE_TLS:-false}
+      - MQTT_BROKER_PORT=${MQTT_BROKER_PORT:-1883}
       - MQTT_BROKER_PROTOCOL=${MQTT_BROKER_PROTOCOL:-mqtt}
+      - MQTT_BROKER_USE_TLS=${MQTT_BROKER_USE_TLS:-false}
       - MQTT_USERNAME=${MQTT_USERNAME:-admin}
-      - MQTT_PASSWORD=${MQTT_PASSWORD:-iotistic2024}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-iotistic42!}
       - MQTT_PERSIST_TO_DB=${MQTT_PERSIST_TO_DB:-true}
       - MQTT_DB_SYNC_INTERVAL=${MQTT_DB_SYNC_INTERVAL:-10000}
       - MQTT_MONITOR_ENABLED=${MQTT_MONITOR_ENABLED:-true}
       - LOG_COMPRESSION=${LOG_COMPRESSION:-true}
       - LICENSE_PUBLIC_KEY=${LICENSE_PUBLIC_KEY}
       - IOTISTIC_LICENSE_KEY=${IOTISTIC_LICENSE_KEY}
-      - REDIS_HOST=${REDIS_HOST:-redis}
-      - REDIS_PORT=${REDIS_PORT:-6379}
       - VPN_ENABLED=false
-      
+      - TAILSCALE_ENABLED=false
     ports:
       - "${API_PORT_EXT:-4002}:3002"
     healthcheck:
@@ -123,75 +118,12 @@ services:
       retries: 5
       start_period: 30s
     depends_on:
-      - postgres
-      - redis
-      - mosquitto
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
-      - iotistic-net
-
-  # Dashboard UI
-  dashboard:
-    image: iotistic/dashboard:${DASHBOARD_VERSION:-latest}
-    container_name: iotistic-dashboard-e2e
-    restart: unless-stopped
-    ports:
-      - "${DASHBOARD_PORT_EXT:-3000}:80"
-    environment:
-      - VITE_API_URL=http://localhost:${API_PORT_EXT:-4002}
-      - NODE_ENV=development
-    depends_on:
-      - api
-    networks:
-      - iotistic-net
-
-  # Protocol Simulators for Testing
-  modbus-simulator:
-        image: iotistic/modbus-simulator:${MODBUS_SIMULATOR_VERSION:-latest}
-        container_name: iotistic-modbus-sim
-        restart: unless-stopped
-        volumes:
-            - ./vendors:/app/vendors:ro
-        environment:
-          - MODBUS_PROFILE=COMAP
-        ports:
-            - "502:502"
-        networks:
-            - iotistic-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-  
-  # COMAP Generator Controller Simulator
-  comap-simulator:
-    build: ./sensors/comap-simulator
-    container_name: iotistic-comap-simulator
-    hostname: comap-simulator
-    restart: unless-stopped
-    ports:
-      - "5502:502"
-    environment:
-      - MODBUS_PORT=502
-      - MODBUS_SLAVES=3
-      - MODBUS_SLAVE_START=1
-      - GENERATOR_RATED_KW=100
-      - GENERATOR_RATED_VOLTAGE=240
-      - GENERATOR_FUEL_TANK_L=200
-      - AUTO_START=true
-      - STATE_CHANGE_INTERVAL=300
-      - NOISE_PERCENT=1.0
-      - INJECT_OVERSPEED=false
-      - INJECT_LOW_OIL=false
-      - INJECT_HIGH_TEMP=false
-      - INJECT_OVERLOAD=false
-    networks:
-      - iotistic-net
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "2"
+      - iotistica-net
 
 volumes:
   postgres-data:
@@ -200,5 +132,5 @@ volumes:
     driver: local
 
 networks:
-  iotistic-net:
+  iotistica-net:
     driver: bridge
