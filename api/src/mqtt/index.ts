@@ -209,8 +209,8 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       if (useKeyCompaction) {
         const tenantId = getTenantId();
         topics.push('meta');
-        logger.info('✅ Dictionary sync enabled - subscribing to meta topic', {
-          topic: `iot/${tenantId}/agent/+/meta/#`,
+        logger.info('Dictionary sync enabled - subscribing to meta topic', {
+          topic: `i/${tenantId}/a/+/meta/#`,
           useKeyCompaction,
           timestamp: new Date().toISOString()
         });
@@ -219,9 +219,9 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       // ✅ FIX: Await subscription to ensure it completes before processing messages
       await mqttManager.subscribeToAll(topics);
       
-      logger.info('✅ All MQTT subscriptions active', {
+      logger.info('All MQTT subscriptions active', {
         topics,
-        wildcardPattern: `iot/${getTenantId()}/agent/+/{topic}/#`,
+        wildcardPattern: `i/${getTenantId()}/a/+/{topic}/#`,
         timestamp: new Date().toISOString()
       });
     } else {

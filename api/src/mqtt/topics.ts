@@ -1,3 +1,5 @@
+import { encodeIfUuid, decodeUuid, isEncodedUuid, isEncodedHexId, decodeHexId } from './codec';
+
 export interface ParsedMqttTopic {
   tenantId: string;
   agentUuid: string;
@@ -7,33 +9,45 @@ export interface ParsedMqttTopic {
 }
 
 /**
- * Build tenant-aware MQTT topic: iot/{tenantId}/agent/{agentUuid}/...
+ * Build tenant-aware MQTT topic: i/{encodedTenant}/a/{encodedAgent}/...
+ * UUIDs are automatically encoded; wildcards (+, #) pass through unchanged.
  */
 export function mqttDeviceTopic(tenantId: string, agentUuid: string, ...segments: string[]): string {
-  return ['iot', tenantId, 'agent', agentUuid, ...segments].join('/');
+  return ['i', encodeIfUuid(tenantId), 'a', encodeIfUuid(agentUuid), ...segments].join('/');
 }
 
 /**
  * Build tenant-aware wildcard pattern for subscriptions.
+ * UUIDs are auto-encoded; MQTT wildcards pass through unchanged.
  */
 export function mqttDevicePattern(tenantPattern: string, agentPattern: string, ...segments: string[]): string {
-  return ['iot', tenantPattern, 'agent', agentPattern, ...segments].join('/');
+  return ['i', encodeIfUuid(tenantPattern), 'a', encodeIfUuid(agentPattern), ...segments].join('/');
 }
 
 /**
- * Parse MQTT topic: iot/{tenantId}/agent/{agentUuid}/{type}/...
+ * Parse MQTT topic: i/{encodedTenant}/a/{encodedAgent}/{type}/...
+ * Decodes encoded UUIDs so downstream handlers work with standard UUIDs.
  */
 export function parseMqttTopic(topic: string): ParsedMqttTopic | null {
   const parts = topic.split('/');
-  
-  // Require: iot/{tenantId}/agent/{uuid}/{type}/...
-  if (parts.length < 5 || parts[0] !== 'iot' || parts[2] !== 'agent') {
+
+  if (parts.length < 5 || parts[0] !== 'i' || parts[2] !== 'a') {
     return null;
   }
-  
+
+  let tenantId = parts[1];
+  let agentUuid = parts[3];
+
+  if (isEncodedHexId(tenantId)) {
+    try { tenantId = decodeHexId(tenantId); } catch { /* pass through */ }
+  }
+  if (isEncodedUuid(agentUuid)) {
+    try { agentUuid = decodeUuid(agentUuid); } catch { /* pass through */ }
+  }
+
   return {
-    tenantId: parts[1],
-    agentUuid: parts[3],
+    tenantId,
+    agentUuid,
     messageType: (parts[4] || '').toLowerCase(),
     subTopic: parts.length > 5 ? parts[5] : undefined,
     rest: parts.slice(5),

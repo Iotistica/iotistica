@@ -172,12 +172,15 @@ export class MqttFileAuthReconciler {
       const username = mqttAuth?.username?.trim();
       const plaintext = mqttAuth?.passwordPlaintext?.trim();
       const passwordFileHash = mqttAuth?.passwordFileHash?.trim();
-      const topic = ep.connection?.topic?.trim();
+      const rawTopic = ep.connection?.topic?.trim();
       const access = Number.isInteger(mqttAuth?.access) ? Number(mqttAuth?.access) : 2;
 
-      if (!username || (!plaintext && !passwordFileHash) || !topic) continue;
+      if (!username || (!plaintext && !passwordFileHash) || !rawTopic) continue;
       if (![1, 2, 3].includes(access)) continue;
       if (bootstrapUsername && username === bootstrapUsername) continue;
+
+      // Append /# to match base topic and any subtopics (e.g. .../d/<id>/temperature)
+      const topic = rawTopic.endsWith('/#') ? rawTopic : `${rawTopic}/#`;
 
       users.push({ username, passwordPlaintext: plaintext, passwordFileHash, isSuperuser: false });
       acls.push({ username, topic, access });

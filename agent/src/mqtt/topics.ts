@@ -1,11 +1,16 @@
 /**
  * Agent MQTT topic helpers.
- * Topic convention: iot/{tenantId}/agent/{agentUuid}/...
+ *
+ * Topic convention: i/{encodedTenantId}/a/{encodedAgentId}/...
+ *   - 'iot' shortened to 'i', 'agent' shortened to 'a'
+ *   - UUIDs encoded as Base64 URL-safe (22 chars vs 36 chars)
  */
 
+import { encodeIfUuid } from './codec.js';
+
 export const MQTT_TOPIC_PATTERNS = {
-  tenantScopedRoot: 'iot/{tenantId}/agent/{agentUuid}/...',
-  tenantScopedEndpoints: 'iot/{tenantId}/agent/{agentUuid}/endpoints/{topic}'
+  tenantScopedRoot: 'i/{tenantId}/a/{agentId}/...',
+  tenantScopedEndpoints: 'i/{tenantId}/a/{agentId}/d/{endpointId}/+',
 } as const;
 
 let cachedTenantId: string | null = null;
@@ -43,6 +48,10 @@ export function resetTenantIdCache(): void {
   cachedTenantId = null;
 }
 
+/**
+ * Build an agent-scoped MQTT topic: i/{encodedTenant}/a/{encodedAgent}/...segments
+ */
 export function agentTopic(agentUuid: string, ...segments: string[]): string {
-  return ['iot', getTenantId(), 'agent', agentUuid, ...segments].join('/');
+  const tenantId = getTenantId();
+  return ['i', encodeIfUuid(tenantId), 'a', encodeIfUuid(agentUuid), ...segments].join('/');
 }

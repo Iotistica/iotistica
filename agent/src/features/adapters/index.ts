@@ -23,6 +23,7 @@ import { SocketServer } from './common/socket-server.js';
 import { DeviceDataPoint, SocketOutput } from './types.js';
 import { EndpointOutputModel } from '../../db/models/endpoint-outputs.model.js';
 import { EndpointModel } from '../../db/models/endpoint.model.js';
+import { encodeIfUuid } from '../../mqtt/codec.js';
 
 // Type imports only (no runtime loading)
 import type { OPCUAAdapter } from './opcua/adapter.js';
@@ -574,7 +575,7 @@ export class SensorsFeature extends BaseFeature {
             uuid: d.uuid,
             name: d.name,
             enabled: d.enabled,
-            topic: d.connection.topic || d.name,
+            topic: d.connection.topic ? `${d.connection.topic}/#` : encodeIfUuid(d.name),
             qos: d.connection.qos || 1,
             dataType: d.connection.dataType || 'float32',
             unit: d.connection.unit,

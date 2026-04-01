@@ -1383,7 +1383,7 @@ if (existing) {
 	// Device exists - update it
 	await DeviceSensorModel.updateByUuid(device.id, normalizedDevice);
     
-    this.logger?.infoSync('Device updated in sensors table', {
+    this.logger?.infoSync('Device updated in endpoints table', {
         component: LogComponents.configManager,
         operation: 'updateDevice',
         deviceName: device.name,
@@ -1396,14 +1396,14 @@ if (existing) {
 					...normalizedDevice
 				});
 				
-				this.logger?.infoSync('Device created in sensors table (was missing)', {
+				this.logger?.infoSync('Device created in endpoints table (was missing)', {
 					component: LogComponents.configManager,
 					operation: 'updateDevice',
 					deviceName: device.name,
 				});
 			}
 		} catch (error) {
-			this.logger?.errorSync('Failed to update device in sensors table', 
+			this.logger?.errorSync('Failed to update device in endpoints table', 
 				error instanceof Error ? error : new Error(String(error)), {
 				component: LogComponents.configManager,
 				operation: 'updateDevice',

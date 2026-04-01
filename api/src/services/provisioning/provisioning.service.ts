@@ -44,6 +44,9 @@ import logger from '../../utils/logger';
 import { configService }  from './config.service';
 import { virtualAgentDeployer } from './virtual-agent-deployer';
 import { getTenantId } from '../../redis/tenant-keys';
+import { encodeIfUuid } from '../../mqtt/codec';
+import { mqttDeviceTopic } from '../../mqtt/topics';
+
 
 // Initialize event publisher for audit trail
 const eventPublisher = new EventPublisher();
@@ -696,6 +699,10 @@ export class ProvisioningService {
     const passwordHash = await bcrypt.hash(password, 10);
 
     // Create MQTT user and ACLs, rotating password on re-provision
+    const tenantId = getTenantId();
+    const encodedTenant = encodeIfUuid(tenantId);
+    const encodedAgent = encodeIfUuid(agentUuid);
+
     await Promise.all([
       query(
         `INSERT INTO mqtt_users (username, password_hash, is_superuser, is_active)
@@ -706,12 +713,12 @@ export class ProvisioningService {
              is_active = true`,
         [username, passwordHash]
       ),
+      // ACL: i/{encodedTenant}/a/{encodedAgent}/#
       query(
         `INSERT INTO mqtt_acls (clientid, username, topic, access, priority)
            VALUES ($1, $2, $3, 7, 0)
            ON CONFLICT DO NOTHING`,
-        // Tenant-aware ACL pattern: iot/{tenantId}/agent/${deviceUuid}/#
-        [username, username, `iot/${getTenantId()}/agent/${agentUuid}/#`]
+        [username, username, `i/${encodedTenant}/a/${encodedAgent}/#`]
       )
     ]);
 
@@ -961,8 +968,8 @@ export class ProvisioningService {
         brokerConfig: finalBrokerConfig,
         // Tenant-aware topic patterns
         topics: {
-          publish: [`iot/${getTenantId()}/agent/${agent.uuid}/#`],
-          subscribe: [`iot/${getTenantId()}/agent/${agent.uuid}/#`]
+          publish: [mqttDeviceTopic(getTenantId(), agent.uuid, '#')],
+          subscribe: [mqttDeviceTopic(getTenantId(), agent.uuid, '#')]
         }
       },
       ...(apiTlsConfig?.caCert && {

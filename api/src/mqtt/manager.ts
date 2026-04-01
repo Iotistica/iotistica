@@ -746,7 +746,6 @@ export class MqttManager extends EventEmitter {
       }
     }).flat().filter(Boolean);  // Flatten arrays and remove null values
 
-    
     // Use Promise.all to track all subscriptions
     const subscriptionPromises = topicPatterns.map(pattern => {
       return new Promise<void>((resolve, reject) => {

@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DeviceTargetStateModel } from '../db/models';
 import type { ModbusDataPoint, OPCUADataPoint, AnomalyDetectionDataPointConfig, AnomalyMetric } from '../types/target-state';
 import { mqttDeviceTopic } from '../mqtt/topics';
+import { encodeIfUuid } from '../mqtt/codec';
 import { getTenantId } from '../redis/tenant-keys';
 
 const eventPublisher = new EventPublisher();
@@ -56,7 +57,7 @@ export function prepareEndpointForCreate(
   };
 
   if (preparedConfig.protocol === 'mqtt') {
-    const topic = mqttDeviceTopic(getTenantId(), deviceUuid, 'mqtt', preparedConfig.uuid!);
+    const topic = mqttDeviceTopic(getTenantId(), deviceUuid, 'd', encodeIfUuid(preparedConfig.uuid!));
     const { pollInterval, ...mqttConfig } = preparedConfig;
 
     return {

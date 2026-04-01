@@ -10,6 +10,7 @@ import { processAgentStateReport } from '../services/agent-state';
 import { redisSensorQueue } from '../services/device-queue';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
 import { getTenantId } from '../redis/tenant-keys';
+import { mqttDevicePattern } from './topics';
 import logger from '../utils/logger';
 
 /**
@@ -147,7 +148,7 @@ export async function handleAgentState(payload: StateMessage): Promise<void> {
     const tenantId = getTenantId();
     await processAgentStateReport(stateReport, {
       source: 'mqtt',
-      topic: `iot/${tenantId}/agent/+/state`
+      topic: mqttDevicePattern(tenantId, '+', 'state')
     });
 
     // Publish to Redis for real-time distribution (MQTT-specific, non-blocking)
