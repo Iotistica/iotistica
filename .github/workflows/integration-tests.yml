@@ -305,6 +305,11 @@ jobs:
           docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -c \
             "SELECT uuid, fleet_uuid, provisioning_state, provisioned_at IS NOT NULL AS has_provisioned_at FROM agents ORDER BY created_at DESC LIMIT 5;"
 
+      - name: Dump fleets table after agent registration
+        run: |
+          docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -c \
+            "SELECT id, fleet_id, fleet_name, customer_id, fleet_type, description, deployment_config, billing_enabled, cost_per_hour, cost_per_month, total_running_hours, current_cost, budget_limit, budget_alert_threshold, status, started_at, stopped_at, tags, environment, location, created_by, created_at, updated_at, k8s_namespace, agent_count, devices_per_agent, fleet_uuid FROM fleets ORDER BY created_at DESC;"
+
       - name: Capture registered agent for dashboard test
         id: registered_agent
         run: |
