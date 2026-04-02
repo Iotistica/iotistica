@@ -60,8 +60,8 @@ jobs:
       - name: Pull prebuilt API and dashboard images
         run: docker compose -f "$COMPOSE_FILE" pull api dashboard
 
-      - name: Pull MQTT simulator image
-        run: docker pull iotistic/mqtt-simulator:latest
+      - name: Build MQTT simulator image
+        run: docker build -t iotistic/mqtt-simulator:latest ./simulators/mqtt-simulator
 
       - name: Start database, cache, API, and dashboard
         run: docker compose -f "$COMPOSE_FILE" up -d postgres redis api dashboard
@@ -408,10 +408,33 @@ jobs:
         run: npx playwright test e2e/dashboard.spec.ts --grep "should add a new MQTT device"
 
       - name: Verify agent Mosquitto passwd and ACL after MQTT device reconciliation
+        env:
+          ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
+          AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
         run: |
           echo "Waiting 60s for agent to reconcile target state and update Mosquitto auth files..."
           sleep 60
 
+          echo ""
+          echo "=== DIAGNOSTIC: Cloud sensors (what the DB has) ==="
+          curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/sensors" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" | jq '{count, devices: [.devices[]? | {name, protocol, uuid, connection: .connection}]}' || true
+
+          echo ""
+          echo "=== DIAGNOSTIC: Cloud agent_target_state (raw JSON the agent polls) ==="
+          docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -c \
+            "SELECT uuid, version, updated_at, config::text FROM agent_target_state WHERE uuid = '${AGENT_UUID}';" || true
+
+          echo ""
+          echo "=== DIAGNOSTIC: Agent reported current-state (what the agent last sent back) ==="
+          curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/current-state" | \
+            jq '{reported_at, config: (.config | if type == "string" then . | fromjson else . end | {devices, endpoints})}' || true
+
+          echo ""
+          echo "=== DIAGNOSTIC: Agent local /v1/devices (what the agent has reconciled) ==="
+          curl -fsS "http://localhost:48484/v1/devices" | jq . || true
+
+          echo ""
           echo "=== Agent journal (subscription check) ==="
           sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -i "Subscribed to MQTT topic" || true
 
@@ -506,6 +529,28 @@ jobs:
           else
             echo "FAIL: simulator did not publish any messages"
             exit 1
+          fi
+
+      - name: Cleanup e2e test devices
+        if: always()
+        env:
+          ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
+          AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
+        run: |
+          SENSORS_RESP=$(curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/sensors?protocol=mqtt" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" || echo '{"devices":[]}')
+
+          E2E_DEVICES=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e_mqtt_")) | .name] | .[]')
+
+          if [ -z "$E2E_DEVICES" ]; then
+            echo "No e2e_mqtt_ devices to clean up"
+          else
+            while IFS= read -r name; do
+              echo "Deleting device: $name"
+              curl -fsS -X DELETE \
+                "http://localhost:4002/api/v1/agents/${AGENT_UUID}/sensors/${name}" \
+                -H "Authorization: Bearer $ACCESS_TOKEN" || echo "Warning: delete failed for $name"
+            done <<< "$E2E_DEVICES"
           fi
 
       - name: Upload dashboard Playwright artifacts

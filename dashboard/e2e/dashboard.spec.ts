@@ -95,7 +95,7 @@ test.describe('Dashboard Navigation', () => {
     await expect(page.getByTestId('global-dashboard-page')).toBeVisible({ timeout: 30000 });
   });
 
-  test('should add a new MQTT device', async ({ page, request }, testInfo) => {
+  test('should add a new MQTT device', async ({ page }, testInfo) => {
     test.setTimeout(60_000);
 
     const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
@@ -165,14 +165,9 @@ test.describe('Dashboard Navigation', () => {
 
     await attachPageScreenshot(page, testInfo, 'add-mqtt-device-result.png', 'add-mqtt-device-result');
 
-    // Cleanup: delete the test device from the API
-    if (agentUuid) {
-      const accessToken = await page.evaluate(() => localStorage.getItem('accessToken'));
-      await request.delete(
-        `${E2E_API_URL}/api/v1/agents/${agentUuid}/sensors/${encodeURIComponent(deviceName)}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-    }
+    // Note: device cleanup is handled by the CI workflow step "Cleanup e2e test devices"
+    // so that the device remains visible to the agent long enough for it to reconcile,
+    // write Mosquitto auth files, and subscribe to MQTT topics before verification runs.
   });
 });
 
