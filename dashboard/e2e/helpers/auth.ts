@@ -9,6 +9,8 @@ const DASHBOARD_STATE_KEYS_TO_CLEAR = [
   'deviceSidebar.typeFilters',
 ];
 
+const E2E_API_URL = process.env.E2E_API_URL || 'http://localhost:4002';
+
 async function primeDashboardState(page: Page, session?: { accessToken?: string; refreshToken?: string; user?: unknown }) {
   await page.addInitScript(
     ({ keysToClear, initAccessToken, initRefreshToken, initUser }) => {
@@ -59,6 +61,102 @@ async function openAgentHome(page: Page) {
     },
     undefined,
     { timeout: 30000 }
+  );
+}
+
+async function waitForAgentsApi(
+  page: Page,
+  expectedAgentUuid?: string,
+  expectedAgentName?: string,
+  timeoutMs = 30000
+) {
+  const startedAt = Date.now();
+  let lastSnapshot: {
+    ok: boolean;
+    status: number;
+    count: number;
+    hasExpected: boolean;
+    agentUuids: string[];
+  } | null = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    lastSnapshot = await page.evaluate(
+      async ({ apiUrl, uuid, name }) => {
+        const token = localStorage.getItem('accessToken');
+
+        if (!token) {
+          return {
+            ok: false,
+            status: 0,
+            count: 0,
+            hasExpected: false,
+            agentUuids: [],
+          };
+        }
+
+        try {
+          const response = await fetch(`${apiUrl}/api/v1/agents?limit=100`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+
+          let body: any = null;
+          try {
+            body = await response.json();
+          } catch {
+            body = null;
+          }
+
+          const agents = Array.isArray(body?.agents) ? body.agents : [];
+          const agentUuids = agents
+            .map((agent: any) => agent?.uuid)
+            .filter((value: unknown): value is string => typeof value === 'string');
+
+          const hasExpected = uuid
+            ? agentUuids.includes(uuid)
+            : name
+              ? agents.some((agent: any) => {
+                  const agentName = agent?.device_name || agent?.name || '';
+                  return typeof agentName === 'string' && agentName.includes(name);
+                })
+              : agents.length > 0;
+
+          return {
+            ok: response.ok,
+            status: response.status,
+            count: agents.length,
+            hasExpected,
+            agentUuids,
+          };
+        } catch {
+          return {
+            ok: false,
+            status: 0,
+            count: 0,
+            hasExpected: false,
+            agentUuids: [],
+          };
+        }
+      },
+      {
+        apiUrl: E2E_API_URL,
+        uuid: expectedAgentUuid,
+        name: expectedAgentName,
+      }
+    );
+
+    if (lastSnapshot.ok && lastSnapshot.hasExpected) {
+      return lastSnapshot;
+    }
+
+    await page.waitForTimeout(2000);
+  }
+
+  throw new Error(
+    `Dashboard agents API did not expose the expected agent within ${timeoutMs}ms. `
+    + `status=${lastSnapshot?.status ?? 0} count=${lastSnapshot?.count ?? 0} `
+    + `visibleAgentUuids=${(lastSnapshot?.agentUuids || []).join(',')}`
   );
 }
 
@@ -131,6 +229,9 @@ export async function ensureAuthenticatedDashboard(page: Page, testInfo: TestInf
 }
 
 export async function selectAgentFromSidebar(page: Page, expectedAgentUuid?: string, expectedAgentName?: string) {
+  await openAgentHome(page);
+  await waitForAgentsApi(page, expectedAgentUuid, expectedAgentName);
+  await page.reload();
   await openAgentHome(page);
   await expect(page.getByTestId('agent-sidebar')).toBeVisible({ timeout: 30000 });
 

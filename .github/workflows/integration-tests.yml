@@ -336,11 +336,38 @@ jobs:
           echo "agent_uuid=$AGENT_UUID" >> "$GITHUB_OUTPUT"
           echo "agent_name=$AGENT_NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Probe dashboard user agent visibility
+        env:
+          ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
+          EXPECTED_AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
+        run: |
+          echo "=== Dashboard user /auth/me ==="
+          curl -fsS http://localhost:4002/api/v1/auth/me \
+            -H "Authorization: Bearer $ACCESS_TOKEN" | jq '.'
+
+          echo "=== Waiting for dashboard user /agents visibility ==="
+          timeout 60 bash -c '
+            until AGENTS_RESPONSE=$(curl -fsS http://localhost:4002/api/v1/agents?limit=100 \
+              -H "Authorization: Bearer $ACCESS_TOKEN"); do
+              sleep 2
+            done
+
+            echo "$AGENTS_RESPONSE" | jq ".count, (.agents[]? | {uuid, device_name, provisioning_state, fleet_uuid})"
+
+            until echo "$AGENTS_RESPONSE" | jq -e --arg uuid "$EXPECTED_AGENT_UUID" ".agents | any(.uuid == \$uuid)" > /dev/null; do
+              sleep 2
+              AGENTS_RESPONSE=$(curl -fsS http://localhost:4002/api/v1/agents?limit=100 \
+                -H "Authorization: Bearer $ACCESS_TOKEN")
+              echo "$AGENTS_RESPONSE" | jq ".count, (.agents[]? | {uuid, device_name, provisioning_state, fleet_uuid})"
+            done
+          '
+
       - name: Verify dashboard shows registered agent in sidebar
         working-directory: dashboard
         env:
           CI: true
           PLAYWRIGHT_BASE_URL: http://localhost:3000
+          E2E_API_URL: http://localhost:4002
           E2E_AUTH_USERNAME: ${{ steps.dashboard_auth.outputs.e2e_auth_username }}
           E2E_AUTH_PASSWORD: ${{ steps.dashboard_auth.outputs.e2e_auth_password }}
           E2E_AUTH_ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
