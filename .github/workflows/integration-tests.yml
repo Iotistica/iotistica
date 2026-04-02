@@ -167,16 +167,17 @@ jobs:
           import { createProvisioningKey } from './dist/utils/provisioning-keys.js';
 
           const fleetUuid = crypto.randomUUID();
-          const customerId = crypto.randomUUID();
+          const customerId = '00000000-0000-0000-0000-000000000001';
 
           await query(
-            `INSERT INTO fleets (fleet_name, customer_id, fleet_type, description, fleet_uuid, created_by)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
+            `INSERT INTO fleets (fleet_id, fleet_name, customer_id, fleet_type, description, fleet_uuid, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
             [
-              'Integration Test Fleet',
+              'default-fleet',
+              'Default Fleet',
               customerId,
-              'physical',
-              'Workflow-seeded fleet for systemd integration testing',
+              'mixed',
+              'Auto-created by integration workflow for provisioning keys',
               fleetUuid,
               'integration-tests'
             ]
