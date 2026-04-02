@@ -1718,6 +1718,7 @@ export default function App() {
                   )}
                   {!isGlobalView && (
                     <Button
+                      data-testid="deploy-button"
                       onClick={handleDeploy}
                       size="sm"
                       disabled={!needsDeployment || isDeploying}
