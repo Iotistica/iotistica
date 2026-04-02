@@ -415,6 +415,13 @@ jobs:
           echo "Waiting 60s for agent to reconcile target state and update Mosquitto auth files..."
           sleep 60
 
+          echo "=== Reloading Mosquitto to pick up updated auth files ==="
+          # The agent writes passwd/acl files but may fail to SIGHUP Mosquitto in CI due to
+          # "NoNewPrivileges" flag on ARC ephemeral runners blocking the agent's sudo call.
+          # The CI runner has passwordless sudo, so we force the reload here.
+          sudo systemctl reload mosquitto || sudo kill -HUP "$(pgrep -x mosquitto)" || true
+          echo "Mosquitto reload triggered"
+
           echo ""
           echo "=== DIAGNOSTIC: Cloud sensors (what the DB has) ==="
           curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/sensors" \
