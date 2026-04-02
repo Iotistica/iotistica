@@ -5,14 +5,19 @@
 #   - PostgreSQL 16 for device state and provisioning data
 #   - Redis for API workers and realtime features
 #   - Mosquitto Go-Auth as the cloud broker
-#   - API server built from local source
+#   - Prebuilt API and dashboard images pulled from Docker Hub by default
 #
 # The agent and its separate local vanilla Mosquitto broker are installed on
 # the host via agent/bin/install.sh.
 #
 # Usage:
-#   docker compose -f docker-compose.e2e.yml up -d --build
+#   docker compose -f docker-compose.e2e.yml pull api dashboard
+#   docker compose -f docker-compose.e2e.yml up -d postgres redis api dashboard
 #   docker compose -f docker-compose.e2e.yml down -v
+#
+# Optional overrides:
+#   E2E_API_IMAGE=iotistic/api:ci-<sha>
+#   E2E_DASHBOARD_IMAGE=iotistic/dashboard:ci-<sha>
 
 services:
   postgres:
@@ -82,9 +87,8 @@ services:
       - iotistica-net
 
   api:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
+    image: ${E2E_API_IMAGE:-iotistic/api:ci-latest}
+    pull_policy: always
     container_name: iotistic-api-e2e
     restart: unless-stopped
     tty: true
@@ -148,16 +152,8 @@ services:
       - iotistica-net
 
   dashboard:
-    build:
-      context: ./dashboard
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${DASHBOARD_VITE_API_URL:-http://localhost:4002}
-        VITE_AUTH0_DOMAIN: ${VITE_AUTH0_DOMAIN:-}
-        VITE_AUTH0_CLIENT_ID: ${VITE_AUTH0_CLIENT_ID:-}
-        VITE_AUTH0_AUDIENCE: ${VITE_AUTH0_AUDIENCE:-}
-        VITE_AUTH0_CALLBACK_URL: ${VITE_AUTH0_CALLBACK_URL:-http://localhost:3000/auth/callback}
-        VITE_AUTH0_SHOW_SOCIAL_LOGIN: ${VITE_AUTH0_SHOW_SOCIAL_LOGIN:-false}
+    image: ${E2E_DASHBOARD_IMAGE:-iotistic/dashboard:ci-latest}
+    pull_policy: always
     container_name: iotistic-dashboard-e2e
     restart: unless-stopped
     ports:

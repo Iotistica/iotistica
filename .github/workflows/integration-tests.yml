@@ -57,8 +57,11 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('dashboard/package-lock.json') }}
 
+      - name: Pull prebuilt API and dashboard images
+        run: docker compose -f "$COMPOSE_FILE" pull api dashboard
+
       - name: Start database, cache, API, and dashboard
-        run: docker compose -f "$COMPOSE_FILE" up -d --build postgres redis api dashboard
+        run: docker compose -f "$COMPOSE_FILE" up -d postgres redis api dashboard
 
       - name: Install dashboard test dependencies and wait for backend readiness
         run: |
