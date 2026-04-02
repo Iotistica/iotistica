@@ -970,7 +970,7 @@ $networkConfig
       - MQTT_PASSWORD=$MqttPassword
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=$RequireProvisioning
-    - PROVISIONING_KEY=
+      - PROVISIONING_KEY=$apiKey
       - API_SECURITY_MODE=$ApiSecurityMode
       - FIREWALL_ENABLED=$FirewallEnabled
       # Testing & Development (not dashboard-controlled)
@@ -983,7 +983,7 @@ $networkConfig
       - ENABLE_HEAP_PROFILING=$EnableHeapProfiling
       - PIPELINE_FLOWS_FILE=$PipelineFlowsFile
       # Shell security (HMAC signature verification)
-    - AGENT_SHELL_HMAC_KEY=$agentShellHmacKeyEnv
+      - AGENT_SHELL_HMAC_KEY=$agentShellHmacKeyEnv
       - AGENT_SHELL_MAX_SESSION_MS=3600000
 "@
     

@@ -149,6 +149,63 @@ test.describe('Dashboard Navigation', () => {
 
     await attachPageScreenshot(page, testInfo, 'add-mqtt-device-result.png', 'add-mqtt-device-result');
 
+    // Fetch the newly created device record to capture the MQTT topic the agent will subscribe to.
+    // The agent builds the subscription as "<connection.topic>/#", so we reconstruct it here
+    // to make the subsequent log assertion deterministic.
+    let expectedMqttTopic: string | null = null;
+    if (agentUuid) {
+      const accessToken = await page.evaluate(() => localStorage.getItem('accessToken'));
+      const sensorsResp = await request.get(
+        `${E2E_API_URL}/api/v1/agents/${agentUuid}/sensors?protocol=mqtt`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      expect(sensorsResp.ok()).toBeTruthy();
+      const sensorsBody = await sensorsResp.json();
+      const createdDevice = (sensorsBody.devices ?? sensorsBody.agents ?? []).find(
+        (d: { name: string }) => d.name === deviceName
+      );
+      if (createdDevice?.connection?.topic) {
+        expectedMqttTopic = `${createdDevice.connection.topic}/#`;
+      }
+      console.log(`[e2e] MQTT device "${deviceName}" topic: ${expectedMqttTopic ?? '(not resolved)'}`);
+    }
+
+    // Wait for the agent to reconcile and confirm the subscription in its logs.
+    // Polls GET /api/v1/agents/:uuid/logs until the "Subscribed to MQTT topic" entry appears
+    // for the expected topic, or times out after 60 s.
+    if (agentUuid && expectedMqttTopic) {
+      const accessToken = await page.evaluate(() => localStorage.getItem('accessToken'));
+      const testStartIso = new Date(Date.now() - 5000).toISOString(); // 5 s grace window
+      const subscribedPattern = new RegExp(
+        `Subscribed to MQTT topic:\\s+${expectedMqttTopic.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+\\(QoS 1\\)`
+      );
+
+      let subscriptionConfirmed = false;
+      const pollDeadline = Date.now() + 60_000;
+
+      while (Date.now() < pollDeadline) {
+        const logsResp = await request.get(
+          `${E2E_API_URL}/api/v1/agents/${agentUuid}/logs?limit=200&from=${encodeURIComponent(testStartIso)}`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (logsResp.ok()) {
+          const logsBody = await logsResp.json();
+          const matched = (logsBody.logs ?? []).some(
+            (entry: { message: string }) => subscribedPattern.test(entry.message)
+          );
+          if (matched) {
+            subscriptionConfirmed = true;
+            break;
+          }
+        }
+        await page.waitForTimeout(2000);
+      }
+
+      expect(subscriptionConfirmed,
+        `Timed out waiting for agent log: [INFO] [Adapters] Subscribed to MQTT topic: ${expectedMqttTopic} (QoS 1)`
+      ).toBe(true);
+    }
+
     // Cleanup: delete the test device from the API
     if (agentUuid) {
       const accessToken = await page.evaluate(() => localStorage.getItem('accessToken'));

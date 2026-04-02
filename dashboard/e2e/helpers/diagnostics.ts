@@ -1,4 +1,4 @@
-import { Page, Request, TestInfo } from '@playwright/test';
+import { ConsoleMessage, Page, Request, TestInfo } from '@playwright/test';
 
 function truncate(value: string, maxLength = 4000) {
   if (value.length <= maxLength) {
@@ -42,15 +42,15 @@ export function createPageDiagnosticsCollector(page: Page) {
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
 
-  const handleConsole = (message: Parameters<Page['on']>[1] extends (event: infer T) => any ? T : never) => {
-    const location = typeof (message as any).location === 'function' ? (message as any).location() : undefined;
+  const handleConsole = (message: ConsoleMessage) => {
+    const location = message.location();
 
     consoleEntries.push({
       type: message.type(),
       text: message.text(),
-      url: location?.url,
-      lineNumber: location?.lineNumber,
-      columnNumber: location?.columnNumber,
+      url: location.url,
+      lineNumber: location.lineNumber,
+      columnNumber: location.columnNumber,
     });
   };
 

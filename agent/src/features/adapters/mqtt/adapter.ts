@@ -187,6 +187,119 @@ export class MqttAdapter extends EventEmitter {
   }
 
   /**
+   * Hot-update device subscriptions without reconnecting to the broker.
+   *
+   * Diffs the new device list against the current one by topic and:
+   * - Subscribes to topics for newly added/enabled devices
+   * - Unsubscribes from topics for removed/disabled devices
+   * - Updates all internal maps (subscriptions, compiledMetrics, etc.)
+   * - Updates config.devices so reconnect logic re-subscribes correctly
+   *
+   * If the client is not yet connected the subscription changes will be
+   * picked up automatically on the next 'connect' event because
+   * subscribeAllConfiguredDevices() reads config.devices.
+   */
+  async updateDevices(newDevices: MqttDevice[]): Promise<void> {
+    const oldTopics = new Set(this.subscriptions.keys());
+    const newEnabledDevices = newDevices.filter(d => d.enabled);
+    const newTopics = new Set(newEnabledDevices.map(d => d.topic));
+
+    // --- Removed devices ---
+    const removedTopics = [...oldTopics].filter(t => !newTopics.has(t));
+    for (const topic of removedTopics) {
+      const device = this.subscriptions.get(topic);
+      if (!device) continue;
+
+      // Unsubscribe from broker (best-effort; client may not be connected)
+      if (this.client && this.connected) {
+        await new Promise<void>(resolve => {
+          this.client!.unsubscribe(topic, () => resolve());
+        });
+      }
+
+      this.subscriptions.delete(topic);
+      this.deviceStatuses.delete(device.name);
+      this.compiledMetrics.delete(device.name);
+      this.compiledTimestampFields.delete(device.name);
+      this.displayNamesByTopic.delete(topic);
+
+      if (device.deviceId?.trim()) {
+        this.lwtDeviceIdToName.delete(device.deviceId.trim());
+      }
+
+      this.logger.info(`MQTT hot-update: unsubscribed removed device '${device.name}' (${topic})`);
+    }
+
+    // --- Added devices ---
+    const addedDevices = newEnabledDevices.filter(d => !oldTopics.has(d.topic));
+    for (const device of addedDevices) {
+      // Update lookup maps before subscribing so message handler can find the device
+      this.subscriptions.set(device.topic, device);
+
+      this.deviceStatuses.set(device.name, {
+        deviceName: device.name,
+        connected: false,
+        lastPoll: null,
+        lastSeen: null,
+        errorCount: 0,
+        lastError: null,
+        responseTimeMs: null,
+        pollSuccessRate: 0,
+        registersUpdated: 0,
+        communicationQuality: 'offline',
+      });
+
+      if (device.displayName?.trim()) {
+        this.displayNamesByTopic.set(device.topic, device.displayName.trim());
+      }
+
+      if (device.deviceId?.trim()) {
+        this.lwtDeviceIdToName.set(device.deviceId.trim(), device.name);
+      }
+
+      if (device.timestampField) {
+        this.compiledTimestampFields.set(
+          device.name,
+          this.compileMetricPath(device.timestampField, Boolean(device.allowArrayMetrics))
+        );
+      }
+
+      if (device.metrics && device.metrics.length > 0) {
+        this.compiledMetrics.set(
+          device.name,
+          device.metrics.map(metric => ({
+            ...metric,
+            path: this.compileMetricPath(metric.field, Boolean(device.allowArrayMetrics)),
+          }))
+        );
+      }
+
+      // Subscribe on the live connection if available
+      if (this.client && this.connected) {
+        try {
+          await this.subscribeToDevice(device);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.error(`MQTT hot-update: failed to subscribe '${device.name}' (${device.topic}): ${msg}`);
+        }
+      } else {
+        this.logger.debug(`MQTT hot-update: queued subscription for '${device.name}' (${device.topic}) — will subscribe on next connect`);
+      }
+    }
+
+    // Sync config.devices so reconnect/subscribeAllConfiguredDevices() is consistent
+    this.config = { ...this.config, devices: newDevices };
+
+    if (removedTopics.length > 0 || addedDevices.length > 0) {
+      this.logger.info('MQTT hot-update complete', {
+        added: addedDevices.length,
+        removed: removedTopics.length,
+        totalActive: this.subscriptions.size,
+      });
+    }
+  }
+
+  /**
    * Get status of all devices
    */
   getDeviceStatuses(): DeviceStatus[] {

@@ -64,6 +64,9 @@ export interface SensorConfig extends FeatureConfig {
 export class SensorsFeature extends BaseFeature {
   private adapters: Map<string, any> = new Map(); // Generic adapter storage
   private socketServers: Map<string, SocketServer> = new Map();
+  // Shared endpoint-UUID lookup used by the MQTT data handler; updated in-place on hot-reload
+  // so the event-handler closure always sees the latest device→UUID mappings.
+  private mqttEndpointUuidByName: Map<string, string> = new Map();
 
   private enrichWithEndpointUuid(
     dataPoints: DeviceDataPoint[],
@@ -624,17 +627,32 @@ export class SensorsFeature extends BaseFeature {
         };
       }
 
-      const mqttEndpointUuidByName = new Map<string, string>();
-      mqttConfig.devices.forEach((device: any) => {
-        const endpointUuid =
-          (typeof device.uuid === 'string' && device.uuid.trim()) ||
-          (typeof device.metadata?.uuid === 'string' && device.metadata.uuid.trim()) ||
-          (typeof device.metadata?.device_uuid === 'string' && device.metadata.device_uuid.trim());
-
-        if (endpointUuid && typeof device.name === 'string') {
-          mqttEndpointUuidByName.set(device.name, endpointUuid);
+      // Helper: rebuild the shared UUID map from a device list
+      const rebuildUuidMap = (devices: typeof mqttConfig.devices) => {
+        this.mqttEndpointUuidByName.clear();
+        for (const device of devices) {
+          const d = device as any;
+          const endpointUuid =
+            (typeof d.uuid === 'string' && d.uuid.trim()) ||
+            (typeof d.metadata?.uuid === 'string' && d.metadata.uuid.trim()) ||
+            (typeof d.metadata?.device_uuid === 'string' && d.metadata.device_uuid.trim());
+          if (endpointUuid && typeof device.name === 'string') {
+            this.mqttEndpointUuidByName.set(device.name, endpointUuid);
+          }
         }
-      });
+      };
+
+      // Hot-update path: if the adapter is already running, diff subscriptions in-place
+      // instead of tearing down the broker connection and recreating everything.
+      const existingAdapter = this.adapters.get('mqtt') as MqttAdapter | undefined;
+      if (existingAdapter) {
+        this.logger.info('MQTT adapter already running — applying hot device update');
+        rebuildUuidMap(mqttConfig.devices);
+        await existingAdapter.updateDevices(mqttConfig.devices);
+        return;
+      }
+
+      rebuildUuidMap(mqttConfig.devices);
 
       // Load output config from database
       const dbOutput = await EndpointOutputModel.getOutput('mqtt');
@@ -664,8 +682,10 @@ export class SensorsFeature extends BaseFeature {
       });
 
       mqttAdapter.on('data', (dataPoints: DeviceDataPoint[]) => {
-        // Route data from adapter to socket server
-        mqttSocket.sendData(this.enrichWithEndpointUuid(dataPoints, mqttEndpointUuidByName));
+        // Route data from adapter to socket server.
+        // this.mqttEndpointUuidByName is updated in-place on hot-reload so new devices
+        // are enriched correctly without restarting the adapter or the socket server.
+        mqttSocket.sendData(this.enrichWithEndpointUuid(dataPoints, this.mqttEndpointUuidByName));
       });
 
       mqttAdapter.on('device-connected', (deviceName: string) => {
@@ -687,6 +707,18 @@ export class SensorsFeature extends BaseFeature {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(`Failed to start MQTT adapter: ${errorMessage}`);
       throw error;
+    }
+  }
+
+  /**
+   * Hot-reload MQTT adapter devices without disconnecting from the broker.
+   * Calls startMQTTAdapter() which takes the hot-update path when the adapter
+   * is already running, or performs a full start on first call.
+   * Safe to call from the reconciliation-complete handler instead of stop/reinit.
+   */
+  async reloadMQTTAdapter(): Promise<void> {
+    if ((this.config as SensorConfig).mqtt?.enabled) {
+      await this.startMQTTAdapter();
     }
   }
 

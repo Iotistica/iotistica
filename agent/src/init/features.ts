@@ -658,7 +658,14 @@ export class FeatureInitializer {
     // discovery-complete will fire once discovery writes the real data_points and will
     // handle the reload at that point.
     if (this.context.stateReconciler) {
-      this.context.stateReconciler.on('reconciliation-complete', async () => {
+      this.context.stateReconciler.on('reconciliation-complete', async (hasEndpointChanges: boolean) => {
+        if (!hasEndpointChanges) {
+          logger.debugSync('Skipping adapter reload on reconciliation-complete — no endpoint changes', {
+            component: LogComponents.agent,
+          });
+          return;
+        }
+
         if (this.features.discoveryService?.isDiscoveryRunning()) {
           logger.infoSync('Skipping adapter reload on reconciliation-complete — discovery in progress; will reload on discovery-complete', {
             component: LogComponents.agent
@@ -667,6 +674,33 @@ export class FeatureInitializer {
         }
 
         try {
+          // Hot-update path: MQTT adapter is already connected — diff subscriptions in-place.
+          // Only the endpoint UUID map and broker subscriptions change; no reconnect needed.
+          // SensorPublish keeps reading from the same IPC socket without interruption.
+          if (this.features.sensors?.getMQTTAdapter()) {
+            logger.infoSync('Hot-reloading MQTT adapter after endpoint changes (no reconnect)', {
+              component: LogComponents.agent,
+              trigger: 'reconciliation-complete'
+            });
+
+            await this.features.sensors.reloadMQTTAdapter();
+
+            // Start SensorPublish if this is the first endpoint being added
+            if (!this.features.sensorPublish) {
+              await this.initDevicePublish();
+            }
+
+            if (this.cloudSync && this.features.sensors) {
+              this.cloudSync.setDevices(this.features.sensors);
+            }
+
+            logger.infoSync('MQTT adapter hot-reloaded after reconciliation', {
+              component: LogComponents.agent
+            });
+            return;
+          }
+
+          // Full reinit path: no adapter running yet, or non-MQTT-only adapter changes.
           logger.infoSync('Reloading protocol adapters after reconciliation complete', {
             component: LogComponents.agent,
             trigger: 'reconciliation-complete'

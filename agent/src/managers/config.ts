@@ -222,11 +222,11 @@ export class ConfigManager extends EventEmitter {
   /**
    * Set target configuration
    */
-  public async setTarget(config: DeviceConfig): Promise<void> {
+  public async setTarget(config: DeviceConfig): Promise<ConfigReconciliationResult> {
     this.targetConfig = cloneDeep(config);
 
     // Trigger reconciliation
-    await this.reconcile();
+    return this.reconcile();
   }
 
   /**
