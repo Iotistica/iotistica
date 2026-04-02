@@ -1,8 +1,17 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page, type TestInfo } from '@playwright/test';
 import { ensureAuthenticatedDashboard, getE2EAuth, selectAgentFromSidebar } from './helpers/auth';
 import { createPageDiagnosticsCollector } from './helpers/diagnostics';
 
 const diagnosticsByPage = new WeakMap<object, ReturnType<typeof createPageDiagnosticsCollector>>();
+
+async function attachPageScreenshot(page: Page, testInfo: TestInfo, fileName: string, attachmentName: string) {
+  const screenshotPath = testInfo.outputPath(fileName);
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await testInfo.attach(attachmentName, {
+    path: screenshotPath,
+    contentType: 'image/png',
+  });
+}
 
 test.describe('Dashboard Navigation', () => {
   test.beforeEach(async ({ page }, testInfo) => {
@@ -25,13 +34,16 @@ test.describe('Dashboard Navigation', () => {
     await expect(page.getByTestId('global-nav-dashboard')).toBeVisible();
   });
 
-  test('should show an agent in the left sidebar', async ({ page }) => {
+  test('should show an agent in the left sidebar', async ({ page }, testInfo) => {
     const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
     const selectedAgentUuid = await selectAgentFromSidebar(page, expectedAgentUuid, expectedAgentName);
 
     if (selectedAgentUuid) {
       await expect(page.getByTestId(`agent-row-selected-${selectedAgentUuid}`)).toBeVisible();
     }
+
+    await expect(page.getByTestId('agent-sidebar')).toBeVisible();
+    await attachPageScreenshot(page, testInfo, 'home-sidebar-state.png', 'home-sidebar-state');
   });
 
   test('should capture the fleets page state', async ({ page }, testInfo) => {
@@ -59,15 +71,10 @@ test.describe('Dashboard Navigation', () => {
       { timeout: 30000 }
     );
 
-    const screenshotPath = testInfo.outputPath('fleets-page-state.png');
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-    await testInfo.attach('fleets-page-state', {
-      path: screenshotPath,
-      contentType: 'image/png',
-    });
+    await attachPageScreenshot(page, testInfo, 'fleets-page-state.png', 'fleets-page-state');
   });
 
-  test('should show system metrics for the selected agent', async ({ page }) => {
+  test('should show system metrics for the selected agent', async ({ page }, testInfo) => {
     const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
     await selectAgentFromSidebar(page, expectedAgentUuid, expectedAgentName);
 
@@ -79,6 +86,8 @@ test.describe('Dashboard Navigation', () => {
     await expect(page.getByTestId('metric-card-disk-usage')).toBeVisible();
     await expect(page.getByTestId('metric-card-network')).toBeVisible();
     await expect(page.getByTestId('system-insights-telemetry')).toBeVisible();
+
+    await attachPageScreenshot(page, testInfo, 'agent-overview-metrics-state.png', 'agent-overview-metrics-state');
   });
 
   test('should navigate to the global dashboard view', async ({ page }) => {
