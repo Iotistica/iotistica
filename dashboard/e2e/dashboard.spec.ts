@@ -185,6 +185,7 @@ test.describe('Dashboard Navigation', () => {
       );
 
       let subscriptionConfirmed = false;
+      let lastFetchedLogs: Array<{ timestamp: string; level: string; service_name: string; message: string }> = [];
       const pollDeadline = Date.now() + 60_000;
 
       while (Date.now() < pollDeadline) {
@@ -194,8 +195,9 @@ test.describe('Dashboard Navigation', () => {
         );
         if (logsResp.ok()) {
           const logsBody = await logsResp.json();
-          const matched = (logsBody.logs ?? []).some(
-            (entry: { message: string }) => subscribedPattern.test(entry.message)
+          lastFetchedLogs = logsBody.logs ?? [];
+          const matched = lastFetchedLogs.some(
+            (entry) => subscribedPattern.test(entry.message)
           );
           if (matched) {
             subscriptionConfirmed = true;
@@ -203,6 +205,20 @@ test.describe('Dashboard Navigation', () => {
           }
         }
         await page.waitForTimeout(2000);
+      }
+
+      // Always attach the last batch of agent logs as a test artifact for debugging
+      if (lastFetchedLogs.length > 0) {
+        const logText = lastFetchedLogs
+          .map(e => `[${e.timestamp}] [${e.level?.toUpperCase() ?? 'INFO'}] [${e.service_name ?? 'agent'}] ${e.message}`)
+          .join('\n');
+        console.log(`[e2e] Agent logs after deploy (${lastFetchedLogs.length} entries):\n${logText}`);
+        await testInfo.attach('agent-logs-after-mqtt-deploy.txt', {
+          body: logText,
+          contentType: 'text/plain',
+        });
+      } else {
+        console.log('[e2e] No agent logs returned from API for this time window');
       }
 
       expect(subscriptionConfirmed,
