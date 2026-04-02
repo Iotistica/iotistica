@@ -178,6 +178,40 @@ volumes:
   redis-data:
     driver: local
 
+  # sim-mqtt-e2e is defined here for the image build only.
+  # It is started manually via `docker run --network host` in the Playwright test
+  # so it can reach the host systemd mosquitto on localhost:1883.
+  # Use `docker compose -f docker-compose.e2e.yml build sim-mqtt-e2e` to build the image.
+  sim-mqtt-e2e:
+    image: iotistic/sim-mqtt:e2e
+    build:
+      context: ./simulators/mqtt-simulator
+      dockerfile: Dockerfile
+    container_name: sim-mqtt-e2e
+    profiles:
+      - mqtt-sim
+    network_mode: host
+    restart: "no"
+    environment:
+      # All overridden at runtime via `docker run -e VAR` — defaults are safe no-ops
+      - MQTT_BROKER_URL=${SIM_MQTT_BROKER_URL:-mqtt://localhost:1883}
+      - MQTT_USERNAME=${SIM_MQTT_USERNAME:-placeholder}
+      - MQTT_PASSWORD=${SIM_MQTT_PASSWORD:-placeholder}
+      - MQTT_CLIENT_ID=${SIM_MQTT_CLIENT_ID:-sim-mqtt-e2e}
+      - MQTT_DEVICE_UUID=${SIM_MQTT_DEVICE_UUID:-00000000-0000-0000-0000-000000000000}
+      - MQTT_TOPIC=${SIM_MQTT_TOPIC:-e2e/test}
+      - MQTT_METRIC_NAMES=${SIM_MQTT_METRIC_NAMES:-temperature,humidity}
+      - MQTT_QOS=${SIM_MQTT_QOS:-1}
+      - PUBLISH_INTERVAL_MS=${SIM_MQTT_INTERVAL_MS:-1000}
+      - LOG_LEVEL=INFO
+      - LOG_PUBLISH_EVENTS=true
+      - LOG_PUBLISH_EVERY=1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 networks:
   iotistica-net:
     driver: bridge

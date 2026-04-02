@@ -389,6 +389,9 @@ jobs:
           E2E_EXPECTED_AGENT_NAME: ${{ steps.registered_agent.outputs.agent_name }}
         run: npx playwright test e2e/dashboard.spec.ts --grep "should show an agent in the left sidebar|should capture the fleets page state|should show system metrics for the selected agent"
 
+      - name: Build MQTT simulator image for integration test
+        run: docker compose -f "$COMPOSE_FILE" build sim-mqtt-e2e
+
       - name: Test MQTT device management
         working-directory: dashboard
         env:
@@ -492,4 +495,6 @@ jobs:
 
       - name: Cleanup containers
         if: always()
-        run: docker compose -f "$COMPOSE_FILE" down -v
+        run: |
+          docker rm -f sim-mqtt-e2e 2>/dev/null || true
+          docker compose -f "$COMPOSE_FILE" down -v
