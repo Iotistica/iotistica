@@ -224,14 +224,24 @@ jobs:
 
       - name: Verify published installer and artifact endpoints
         run: |
+          retry_curl() {
+            curl --fail --show-error --silent --location \
+              --retry 5 \
+              --retry-all-errors \
+              --retry-delay 3 \
+              --retry-max-time 90 \
+              --connect-timeout 15 \
+              "$@"
+          }
+
           echo "=== Fetch published installer ==="
-          curl -fsSL https://get.iotistica.com/agent -o /tmp/iotistica-install.sh
+          retry_curl https://get.iotistica.com/agent -o /tmp/iotistica-install.sh
 
           echo "=== Installer artifact URL markers ==="
           grep -nE 'IOTISTICA_DOWNLOAD_BASE_URL|get\.iotistica\.com/agent/artifacts|blob\.core\.windows\.net/scripts/agent' /tmp/iotistica-install.sh || true
 
           echo "=== Check redirected artifact endpoint ==="
-          curl -fsSI https://get.iotistica.com/agent/artifacts/agent-latest-x86_64.tar.gz
+          retry_curl --head https://get.iotistica.com/agent/artifacts/agent-latest-x86_64.tar.gz
 
       - name: Install Mosquitto and agent with install.sh
         env:
@@ -249,7 +259,19 @@ jobs:
           AGENT_SHELL_HMAC_KEY: integration-test-shell-hmac-key
           PROVISIONING_KEY: ${{ steps.provision.outputs.provisioning_key }}
         run: |
-          curl -fsSL https://get.iotistica.com/agent | sudo -E bash
+          retry_curl() {
+            curl --fail --show-error --silent --location \
+              --retry 5 \
+              --retry-all-errors \
+              --retry-delay 3 \
+              --retry-max-time 90 \
+              --connect-timeout 15 \
+              "$@"
+          }
+
+          retry_curl https://get.iotistica.com/agent -o /tmp/iotistica-install.sh
+          sudo chmod +x /tmp/iotistica-install.sh
+          sudo -E bash /tmp/iotistica-install.sh
 
       - name: Verify system services
         run: |
