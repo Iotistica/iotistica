@@ -232,6 +232,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
+        data-testid="add-device-dialog"
         className="!p-0 overflow-hidden flex flex-col"
         style={{ width: '66vh', maxWidth: '66vh', height: '66vh', maxHeight: '66vh' }}
       >
@@ -308,7 +309,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
               value={selectedProtocol}
               onValueChange={(value) => setSelectedProtocol(value as 'modbus' | 'opcua' | 'mqtt')}
             >
-              <SelectTrigger id="protocol-select" className="h-11 text-left">
+              <SelectTrigger id="protocol-select" data-testid="protocol-select" className="h-11 text-left">
                 <SelectValue placeholder="Select protocol" />
               </SelectTrigger>
               <SelectContent>
@@ -371,6 +372,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
                     <Label htmlFor="mqtt-user-name">Username</Label>
                     <Input
                       id="mqtt-user-name"
+                      data-testid="mqtt-username-input"
                       value={mqttUsername}
                       onChange={(e) => setMqttUsername(e.target.value)}
                       placeholder="device_mqtt_user"
@@ -380,6 +382,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
                     <Label htmlFor="mqtt-user-password">Password</Label>
                     <Input
                       id="mqtt-user-password"
+                      data-testid="mqtt-password-input"
                       type="password"
                       value={mqttPassword}
                       onChange={(e) => setMqttPassword(e.target.value)}
@@ -394,7 +397,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
                     value={String(mqttAclAccess)}
                     onValueChange={(value) => setMqttAclAccess(Number(value))}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger data-testid="mqtt-permission-select">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -431,6 +434,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
             Cancel
           </Button>
           <Button 
+            data-testid="save-device-button"
             onClick={handleSave} 
             disabled={!canSave() || loading}
           >

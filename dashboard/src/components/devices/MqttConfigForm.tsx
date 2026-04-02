@@ -69,7 +69,7 @@ export const MqttConfigForm: React.FC<MqttConfigFormProps> = ({
         <Label htmlFor="mqtt-name">
           Device Name <span className="text-red-500">*</span>
         </Label>
-        <Input id="mqtt-name" {...register('name')} placeholder="e.g., boiler_temp_sensor" />
+        <Input id="mqtt-name" data-testid="mqtt-device-name-input" {...register('name')} placeholder="e.g., boiler_temp_sensor" />
       </div>
 
       <div className="space-y-2">

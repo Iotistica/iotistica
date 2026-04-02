@@ -94,6 +94,69 @@ test.describe('Dashboard Navigation', () => {
     await page.getByTestId('global-nav-dashboard').click();
     await expect(page.getByTestId('global-dashboard-page')).toBeVisible({ timeout: 30000 });
   });
+
+  test('should add a new MQTT device', async ({ page, request }, testInfo) => {
+    const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
+    const E2E_API_URL = process.env.E2E_API_URL || 'http://localhost:4002';
+
+    // Use a timestamp-based name to avoid conflicts between runs
+    const deviceName = `e2e_mqtt_${Date.now()}`;
+
+    // Select an agent and navigate to the Devices tab
+    const agentUuid = await selectAgentFromSidebar(page, expectedAgentUuid, expectedAgentName);
+    await page.getByTestId('agent-view-devices').click();
+    await expect(page.getByTestId('devices-tab-trigger')).toBeVisible({ timeout: 15000 });
+
+    // Open the Add Device dialog
+    await page.getByTestId('add-device-button').click();
+    await expect(page.getByTestId('add-device-dialog')).toBeVisible({ timeout: 10000 });
+
+    // Select MQTT as the protocol
+    await page.getByTestId('protocol-select').click();
+    await page.getByRole('option', { name: 'MQTT' }).click();
+
+    // Fill in the device name
+    await page.getByTestId('mqtt-device-name-input').fill(deviceName);
+
+    // Fill in MQTT credentials
+    await page.getByTestId('mqtt-username-input').fill(`${deviceName}_user`);
+    await page.getByTestId('mqtt-password-input').fill('E2eSecurePass1!');
+
+    // Select Write permission
+    await page.getByTestId('mqtt-permission-select').click();
+    await page.getByRole('option', { name: 'Write' }).click();
+
+    await attachPageScreenshot(page, testInfo, 'add-mqtt-device-before-save.png', 'add-mqtt-device-before-save');
+
+    // Save the device (calls POST validateOnly — validates + adds to pending state)
+    await expect(page.getByTestId('save-device-button')).toBeEnabled({ timeout: 5000 });
+    await page.getByTestId('save-device-button').click();
+
+    // Dialog should close after a successful save
+    await expect(page.getByTestId('add-device-dialog')).not.toBeVisible({ timeout: 10000 });
+
+    // Device should appear in the pending-state grid immediately
+    const deviceRow = page.locator('[data-testid^="device-row-"]', { hasText: deviceName });
+    await expect(deviceRow).toBeVisible({ timeout: 15000 });
+
+    // Persist to the database by clicking Save Draft
+    await expect(page.getByTestId('save-draft-button')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('save-draft-button').click();
+
+    // Wait for the draft to finish saving (button disappears once changes are cleared)
+    await expect(page.getByTestId('save-draft-button')).not.toBeVisible({ timeout: 15000 });
+
+    await attachPageScreenshot(page, testInfo, 'add-mqtt-device-result.png', 'add-mqtt-device-result');
+
+    // Cleanup: delete the test device from the API
+    if (agentUuid) {
+      const accessToken = await page.evaluate(() => localStorage.getItem('accessToken'));
+      await request.delete(
+        `${E2E_API_URL}/api/v1/agents/${agentUuid}/sensors/${encodeURIComponent(deviceName)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+    }
+  });
 });
 
 

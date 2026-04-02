@@ -1109,6 +1109,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start border-0">
             <TabsTrigger
               value="devices"
+              data-testid="devices-tab-trigger"
               className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-base leading-none font-normal data-[state=active]:font-medium"
               style={
                 activeTab === 'devices'
@@ -1311,13 +1312,13 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           
           <div className="flex gap-2">
             {deviceType !== 'virtual' && (
-              <Button onClick={() => setAddSensorDialogOpen(true)}>
+              <Button data-testid="add-device-button" onClick={() => setAddSensorDialogOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add Device
               </Button>
             )}
             {deviceType === 'virtual' && (
-              <Button onClick={handleOpenVirtualDeviceDialog}>
+              <Button data-testid="add-device-button" onClick={handleOpenVirtualDeviceDialog}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add Device
               </Button>
@@ -1359,7 +1360,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto" data-testid="devices-table">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
@@ -1395,7 +1396,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
                       return (
                       <React.Fragment key={sensorId}>
-                      <tr className="border-b border-border last:border-0 hover:bg-muted">
+                      <tr data-testid={`device-row-${sensorId}`} className="border-b border-border last:border-0 hover:bg-muted">
                         <td className="py-3 px-2 align-top">
                           {hasChildren ? (
                             <Button

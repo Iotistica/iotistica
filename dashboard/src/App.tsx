@@ -1706,6 +1706,7 @@ export default function App() {
                 <>
                   {!isGlobalView && hasUnsavedChanges && (
                     <Button
+                      data-testid="save-draft-button"
                       onClick={handleSaveDraft}
                       size="sm"
                       variant="outline"
