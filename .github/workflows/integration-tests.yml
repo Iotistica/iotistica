@@ -387,7 +387,51 @@ jobs:
           E2E_AUTH_USER_JSON: ${{ steps.dashboard_auth.outputs.e2e_auth_user_json }}
           E2E_EXPECTED_AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
           E2E_EXPECTED_AGENT_NAME: ${{ steps.registered_agent.outputs.agent_name }}
-        run: npx playwright test e2e/dashboard.spec.ts --grep "should show an agent in the left sidebar|should capture the fleets page state|should show system metrics for the selected agent|should add a new MQTT device"
+        run: npx playwright test e2e/dashboard.spec.ts --grep "should show an agent in the left sidebar|should capture the fleets page state|should show system metrics for the selected agent"
+
+      - name: Test MQTT device management
+        working-directory: dashboard
+        env:
+          CI: true
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          E2E_API_URL: http://localhost:4002
+          E2E_AUTH_USERNAME: ${{ steps.dashboard_auth.outputs.e2e_auth_username }}
+          E2E_AUTH_PASSWORD: ${{ steps.dashboard_auth.outputs.e2e_auth_password }}
+          E2E_AUTH_ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
+          E2E_AUTH_REFRESH_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_refresh_token }}
+          E2E_AUTH_USER_JSON: ${{ steps.dashboard_auth.outputs.e2e_auth_user_json }}
+          E2E_EXPECTED_AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
+          E2E_EXPECTED_AGENT_NAME: ${{ steps.registered_agent.outputs.agent_name }}
+        run: npx playwright test e2e/dashboard.spec.ts --grep "should add a new MQTT device"
+
+      - name: Verify agent Mosquitto passwd and ACL after MQTT device reconciliation
+        run: |
+          echo "Waiting 60s for agent to reconcile target state and update Mosquitto auth files..."
+          sleep 60
+
+          echo "=== /etc/mosquitto/passwd ==="
+          sudo cat /etc/mosquitto/passwd || true
+
+          echo "=== /etc/mosquitto/acl ==="
+          sudo cat /etc/mosquitto/acl || true
+
+          echo "Verifying e2e_mqtt_ user entry exists in passwd file..."
+          if sudo grep -q "e2e_mqtt_" /etc/mosquitto/passwd; then
+            echo "PASS: e2e_mqtt_ user found in /etc/mosquitto/passwd"
+          else
+            echo "FAIL: No e2e_mqtt_ user found in /etc/mosquitto/passwd"
+            exit 1
+          fi
+
+          echo "Verifying e2e_mqtt_ ACL entry exists in acl file..."
+          if sudo grep -q "e2e_mqtt_" /etc/mosquitto/acl; then
+            echo "PASS: e2e_mqtt_ ACL entry found in /etc/mosquitto/acl"
+          else
+            echo "FAIL: No e2e_mqtt_ ACL entry found in /etc/mosquitto/acl"
+            exit 1
+          fi
+
+          echo "Mosquitto auth files verified successfully."
 
       - name: Upload dashboard Playwright artifacts
         if: always()
