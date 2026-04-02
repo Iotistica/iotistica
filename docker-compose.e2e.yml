@@ -172,15 +172,11 @@ services:
     networks:
       - iotistica-net
 
-  # sim-mqtt-e2e is defined here for the image build only.
-  # It is started manually via `docker run --network host` in the Playwright test
+  # sim-mqtt-e2e pulls the published image from Docker Hub.
+  # It is started manually via `docker run --network host` in the CI workflow
   # so it can reach the host systemd mosquitto on localhost:1883.
-  # Use `docker compose -f docker-compose.e2e.yml build sim-mqtt-e2e` to build the image.
   sim-mqtt-e2e:
-    image: iotistic/sim-mqtt:e2e
-    build:
-      context: ./simulators/mqtt-simulator
-      dockerfile: Dockerfile
+    image: iotistic/mqtt-simulator:latest
     container_name: sim-mqtt-e2e
     profiles:
       - mqtt-sim

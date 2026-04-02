@@ -1354,7 +1354,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           </CardHeader>
           <CardContent>
             {sensors.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
+              <div data-testid="devices-empty-state" className="text-center py-12 text-muted-foreground">
                 <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-2">No devices yet</p>
                
@@ -1465,7 +1465,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
                         </td>
                         <td className="py-3 px-4 text-muted-foreground align-top w-[360px] min-w-[360px] max-w-[360px]">
                           <div className="flex items-start gap-2">
-                            <span className="block flex-1 truncate" title={endpointUrl || undefined}>
+                            <span data-testid={`device-endpoint-${sensorId}`} className="block flex-1 truncate" title={endpointUrl || undefined}>
                               {endpointUrl || '—'}
                             </span>
                             {endpointUrl && (

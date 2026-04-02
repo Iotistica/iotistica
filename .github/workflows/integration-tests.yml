@@ -60,8 +60,8 @@ jobs:
       - name: Pull prebuilt API and dashboard images
         run: docker compose -f "$COMPOSE_FILE" pull api dashboard
 
-      - name: Build MQTT simulator image
-        run: docker compose -f "$COMPOSE_FILE" build sim-mqtt-e2e
+      - name: Pull MQTT simulator image
+        run: docker pull iotistic/mqtt-simulator:latest
 
       - name: Start database, cache, API, and dashboard
         run: docker compose -f "$COMPOSE_FILE" up -d postgres redis api dashboard
@@ -483,7 +483,7 @@ jobs:
             -e PUBLISH_INTERVAL_MS=1000 \
             -e LOG_PUBLISH_EVENTS=true \
             -e LOG_PUBLISH_EVERY=1 \
-            iotistic/sim-mqtt:e2e
+            iotistic/mqtt-simulator:latest
 
           echo "Waiting 8 s for broker connect and first publish cycle..."
           sleep 8

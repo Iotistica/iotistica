@@ -1,0 +1,286 @@
+name: CI Build & Push MQTT Simulator
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'simulators/mqtt-simulator/**'
+      - '.github/workflows/build-mqtt-sim-ci.yml'
+
+jobs:
+  test:
+    name: Validate Python & Syntax
+    runs-on: [arc-runner-set-iotistica-light]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: ./simulators/mqtt-simulator
+        run: |
+          pip install --no-cache-dir paho-mqtt==1.6.1
+          pip install pylint
+
+      - name: Check Python syntax
+        working-directory: ./simulators/mqtt-simulator
+        run: python -m py_compile simulator.py
+
+      - name: Run pylint
+        working-directory: ./simulators/mqtt-simulator
+        run: pylint --disable=all --enable=E,F simulator.py || true
+
+      - name: Cleanup test artifacts
+        if: always()
+        run: |
+          pip cache purge || true
+          rm -rf ~/.cache/pip || true
+
+  version:
+    name: Bump Version
+    needs: test
+    runs-on: [arc-runner-set-iotistica-light]
+    permissions:
+      contents: write
+    outputs:
+      package_version: ${{ steps.bump.outputs.package_version }}
+      sha_short: ${{ steps.bump.outputs.sha_short }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: master
+
+      - name: Bump version in package.json
+        id: bump
+        run: |
+          cd simulators/mqtt-simulator
+
+          # Check if package.json exists, if not create it
+          if [ ! -f package.json ]; then
+            echo '{"name":"mqtt-simulator","version":"1.0.0"}' > package.json
+            git add package.json
+          fi
+
+          # Get current version
+          CURRENT_VERSION=$(jq -r '.version' package.json)
+          echo "Current version: $CURRENT_VERSION"
+
+          # Bump patch version (e.g., 1.0.0 -> 1.0.1)
+          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+          MAJOR="${VERSION_PARTS[0]}"
+          MINOR="${VERSION_PARTS[1]}"
+          PATCH="${VERSION_PARTS[2]}"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+
+          echo "New version: $NEW_VERSION"
+
+          # Update package.json
+          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
+
+          # Set outputs
+          echo "package_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Commit and push version bump
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add simulators/mqtt-simulator/package.json
+          git commit -m "chore: bump mqtt-simulator version to ${{ steps.bump.outputs.package_version }} [skip ci]"
+
+          # Fetch latest from remote to avoid race conditions
+          git fetch origin master
+
+          # Pull with rebase strategy, auto-stashing if needed
+          git pull --rebase --autostash origin master
+
+          # Push to master with retry logic
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if git push origin HEAD:master; then
+              echo "Push successful"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Push failed, retrying ($RETRY_COUNT/$MAX_RETRIES)..."
+                git fetch origin master
+                git pull --rebase --autostash origin master
+                sleep 2
+              else
+                echo "Push failed after $MAX_RETRIES attempts"
+                exit 1
+              fi
+            fi
+          done
+
+      - name: Display version info
+        run: |
+          echo "## Version Bumped" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**New Version:** \`${{ steps.bump.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.bump.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+
+  buildx:
+    name: Build & Push to Docker
+    needs: version
+    runs-on: [arc-runner-set-iotistica-light]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Display Version Update
+        run: |
+          echo "## Building Version ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/mqtt-simulator:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/mqtt-simulator:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/mqtt-simulator:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: buildx-mqtt-sim-amd64-${{ github.sha }}
+          restore-keys: |
+            buildx-mqtt-sim-amd64-
+
+      - name: Login to Docker Hub
+        if: success()
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Build & Push final image
+        id: docker_build
+        if: success()
+        uses: docker/build-push-action@v5
+        with:
+          context: ./simulators/mqtt-simulator
+          file: ./simulators/mqtt-simulator/Dockerfile
+          push: true
+          platforms: linux/amd64
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
+          tags: |
+            iotistic/mqtt-simulator:latest
+            iotistic/mqtt-simulator:${{ needs.version.outputs.sha_short }}
+            iotistic/mqtt-simulator:${{ needs.version.outputs.package_version }}
+
+      - name: Cleanup Docker build artifacts
+        if: always()
+        run: |
+          docker image prune -f
+          rm -rf /tmp/.buildx-cache || true
+          docker buildx prune -f --keep-storage 5GB || true
+
+  report:
+    name: Generate Reports
+    needs: [version, buildx]
+    runs-on: [arc-runner-set-iotistica-light]
+    if: always()
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, using all commits"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -- simulators/mqtt-simulator/)
+          else
+            echo "Generating changelog from $PREV_TAG to HEAD"
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges -- simulators/mqtt-simulator/)
+          fi
+
+          echo "$COMMITS" > changelog.txt
+          echo "$COMMITS" | head -20 > changelog_summary.txt
+
+      - name: Get Docker image size
+        id: image_size
+        run: |
+          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+          docker pull --platform linux/amd64 iotistic/mqtt-simulator:${{ needs.version.outputs.package_version }}
+
+          SIZE_BYTES=$(docker image inspect iotistic/mqtt-simulator:${{ needs.version.outputs.package_version }} --format='{{.Size}}')
+          SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
+
+          echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
+          echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
+
+          LAYERS=$(docker image inspect iotistic/mqtt-simulator:${{ needs.version.outputs.package_version }} --format='{{len .RootFS.Layers}}')
+          echo "layers=$LAYERS" >> $GITHUB_OUTPUT
+
+      - name: Generate Summary Report
+        run: |
+          echo "# Build & Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
+          echo "**Size (amd64):** ${{ steps.image_size.outputs.size_mb }} MB" >> $GITHUB_STEP_SUMMARY
+          echo "**Layers:** ${{ steps.image_size.outputs.layers }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/mqtt-simulator:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/mqtt-simulator:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/mqtt-simulator:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Changelog (MQTT Simulator)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -s changelog_summary.txt ]; then
+            cat changelog_summary.txt >> $GITHUB_STEP_SUMMARY
+
+            TOTAL_COMMITS=$(wc -l < changelog.txt)
+            SHOWN_COMMITS=$(wc -l < changelog_summary.txt)
+            if [ $TOTAL_COMMITS -gt $SHOWN_COMMITS ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "_...and $((TOTAL_COMMITS - SHOWN_COMMITS)) more commits_" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "No mqtt-simulator commits found" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
+          echo "All jobs completed successfully!" >> $GITHUB_STEP_SUMMARY

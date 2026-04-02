@@ -149,6 +149,20 @@ test.describe('Dashboard Navigation', () => {
     // Wait for the deploy button to become disabled (deployment dispatched, needsDeployment clears)
     await expect(page.getByTestId('deploy-button')).toBeDisabled({ timeout: 30000 });
 
+    // The device row must still be visible after deploy (not wiped from the grid)
+    await expect(deviceRow).toBeVisible({ timeout: 10000 });
+
+    // The endpoint cell must show the MQTT topic (non-empty, not '—')
+    const endpointCell = deviceRow.locator('[data-testid^="device-endpoint-"]');
+    await expect(endpointCell).toBeVisible({ timeout: 10000 });
+    const endpointText = await endpointCell.textContent();
+    expect(endpointText?.trim(), 'Device endpoint/topic should be populated after deploy').not.toBe('');
+    expect(endpointText?.trim(), 'Device endpoint/topic should not be a dash placeholder').not.toBe('—');
+
+    // The devices table must be visible (not showing empty state)
+    await expect(page.getByTestId('devices-table')).toBeVisible();
+    await expect(page.getByTestId('devices-empty-state')).not.toBeVisible();
+
     await attachPageScreenshot(page, testInfo, 'add-mqtt-device-result.png', 'add-mqtt-device-result');
 
     // Cleanup: delete the test device from the API
