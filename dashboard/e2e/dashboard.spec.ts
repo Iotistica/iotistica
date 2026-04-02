@@ -1,9 +1,21 @@
 import { test, expect } from '@playwright/test';
 import { ensureAuthenticatedDashboard, getE2EAuth, selectAgentFromSidebar } from './helpers/auth';
+import { createPageDiagnosticsCollector } from './helpers/diagnostics';
+
+const diagnosticsByPage = new WeakMap<object, ReturnType<typeof createPageDiagnosticsCollector>>();
 
 test.describe('Dashboard Navigation', () => {
   test.beforeEach(async ({ page }, testInfo) => {
+    diagnosticsByPage.set(page, createPageDiagnosticsCollector(page));
     await ensureAuthenticatedDashboard(page, testInfo);
+  });
+
+  test.afterEach(async ({ page }, testInfo) => {
+    const diagnostics = diagnosticsByPage.get(page);
+    if (diagnostics) {
+      await diagnostics.attach(testInfo);
+      diagnosticsByPage.delete(page);
+    }
   });
 
   test('should display main navigation after login', async ({ page }) => {
