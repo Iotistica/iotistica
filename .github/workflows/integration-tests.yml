@@ -380,6 +380,17 @@ jobs:
           E2E_EXPECTED_AGENT_NAME: ${{ steps.registered_agent.outputs.agent_name }}
         run: npx playwright test e2e/dashboard.spec.ts --grep "should show an agent in the left sidebar"
 
+      - name: Upload dashboard Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-playwright-artifacts
+          path: |
+            dashboard/playwright-report
+            dashboard/test-results
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Show diagnostics
         if: always()
         run: |

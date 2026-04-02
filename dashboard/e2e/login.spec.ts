@@ -23,6 +23,12 @@ test.describe('Dashboard Login', () => {
 
   test('should login with Auth0-backed credentials', async ({ page }, testInfo) => {
     const { username, password } = requireE2EAuth(testInfo);
+    test.skip(!username || !password, 'Credential login test requires E2E_AUTH_USERNAME and E2E_AUTH_PASSWORD.');
+
+    if (!username || !password) {
+      return;
+    }
+
     await loginWithCredentials(page, username, password);
     await expect(page.getByTestId('dashboard-app')).toBeVisible();
     await expect(page.getByTestId('global-nav-home')).toBeVisible();
