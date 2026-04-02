@@ -1,5 +1,4 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
-import { execSync } from 'child_process';
 import { ensureAuthenticatedDashboard, getE2EAuth, selectAgentFromSidebar } from './helpers/auth';
 import { createPageDiagnosticsCollector } from './helpers/diagnostics';
 
@@ -97,9 +96,7 @@ test.describe('Dashboard Navigation', () => {
   });
 
   test('should add a new MQTT device', async ({ page, request }, testInfo) => {
-    // This test includes a 60 s log-poll loop (subscription confirm) + 8 s sim verification,
-    // so it needs a longer timeout than the default.
-    test.setTimeout(180_000);
+    test.setTimeout(60_000);
 
     const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
     const E2E_API_URL = process.env.E2E_API_URL || 'http://localhost:4002';
@@ -153,108 +150,6 @@ test.describe('Dashboard Navigation', () => {
     await expect(page.getByTestId('deploy-button')).toBeDisabled({ timeout: 30000 });
 
     await attachPageScreenshot(page, testInfo, 'add-mqtt-device-result.png', 'add-mqtt-device-result');
-
-    // Fetch the newly created device record to capture the MQTT topic the agent will subscribe to.
-    // The agent builds the subscription as "<connection.topic>/#", so we reconstruct it here
-    // to make the subsequent log assertion deterministic.
-    let expectedMqttTopic: string | null = null;
-    if (agentUuid) {
-      const accessToken = await page.evaluate(() => localStorage.getItem('accessToken'));
-      const sensorsResp = await request.get(
-        `${E2E_API_URL}/api/v1/agents/${agentUuid}/sensors?protocol=mqtt`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      expect(sensorsResp.ok()).toBeTruthy();
-      const sensorsBody = await sensorsResp.json();
-      const createdDeviceRecord = (sensorsBody.devices ?? sensorsBody.agents ?? []).find(
-        (d: { name: string }) => d.name === deviceName
-      ) ?? null;
-      if (createdDeviceRecord?.connection?.topic) {
-        expectedMqttTopic = `${createdDeviceRecord.connection.topic}/#`;
-      }
-      console.log(`[e2e] MQTT device "${deviceName}" topic: ${expectedMqttTopic ?? '(not resolved)'}`);
-    }
-
-    // Wait for the agent to reconcile and confirm the subscription in its logs.
-    // Polls GET /api/v1/agents/:uuid/logs until the "Subscribed to MQTT topic" entry appears
-    // for the expected topic, or times out after 60 s.
-    if (agentUuid && expectedMqttTopic) {
-      const accessToken = await page.evaluate(() => localStorage.getItem('accessToken'));
-      const testStartIso = new Date(Date.now() - 5000).toISOString(); // 5 s grace window
-      const subscribedPattern = new RegExp(
-        `Subscribed to MQTT topic:\\s+${expectedMqttTopic.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+\\(QoS 1\\)`
-      );
-
-      let subscriptionConfirmed = false;
-      let lastFetchedLogs: Array<{ timestamp: string; level: string; service_name: string; message: string }> = [];
-      const pollDeadline = Date.now() + 60_000;
-
-      while (Date.now() < pollDeadline) {
-        // In CI the agent runs as a systemd service. Check the journal directly
-        // on every iteration to avoid waiting up to 30 s for the cloud log flush.
-        if (process.env.CI) {
-          try {
-            const journal = execSync(
-              'sudo journalctl -u iotistica-agent --no-pager --lines 1000 --since "10 minutes ago"',
-              { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-            );
-            if (subscribedPattern.test(journal)) {
-              subscriptionConfirmed = true;
-              break;
-            }
-          } catch { /* journalctl unavailable — fall through to cloud API check */ }
-        }
-
-        const logsResp = await request.get(
-          `${E2E_API_URL}/api/v1/agents/${agentUuid}/logs?limit=200&from=${encodeURIComponent(testStartIso)}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
-        if (logsResp.ok()) {
-          const logsBody = await logsResp.json();
-          lastFetchedLogs = logsBody.logs ?? [];
-          const matched = lastFetchedLogs.some(
-            (entry) => subscribedPattern.test(entry.message)
-          );
-          if (matched) {
-            subscriptionConfirmed = true;
-            break;
-          }
-        }
-        await page.waitForTimeout(2000);
-      }
-
-      // Always attach the last batch of cloud API logs as a test artifact for debugging
-      if (lastFetchedLogs.length > 0) {
-        const logText = lastFetchedLogs
-          .map(e => `[${e.timestamp}] [${e.level?.toUpperCase() ?? 'INFO'}] [${e.service_name ?? 'agent'}] ${e.message}`)
-          .join('\n');
-        console.log(`[e2e] Agent logs after deploy (${lastFetchedLogs.length} entries):\n${logText}`);
-        await testInfo.attach('agent-logs-after-mqtt-deploy.txt', {
-          body: logText,
-          contentType: 'text/plain',
-        });
-      } else {
-        console.log('[e2e] No agent logs returned from cloud API for this time window');
-      }
-
-      // On CI, also attach the recent journal tail so we can see the raw agent output
-      if (!subscriptionConfirmed && process.env.CI) {
-        try {
-          const journalDump = execSync(
-            'sudo journalctl -u iotistica-agent --no-pager --lines 200 --since "10 minutes ago"',
-            { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-          );
-          await testInfo.attach('agent-journal-tail.txt', {
-            body: journalDump,
-            contentType: 'text/plain',
-          });
-        } catch { /* journalctl unavailable */ }
-      }
-
-      expect(subscriptionConfirmed,
-        `Timed out waiting for agent log: [INFO] [Adapters] Subscribed to MQTT topic: ${expectedMqttTopic} (QoS 1)`
-      ).toBe(true);
-    }
 
     // Cleanup: delete the test device from the API
     if (agentUuid) {

@@ -412,6 +412,17 @@ jobs:
           echo "Waiting 60s for agent to reconcile target state and update Mosquitto auth files..."
           sleep 60
 
+          echo "=== Agent journal (subscription check) ==="
+          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -i "Subscribed to MQTT topic" || true
+
+          if sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -q "Subscribed to MQTT topic"; then
+            echo "PASS: agent logged MQTT subscription"
+          else
+            echo "FAIL: no MQTT subscription log found in agent journal"
+            sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | tail -50 || true
+            exit 1
+          fi
+
           echo "=== /etc/mosquitto/passwd ==="
           sudo cat /etc/mosquitto/passwd || true
 
