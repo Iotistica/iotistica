@@ -124,7 +124,7 @@ test.describe('Dashboard Navigation', () => {
 
     // Select Write permission
     await page.getByTestId('mqtt-permission-select').click();
-    await page.getByRole('option', { name: 'Write' }).click();
+    await page.getByRole('option', { name: 'Write', exact: true }).click();
 
     await attachPageScreenshot(page, testInfo, 'add-mqtt-device-before-save.png', 'add-mqtt-device-before-save');
 
