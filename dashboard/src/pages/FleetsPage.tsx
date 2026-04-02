@@ -127,12 +127,12 @@ export function FleetsPage() {
   ];
 
   return (
-    <div className="flex-1 bg-background overflow-auto">
+    <div className="flex-1 bg-background overflow-auto" data-testid="fleets-page">
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Fleet Management</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground" data-testid="fleets-page-title">Fleet Management</h1>
             <p className="text-sm text-muted-foreground">
               Monitor and manage your device fleets
             </p>
@@ -247,7 +247,7 @@ export function FleetsPage() {
         </div>
 
         {/* Fleets List */}
-        <Card>
+        <Card data-testid="fleets-list-card">
           <CardHeader>
             <CardTitle>Fleets</CardTitle>
             <CardDescription>
@@ -256,23 +256,23 @@ export function FleetsPage() {
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="text-center py-12 text-muted-foreground" data-testid="fleets-loading-state">
                 <Server className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-2">Loading fleets...</p>
               </div>
             ) : fleets.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="text-center py-12 text-muted-foreground" data-testid="fleets-empty-state">
                 <Server className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-2">No fleets yet</p>
                 <p className="text-sm">Create your first fleet to get started</p>
               </div>
             ) : filteredFleets.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="text-center py-12 text-muted-foreground" data-testid="fleets-filtered-empty-state">
                 No fleets match the selected filters.
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div className="overflow-x-auto" data-testid="fleets-table-container">
+                <table className="w-full text-sm" data-testid="fleets-table">
                   <thead>
                     <tr className="border-b border-border">
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Status</th>
@@ -290,6 +290,7 @@ export function FleetsPage() {
                     {filteredFleets.map((fleet) => (
                       <tr
                         key={fleet.fleet_id}
+                        data-testid={`fleet-row-${fleet.fleet_uuid || fleet.fleet_id}`}
                         className="border-b border-border last:border-0 hover:bg-muted cursor-pointer"
                         onClick={() => navigateToFleet(fleet.fleet_uuid || fleet.fleet_id)}
                       >

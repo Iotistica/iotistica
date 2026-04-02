@@ -22,6 +22,39 @@ test.describe('Dashboard Navigation', () => {
     }
   });
 
+  test('should capture the fleets page state', async ({ page }, testInfo) => {
+    await page.getByTestId('global-nav-fleets').click();
+    await expect(page.getByTestId('fleets-page')).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId('fleets-page-title')).toContainText('Fleet Management');
+
+    await page.waitForFunction(
+      () => {
+        return !document.querySelector('[data-testid="fleets-loading-state"]');
+      },
+      undefined,
+      { timeout: 30000 }
+    );
+
+    await page.waitForFunction(
+      () => {
+        return (
+          !!document.querySelector('[data-testid="fleets-table"]') ||
+          !!document.querySelector('[data-testid="fleets-empty-state"]') ||
+          !!document.querySelector('[data-testid="fleets-filtered-empty-state"]')
+        );
+      },
+      undefined,
+      { timeout: 30000 }
+    );
+
+    const screenshotPath = testInfo.outputPath('fleets-page-state.png');
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach('fleets-page-state', {
+      path: screenshotPath,
+      contentType: 'image/png',
+    });
+  });
+
   test('should show system metrics for the selected agent', async ({ page }) => {
     const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
     await selectAgentFromSidebar(page, expectedAgentUuid, expectedAgentName);
