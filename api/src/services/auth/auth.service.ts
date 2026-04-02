@@ -38,7 +38,7 @@ export interface RegisterInput {
  * Register a new user
  */
 export async function registerUser(input: RegisterInput): Promise<LoginResult> {
-  const { username, email, password, fullName, role = 'user' } = input;
+  const { username, email, password, fullName, role = 'viewer' } = input;
 
   // Validate input
   if (!username || username.length < 3) {

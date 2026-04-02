@@ -63,7 +63,7 @@ router.post('/register', registerRateLimit, async (req: Request, res: Response) 
       email,
       password,
       fullName,
-      role: 'user' // Default role for self-registration
+      role: 'viewer' // Default role for self-registration
     });
 
     res.status(201).json({
