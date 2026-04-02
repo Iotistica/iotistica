@@ -96,6 +96,10 @@ test.describe('Dashboard Navigation', () => {
   });
 
   test('should add a new MQTT device', async ({ page, request }, testInfo) => {
+    // This test includes a 60 s log-poll loop waiting for the agent reconciliation
+    // confirmation after deploy, so it needs a longer timeout than the default.
+    test.setTimeout(120_000);
+
     const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
     const E2E_API_URL = process.env.E2E_API_URL || 'http://localhost:4002';
 
