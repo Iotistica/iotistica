@@ -90,6 +90,15 @@ jobs:
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "Build for commit: $SHA ($SHORT_SHA)"
 
+      - name: Wait for Docker daemon
+        run: |
+          for i in $(seq 1 15); do
+            docker info > /dev/null 2>&1 && echo "Docker daemon ready" && break
+            echo "Waiting for Docker daemon... ($i/15)"
+            sleep 2
+          done
+          docker info
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
