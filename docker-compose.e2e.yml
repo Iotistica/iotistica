@@ -172,12 +172,6 @@ services:
     networks:
       - iotistica-net
 
-volumes:
-  postgres-data:
-    driver: local
-  redis-data:
-    driver: local
-
   # sim-mqtt-e2e is defined here for the image build only.
   # It is started manually via `docker run --network host` in the Playwright test
   # so it can reach the host systemd mosquitto on localhost:1883.
@@ -211,6 +205,12 @@ volumes:
       options:
         max-size: "5m"
         max-file: "2"
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
 
 networks:
   iotistica-net:
