@@ -158,7 +158,6 @@ test.describe('Dashboard Navigation', () => {
     // The agent builds the subscription as "<connection.topic>/#", so we reconstruct it here
     // to make the subsequent log assertion deterministic.
     let expectedMqttTopic: string | null = null;
-    let createdDeviceRecord: Record<string, any> | null = null;
     if (agentUuid) {
       const accessToken = await page.evaluate(() => localStorage.getItem('accessToken'));
       const sensorsResp = await request.get(
@@ -167,7 +166,7 @@ test.describe('Dashboard Navigation', () => {
       );
       expect(sensorsResp.ok()).toBeTruthy();
       const sensorsBody = await sensorsResp.json();
-      createdDeviceRecord = (sensorsBody.devices ?? sensorsBody.agents ?? []).find(
+      const createdDeviceRecord = (sensorsBody.devices ?? sensorsBody.agents ?? []).find(
         (d: { name: string }) => d.name === deviceName
       ) ?? null;
       if (createdDeviceRecord?.connection?.topic) {
@@ -256,76 +255,6 @@ test.describe('Dashboard Navigation', () => {
         `Timed out waiting for agent log: [INFO] [Adapters] Subscribed to MQTT topic: ${expectedMqttTopic} (QoS 1)`
       ).toBe(true);
     }
-
-    // Phase 3: Start the MQTT simulator with the new device's credentials and verify it publishes data.
-    // The simulator uses `--network host` so it can reach the systemd mosquitto on localhost:1883.
-    if (createdDeviceRecord?.uuid && createdDeviceRecord?.connection?.topic) {
-      const baseTopic = createdDeviceRecord.connection.topic as string;
-      const deviceUuid = createdDeviceRecord.uuid as string;
-
-      // Remove any leftover container from a previous aborted run
-      try { execSync('docker rm -f sim-mqtt-e2e', { stdio: 'pipe' }); } catch { /* not running */ }
-
-      // Inject credentials via -e NAME (Docker reads matching vars from the spawned process env)
-      const simEnv: NodeJS.ProcessEnv = {
-        ...process.env,
-        MQTT_BROKER_URL: 'mqtt://localhost:1883',
-        MQTT_USERNAME: `${deviceName}_user`,
-        MQTT_PASSWORD: 'E2eSecurePass1!',
-        MQTT_CLIENT_ID: `sim-${deviceName.slice(-20)}`,
-        MQTT_DEVICE_UUID: deviceUuid,
-        MQTT_TOPIC: baseTopic,
-        MQTT_METRIC_NAMES: 'temperature,humidity',
-        MQTT_QOS: '1',
-        PUBLISH_INTERVAL_MS: '1000',
-        LOG_PUBLISH_EVENTS: 'true',
-        LOG_PUBLISH_EVERY: '1',
-      };
-
-      execSync(
-        'docker run -d --network host --name sim-mqtt-e2e ' +
-        '-e MQTT_BROKER_URL -e MQTT_USERNAME -e MQTT_PASSWORD -e MQTT_CLIENT_ID ' +
-        '-e MQTT_DEVICE_UUID -e MQTT_TOPIC -e MQTT_METRIC_NAMES -e MQTT_QOS ' +
-        '-e PUBLISH_INTERVAL_MS -e LOG_PUBLISH_EVENTS -e LOG_PUBLISH_EVERY ' +
-        'iotistic/sim-mqtt:e2e',
-        { env: simEnv, stdio: 'pipe' }
-      );
-      console.log(`[e2e] sim-mqtt-e2e started (topic=${baseTopic}, uuid=${deviceUuid})`);
-
-      // Allow time for broker connect + first publish cycle before collecting logs
-      await page.waitForTimeout(8000);
-
-      // Collect simulator logs — docker logs merges container stdout+stderr
-      let simLogText = '';
-      try {
-        simLogText = execSync('docker logs --tail 100 sim-mqtt-e2e', {
-          encoding: 'utf8',
-          // Merge stderr into stdout so Python logging output (written to stderr) is captured
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
-      } catch (err: any) {
-        simLogText = err?.stdout ? String(err.stdout) : String(err);
-      }
-
-      console.log(`[e2e] sim-mqtt-e2e logs:\n${simLogText}`);
-      await testInfo.attach('sim-mqtt-e2e-logs.txt', {
-        body: simLogText || '(no output)',
-        contentType: 'text/plain',
-      });
-
-      expect(
-        simLogText.includes('Connected to MQTT broker'),
-        'MQTT simulator did not connect to broker — check sim-mqtt-e2e-logs.txt attachment'
-      ).toBe(true);
-
-      expect(
-        simLogText.includes('Publish confirmed') || simLogText.includes('Publish queued'),
-        'MQTT simulator did not publish any messages — check sim-mqtt-e2e-logs.txt attachment'
-      ).toBe(true);
-    }
-
-    // Cleanup: stop and remove the MQTT simulator container
-    try { execSync('docker rm -f sim-mqtt-e2e', { stdio: 'pipe' }); } catch { /* not running */ }
 
     // Cleanup: delete the test device from the API
     if (agentUuid) {

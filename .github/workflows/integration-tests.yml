@@ -436,6 +436,67 @@ jobs:
 
           echo "Mosquitto auth files verified successfully."
 
+      - name: Verify MQTT simulator publishes data
+        env:
+          ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
+          AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
+        run: |
+          # Look up the e2e MQTT device created by the Playwright test
+          SENSORS_RESP=$(curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/sensors?protocol=mqtt" \
+            -H "Authorization: Bearer $ACCESS_TOKEN")
+
+          DEVICE_NAME=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e_mqtt_"))] | first | .name // empty')
+          DEVICE_UUID=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e_mqtt_"))] | first | .uuid // empty')
+          BASE_TOPIC=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e_mqtt_"))] | first | .connection.topic // empty')
+
+          if [ -z "$DEVICE_NAME" ] || [ -z "$BASE_TOPIC" ]; then
+            echo "FAIL: Could not find e2e_mqtt_ device in agent sensors response"
+            echo "$SENSORS_RESP" | jq .
+            exit 1
+          fi
+
+          echo "Found device: $DEVICE_NAME (uuid=$DEVICE_UUID, topic=$BASE_TOPIC)"
+
+          # Clean up any leftover container from a previous run
+          docker rm -f sim-mqtt-e2e 2>/dev/null || true
+
+          docker run -d --network host --name sim-mqtt-e2e \
+            -e MQTT_BROKER_URL=mqtt://localhost:1883 \
+            -e MQTT_USERNAME="${DEVICE_NAME}_user" \
+            -e MQTT_PASSWORD="E2eSecurePass1!" \
+            -e MQTT_CLIENT_ID="sim-${DEVICE_NAME: -20}" \
+            -e MQTT_DEVICE_UUID="$DEVICE_UUID" \
+            -e MQTT_TOPIC="$BASE_TOPIC" \
+            -e MQTT_METRIC_NAMES="temperature,humidity" \
+            -e MQTT_QOS=1 \
+            -e PUBLISH_INTERVAL_MS=1000 \
+            -e LOG_PUBLISH_EVENTS=true \
+            -e LOG_PUBLISH_EVERY=1 \
+            iotistic/sim-mqtt:e2e
+
+          echo "Waiting 8 s for broker connect and first publish cycle..."
+          sleep 8
+
+          SIM_LOGS=$(docker logs --tail 100 sim-mqtt-e2e 2>&1)
+          echo "=== sim-mqtt-e2e logs ==="
+          echo "$SIM_LOGS"
+
+          docker rm -f sim-mqtt-e2e 2>/dev/null || true
+
+          if echo "$SIM_LOGS" | grep -q "Connected to MQTT broker"; then
+            echo "PASS: simulator connected to broker"
+          else
+            echo "FAIL: simulator did not connect to broker"
+            exit 1
+          fi
+
+          if echo "$SIM_LOGS" | grep -qE "Publish confirmed|Publish queued"; then
+            echo "PASS: simulator published messages"
+          else
+            echo "FAIL: simulator did not publish any messages"
+            exit 1
+          fi
+
       - name: Upload dashboard Playwright artifacts
         if: always()
         uses: actions/upload-artifact@v4
