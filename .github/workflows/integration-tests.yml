@@ -21,6 +21,7 @@ permissions:
 
 env:
   COMPOSE_FILE: docker-compose.e2e.yml
+  PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
 
 concurrency:
   group: integration-tests-${{ github.ref }}
@@ -50,11 +51,24 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('dashboard/package-lock.json') }}
+
       - name: Start database, cache, API, and dashboard
         run: docker compose -f "$COMPOSE_FILE" up -d --build postgres redis api dashboard
 
-      - name: Wait for backend and dashboard readiness
+      - name: Install dashboard test dependencies and wait for backend readiness
         run: |
+          (
+            cd dashboard
+            npm ci
+            npx playwright install --with-deps chromium
+          ) &
+          PLAYWRIGHT_SETUP_PID=$!
+
           echo "Waiting for PostgreSQL..."
           timeout 90 bash -c '
             until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U postgres > /dev/null 2>&1; do
@@ -90,11 +104,7 @@ jobs:
             done
           '
 
-      - name: Install dashboard Playwright dependencies
-        working-directory: dashboard
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+          wait "$PLAYWRIGHT_SETUP_PID"
 
       - name: Seed local dashboard test user
         id: dashboard_auth
