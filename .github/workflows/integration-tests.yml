@@ -43,10 +43,10 @@ jobs:
           IOTISTIC_LICENSE_KEY="${{ secrets.IOTISTIC_LICENSE_KEY }}" \
           .github/scripts/setup-env.sh
 
-      - name: Start database, cache, and API
-        run: docker compose -f "$COMPOSE_FILE" up -d --build postgres redis api
+      - name: Start database, cache, API, and dashboard
+        run: docker compose -f "$COMPOSE_FILE" up -d --build postgres redis api dashboard
 
-      - name: Wait for backend readiness
+      - name: Wait for backend and dashboard readiness
         run: |
           echo "Waiting for PostgreSQL..."
           timeout 90 bash -c '
@@ -65,6 +65,20 @@ jobs:
           echo "Waiting for API..."
           timeout 180 bash -c '
             until curl -fsS http://localhost:4002/health > /dev/null; do
+              sleep 3
+            done
+          '
+
+          echo "Waiting for dashboard health endpoint..."
+          timeout 180 bash -c '
+            until curl -fsS http://localhost:3000/health > /dev/null; do
+              sleep 3
+            done
+          '
+
+          echo "Waiting for dashboard index page..."
+          timeout 180 bash -c '
+            until curl -fsS http://localhost:3000 | grep -q "Iotistica - Your Edge Management Platform"; do
               sleep 3
             done
           '
@@ -242,6 +256,9 @@ jobs:
 
           echo "=== API logs ==="
           docker compose -f "$COMPOSE_FILE" logs api --tail=200 || true
+
+          echo "=== Dashboard logs ==="
+          docker compose -f "$COMPOSE_FILE" logs dashboard --tail=200 || true
 
           echo "=== Cloud Mosquitto logs ==="
           docker compose -f "$COMPOSE_FILE" logs mosquitto --tail=200 || true
