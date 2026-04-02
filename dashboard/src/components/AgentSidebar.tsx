@@ -3,7 +3,7 @@ import { getDeviceTags, invalidateDeviceTagsCache } from "@/services/deviceTags"
 import { buildApiUrl } from "@/config/api";
 import { useFleet } from "@/contexts/FleetContext";
 import { useRouting } from "@/hooks/useRouting";
-import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, ChevronRight, Container, Layers } from "lucide-react";
+import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, ChevronRight, Layers } from "lucide-react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -28,7 +28,7 @@ export interface Device {
   id: string;
   deviceUuid: string;
   name: string;
-  type: "desktop" | "laptop" | "mobile" | "server" | "gateway" | "edge-device" | "iot-hub" | "plc" | "controller" | "sensor-node" | "standalone" | "virtual";
+  type: string;
   status: "online" | "offline" | "warning" | "pending";
   ipAddress: string;
   macAddress?: string;
@@ -62,7 +62,7 @@ const deviceIcons = {
   controller: Server,
   "sensor-node": Smartphone,
   standalone: Monitor,
-  virtual: Container, // Containerized K8s pod
+  virtual: Server,
 };
 
 const statusColors = {
@@ -533,7 +533,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 space-y-3">
           {filteredDevices.map((device) => {
-            const Icon = deviceIcons[device.type];
+            const Icon = deviceIcons[device.type as keyof typeof deviceIcons] || Server;
             const isSelected = device.id === selectedDeviceId;
             
             return (

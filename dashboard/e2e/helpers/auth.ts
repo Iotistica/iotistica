@@ -11,6 +11,53 @@ const DASHBOARD_STATE_KEYS_TO_CLEAR = [
 
 const E2E_API_URL = process.env.E2E_API_URL || 'http://localhost:4002';
 
+function getExpectedUserLabels(session?: { username?: string; user?: any }) {
+  const labels = [
+    session?.user?.name,
+    session?.user?.email,
+    session?.username,
+  ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+  return Array.from(new Set(labels));
+}
+
+async function waitForAuthenticatedHeader(page: Page, session?: { username?: string; user?: any }, timeoutMs = 30000) {
+  const expectedLabels = getExpectedUserLabels(session);
+
+  await page.waitForFunction(
+    ({ labels }) => {
+      const header = document.querySelector('header');
+      const appShell = document.querySelector('[data-testid="dashboard-app"]');
+      const loginForm = document.querySelector('[data-testid="login-form"]');
+
+      if (!header || !appShell || loginForm) {
+        return false;
+      }
+
+      const headerText = header.textContent || '';
+      if (labels.length === 0) {
+        return headerText.includes('Iotistica');
+      }
+
+      return labels.some((label) => headerText.includes(label));
+    },
+    { labels: expectedLabels },
+    { timeout: timeoutMs }
+  );
+}
+
+async function waitForDashboardShell(page: Page, timeoutMs = 30000) {
+  await page.waitForFunction(
+    () => {
+      return !!document.querySelector('[data-testid="dashboard-app"]') && !document.querySelector('[data-testid="login-form"]');
+    },
+    undefined,
+    { timeout: timeoutMs }
+  );
+
+  await expect(page.getByTestId('dashboard-app')).toBeVisible({ timeout: timeoutMs });
+}
+
 async function primeDashboardState(page: Page, session?: { accessToken?: string; refreshToken?: string; user?: unknown }) {
   await page.addInitScript(
     ({ keysToClear, initAccessToken, initRefreshToken, initUser }) => {
@@ -40,7 +87,7 @@ async function primeDashboardState(page: Page, session?: { accessToken?: string;
 }
 
 async function openAgentHome(page: Page) {
-  await expect(page.getByTestId('dashboard-app')).toBeVisible({ timeout: 30000 });
+  await waitForDashboardShell(page);
   await expect(page.getByTestId('global-nav-home')).toBeVisible();
 
   await page.waitForFunction(
@@ -197,6 +244,7 @@ export async function injectAuthenticatedSession(page: Page, accessToken: string
   await primeDashboardState(page, { accessToken, refreshToken, user });
 
   await page.goto('/');
+  await waitForAuthenticatedHeader(page, { user });
   await openAgentHome(page);
 }
 
@@ -205,6 +253,7 @@ export async function loginWithCredentials(page: Page, username: string, passwor
   await page.goto('/');
 
   if (await page.getByTestId('dashboard-app').isVisible().catch(() => false)) {
+    await waitForAuthenticatedHeader(page, { username });
     await openAgentHome(page);
     return;
   }
@@ -214,6 +263,7 @@ export async function loginWithCredentials(page: Page, username: string, passwor
   await page.getByTestId('login-password').fill(password);
   await page.getByTestId('login-submit').click();
 
+  await waitForAuthenticatedHeader(page, { username });
   await openAgentHome(page);
 }
 
