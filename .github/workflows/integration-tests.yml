@@ -107,6 +107,9 @@ jobs:
             done
           '
 
+          echo "=== Dashboard runtime config.js ==="
+          curl -fsS http://localhost:3000/config.js
+
           wait "$PLAYWRIGHT_SETUP_PID"
 
       - name: Seed local dashboard test user

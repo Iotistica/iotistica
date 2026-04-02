@@ -156,6 +156,8 @@ services:
     pull_policy: always
     container_name: iotistic-dashboard-e2e
     restart: unless-stopped
+    volumes:
+      - ./dashboard/e2e/runtime-config.e2e.js:/usr/share/nginx/html/config.js:ro
     ports:
       - "${DASHBOARD_PORT_EXT:-3000}:80"
     healthcheck:

@@ -1,0 +1,11 @@
+window.env = {
+  VITE_API_URL: 'http://localhost:4002',
+  VITE_AUTH0_DOMAIN: '__VITE_AUTH0_DOMAIN__',
+  VITE_AUTH0_CLIENT_ID: '__VITE_AUTH0_CLIENT_ID__',
+  VITE_AUTH0_AUDIENCE: '__VITE_AUTH0_AUDIENCE__',
+  VITE_AUTH0_CALLBACK_URL: 'http://localhost:3000/auth/callback',
+  VITE_AUTH0_SHOW_SOCIAL_LOGIN: '__VITE_AUTH0_SHOW_SOCIAL_LOGIN__',
+  VITE_PROVISIONING_API_URL: 'http://localhost:3100',
+  VITE_WEBSITE_URL: 'http://localhost:3000',
+  NODE_ENV: 'development'
+};
