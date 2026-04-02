@@ -191,6 +191,21 @@ test.describe('Dashboard Navigation', () => {
       const pollDeadline = Date.now() + 60_000;
 
       while (Date.now() < pollDeadline) {
+        // In CI the agent runs as a systemd service. Check the journal directly
+        // on every iteration to avoid waiting up to 30 s for the cloud log flush.
+        if (process.env.CI) {
+          try {
+            const journal = execSync(
+              'sudo journalctl -u iotistica-agent --no-pager --lines 1000 --since "10 minutes ago"',
+              { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+            );
+            if (subscribedPattern.test(journal)) {
+              subscriptionConfirmed = true;
+              break;
+            }
+          } catch { /* journalctl unavailable — fall through to cloud API check */ }
+        }
+
         const logsResp = await request.get(
           `${E2E_API_URL}/api/v1/agents/${agentUuid}/logs?limit=200&from=${encodeURIComponent(testStartIso)}`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
@@ -209,7 +224,7 @@ test.describe('Dashboard Navigation', () => {
         await page.waitForTimeout(2000);
       }
 
-      // Always attach the last batch of agent logs as a test artifact for debugging
+      // Always attach the last batch of cloud API logs as a test artifact for debugging
       if (lastFetchedLogs.length > 0) {
         const logText = lastFetchedLogs
           .map(e => `[${e.timestamp}] [${e.level?.toUpperCase() ?? 'INFO'}] [${e.service_name ?? 'agent'}] ${e.message}`)
@@ -220,7 +235,21 @@ test.describe('Dashboard Navigation', () => {
           contentType: 'text/plain',
         });
       } else {
-        console.log('[e2e] No agent logs returned from API for this time window');
+        console.log('[e2e] No agent logs returned from cloud API for this time window');
+      }
+
+      // On CI, also attach the recent journal tail so we can see the raw agent output
+      if (!subscriptionConfirmed && process.env.CI) {
+        try {
+          const journalDump = execSync(
+            'sudo journalctl -u iotistica-agent --no-pager --lines 200 --since "10 minutes ago"',
+            { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+          );
+          await testInfo.attach('agent-journal-tail.txt', {
+            body: journalDump,
+            contentType: 'text/plain',
+          });
+        } catch { /* journalctl unavailable */ }
       }
 
       expect(subscriptionConfirmed,
