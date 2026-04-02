@@ -139,14 +139,8 @@ test.describe('Dashboard Navigation', () => {
     const deviceRow = page.locator('[data-testid^="device-row-"]', { hasText: deviceName });
     await expect(deviceRow).toBeVisible({ timeout: 15000 });
 
-    // Persist to the database by clicking Save Draft
-    await expect(page.getByTestId('save-draft-button')).toBeVisible({ timeout: 10000 });
-    await page.getByTestId('save-draft-button').click();
-
-    // Wait for the draft to finish saving (button disappears once changes are cleared)
-    await expect(page.getByTestId('save-draft-button')).not.toBeVisible({ timeout: 15000 });
-
-    // Deploy to the agent — button becomes enabled once needsDeployment is true
+    // Deploy — handleDeploy auto-saves the draft first when there are unsaved changes,
+    // then dispatches to the agent in one step.
     await expect(page.getByTestId('deploy-button')).toBeEnabled({ timeout: 10000 });
     await page.getByTestId('deploy-button').click();
 
