@@ -47,8 +47,8 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-cyan-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 p-4">
-      <Card className="w-full max-w-md border-slate-200 shadow-xl">
+    <div data-testid="login-page" className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-cyan-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 p-4">
+      <Card data-testid="login-card" className="w-full max-w-md border-slate-200 shadow-xl">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold text-center">Sign in to Iotistica</CardTitle>
           <CardDescription className="text-center">
@@ -57,17 +57,18 @@ export function LoginPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
-            <Alert variant="destructive">
+            <Alert variant="destructive" data-testid="login-error">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
-          <form className="space-y-4" onSubmit={handleCredentialsLogin}>
+          <form className="space-y-4" onSubmit={handleCredentialsLogin} data-testid="login-form">
             <div className="space-y-2">
               <Label htmlFor="username">Email</Label>
               <Input
                 id="username"
+                data-testid="login-email"
                 type="email"
                 autoComplete="email"
                 placeholder="you@company.com"
@@ -81,6 +82,7 @@ export function LoginPage() {
               <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
+                data-testid="login-password"
                 type="password"
                 autoComplete="current-password"
                 placeholder="Enter your password"
@@ -90,7 +92,7 @@ export function LoginPage() {
               />
             </div>
 
-            <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={isSubmitting}>
+            <Button type="submit" data-testid="login-submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={isSubmitting}>
               {isSubmitting ? 'Signing in...' : 'Sign in'}
             </Button>
           </form>
@@ -104,7 +106,7 @@ export function LoginPage() {
             </div>
           </div>
 
-          <Button type="button" onClick={handleGoogleLogin} className="w-full bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 disabled:opacity-50" disabled={isSubmitting}>
+          <Button type="button" data-testid="login-google" onClick={handleGoogleLogin} className="w-full bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 disabled:opacity-50" disabled={isSubmitting}>
             <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
               <path
                 fill="currentColor"

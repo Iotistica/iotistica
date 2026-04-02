@@ -400,13 +400,14 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
 
   return (
     <TooltipProvider>
-      <div className="w-full lg:w-80 lg:border-r border-border bg-card h-full flex flex-col overflow-hidden">
+      <div data-testid="agent-sidebar" className="w-full lg:w-80 lg:border-r border-border bg-card h-full flex flex-col overflow-hidden">
       {/* Fleet Filter */}
       {fleets.length > 0 && (
         <div className="px-4 py-3 border-b border-border flex-shrink-0">
           <div className="relative">
             <Layers className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <select
+              data-testid="agent-fleet-filter"
               value={selectedFleetId}
               onChange={(e) => {
                 const newFleetId = e.target.value;
@@ -444,6 +445,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
+            data-testid="agent-search"
             type="search"
             placeholder="Search agents..."
             value={searchQuery}
@@ -537,12 +539,14 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
             return (
               <Card
                 key={device.id}
+                data-testid={`agent-row-${device.deviceUuid}`}
                 className={cn(
                   "p-4 transition-all hover:shadow-md relative group",
                   isSelected ? "ring-2 ring-blue-500 shadow-md" : ""
                 )}
               >
                 <div 
+                  data-testid={isSelected ? `agent-row-selected-${device.deviceUuid}` : undefined}
                   className="flex items-start gap-3 cursor-pointer"
                   onClick={() => onSelectDevice(device.id)}
                 >
@@ -562,7 +566,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <h3 className="text-foreground truncate">
+                          <h3 data-testid={`agent-name-${device.deviceUuid}`} className="text-foreground truncate">
                             {device.name.length > 15 
                               ? `${device.name.substring(0, 15)}...` 
                               : device.name}
@@ -585,7 +589,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                           Pending
                         </Badge>
                       )}
-                      <span className="text-muted-foreground">{device.ipAddress}</span>
+                      <span data-testid={`agent-ip-${device.deviceUuid}`} className="text-muted-foreground">{device.ipAddress}</span>
                     </div>
 
                     <div className="space-y-1">

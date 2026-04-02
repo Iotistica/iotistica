@@ -659,16 +659,17 @@ export function SystemMetrics({
   const networkGapTimes = useMemo(() => networkChartData.filter(point => point.isGap).map(point => point.time), [networkChartData]);
 
   return (
-    <div className="flex-1 bg-background overflow-auto">
+    <div data-testid="system-metrics" className="flex-1 bg-background overflow-auto">
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
 
         {/* Quick Metrics */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div data-testid="system-metrics-cards" className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {metrics.map((metric, index) => (
             <MetricCard
               key={index}
               label={metric.label}
               value={metric.value}
+              testId={`metric-card-${metric.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
               icon={metric.icon}
               iconColor={metric.color as "blue" | "purple" | "green" | "orange"}
               trend={metric.trend}
@@ -681,7 +682,7 @@ export function SystemMetrics({
         {/* Main Cards Layout */}
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Telemetry / Top Processes Tabs Card */}
-          <Card className="p-4 md:p-6 min-w-0">
+          <Card data-testid="system-insights-card" className="p-4 md:p-6 min-w-0">
             <Tabs value={insightsTab} onValueChange={(value) => setInsightsTab(value as 'telemetry' | 'processes')} className="w-full min-w-0">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
@@ -690,6 +691,7 @@ export function SystemMetrics({
                 </div>
                 <TabsList className="bg-transparent rounded-none p-0 h-auto gap-0">
                   <TabsTrigger
+                    data-testid="system-insights-tab-telemetry"
                     value="telemetry"
                     className="rounded-none border-0 bg-transparent px-3 pb-2 text-sm shadow-none"
                     style={
@@ -713,6 +715,7 @@ export function SystemMetrics({
                     Telemetry
                   </TabsTrigger>
                   <TabsTrigger
+                    data-testid="system-insights-tab-processes"
                     value="processes"
                     className="rounded-none border-0 bg-transparent px-3 pb-2 text-sm shadow-none"
                     style={
@@ -738,7 +741,7 @@ export function SystemMetrics({
                 </TabsList>
               </div>
 
-              <TabsContent value="telemetry" className="mt-0 min-w-0 overflow-y-auto" style={{ height: '350px' }}>
+              <TabsContent value="telemetry" data-testid="system-insights-telemetry" className="mt-0 min-w-0 overflow-y-auto" style={{ height: '350px' }}>
                 <div className="mb-4 space-y-3">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -800,6 +803,7 @@ export function SystemMetrics({
 
                 {selectedMetric === 'cpu' && (
                   <>
+                    <div data-testid="metric-chart-cpu">
                     <ResponsiveContainer width="100%" height={250} key="cpu-chart">
                       <AreaChart data={cpuChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                         <defs>
@@ -850,11 +854,13 @@ export function SystemMetrics({
                         ))}
                       </AreaChart>
                     </ResponsiveContainer>
+                    </div>
                   </>
                 )}
 
                 {selectedMetric === 'memory' && (
                   <>
+                    <div data-testid="metric-chart-memory">
                     <ResponsiveContainer width="100%" height={250} key="memory-chart">
                       <AreaChart data={memoryChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                         <defs>
@@ -907,11 +913,13 @@ export function SystemMetrics({
                         ))}
                       </AreaChart>
                     </ResponsiveContainer>
+                    </div>
                   </>
                 )}
 
                 {selectedMetric === 'network' && (
                   <>
+                    <div data-testid="metric-chart-network">
                     <ResponsiveContainer width="100%" height={250} key="network-chart">
                       <LineChart data={networkChartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -959,11 +967,12 @@ export function SystemMetrics({
                         ))}
                       </LineChart>
                     </ResponsiveContainer>
+                    </div>
                   </>
                 )}
               </TabsContent>
 
-              <TabsContent value="processes" className="mt-0 min-w-0 overflow-hidden" style={{ height: '350px' }}>
+              <TabsContent value="processes" data-testid="system-insights-processes" className="mt-0 min-w-0 overflow-hidden" style={{ height: '350px' }}>
                 <div className="mb-4 flex justify-end">
                   <Button
                     variant="ghost"
@@ -986,7 +995,7 @@ export function SystemMetrics({
                 ) : processes.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">No process data available</div>
                 ) : (
-                  <div className="overflow-y-auto overflow-x-auto" style={{maxHeight: '300px'}}>
+                  <div data-testid="processes-table" className="overflow-y-auto overflow-x-auto" style={{maxHeight: '300px'}}>
                     <table className="w-full table-fixed">
                       <thead>
                         <tr className="border-b border-border">

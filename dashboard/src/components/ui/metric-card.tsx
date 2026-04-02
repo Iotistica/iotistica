@@ -5,6 +5,7 @@ interface MetricCardProps {
   label: string;
   value: string | number;
   subtitle?: string;
+  testId?: string;
   icon: LucideIcon;
   iconColor?: "blue" | "purple" | "green" | "orange" | "red" | "gray";
   trend?: "up" | "down" | "neutral";
@@ -25,6 +26,7 @@ export function MetricCard({
   label, 
   value, 
   subtitle, 
+  testId,
   icon: Icon, 
   iconColor = "blue",
   trend,
@@ -46,7 +48,7 @@ export function MetricCard({
   const TrendIcon = getTrendIcon();
 
   return (
-    <Card>
+    <Card data-testid={testId}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardDescription>{label}</CardDescription>

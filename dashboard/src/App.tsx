@@ -1195,7 +1195,7 @@ export default function App() {
 
   return (
 
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div data-testid="dashboard-app" className="flex flex-col h-screen overflow-hidden">
 
            {/* Header - Hidden in kiosk mode */}
       {!isKioskMode && (
@@ -1223,6 +1223,7 @@ export default function App() {
         <div className="bg-card border-b border-border px-6 py-2 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Button
+                data-testid="global-nav-home"
               variant={currentView === 'home' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleGlobalViewChange('home')}
@@ -1232,6 +1233,7 @@ export default function App() {
               Home
             </Button>
             <Button
+                data-testid="global-nav-fleets"
               variant={currentView === 'fleets' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleGlobalViewChange('fleets')}
@@ -1250,6 +1252,7 @@ export default function App() {
             </Button> */}
             <div className="flex items-center gap-2">
               <Button
+                data-testid="global-nav-dashboard"
                 variant={currentView === 'dashboard' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('dashboard')}
@@ -1259,6 +1262,7 @@ export default function App() {
                 Dashboards
               </Button>
               <Button
+                data-testid="global-nav-mqtt"
                 variant={currentView === 'mqtt' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('mqtt')}
@@ -1268,6 +1272,7 @@ export default function App() {
                 MQTT
               </Button>
               <Button
+                data-testid="global-nav-audit"
                 variant={currentView === 'audit' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('audit')}
@@ -1277,6 +1282,7 @@ export default function App() {
                 Audit & Activity
               </Button>
               <Button
+                data-testid="global-nav-security"
                 variant={currentView === 'security' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('security')}
@@ -1295,6 +1301,7 @@ export default function App() {
                 Node-RED
               </Button> */}
               <Button
+                data-testid="global-nav-monitoring"
                 variant={currentView === 'monitoring' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('monitoring')}
@@ -1389,7 +1396,7 @@ export default function App() {
                 <FleetsPage />
               )}
               {currentView === 'dashboard' && (
-                <div className="h-full overflow-hidden">
+                <div data-testid="global-dashboard-page" className="h-full overflow-hidden">
                   <GlobalDashboardPage 
                     devices={devices} 
                     onDeviceSelect={(device) => {
@@ -1418,14 +1425,14 @@ export default function App() {
               )}
             </>
           ) : isLoadingDevices ? (
-            <div className="flex items-center justify-center h-full">
+            <div data-testid="devices-loading" className="flex items-center justify-center h-full">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
                 <p className="text-gray-600">Loading devices...</p>
               </div>
             </div>
           ) : devices.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
+            <div data-testid="no-agents-state" className="flex items-center justify-center h-full">
               <div className="text-center max-w-md px-4">
                 <p className="text-xl font-semibold text-foreground mb-2">No Agents Found</p>
                 <p className="text-muted-foreground mb-4">Get started by adding your first agent.</p>
@@ -1536,7 +1543,7 @@ export default function App() {
               )}
 
               {/* Empty State Message */}
-              <div className="flex items-center justify-center h-full">
+              <div data-testid="no-selected-agent-state" className="flex items-center justify-center h-full">
                 <div className="text-center space-y-4 max-w-md">
                   <h2 className="text-2xl font-bold text-foreground">No Agents Yet</h2>
                   <div className="pt-4 space-y-2">
@@ -1585,6 +1592,7 @@ export default function App() {
             <div className="bg-card border-b border-border px-6 py-3 flex items-center justify-between gap-4">
             <div className="flex items-center gap-2 overflow-x-auto flex-1 pr-2">
             <Button
+                      data-testid="agent-view-metrics"
               variant={currentView === 'metrics' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('metrics')}
@@ -1594,6 +1602,7 @@ export default function App() {
               Overview
             </Button>
             <Button
+                      data-testid="agent-view-devices"
               variant={currentView === 'devices' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('devices')}
@@ -1619,6 +1628,7 @@ export default function App() {
               Jobs
             </Button> */}
             <Button
+                      data-testid="agent-view-applications"
               variant={currentView === 'applications' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('applications')}
@@ -1660,6 +1670,7 @@ export default function App() {
               Housekeeping
             </Button> */}
             <Button
+                      data-testid="agent-view-logs"
               variant={currentView === 'logs' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('logs')}
