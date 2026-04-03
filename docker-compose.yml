@@ -51,13 +51,13 @@ services:
         command: >
             redis-server
             --maxmemory 512mb
-            --maxmemory-policy allkeys-lru
-            --save 60 1000
-            --appendonly yes
+            --maxmemory-policy noeviction
+            --save ""
+            --appendonly no
+        mem_limit: 640m
+        mem_reservation: 512m
         ports:
             - "${REDIS_PORT_EXT:-6379}:6379"
-        volumes:
-            - iotistic-redis-data:/data
         healthcheck:
             test: ["CMD", "redis-cli", "ping"]
             interval: 10s
@@ -142,12 +142,16 @@ services:
             - REDIS_TLS_ENABLED=${REDIS_TLS_ENABLED}
             - REDIS_TLS_SERVERNAME=${REDIS_TLS_SERVERNAME}
             # Redis OOM Protection (Tier-1: Circuit breaker + disk spool)
-            - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-false}
+            - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-true}
             - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
             - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-1000}
             # Redis OOM Protection (Tier-2: Stream MAXLEN limits)
+            # Sizing guide: INGESTION = (peak_msg_per_sec × target_buffer_seconds)
+            #   e.g. 100 devices × 10 readings/s = 1000 msg/s → 10000 = ~10s buffer
+            #   Increase if workers are slower than producers (check workerLag in /admin/sensor-queue/stats)
             - REDIS_INGESTION_STREAM_MAXLEN=${REDIS_INGESTION_STREAM_MAXLEN:-10000}
             - REDIS_PROCESSING_STREAM_MAXLEN=${REDIS_PROCESSING_STREAM_MAXLEN:-100000}
+            # DLQ: keep last N failed messages for inspection; flush periodically
             - REDIS_DLQ_MAXLEN=${REDIS_DLQ_MAXLEN:-1000}
             - MODBUS_TCP_HOST=${MODBUS_TCP_HOST:-iotistic-modbus-sim}
             - TAILSCALE_ENABLED=false
@@ -435,7 +439,7 @@ services:
             - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-1
             - MQTT_DEVICE_UUID=a6c87211-7e40-4229-8632-d238daf58296
-            - MQTT_TOPIC=i/c-3dOFzo/a/OC2tnTxCTE2sipDGzZXrgQ/d/XCkEKVLsQjqOxsUHvTxx_Q
+            - MQTT_TOPIC=i/c-3dOFzo/a/rxiDMrFMTAS3z05HDtRf9A/d/UyFldTspTQ6K5ttR9I3eLQ
             - MQTT_METRIC_NAMES=temperature,humidity
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}

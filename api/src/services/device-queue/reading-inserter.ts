@@ -1,13 +1,13 @@
 import { logger } from '../../utils/logger';
 import { ReadingsService, ReadingInsert } from '../../services/readings.service';
 import { query } from '../../db/connection';
-import { SensorDataEntry } from './types';
+import { DeviceDataEntry } from './types';
 import { detectProtocol, expandMessages } from './readings-normalizer';
 
 export class ReadingInserter {
   private readonly readingsService = new ReadingsService();
 
-  async insertBatch(data: SensorDataEntry[]): Promise<void> {
+  async insertBatch(data: DeviceDataEntry[]): Promise<void> {
     const chunkSize = 500;
     const ingestedAt = new Date();
 

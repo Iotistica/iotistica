@@ -33,7 +33,6 @@ interface RedisClientOptions {
   enableOfflineQueue?: boolean;
   retryStrategy?: (times: number) => number | null;
   reconnectOnError?: (err: Error) => boolean;
-  maxReconnectAttempts?: number;
 }
 
 class RedisClientFactory {
@@ -118,14 +117,11 @@ class RedisClientFactory {
       maxLoadingRetryTime: 30000, // 30s to retry LOADING errors during Azure failover
       
       retryStrategy: options.retryStrategy || ((times: number) => {
-        const maxAttempts = options.maxReconnectAttempts || 20; // Azure failover needs more attempts
-        if (times > maxAttempts) {
-          logger.error(`Redis ${clientType} max reconnection attempts (${maxAttempts}) reached`);
-          return null;
-        }
-        // Linear backoff capped at 5s: 1s, 2s, 3s, 4s, 5s, 5s...
+        // Keep reconnecting indefinitely. A finite cap caused permanent connection death
+        // on long outages, blocking spool replay even after Redis recovered.
+        // Linear backoff capped at 5s: 1s, 2s, 3s, 4s, 5s, 5s, 5s...
         const delay = Math.min(times * 1000, 5000);
-        logger.info(`⏳ Redis ${clientType} reconnecting in ${delay}ms (attempt ${times}/${maxAttempts})`);
+        logger.info(`⏳ Redis ${clientType} reconnecting in ${delay}ms (attempt ${times})`);
         return delay;
       }),
       
@@ -147,12 +143,7 @@ class RedisClientFactory {
           // Prevent DNS lookup issues with Azure internal addresses during MOVED/ASK redirects
           dnsLookup: (address: string, callback: any) => callback(null, address),
           clusterRetryStrategy: (times: number) => {
-            const maxAttempts = options.maxReconnectAttempts || 20; // Azure cluster failover
-            if (times > maxAttempts) {
-              logger.error(`Redis cluster ${clientType} max reconnection attempts (${maxAttempts}) reached`);
-              return null;
-            }
-            // Linear backoff capped at 5s: 1s, 2s, 3s, 4s, 5s, 5s...
+            // Keep reconnecting indefinitely (same rationale as standalone retryStrategy above).
             return Math.min(times * 1000, 5000);
           }
         }
@@ -238,10 +229,15 @@ class RedisClientFactory {
       this.ingestionClient = this.createClient({
         clientType: 'ingestion',
         maxRetriesPerRequest: 3, // Fail fast on overload
-        enableOfflineQueue: false, // Fail immediately when Redis unavailable
+        enableOfflineQueue: false, // Fail immediately when Redis unavailable — this is the
+        // fail-fast behavior we want. Do NOT limit retryStrategy: the retry count controls
+        // how long the connection-level reconnection loop runs, which is orthogonal to
+        // per-command fail-fast. A finite retry limit caused the client to enter 'end'
+        // state after ~43s, permanently blocking spool replay even after Redis recovered.
         retryStrategy: (times: number) => {
-          if (times > 10) return null;
-          return Math.min(times * 100, 2000);
+          // Keep reconnecting indefinitely. enableOfflineQueue: false already drops
+          // in-flight writes immediately when disconnected — that is the fail-fast guarantee.
+          return Math.min(times * 100, 2000); // 100ms → 2s, no upper bound on attempts
         },
       });
     }
@@ -260,8 +256,8 @@ class RedisClientFactory {
         maxRetriesPerRequest: 10,
         enableOfflineQueue: true, // OK for workers to queue reads
         retryStrategy: (times: number) => {
-          if (times > 20) return null;
-          return Math.min(times * 200, 3000);
+          // Keep reconnecting indefinitely — consumer workers must resume after Redis recovers.
+          return Math.min(times * 200, 3000); // 200ms → 3s, no upper bound on attempts
         },
       });
     }

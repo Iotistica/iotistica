@@ -204,7 +204,7 @@ function createConfigFromEnv(): MqttBrokerConfig {
     client_cert: process.env.MQTT_BROKER_CLIENT_CERT || null,
     verify_certificate: process.env.MQTT_BROKER_VERIFY_CERT !== 'false',
     client_id_prefix: process.env.MQTT_CLIENT_ID_PREFIX || 'Iotistic',
-    keep_alive: parseInt(process.env.MQTT_KEEP_ALIVE || '60', 10),
+    keep_alive: parseInt(process.env.MQTT_KEEP_ALIVE || '120', 10),
     clean_session: process.env.MQTT_CLEAN_SESSION !== 'false',
     reconnect_period: parseInt(process.env.MQTT_RECONNECT_PERIOD || '1000', 10),
     connect_timeout: parseInt(process.env.MQTT_CONNECT_TIMEOUT || '30000', 10),
@@ -241,7 +241,7 @@ export async function getDefaultBrokerConfig(): Promise<MqttBrokerConfig | null>
           client_cert: process.env.MQTT_BROKER_CLIENT_CERT || null,
           verify_certificate: process.env.MQTT_TLS_REJECT_UNAUTHORIZED !== 'false',
           client_id_prefix: process.env.MQTT_CLIENT_ID_PREFIX || 'Iotistic',
-          keep_alive: parseInt(process.env.MQTT_KEEP_ALIVE || '60', 10),
+          keep_alive: parseInt(process.env.MQTT_KEEP_ALIVE || '120', 10),
           clean_session: process.env.MQTT_CLEAN_SESSION !== 'false',
           reconnect_period: parseInt(process.env.MQTT_RECONNECT_PERIOD || '1000', 10),
           connect_timeout: parseInt(process.env.MQTT_CONNECT_TIMEOUT || '30000', 10),
@@ -318,7 +318,7 @@ export function formatBrokerConfigForClient(config: any, credentials?: { usernam
   const clientCert = config.client_cert ?? config.clientCert ?? null;
   const verifyCertificate = config.verify_certificate ?? config.verifyCertificate ?? true;
   const clientIdPrefix = config.client_id_prefix ?? config.clientIdPrefix ?? 'Iotistic';
-  const keepAlive = config.keep_alive ?? config.keepAlive ?? 60;
+  const keepAlive = config.keep_alive ?? config.keepAlive ?? 120;
   const cleanSession = config.clean_session ?? config.cleanSession ?? true;
   const reconnectPeriod = config.reconnect_period ?? config.reconnectPeriod ?? 1000;
   const connectTimeout = config.connect_timeout ?? config.connectTimeout ?? 30000;

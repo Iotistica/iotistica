@@ -1,4 +1,7 @@
-export interface SensorDataEntry {
+/** Where a batch of sensor data ultimately landed after an add() call. */
+export type AddOutcome = 'redis' | 'disk' | 'dropped';
+
+export interface DeviceDataEntry {
   deviceUuid: string;
   sensorName: string;
   timestamp: string;
@@ -12,7 +15,7 @@ export interface DeviceIdentity {
   deviceName?: string;
 }
 
-export interface CompressedSensorEntry {
+export interface CompressedDeviceEntry {
   deviceUuid: string;
   sensorName: string;
   batchId: string;
@@ -21,8 +24,8 @@ export interface CompressedSensorEntry {
   contentType: string;
 }
 
-export interface RedisSensorEntry {
+export interface RedisDeviceEntry {
   id: string;
-  data: SensorDataEntry | CompressedSensorEntry;
+  data: DeviceDataEntry | CompressedDeviceEntry;
   isCompressed?: boolean;
 }

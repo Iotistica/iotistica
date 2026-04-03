@@ -1,13 +1,16 @@
 import type Redis from 'ioredis';
 import { logger } from '../../utils/logger';
-import { RedisSensorEntry } from './types';
+import { RedisDeviceEntry } from './types';
 
 export const FAILURE_TRACKING_KEY = 'sensor:failed:attempts';
 
 const maxlenArgs = (len: number): ['MAXLEN', '~', number] => ['MAXLEN', '~', len];
 
 export async function incrementFailureCount(redis: Redis, messageId: string): Promise<number> {
-  return redis.hincrby(FAILURE_TRACKING_KEY, messageId, 1);
+  const count = await redis.hincrby(FAILURE_TRACKING_KEY, messageId, 1);
+  // Refresh a 24h TTL each time so the hash expires naturally even if the pruner crashes
+  await redis.expire(FAILURE_TRACKING_KEY, 24 * 60 * 60);
+  return count;
 }
 
 export async function getFailureCount(redis: Redis, messageId: string): Promise<number> {
@@ -21,7 +24,7 @@ export async function moveToDLQ(
   consumerGroup: string,
   dlqStreamKey: string,
   maxDlqLength: number,
-  entry: RedisSensorEntry,
+  entry: RedisDeviceEntry,
   error: string,
   attempts: number,
 ): Promise<void> {

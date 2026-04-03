@@ -69,7 +69,13 @@ COPY --chown=appuser:appgroup package*.json ./
 # Create writable dirs
 RUN mkdir -p /app/logs && \
     chown appuser:appgroup /app/logs && \
-    chown appuser:appgroup /app
+    chown appuser:appgroup /app && \
+    # Create spool directory for circuit-breaker disk fallback.
+    # Must be created here (owned by appuser) so the Docker named volume
+    # inherits correct ownership on first mount. Without this the volume is
+    # created as root and appuser gets EACCES at runtime.
+    mkdir -p /var/lib/iotistic/spool && \
+    chown -R appuser:appgroup /var/lib/iotistic
 
 
 # Switch to non-root user

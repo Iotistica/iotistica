@@ -1,11 +1,11 @@
 import { logger } from '../../utils/logger';
 import { ReadingInsert } from '../../services/readings.service';
-import { SensorDataEntry, DeviceIdentity } from './types';
+import { DeviceDataEntry, DeviceIdentity } from './types';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const shortId = (id?: string): string | undefined => id?.substring(0, 8);
 
-export function detectProtocol(entry: SensorDataEntry): string {
+export function detectProtocol(entry: DeviceDataEntry): string {
   if (entry.metadata?.protocol) return entry.metadata.protocol;
 
   const name = entry.sensorName.toLowerCase();
@@ -80,7 +80,7 @@ export function extractDeviceIdentity(reading: any): DeviceIdentity {
 
 export function buildExtraPayload(
   payload: any,
-  entry: SensorDataEntry,
+  entry: DeviceDataEntry,
   ingestedAt: Date,
   identityContext?: Record<string, any>,
 ): Record<string, any> {
@@ -111,7 +111,7 @@ function extractAnomalyFields(reading: any): Partial<ReadingInsert> {
 
 export function normalizeReading(
   reading: any,
-  entry: SensorDataEntry,
+  entry: DeviceDataEntry,
   protocol: string,
   ingestedAt: Date,
   messageTimestamp?: string,
@@ -142,7 +142,7 @@ export function normalizeReading(
 }
 
 // Format 1: {messages: [{readings: [...]}]}  (OPC UA/Modbus compacted)
-function expandFormat1(entry: SensorDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
+function expandFormat1(entry: DeviceDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
   const readings: ReadingInsert[] = [];
   entry.data.messages.forEach((message: any) => {
     if (!message.readings || !Array.isArray(message.readings)) return;
@@ -160,7 +160,7 @@ function expandFormat1(entry: SensorDataEntry, protocol: string, ingestedAt: Dat
 }
 
 // Format 2: {readings: [...]}  (Modbus/OPC UA batch)
-function expandFormat2(entry: SensorDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
+function expandFormat2(entry: DeviceDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
   const readings: ReadingInsert[] = [];
   entry.data.readings.forEach((reading: any) => {
     const normalized = normalizeReading(reading, entry, protocol, ingestedAt, undefined, entry.data);
@@ -170,7 +170,7 @@ function expandFormat2(entry: SensorDataEntry, protocol: string, ingestedAt: Dat
 }
 
 // Format 3: single reading (legacy)
-function expandFormat3(entry: SensorDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
+function expandFormat3(entry: DeviceDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
   if (entry.data && typeof entry.data === 'object' && !Array.isArray(entry.data)) {
     const normalized = normalizeReading(entry.data, entry, protocol, ingestedAt, undefined, entry.data);
     if (normalized) {
@@ -199,7 +199,7 @@ function expandFormat3(entry: SensorDataEntry, protocol: string, ingestedAt: Dat
   }];
 }
 
-export function expandMessages(entry: SensorDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
+export function expandMessages(entry: DeviceDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
   if (entry.data?.messages && Array.isArray(entry.data.messages)) return expandFormat1(entry, protocol, ingestedAt);
   if (entry.data && Array.isArray(entry.data.readings)) return expandFormat2(entry, protocol, ingestedAt);
   return expandFormat3(entry, protocol, ingestedAt);

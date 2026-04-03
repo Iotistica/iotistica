@@ -325,9 +325,6 @@ export class CloudDictionaryManager {
     }
   }
 
-  /**
-   * Retrieve dictionary (Redis first, PostgreSQL fallback)
-   */
   async getDictionary(deviceUuid: string): Promise<Record<number, string> | null> {
     try {
       // Try Redis first (fast path)

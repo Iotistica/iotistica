@@ -4,5 +4,5 @@
 user admin
 topic readwrite #
 
-user sdfs
-topic write i/c-3dOFzo/a/bEkkpt1pS5-l65nAxIp9UA/d/TBs8mYTARBqrpjomUFku7Q/#
+user mqtt-user-1
+topic write i/c-3dOFzo/a/rxiDMrFMTAS3z05HDtRf9A/d/UyFldTspTQ6K5ttR9I3eLQ/#

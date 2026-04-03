@@ -241,7 +241,7 @@ export class MqttManager extends EventEmitter {
       username: config.username || '',
       password: config.password || '',
       reconnectPeriod: 0, // Disable built-in reconnect, use manual exponential backoff
-      keepalive: config.keepalive || 60,
+      keepalive: config.keepalive || 120,
       clean: config.clean !== false,
       qos: config.qos || 1
     };

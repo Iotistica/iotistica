@@ -30,7 +30,11 @@ export async function handleDeviceData(data: SensorData): Promise<void> {
       const batch = data.data as any;
       const messages = batch.messages as (string | object)[];
       
-      logger.debug(`Processing endpoints data batch: ${messages.length} messages from ${data.deviceUuid}/${data.sensorName}`);
+      logger.info('Handling endpoints batch', {
+        deviceUuid: data.deviceUuid.substring(0, 8),
+        sensorName: data.sensorName,
+        count: messages.length,
+      });
       
       // Transform all messages to SensorDataEntry format
       // Handle both JSON strings (legacy) and objects (current format)
@@ -54,20 +58,21 @@ export async function handleDeviceData(data: SensorData): Promise<void> {
         .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       
       // Queue raw parsed data (NO compression - worker handles it if needed)
-      await redisSensorQueue.add(readings);
+      const outcome = await redisSensorQueue.add(readings);
       
       const duration = Date.now() - startTime;
-      logger.info('Queued endpoints batch to Redis Stream', {
+      logger.info('Processed metrics batch', {
         deviceUuid: data.deviceUuid.substring(0, 8),
         sensorName: data.sensorName,
         received: messages.length,
-        queued: readings.length,
+        submitted: readings.length,
         dropped: messages.length - readings.length,
+        destination: outcome,
         durationMs: duration
       });
     } else {
       // Single message
-      await redisSensorQueue.add([{
+      const outcome = await redisSensorQueue.add([{
         deviceUuid: data.deviceUuid,
         sensorName: data.sensorName,
         data: data.data,
@@ -76,9 +81,10 @@ export async function handleDeviceData(data: SensorData): Promise<void> {
       }]);
       
       const duration = Date.now() - startTime;
-      logger.debug('Queued endpoints data to Redis Stream', {
+      logger.debug('Processed endpoints data', {
         deviceUuid: data.deviceUuid.substring(0, 8),
         sensorName: data.sensorName,
+        destination: outcome,
         durationMs: duration
       });
     }

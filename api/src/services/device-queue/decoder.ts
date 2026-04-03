@@ -1,7 +1,7 @@
 import { promisify } from 'util';
 import { brotliDecompress, gunzip, inflate } from 'zlib';
 import { logger } from '../../utils/logger';
-import { SensorDataEntry } from './types';
+import { DeviceDataEntry } from './types';
 
 const brotliDecompressAsync = promisify(brotliDecompress);
 const gunzipAsync = promisify(gunzip);
@@ -19,7 +19,7 @@ export async function decompressAndParseSensors(
   contentEncoding: string,
   deviceUuid: string,
   sensorName: string,
-): Promise<SensorDataEntry[]> {
+): Promise<DeviceDataEntry[]> {
   const startTime = Date.now();
 
   try {
@@ -59,7 +59,7 @@ export async function decompressAndParseSensors(
       throw parseErr;
     }
 
-    const entries: SensorDataEntry[] = readings.map((reading: any) => ({
+    const entries: DeviceDataEntry[] = readings.map((reading: any) => ({
       deviceUuid: reading.deviceUuid || deviceUuid,
       sensorName: reading.sensorName || sensorName,
       timestamp: reading.timestamp || new Date().toISOString(),

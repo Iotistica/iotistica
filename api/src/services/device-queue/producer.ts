@@ -1,6 +1,6 @@
 import type Redis from 'ioredis';
 import { logger } from '../../utils/logger';
-import { SensorDataEntry, CompressedSensorEntry } from './types';
+import { DeviceDataEntry, CompressedDeviceEntry, AddOutcome } from './types';
 import { metrics } from './metrics';
 import { circuitBreaker } from './circuit-breaker';
 import { DiskSpool } from './disk-spool';
@@ -23,19 +23,36 @@ export class RedisQueueProducer {
     return this.redis.status === 'ready' || this.redis.status === 'connect';
   }
 
+  isClientReady(): boolean {
+    return this.isRedisReady();
+  }
+
   private maxlenArgs(len: number): ['MAXLEN', '~', number] {
     return ['MAXLEN', '~', len];
   }
 
-  private async fallbackToDiskOrDrop(sensorData: SensorDataEntry[], reason: string): Promise<void> {
+  private async fallbackToDiskOrDrop(sensorData: DeviceDataEntry[], reason: string): Promise<AddOutcome> {
     if (this.diskSpool.isEnabled()) {
-      await this.diskSpool.spoolToDisk(sensorData);
-      logger.warn(`${reason} - spooled to disk`, { count: sensorData.length });
+      try {
+        await this.diskSpool.spoolToDisk(sensorData);
+        logger.warn(`${reason} - spooled to disk`, { count: sensorData.length });
+        return 'disk';
+      } catch (err: any) {
+        // Spool write failed (e.g. EACCES, ENOSPC). Count as dropped so metrics reflect reality.
+        metrics.messagesDropped += sensorData.length;
+        logger.error(`${reason} - disk spool write failed, data dropped`, {
+          count: sensorData.length,
+          totalDropped: metrics.messagesDropped,
+          error: err.message,
+        });
+        return 'dropped';
+      }
     } else {
       metrics.messagesDropped += sensorData.length;
       logger.error(`${reason} and disk spool disabled - data dropped`, {
         count: sensorData.length, totalDropped: metrics.messagesDropped,
       });
+      return 'dropped';
     }
   }
 
@@ -50,17 +67,34 @@ export class RedisQueueProducer {
     }
   }
 
-  async addCompressed(entry: CompressedSensorEntry): Promise<void> {
+  async addCompressed(entry: CompressedDeviceEntry): Promise<void> {
     try {
-      if (!this.isRedisReady()) {
-        logger.error('Redis ingestion not ready, dropping compressed device batch', {
-          status: this.redis.status,
+      if (!circuitBreaker.shouldAllowRequest()) {
+        logger.warn('Redis circuit OPEN, spooling compressed batch to disk', {
           deviceUuid: this.short(entry.deviceUuid),
           sensorName: entry.sensorName,
           batchId: entry.batchId,
-          compressedBytes: entry.compressedPayload.length,
         });
-        metrics.messagesDropped++;
+        // Wrap into a SensorDataEntry so the disk spool can replay it through addInternal()
+        await this.fallbackToDiskOrDrop([{
+          deviceUuid: entry.deviceUuid,
+          sensorName: entry.sensorName,
+          data: { _compressedBatchId: entry.batchId },
+          timestamp: new Date().toISOString(),
+          metadata: {},
+        }], 'Redis circuit OPEN (compressed entry)');
+        return;
+      }
+
+      if (!this.isRedisReady()) {
+        circuitBreaker.recordFailure();
+        await this.fallbackToDiskOrDrop([{
+          deviceUuid: entry.deviceUuid,
+          sensorName: entry.sensorName,
+          data: { _compressedBatchId: entry.batchId },
+          timestamp: new Date().toISOString(),
+          metadata: {},
+        }], 'Redis not ready (compressed entry)');
         return;
       }
 
@@ -89,39 +123,47 @@ export class RedisQueueProducer {
         payloadBytes: payloadSize,
         encoding: entry.contentEncoding,
       });
+      circuitBreaker.recordSuccess();
     } catch (err: any) {
+      circuitBreaker.recordFailure();
       logger.error('Failed to queue compressed sensor metadata to Redis', {
         deviceUuid: this.short(entry.deviceUuid),
         sensorName: entry.sensorName,
         batchId: entry.batchId,
         error: err.message,
       });
+      if (err.message?.includes('OOM')) {
+        metrics.messagesDropped++;
+      }
     }
   }
 
-  async add(sensorData: SensorDataEntry[]): Promise<void> {
-    return this.addInternal(sensorData, false);
+  async add(deviceData: DeviceDataEntry[]): Promise<AddOutcome> {
+    return this.addInternal(deviceData, false);
   }
 
-  async addInternal(sensorData: SensorDataEntry[], bypassCircuit = false): Promise<void> {
-    if (sensorData.length === 0) return;
+  async addInternal(deviceData: DeviceDataEntry[], bypassCircuit = false): Promise<AddOutcome> {
+    if (deviceData.length === 0) return 'redis';
 
     try {
       const startTime = Date.now();
 
       if (!bypassCircuit && !circuitBreaker.shouldAllowRequest()) {
-        await this.fallbackToDiskOrDrop(sensorData, 'Redis circuit OPEN');
-        return;
+        return this.fallbackToDiskOrDrop(deviceData, 'Redis circuit OPEN');
       }
 
       if (!this.isRedisReady()) {
         if (!bypassCircuit) circuitBreaker.recordFailure();
-        await this.fallbackToDiskOrDrop(sensorData, 'Redis not ready');
-        return;
+        logger.info('Redis not ready, routing to disk spool', {
+          redisStatus: this.redis.status,
+          count: deviceData.length,
+          circuitState: circuitBreaker.getState?.() ?? 'unknown',
+        });
+        return this.fallbackToDiskOrDrop(deviceData, 'Redis not ready');
       }
 
       const streamKey = this.getStreamKey();
-      const payload = JSON.stringify(sensorData);
+      const payload = JSON.stringify(deviceData);
       void this.pipeline.add(p => {
         p.xadd(streamKey, ...this.maxlenArgs(this.maxStreamLength), '*', 'data', payload);
       });
@@ -129,12 +171,19 @@ export class RedisQueueProducer {
       const duration = Date.now() - startTime;
       metrics.recordBatchLatency(duration);
       if (!bypassCircuit) circuitBreaker.recordSuccess();
-      this.logAddResult(sensorData.length, payload.length, duration);
+      this.logAddResult(deviceData.length, payload.length, duration);
+      return 'redis';
     } catch (err: any) {
       if (!bypassCircuit) circuitBreaker.recordFailure();
-      logger.error('Failed to add device data to Redis stream', {
-        count: sensorData.length, error: err.message,
-      });
+      if (err.message?.includes('OOM')) {
+        logger.error('Redis OOM, routing to fallback', { count: deviceData.length, error: err.message });
+        return this.fallbackToDiskOrDrop(deviceData, 'Redis OOM');
+      } else {
+        logger.error('Failed to add device data to Redis stream', {
+          count: deviceData.length, error: err.message,
+        });
+        return 'dropped';
+      }
     }
   }
 }

@@ -21,7 +21,7 @@ on:
         required: false
         type: string
       include_agent:
-        description: 'Include Iotistic agent in image'
+        description: 'Include iotistica agent in image'
         required: true
         type: boolean
         default: true
@@ -39,7 +39,7 @@ jobs:
   build-yocto-image:
     name: Build Yocto Image
     
-    runs-on: [iotistic-lab-sc-multi-cores]    
+    runs-on: [iotistica-lab-sc-multi-cores]    
     timeout-minutes: 720  # 12 hours for full Yocto build (increased for self-hosted runner)
     
     steps:
@@ -75,8 +75,8 @@ jobs:
       - name: Clone meta-virtualization layer
         run: bash .github/workflows/scripts/clone-meta-virtualization.sh "$BUILD_DIR" "${{ inputs.yocto_version }}"
 
-      - name: Create meta-iotistic layer
-        run: bash .github/workflows/scripts/create-meta-iotistic.sh "$BUILD_DIR"
+      - name: Create meta-iotistica layer
+        run: bash .github/workflows/scripts/create-meta-iotistica.sh "$BUILD_DIR"
 
       - name: Create agent recipe
         if: inputs.include_agent == true
@@ -123,10 +123,10 @@ jobs:
         if: always()
         run: |
           {
-            echo "## IotisticOS Build Summary"
+            echo "## iotistica OS Build Summary"
             echo ""
             echo "### Configuration"
-            echo "- **Distribution**: IotisticOS v1.0.0"
+            echo "- **Distribution**: Iotistica OS v1.0.0"
             echo "- **Yocto Version**: ${{ inputs.yocto_version }}"
             echo "- **Machine**: ${{ inputs.machine }}"
             echo "- **Agent Version**: ${{ steps.version.outputs.agent_version }}"
@@ -147,19 +147,19 @@ jobs:
             echo "\`\`\`"
             echo ""
             echo "### Build Status"
-            if [ -f "$BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/iotistic-image-${{ inputs.machine }}.wic.bz2" ]; then
+            if [ -f "$BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/iotistica-image-${{ inputs.machine }}.wic.bz2" ]; then
               echo "✅ Build successful"
               echo ""
               echo "### Artifacts"
               echo "\`\`\`"
-              ls -lh $BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/ | grep -E "iotistic-image.*\.(wic|tar)" || echo "No images found"
+              ls -lh $BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/ | grep -E "iotistica-image.*\.(wic|tar)" || echo "No images found"
               echo "\`\`\`"
               echo ""
               echo "### Flash Instructions"
               echo "\`\`\`bash"
               echo "# Extract and flash to SD card (Linux/macOS)"
-              echo "bunzip2 iotistic-image-${{ inputs.machine }}.wic.bz2"
-              echo "sudo dd if=iotistic-image-${{ inputs.machine }}.wic of=/dev/sdX bs=4M status=progress"
+              echo "bunzip2 iotistica-image-${{ inputs.machine }}.wic.bz2"
+              echo "sudo dd if=iotistica-image-${{ inputs.machine }}.wic of=/dev/sdX bs=4M status=progress"
               echo "sync"
               echo ""
               echo "# Or use Etcher for GUI flashing (all platforms)"

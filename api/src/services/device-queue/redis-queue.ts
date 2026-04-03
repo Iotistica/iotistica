@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { randomUUID } from 'crypto';
 import { logger } from '../../utils/logger';
 import { getRedisIngestion, getRedisConsumer } from '../../redis/client-factory';
 import {
@@ -9,8 +10,36 @@ import {
   consumerGroupName,
   consumerName as makeConsumerName,
 } from '../../redis/tenant-keys';
-import { SensorDataEntry, CompressedSensorEntry } from './types';
+import { DeviceDataEntry, CompressedDeviceEntry, AddOutcome } from './types';
+
+/**
+ * Stable, globally unique identity for this process/pod.
+ *
+ * Priority:
+ *   1. HOSTNAME env var — Kubernetes sets this to the pod name (e.g. "api-7d9f8b-xk2pq"),
+ *      which is unique across the entire cluster for the lifetime of the pod.
+ *   2. Fallback: crypto UUID — guarantees uniqueness when running outside K8s
+ *      (local dev, Docker Compose, bare-metal) where HOSTNAME may equal the
+ *      machine hostname shared by multiple processes.
+ *
+ * Computed once at module load so all RedisDeviceQueue instances (and the
+ * initialize() re-entry path) always use the same value, preventing orphaned
+ * consumer entries in the Redis consumer group.
+ */
+const POD_IDENTITY: string = (() => {
+  const hostname = process.env.HOSTNAME?.trim();
+  // Reject generic single-word hostnames (e.g. bare "api" or "localhost") that
+  // Docker Compose or local dev might produce — they are NOT unique per instance.
+  const isUniqueHostname = hostname && hostname.length > 0 && /[-_.]/.test(hostname);
+  const identity = isUniqueHostname ? hostname : randomUUID();
+  logger.info('Redis consumer identity established', {
+    identity,
+    source: isUniqueHostname ? 'HOSTNAME' : 'uuid-fallback',
+  });
+  return identity;
+})();
 import { metrics } from './metrics';
+import { circuitBreaker } from './circuit-breaker';
 import { DiskSpool } from './disk-spool';
 import { FAILURE_TRACKING_KEY } from './dlq';
 import { RedisPipeline } from './pipeline';
@@ -39,6 +68,8 @@ export class RedisDeviceQueue {
   private readonly dbWaitingHighWatermark: number;
   private readonly dbSaturationHighWatermarkPct: number;
   private readonly backpressureSleepMs: number;
+  private readonly redisStreamHighWatermarkPct: number;
+  private readonly redisMemoryHighWatermarkPct: number;
 
   private readonly pipeline: RedisPipeline;
   private readonly diskSpool: DiskSpool;
@@ -46,6 +77,7 @@ export class RedisDeviceQueue {
   private readonly inserter: ReadingInserter;
   private worker: RedisQueueConsumer | null = null;
   private isRunning = false;
+  private healthCollector: NodeJS.Timeout | null = null;
 
   private resolveTenantId(): string {
     return this.tenantId || getTenantId();
@@ -56,13 +88,12 @@ export class RedisDeviceQueue {
     this.redisConsumer = getRedisConsumer();
 
     this.tenantId = tenantId || '';
-    const baseWorkerName = `worker-${process.pid}-${Date.now()}`;
     if (this.tenantId) {
       this.consumerGroup = consumerGroupName(this.tenantId, 'sensor-writers');
-      this.consumerName = makeConsumerName(this.tenantId, baseWorkerName);
+      this.consumerName = makeConsumerName(this.tenantId, POD_IDENTITY);
     } else {
       this.consumerGroup = 'sensor-writers';
-      this.consumerName = baseWorkerName;
+      this.consumerName = POD_IDENTITY;
     }
 
     this.workerCount = parseInt(process.env.SENSOR_WORKER_COUNT || '2', 10);
@@ -74,8 +105,21 @@ export class RedisDeviceQueue {
     this.dbWaitingHighWatermark = parseInt(process.env.SENSOR_DB_WAITING_HIGH_WATERMARK || '10', 10);
     this.dbSaturationHighWatermarkPct = parseInt(process.env.SENSOR_DB_SATURATION_HIGH_WATERMARK_PCT || '85', 10);
     this.backpressureSleepMs = parseInt(process.env.SENSOR_DB_BACKPRESSURE_SLEEP_MS || '250', 10);
+    // Redis pressure thresholds: fraction of MAXLEN and % of maxmemory that trigger autoscale warning
+    this.redisStreamHighWatermarkPct = parseFloat(process.env.REDIS_STREAM_HIGH_WATERMARK_PCT || '0.8');
+    this.redisMemoryHighWatermarkPct = parseInt(process.env.REDIS_MEMORY_HIGH_WATERMARK_PCT || '75', 10);
 
-    this.pipeline = new RedisPipeline(this.redisIngestion);
+    this.pipeline = new RedisPipeline(this.redisIngestion, {
+      onPersistentOomFailure: (dropped) => {
+        // Force the circuit open so producers route subsequent writes to disk spool
+        // instead of retrying Redis while it remains at maxmemory
+        for (let i = 0; i < 5; i++) circuitBreaker.recordFailure();
+        metrics.messagesDropped += dropped;
+        logger.error('Redis OOM: pipeline retries exhausted, circuit forced OPEN', {
+          dropped, totalDropped: metrics.messagesDropped,
+        });
+      },
+    });
 
     const spoolPath = process.env.DISK_SPOOL_PATH || '/tmp/iotistic-spool';
     const spoolMaxSizeMb = parseInt(process.env.DISK_SPOOL_MAX_SIZE_MB || '1000', 10);
@@ -92,7 +136,10 @@ export class RedisDeviceQueue {
 
     if (process.env.DISK_SPOOL_ENABLED === 'true') {
       this.diskSpool.initialize()
-        .then(() => this.diskSpool.startReplayer(data => this.producer.addInternal(data, true)))
+        .then(() => this.diskSpool.startReplayer(
+          data => this.producer.addInternal(data, true),
+          () => this.producer.isClientReady(),
+        ))
         .catch(err => logger.error('Failed to initialize disk spool', { error: err.message }));
     }
 
@@ -113,11 +160,11 @@ export class RedisDeviceQueue {
     });
   }
 
-  async addCompressed(entry: CompressedSensorEntry): Promise<void> {
+  async addCompressed(entry: CompressedDeviceEntry): Promise<void> {
     return this.producer.addCompressed(entry);
   }
 
-  async add(sensorData: SensorDataEntry[]): Promise<void> {
+  async add(sensorData: DeviceDataEntry[]): Promise<AddOutcome> {
     return this.producer.add(sensorData);
   }
 
@@ -129,7 +176,9 @@ export class RedisDeviceQueue {
       const resolvedTenantId = this.resolveTenantId();
       this.tenantId = resolvedTenantId;
       this.consumerGroup = consumerGroupName(resolvedTenantId, 'sensor-writers');
-      this.consumerName = makeConsumerName(resolvedTenantId, `worker-${process.pid}-${Date.now()}`);
+      // Use POD_IDENTITY — must be the same stable value as the constructor used,
+      // otherwise a second call creates a new orphaned consumer in the group.
+      this.consumerName = makeConsumerName(resolvedTenantId, POD_IDENTITY);
     }
 
     const maxAttempts = 5;
@@ -192,21 +241,88 @@ export class RedisDeviceQueue {
         dbWaitingHighWatermark: this.dbWaitingHighWatermark,
         dbSaturationHighWatermarkPct: this.dbSaturationHighWatermarkPct,
         backpressureSleepMs: this.backpressureSleepMs,
+        maxStreamLength: this.maxStreamLength,
+        redisStreamHighWatermarkPct: this.redisStreamHighWatermarkPct,
+        redisMemoryHighWatermarkPct: this.redisMemoryHighWatermarkPct,
       },
       this.inserter,
       () => this.initialize(),
     );
 
     await this.worker.start();
+    this.startHealthCollector();
   }
 
   async stopWorker(): Promise<void> {
     logger.info('Stopping Redis sensor worker...');
     this.isRunning = false;
     this.worker?.stop();
+    if (this.healthCollector) {
+      clearInterval(this.healthCollector);
+      this.healthCollector = null;
+    }
     await new Promise(resolve => setTimeout(resolve, 10000));
     await Promise.all([this.redisIngestion.quit(), this.redisConsumer.quit()]);
     logger.info('Redis sensor worker stopped');
+  }
+
+  /**
+   * Polls Redis every 30 seconds to update in-memory metric gauges:
+   * - Stream length (proxy for worker lag)
+   * - Pending message count (PEL size)
+   * - DLQ length
+   * - Redis memory used / max (from INFO memory)
+   */
+  private startHealthCollector(): void {
+    const collectInterval = 30_000;
+
+    const collect = async () => {
+      try {
+        // Stream length → worker lag
+        const streamLen = await this.redisConsumer.xlen(this.streamKey).catch(() => 0);
+        metrics.streamLength = streamLen;
+        metrics.workerLag = streamLen;
+
+        // Pending entries list (messages delivered but not yet ACK'd)
+        const pending = await this.redisConsumer
+          .xpending(this.streamKey, this.consumerGroup)
+          .catch(() => null);
+        if (pending) metrics.pendingMessages = (pending as any[])[0] as number;
+
+        // DLQ length
+        metrics.dlqLength = await this.redisConsumer.xlen(this.dlqStreamKey).catch(() => 0);
+
+        // Failure tracking hash size
+        metrics.failureTrackingCount = await this.redisConsumer.hlen(FAILURE_TRACKING_KEY).catch(() => 0);
+
+        // Redis memory (INFO memory section)
+        const memInfo = await this.redisConsumer.info('memory').catch(() => '');
+        for (const line of memInfo.split('\r\n')) {
+          if (line.startsWith('used_memory:')) {
+            metrics.redisMemoryUsedBytes = parseInt(line.split(':')[1], 10) || 0;
+          } else if (line.startsWith('maxmemory:')) {
+            metrics.redisMemoryMaxBytes = parseInt(line.split(':')[1], 10) || 0;
+          }
+        }
+
+        logger.debug('Redis health metrics collected', {
+          streamLength: metrics.streamLength,
+          workerLag: metrics.workerLag,
+          pendingMessages: metrics.pendingMessages,
+          dlqLength: metrics.dlqLength,
+          redisMemoryMb: Math.round(metrics.redisMemoryUsedBytes / 1024 / 1024),
+          redisMemoryMaxMb: metrics.redisMemoryMaxBytes
+            ? Math.round(metrics.redisMemoryMaxBytes / 1024 / 1024)
+            : 'unlimited',
+        });
+      } catch (err: any) {
+        logger.warn('Health metrics collection failed', { error: err.message });
+      }
+    };
+
+    // Run immediately on start, then on interval
+    collect();
+    this.healthCollector = setInterval(collect, collectInterval);
   }
 
   async getStats() {
@@ -226,8 +342,25 @@ export class RedisDeviceQueue {
 
       const failureTrackingCount = await this.redisConsumer.hlen(FAILURE_TRACKING_KEY);
 
+      // Parse Redis INFO memory inline for the stats response
+      let memoryUsedMb = 0;
+      let memoryMaxMb: number | 'unlimited' = 'unlimited';
+      try {
+        const memInfo = await this.redisConsumer.info('memory');
+        for (const line of memInfo.split('\r\n')) {
+          if (line.startsWith('used_memory:')) {
+            memoryUsedMb = Math.round((parseInt(line.split(':')[1], 10) || 0) / 1024 / 1024);
+          } else if (line.startsWith('maxmemory:')) {
+            const v = parseInt(line.split(':')[1], 10);
+            memoryMaxMb = v > 0 ? Math.round(v / 1024 / 1024) : 'unlimited';
+          }
+        }
+      } catch { /* non-fatal */ }
+
       return {
+        // Stream state
         streamLength: length,
+        workerLag: length,
         firstEntryId: firstEntry ? firstEntry[0] : null,
         lastEntryId: lastEntry ? lastEntry[0] : null,
         pendingMessages: pending[0] as number,
@@ -237,6 +370,39 @@ export class RedisDeviceQueue {
         consumerName: this.consumerName,
         isRunning: this.isRunning,
         maxRetries: this.maxRetries,
+        maxStreamLength: this.maxStreamLength,
+        // Memory
+        redis: {
+          memoryUsedMb,
+          memoryMaxMb,
+          memoryUtilizationPct: typeof memoryMaxMb === 'number' && memoryMaxMb > 0
+            ? Math.round((memoryUsedMb / memoryMaxMb) * 100)
+            : null,
+        },
+        // Counters from in-process metrics
+        counters: {
+          messagesDropped: metrics.messagesDropped,
+          messagesFailed: metrics.messagesFailed,
+          readingsInserted: metrics.readingsInserted,
+          redisReconnects: metrics.redisReconnects,
+          oomErrors: metrics.oomErrors,
+          oomRetries: metrics.oomRetries,
+        },
+        // Latency percentiles
+        latencyP95Ms: {
+          batch: metrics.getBatchLatencyP95(),
+          insert: metrics.getInsertLatencyP95(),
+          /** P95 of max-per-batch queue dwell time: how long messages wait in Redis before processing */
+          dwell: metrics.getDwellLatencyP95(),
+        },
+        // How long the current oldest stream entry has been waiting (live snapshot).
+        // Derived from the Redis Stream ID timestamp — no extra field required.
+        streamHeadDwellMs: firstEntry && firstEntry[0]
+          ? (() => {
+            const ms = parseInt((firstEntry[0] as string).split('-')[0], 10);
+            return isNaN(ms) ? null : Date.now() - ms;
+          })()
+          : null,
       };
     } catch (err: any) {
       return { error: err.message };

@@ -2,7 +2,7 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import { logger } from '../../utils/logger';
-import { SensorDataEntry } from './types';
+import { DeviceDataEntry } from './types';
 import { metrics } from './metrics';
 import { circuitBreaker, CircuitState } from './circuit-breaker';
 
@@ -24,13 +24,26 @@ export class DiskSpool {
         await fs.mkdir(this.spoolPath, { recursive: true });
         logger.info('Created disk spool directory', { path: this.spoolPath });
       }
+
+      // Verify the process can actually write to the directory.
+      // Docker named volumes are created as root by default — if the Dockerfile
+      // did not pre-create the path owned by appuser the write will fail with EACCES.
+      const testFile = path.join(this.spoolPath, '.write-test');
+      await fs.writeFile(testFile, '');
+      await fs.unlink(testFile);
+
       this.enabled = true;
       logger.info('Disk spool fallback initialized', {
         path: this.spoolPath,
         maxSizeMb: this.maxSizeMb,
       });
     } catch (err: any) {
-      logger.error('Failed to initialize disk spool', { error: err.message });
+      logger.error(
+        'Failed to initialize disk spool — spool disabled, circuit-breaker fallback will drop data.' +
+        ' Ensure the spool directory is writable by the container user.' +
+        ' If using a Docker named volume, recreate it after rebuilding the image.',
+        { path: this.spoolPath, error: err.message },
+      );
       this.enabled = false;
     }
   }
@@ -39,47 +52,45 @@ export class DiskSpool {
     return this.enabled;
   }
 
-  async spoolToDisk(sensorData: SensorDataEntry[]): Promise<void> {
-    try {
-      const payload = JSON.stringify(sensorData);
-      const payloadSize = Buffer.byteLength(payload, 'utf8');
+  async spoolToDisk(deviceData: DeviceDataEntry[]): Promise<void> {
+    const payload = JSON.stringify(deviceData);
+    const payloadSize = Buffer.byteLength(payload, 'utf8');
 
-      const totalSpoolSize = await this.getTotalSize();
-      if (totalSpoolSize + payloadSize > this.maxSizeMb * 1024 * 1024) {
-        await this.deleteOldestFile();
-      }
-
-      if (!this.currentFile || this.currentSize > 10 * 1024 * 1024) {
-        this.fileIndex++;
-        this.currentFile = path.join(this.spoolPath, `spool-${this.fileIndex}.ndjson`);
-        this.currentSize = 0;
-      }
-
-      await fs.appendFile(this.currentFile, payload + '\n');
-      this.currentSize += payloadSize;
-
-      logger.debug('Spooled device data to disk', {
-        count: sensorData.length,
-        file: path.basename(this.currentFile),
-        sizeBytes: payloadSize,
-        totalSpoolMb: Math.round(totalSpoolSize / 1024 / 1024),
-      });
-    } catch (err: any) {
-      logger.error('Failed to spool to disk - data lost', {
-        count: sensorData.length,
-        error: err.message,
-      });
-      metrics.messagesDropped += sensorData.length;
+    const totalSpoolSize = await this.getTotalSize();
+    if (totalSpoolSize + payloadSize > this.maxSizeMb * 1024 * 1024) {
+      await this.deleteOldestFile();
     }
+
+    if (!this.currentFile || this.currentSize > 10 * 1024 * 1024) {
+      this.fileIndex++;
+      this.currentFile = path.join(this.spoolPath, `spool-${this.fileIndex}.ndjson`);
+      this.currentSize = 0;
+    }
+
+    // Let errors (EACCES, ENOSPC, etc.) propagate to the caller.
+    // fallbackToDiskOrDrop owns the decision of what to log and count.
+    await fs.appendFile(this.currentFile, payload + '\n');
+    this.currentSize += payloadSize;
+
+    logger.debug('Spooled device data to disk', {
+      count: deviceData.length,
+      file: path.basename(this.currentFile),
+      sizeBytes: payloadSize,
+      totalSpoolMb: Math.round(totalSpoolSize / 1024 / 1024),
+    });
   }
 
   /**
    * Start background replayer that drains spool files to Redis when circuit is closed.
    * The onBatch callback is the queue's add() — provided by the caller to avoid circular deps.
    */
-  startReplayer(onBatch: (data: SensorDataEntry[]) => Promise<void>): void {
+  startReplayer(onBatch: (data: DeviceDataEntry[]) => Promise<unknown>, isReady?: () => boolean): void {
     this.replayInterval = setInterval(async () => {
       if (circuitBreaker.getState() !== CircuitState.CLOSED) return;
+      // Skip if the underlying Redis client isn't actually connected yet.
+      // The circuit can be CLOSED while ioredis is still in reconnecting state,
+      // which would cause onBatch → spoolToDisk → unlink(same file) data loss.
+      if (isReady && !isReady()) return;
 
       try {
         const files = (await fs.readdir(this.spoolPath))
@@ -98,16 +109,23 @@ export class DiskSpool {
           totalSpooledFiles: files.length,
         });
 
+        // Delete the spool file BEFORE calling onBatch so that any re-spool
+        // (if Redis fails mid-replay) writes to a fresh file rather than
+        // appending to the file we're about to delete — which would lose that data.
+        await fs.unlink(oldestFile);
+        if (this.currentFile === oldestFile) {
+          this.currentFile = null;
+        }
+
         for (const line of lines) {
           try {
-            const sensorData = JSON.parse(line) as SensorDataEntry[];
+            const sensorData = JSON.parse(line) as DeviceDataEntry[];
             await onBatch(sensorData);
           } catch (err: any) {
             logger.error('Failed to replay spooled batch', { error: err.message });
           }
         }
 
-        await fs.unlink(oldestFile);
         logger.info('Replayed and deleted spool file', { file: files[0] });
       } catch (err: any) {
         logger.error('Spool replay error', { error: err.message });
