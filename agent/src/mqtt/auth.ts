@@ -237,8 +237,17 @@ export class MqttFileAuthReconciler {
   }
 
   /**
-   * Send SIGHUP to the mosquitto container so it reloads passwd and ACL files
-   * without restarting or dropping existing connections.
+   * Signal Mosquitto to reload its passwd and ACL files.
+   *
+   * Systemd deployments (primary path):
+   *   The installer creates an `iotistica-mqtt-reload.path` unit that watches
+   *   /etc/mosquitto/passwd via inotify. Writing the file above is enough to
+   *   trigger a root-privileged reload automatically — no action is needed here.
+   *   The sudo fallback below will always fail when the agent service has
+   *   NoNewPrivileges=true (which is the hardened default), and that is expected.
+   *
+   * Docker deployments (primary path):
+   *   Send SIGHUP directly to the Mosquitto container via the Docker API.
    */
   private async signalMosquittoReload(options: FileAuthOptions): Promise<void> {
     if (options.dockerManager && options.containerName) {
@@ -268,20 +277,25 @@ export class MqttFileAuthReconciler {
       }
     }
 
-    try {
-      if (fs.existsSync(SYSTEMD_RELOAD_HELPER)) {
+    // Systemd deployments: the iotistica-mqtt-reload.path unit handles reload
+    // automatically via inotify when the passwd file is written. The sudo call
+    // below is a best-effort fallback for non-hardened environments only; it
+    // will silently fail (and is expected to) when NoNewPrivileges=true is set.
+    if (fs.existsSync(SYSTEMD_RELOAD_HELPER)) {
+      try {
         await execFileAsync('sudo', [SYSTEMD_RELOAD_HELPER]);
-        this.logger?.debugSync('Invoked systemd Mosquitto reload helper', {
+        this.logger?.debugSync('Invoked systemd Mosquitto reload helper via sudo', {
           component: LogComponents.configManager,
           operation: 'signalMosquittoReload',
           helper: SYSTEMD_RELOAD_HELPER,
         });
+      } catch (err) {
+        // Expected when NoNewPrivileges=true — the path unit handles the reload.
+        this.logger?.debugSync(`sudo reload helper unavailable (expected with NoNewPrivileges=true) — systemd path unit will handle reload`, {
+          component: LogComponents.configManager,
+          operation: 'signalMosquittoReload',
+        });
       }
-    } catch (err) {
-      this.logger?.warnSync(`Failed to run systemd mosquitto reload helper: ${(err as Error).message}`, {
-        component: LogComponents.configManager,
-        operation: 'signalMosquittoReload',
-      });
     }
   }
 }

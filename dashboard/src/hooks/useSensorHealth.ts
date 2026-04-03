@@ -64,7 +64,7 @@ export const useSensorHealth = (deviceUuid: string): UseSensorHealthResult => {
       const healthData = await healthResponse.json();
       
       // Fetch sensor pipeline data
-      const sensorsResponse = await fetch(`/api/v1/agents/${deviceUuid}/sensors`);
+      const sensorsResponse = await fetch(`/api/v1/agents/${deviceUuid}/devices`);
       const sensorsData = sensorsResponse.ok ? await sensorsResponse.json() : { pipelines: [] };
       
       // Transform data to match expected format

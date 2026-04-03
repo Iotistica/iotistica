@@ -424,7 +424,7 @@ jobs:
 
           echo ""
           echo "=== DIAGNOSTIC: Cloud sensors (what the DB has) ==="
-          curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/sensors" \
+          curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/devices" \
             -H "Authorization: Bearer $ACCESS_TOKEN" | jq '{count, devices: [.devices[]? | {name, protocol, uuid, connection: .connection}]}' || true
 
           echo ""
@@ -483,7 +483,7 @@ jobs:
           AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
         run: |
           # Look up the e2e MQTT device created by the Playwright test
-          SENSORS_RESP=$(curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/sensors?protocol=mqtt" \
+          SENSORS_RESP=$(curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/devices?protocol=mqtt" \
             -H "Authorization: Bearer $ACCESS_TOKEN")
 
           DEVICE_NAME=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e_mqtt_"))] | first | .name // empty')
@@ -544,7 +544,7 @@ jobs:
           ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
           AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
         run: |
-          SENSORS_RESP=$(curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/sensors?protocol=mqtt" \
+          SENSORS_RESP=$(curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/devices?protocol=mqtt" \
             -H "Authorization: Bearer $ACCESS_TOKEN" || echo '{"devices":[]}')
 
           E2E_DEVICES=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e_mqtt_")) | .name] | .[]')
@@ -555,7 +555,7 @@ jobs:
             while IFS= read -r name; do
               echo "Deleting device: $name"
               curl -fsS -X DELETE \
-                "http://localhost:4002/api/v1/agents/${AGENT_UUID}/sensors/${name}" \
+                "http://localhost:4002/api/v1/agents/${AGENT_UUID}/devices/${name}" \
                 -H "Authorization: Bearer $ACCESS_TOKEN" || echo "Warning: delete failed for $name"
             done <<< "$E2E_DEVICES"
           fi

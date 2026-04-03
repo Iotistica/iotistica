@@ -7,10 +7,10 @@
  * - endpoints table for efficient querying/display
  * 
  * CRUD Endpoints:
- * - GET /api/v1/agents/:uuid/sensors - List all sensors
- * - POST /api/v1/agents/:uuid/sensors - Add new sensor
- * - PUT /api/v1/agents/:uuid/sensors/:name - Update sensor
- * - DELETE /api/v1/agents/:uuid/sensors/:name - Delete sensor
+ * - GET /api/v1/agents/:uuid/devices - List all devices
+ * - POST /api/v1/agents/:uuid/devices - Add new device
+ * - PUT /api/v1/agents/:uuid/devices/:name - Update device
+ * - DELETE /api/v1/agents/:uuid/devices/:name - Delete device
  * 
  * Health & History Endpoints:
  * - GET /api/v1/agents/:uuid/device-health - Sensor overview and status
@@ -30,12 +30,12 @@ export const router = express.Router();
 const virtualDeviceManager = new VirtualDeviceManager();
 
 /**
- * List all sensors for a device
- * GET /api/v1/agents/:uuid/sensors
+ * List all devices for an agent
+ * GET /api/v1/agents/:uuid/devices
  * 
  * Reads from endpoints table (faster, allows filtering/sorting)
  */
-router.get('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
+router.get('/agents/:uuid/devices', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const { protocol } = req.query; // Optional filter by protocol
@@ -51,9 +51,9 @@ router.get('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
       count: sensors.length
     });
   } catch (error: any) {
-    logger.error('Error getting sensors:', error);
+    logger.error('Error getting devices:', error);
     res.status(500).json({
-      error: 'Failed to get sensors',
+      error: 'Failed to get devices',
       message: error.message
     });
   }
@@ -61,9 +61,9 @@ router.get('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
 
 /**
  * List agent-reported physical/logical devices for an agent.
- * GET /api/v1/agents/:uuid/devices
+ * GET /api/v1/agents/:uuid/reported-devices
  */
-router.get('/agents/:uuid/devices', jwtAuth, async (req, res) => {
+router.get('/agents/:uuid/reported-devices', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
 
@@ -100,14 +100,14 @@ router.get('/agents/:uuid/devices', jwtAuth, async (req, res) => {
 });
 
 /**
- * Add new sensor
- * POST /api/v1/agents/:uuid/sensors
+ * Add new device
+ * POST /api/v1/agents/:uuid/devices
  * 
  * Query Parameters:
  * - validateOnly=true: Only validate config, don't persist (for draft mode)
  * - validateOnly=false (default): Validate and persist using dual-write
  */
-router.post('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
+router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
   try {
     const { uuid } = req.params;
     const sensorConfig = req.body;
@@ -118,7 +118,7 @@ router.post('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
     if (!sensorConfig.name) {
       return res.status(400).json({
         error: 'Validation failed',
-        message: 'Sensor name is required'
+        message: 'Device name is required'
       });
     }
 
@@ -194,16 +194,16 @@ router.post('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
 
     res.status(201).json({
       status: 'ok',
-      message: 'Sensor added. Click Sync to deploy.',
+      message: 'Device added. Click Sync to deploy.',
       device: result.sensor, // Keep "device" for backward compatibility
       version: result.version
     });
   } catch (error: any) {
-    logger.error('Error adding sensor:', error);
+    logger.error('Error adding device:', error);
     
     if (error.message?.includes('already exists')) {
       return res.status(409).json({
-        error: 'Duplicate sensor',
+        error: 'Duplicate device',
         message: error.message
       });
     }
@@ -216,21 +216,21 @@ router.post('/agents/:uuid/sensors', jwtAuth, async (req, res) => {
     }
     
     res.status(500).json({
-      error: 'Failed to add sensor',
+      error: 'Failed to add device',
       message: error.message
     });
   }
 });
 
 /**
- * Update sensor
- * PUT /api/v1/agents/:uuid/sensors/:name
+ * Update device
+ * PUT /api/v1/agents/:uuid/devices/:name
  * 
  * Query Parameters:
  * - validateOnly=true: Only validate updates, don't persist (for draft mode)
  * - validateOnly=false (default): Validate and persist using dual-write
  */
-router.put('/agents/:uuid/sensors/:name', jwtAuth, async (req, res) => {
+router.put('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
   try {
     const { uuid, name } = req.params;
     const updates = req.body;
@@ -283,36 +283,36 @@ router.put('/agents/:uuid/sensors/:name', jwtAuth, async (req, res) => {
 
     res.json({
       status: 'ok',
-      message: 'Sensor updated',
+      message: 'Device updated',
       device: result.sensor, // Keep "device" for backward compatibility
       version: result.version
     });
   } catch (error: any) {
-    logger.error('Error updating sensor:', error);
+    logger.error('Error updating device:', error);
     
     if (error.message?.includes('not found')) {
       return res.status(404).json({
-        error: 'Sensor not found',
+        error: 'Device not found',
         message: error.message
       });
     }
     
     res.status(500).json({
-      error: 'Failed to update sensor',
+      error: 'Failed to update device',
       message: error.message
     });
   }
 });
 
 /**
- * Delete sensor
- * DELETE /api/v1/agents/:uuid/sensors/:name
+ * Delete device
+ * DELETE /api/v1/agents/:uuid/devices/:name
  * 
  * Query Parameters:
  * - hard=true: Hard delete immediately (remove from target state config + endpoints)
  * - hard=false (default): Soft delete (mark pending_deletion, wait for agent reconciliation)
  */
-router.delete('/agents/:uuid/sensors/:name', jwtAuth, async (req, res) => {
+router.delete('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
   try {
     const { uuid, name } = req.params;
     const hardDelete = req.query.hard === 'true';
@@ -326,22 +326,22 @@ router.delete('/agents/:uuid/sensors/:name', jwtAuth, async (req, res) => {
       status: 'ok',
       mode: hardDelete ? 'hard' : 'soft',
       message: hardDelete
-        ? 'Sensor hard deleted (removed from target state and database)'
-        : 'Sensor marked for deletion (pending agent reconciliation)',
+        ? 'Device hard deleted (removed from target state and database)'
+        : 'Device marked for deletion (pending agent reconciliation)',
       version: result.version
     });
   } catch (error: any) {
-    logger.error('Error deleting sensor:', error);
+    logger.error('Error deleting device:', error);
     
     if (error.message?.includes('not found')) {
       return res.status(404).json({
-        error: 'Sensor not found',
+        error: 'Device not found',
         message: error.message
       });
     }
     
     res.status(500).json({
-      error: 'Failed to delete sensor',
+      error: 'Failed to delete device',
       message: error.message
     });
   }

@@ -282,12 +282,45 @@ systemctl reload mosquitto
 EOFRELOAD
     chmod +x /usr/local/bin/iotistica-mqtt-reload.sh
 
+    # Keep sudoers rule as a best-effort fallback for non-hardened environments.
+    # The primary reload mechanism is the systemd path unit below, which does not
+    # require the agent process to escalate privileges at all.
     cat > /etc/sudoers.d/iotistica-mqtt-reload << 'EOFSUDO'
 iotistic ALL=(root) NOPASSWD: /usr/local/bin/iotistica-mqtt-reload.sh
 EOFSUDO
     chmod 440 /etc/sudoers.d/iotistica-mqtt-reload
 
+    # Install a systemd path unit that watches /etc/mosquitto/passwd and fires
+    # iotistica-mqtt-reload.service (runs as root) whenever the agent writes
+    # updated credentials. This works even when the agent service has
+    # NoNewPrivileges=true (which blocks sudo from within the agent process).
+    cat > /etc/systemd/system/iotistica-mqtt-reload.service << 'EOFSERVICE'
+[Unit]
+Description=Reload Mosquitto MQTT auth files after credential update
+After=mosquitto.service
+Requires=mosquitto.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/iotistica-mqtt-reload.sh
+EOFSERVICE
+
+    cat > /etc/systemd/system/iotistica-mqtt-reload.path << 'EOFPATH'
+[Unit]
+Description=Watch Mosquitto passwd file for credential updates
+
+[Path]
+PathModified=/etc/mosquitto/passwd
+Unit=iotistica-mqtt-reload.service
+
+[Install]
+WantedBy=multi-user.target
+EOFPATH
+
     systemctl daemon-reload
+    systemctl enable --now iotistica-mqtt-reload.path
+    echo "✓ Mosquitto auto-reload path unit installed and active"
+
     systemctl restart mosquitto
 
     sleep 3
