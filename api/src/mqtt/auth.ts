@@ -239,7 +239,7 @@ router.post('/acl', async (req: Request, res: Response) => {
     : resolvedAcc === 2 || resolvedAcc === '2'
       ? 'WRITE'
       : `UNKNOWN(${resolvedAcc})`;
-  authLogger.info('ACL check', { username, topic, accessType });
+  authLogger.debug('ACL check', { username, topic, accessType });
 
   try {
     // First check if user is a superuser (superusers have full access)
