@@ -299,6 +299,7 @@ export class SocketServer {
       ...(point.deviceId && { deviceId: point.deviceId }),
       ...(point.endpoint_uuid && { endpoint_uuid: point.endpoint_uuid }),
       ...(point.device_uuid && { device_uuid: point.device_uuid }),
+      ...(point.protocol && { protocol: point.protocol }),
       metric: point.metric,
       value: point.value,
       unit: point.unit,

@@ -5,6 +5,7 @@ import { DeviceDataEntry, DeviceIdentity } from './types';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UNKNOWN_DEVICE_NAME = 'unknown';
 const shortId = (id?: string): string | undefined => id?.substring(0, 8);
+const KNOWN_PROTOCOLS = new Set(['modbus', 'opcua', 'snmp', 'can', 'mqtt', 'bacnet', 'system']);
 
 function normalizeNonEmptyString(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -25,9 +26,44 @@ function resolveEntryDeviceName(entry: DeviceDataEntry): string {
   return UNKNOWN_DEVICE_NAME;
 }
 
+function normalizeProtocolCandidate(value: unknown): string | undefined {
+  const normalized = normalizeNonEmptyString(value)?.toLowerCase();
+  if (!normalized) return undefined;
+  return KNOWN_PROTOCOLS.has(normalized) ? normalized : undefined;
+}
+
+function extractProtocolFromPayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const directProtocol = normalizeProtocolCandidate(record.protocol);
+  if (directProtocol) return directProtocol;
+
+  if (Array.isArray(record.messages)) {
+    for (const message of record.messages) {
+      const protocol = extractProtocolFromPayload(message);
+      if (protocol) return protocol;
+    }
+  }
+
+  if (Array.isArray(record.readings)) {
+    for (const reading of record.readings) {
+      const protocol = extractProtocolFromPayload(reading);
+      if (protocol) return protocol;
+    }
+  }
+
+  return undefined;
+}
+
 export function detectProtocol(entry: DeviceDataEntry): string {
-  const metadataProtocol = normalizeNonEmptyString(entry.metadata?.protocol);
+  const metadataProtocol = normalizeProtocolCandidate(entry.metadata?.protocol);
   if (metadataProtocol) return metadataProtocol;
+
+  const payloadProtocol = extractProtocolFromPayload(entry.data);
+  if (payloadProtocol) return payloadProtocol;
 
   const name = resolveEntryDeviceName(entry).toLowerCase();
   if (name === 'modbus' || name.startsWith('modbus_')) return 'modbus';
