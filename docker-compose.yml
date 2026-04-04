@@ -48,8 +48,11 @@ services:
         image: redis:7-alpine
         container_name: iotistic-redis
         restart: unless-stopped
+        environment:
+            - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
         command: >
             redis-server
+            --requirepass ${REDIS_PASSWORD:-local-dev-redis-change-me}
             --maxmemory 512mb
             --maxmemory-policy noeviction
             --save ""
@@ -59,7 +62,7 @@ services:
         ports:
             - "${REDIS_PORT_EXT:-6379}:6379"
         healthcheck:
-            test: ["CMD", "redis-cli", "ping"]
+            test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping"]
             interval: 10s
             timeout: 3s
             retries: 5
@@ -134,7 +137,7 @@ services:
             - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
             - REDIS_HOST=${REDIS_HOST:-redis}
             - REDIS_PORT=${REDIS_PORT:-6379}
-            - REDIS_PASSWORD=${REDIS_PASSWORD}
+            - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
             - REDIS_USERNAME=${REDIS_USERNAME}
             - REDIS_CLUSTER=${REDIS_CLUSTER}
             - REDIS_TLS=${REDIS_TLS}
@@ -583,7 +586,7 @@ services:
             - SMTP_PASS=${SMTP_PASS}
             - REDIS_HOST=${REDIS_HOST:-redis}
             - REDIS_PORT=${REDIS_PORT:-6379}
-            - REDIS_PASSWORD=${REDIS_PASSWORD}
+            - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
             - LOG_LEVEL=${POSTOFFICE_LOG_LEVEL:-info}
         depends_on:
             redis:

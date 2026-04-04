@@ -14,7 +14,6 @@
  */
 
 import Redis from 'ioredis';
-import { DeviceLogsModel } from '../../db/models';
 import { logger } from '../../utils/logger';
 import { query } from '../../db/connection';
 import { getRedisIngestion, getRedisConsumer } from '../../redis/client-factory';

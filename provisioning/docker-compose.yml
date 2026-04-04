@@ -25,13 +25,18 @@ services:
 
   redis:
     image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-local-dev-redis-change-me}
     ports:
       - "6380:6379"  # External port 6380 to avoid conflict
-    command: redis-server --appendonly yes
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-local-dev-redis-change-me}
+      --appendonly yes
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -63,7 +68,7 @@ services:
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_DB: 0
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-local-dev-redis-change-me}
       REDIS_CLUSTER: ${REDIS_CLUSTER:-false}
       REDIS_TLS: ${REDIS_TLS:-false}
       REDIS_USE_TLS: ${REDIS_USE_TLS:-false}

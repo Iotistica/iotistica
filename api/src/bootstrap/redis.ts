@@ -8,9 +8,10 @@
 import Redis from 'ioredis';
 import logger from '../utils/logger';
 import { redisClient } from '../redis/client';
+import { redisFactory } from '../redis/client-factory';
 import { startMetricsBatchWorker } from '../workers/metrics-batch-worker';
-import { redisLogQueue } from '../services/logs-queue/redis-log-queue';
-import { redisDeviceQueue } from '../services/device-queue';
+import { redisLogQueue } from '../services/ingestion/redis-log-queue';
+import { redisDeviceQueue } from '../services/ingestion';
 
 /**
  * Flush the Mosquitto go-auth Redis cache (DB 1) on startup.
@@ -23,14 +24,19 @@ import { redisDeviceQueue } from '../services/device-queue';
  * first post-restart MQTT connection always hits a live auth check.
  */
 async function flushMqttAuthCache(): Promise<void> {
-  const host = process.env.REDIS_HOST || 'localhost';
-  const port = parseInt(process.env.REDIS_PORT || '6379', 10);
-  const password = process.env.REDIS_PASSWORD || undefined;
+  const { host, port, username, password, useTls, tlsServerName } = redisFactory.getConfig();
 
   const authCacheDb = new Redis({
     host,
     port,
+    username,
     password,
+    tls: useTls
+      ? {
+          servername: tlsServerName,
+          rejectUnauthorized: true,
+        }
+      : undefined,
     db: 1, // go-auth cache database
     lazyConnect: true,
     connectTimeout: 5000,

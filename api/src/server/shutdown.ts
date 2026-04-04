@@ -82,7 +82,7 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
 
     // Redis log queue (final batch)
     try {
-      const { redisLogQueue } = await import('../services/logs-queue/redis-log-queue');
+      const { redisLogQueue } = await import('../services/ingestion/redis-log-queue');
       await redisLogQueue.stopWorker();
       logger.info('Redis log queue worker stopped');
     } catch (error) {
@@ -91,7 +91,7 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
 
     // Redis device queue (final batch)
     try {
-      const { redisDeviceQueue } = await import('../services/device-queue');
+      const { redisDeviceQueue } = await import('../services/ingestion');
       await redisDeviceQueue.stopWorker();
       logger.info('Redis device queue worker stopped');
     } catch (error) {

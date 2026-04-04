@@ -7,7 +7,13 @@ global:
 redis:
   enabled: false
   tls: false     # No TLS for port 10000
+  tlsServerName: ""
   cluster: false # Azure Redis is NOT in cluster mode (Basic/Standard tier)
+  auth:
+    enabled: true
+    existingSecret: ""
+    password: ""
+    passwordKey: password
 # Mosquitto MQTT broker
 mosquitto:
   enabled: true

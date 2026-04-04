@@ -15,8 +15,11 @@ services:
     image: redis:7-alpine
     container_name: postoffice-redis
     restart: unless-stopped
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
     command: >
       redis-server
+      --requirepass ${REDIS_PASSWORD:-local-dev-redis-change-me}
       --maxmemory 256mb
       --maxmemory-policy volatile-lru
       --save 60 1000
@@ -26,7 +29,7 @@ services:
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -71,7 +74,7 @@ services:
       # Redis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
       
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-info}

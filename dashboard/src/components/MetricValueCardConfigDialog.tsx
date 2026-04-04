@@ -81,10 +81,10 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
 
   // Fetch devices on mount
   useEffect(() => {
-    if (open) {
+    if (open && devices.length === 0 && !loadingDevices) {
       fetchDevices();
     }
-  }, [open]);
+  }, [open, devices.length, loadingDevices]);
 
   // Extract available metrics when device changes
   useEffect(() => {

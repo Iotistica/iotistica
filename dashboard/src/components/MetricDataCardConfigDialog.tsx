@@ -158,10 +158,10 @@ export function MetricDataCardConfigDialog({
   }, [open, initialConfig]);
 
   useEffect(() => {
-    if (open) {
+    if (open && devices.length === 0 && !loading) {
       fetchDevices();
     }
-  }, [open]);
+  }, [open, devices.length, loading]);
 
   const sourceRefAgentUuid = (sourceRef: MetricSourceRef): string | undefined =>
     sourceRef.agentUuid || (sourceRef as any).agent_uuid;
@@ -289,14 +289,20 @@ export function MetricDataCardConfigDialog({
   const fetchDevices = async () => {
     try {
       setLoading(true);
-      
-      // Fetch devices with metric data
-      const metricsUrl = buildApiUrl('/api/v1/metrics/agents');
-      const metricsResponse = await fetch(metricsUrl, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
-        },
-      });
+
+      const token = localStorage.getItem('accessToken');
+      const [metricsResponse, devicesResponse] = await Promise.all([
+        fetch(buildApiUrl('/api/v1/metrics/agents'), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch(buildApiUrl('/api/v1/agents?limit=1000'), {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      ]);
 
       if (!metricsResponse.ok) {
         throw new Error('Failed to fetch devices');
@@ -304,14 +310,6 @@ export function MetricDataCardConfigDialog({
 
       const metricsResult = await metricsResponse.json();
       setDevices(metricsResult.agents || []);
-      
-      // Fetch registered devices to check status
-      const devicesUrl = buildApiUrl('/api/v1/agents?limit=1000');
-      const devicesResponse = await fetch(devicesUrl, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
-        },
-      });
       
       if (devicesResponse.ok) {
         const devicesData = await devicesResponse.json();

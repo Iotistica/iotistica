@@ -68,6 +68,11 @@ import { MetricDataCard, type MetricDataCardConfig } from '../components/MetricD
 import { MetricDataCardConfigDialog } from '../components/MetricDataCardConfigDialog';
 import MetricValueCard, { type MetricValueCardConfig } from '../components/MetricValueCard';
 import MetricValueCardConfigDialog from '../components/MetricValueCardConfigDialog';
+import {
+  MultiSeriesMetricCard,
+  type MultiSeriesMetricCardConfig,
+} from '../components/MultiSeriesMetricCard';
+import { MultiSeriesMetricCardConfigDialog } from '../components/MultiSeriesMetricCardConfigDialog';
 import { TableDataCard, type TableDataCardConfig } from '../components/TableDataCard';
 import { TableDataCardConfigDialog } from '../components/TableDataCardConfigDialog';
 import { useDeviceState } from '../contexts/DeviceStateContext';
@@ -140,6 +145,15 @@ const WIDGET_TYPES = {
     defaultW: 4,
     defaultH: 4
   },
+  MULTI_SERIES: {
+    id: 'multi-series',
+    name: 'Multi-Series Chart',
+    icon: BarChart3,
+    minW: 4,
+    minH: 6,
+    defaultW: 8,
+    defaultH: 8
+  },
   TABLE: {
     id: 'table',
     name: 'Metrics Table',
@@ -157,8 +171,8 @@ interface DashboardWidget extends Layout {
   deviceId?: string; // For device-specific widgets
   metricConfig?: MetricDataCardConfig; // For metric data widgets
   metricValueConfig?: MetricValueCardConfig; // For metric value widgets
+  multiSeriesConfig?: MultiSeriesMetricCardConfig; // For multi-series widgets
   tableConfig?: TableDataCardConfig; // For table widgets
-  _metricData?: any; // Runtime data for badge rendering
   _refreshTrigger?: number; // Timestamp to trigger manual refresh
   _aiFeedback?: {
     suggestionId?: string;
@@ -175,6 +189,11 @@ interface DashboardLayout {
   shareToken: string;
   createdAt: string;
   updatedAt: string;
+}
+
+interface WidgetMetricBadgeData {
+  protocol?: string;
+  qualityPercentage?: number;
 }
 
 type AiSuggestedChart = 'line' | 'bar' | 'gauge' | 'stat';
@@ -468,9 +487,11 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [newDashboardName, setNewDashboardName] = useState('');
   const [showMetricConfigDialog, setShowMetricConfigDialog] = useState(false);
   const [showMetricValueConfigDialog, setShowMetricValueConfigDialog] = useState(false);
+  const [showMultiSeriesConfigDialog, setShowMultiSeriesConfigDialog] = useState(false);
   const [showTableConfigDialog, setShowTableConfigDialog] = useState(false);
   const [configuringWidgetId, setConfiguringWidgetId] = useState<string | null>(null);
   const [refreshingWidgets, setRefreshingWidgets] = useState<Set<string>>(new Set());
+  const [widgetMetricBadges, setWidgetMetricBadges] = useState<Record<string, WidgetMetricBadgeData | undefined>>({});
   const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false);
   const [widgetToDelete, setWidgetToDelete] = useState<string | null>(null);
   const [showResetConfirmDialog, setShowResetConfirmDialog] = useState(false);
@@ -1145,6 +1166,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       return;
     }
 
+    if (type === 'MULTI_SERIES') {
+      setConfiguringWidgetId(`multi-series-${crypto.randomUUID()}`);
+      setIsEditingWidget(false);
+      setShowMultiSeriesConfigDialog(true);
+      return;
+    }
+
     if (type === 'TABLE') {
       // Open config dialog for table widgets
       setConfiguringWidgetId(`table-${crypto.randomUUID()}`);
@@ -1173,6 +1201,15 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const removeWidget = (id: string) => {
     const removedWidget = widgets.find(w => w.i === id);
     setWidgets(widgets.filter(w => w.i !== id));
+    setWidgetMetricBadges((current) => {
+      if (!(id in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
 
     if (removedWidget?._aiFeedback) {
       const { chart, bin } = parseSuggestionSignature(removedWidget._aiFeedback.suggestionSignature);
@@ -1298,6 +1335,47 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     setConfiguringWidgetId(null);
   };
 
+  const handleSaveMultiSeriesConfig = (config: MultiSeriesMetricCardConfig) => {
+    if (!configuringWidgetId) return;
+
+    const correctedConfig: MultiSeriesMetricCardConfig = { ...config, widgetId: configuringWidgetId };
+    const existingWidget = widgets.find(w => w.i === configuringWidgetId);
+    const title = correctedConfig.title || `${correctedConfig.deviceName} - Multi-Series`;
+
+    if (existingWidget) {
+      const updatedWidgets = widgets.map(w =>
+        w.i === configuringWidgetId
+          ? {
+              ...w,
+              multiSeriesConfig: correctedConfig,
+              title,
+              _refreshTrigger: Date.now(),
+            }
+          : w
+      );
+      setWidgets(updatedWidgets);
+    } else {
+      const widgetConfig = WIDGET_TYPES.MULTI_SERIES;
+      const placement = getNextMetricWidgetPlacement(widgets);
+      const newWidget: DashboardWidget = {
+        i: configuringWidgetId,
+        x: placement.x,
+        y: placement.y,
+        w: widgetConfig.defaultW,
+        h: widgetConfig.defaultH,
+        minW: widgetConfig.minW,
+        minH: widgetConfig.minH,
+        type: 'MULTI_SERIES',
+        title,
+        multiSeriesConfig: correctedConfig,
+      };
+      setWidgets([...widgets, newWidget]);
+    }
+
+    setHasUnsavedChanges(true);
+    setConfiguringWidgetId(null);
+  };
+
   const handleSaveTableConfig = (config: TableDataCardConfig) => {
     if (!configuringWidgetId) return;
 
@@ -1352,7 +1430,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
   const getNextMetricWidgetPlacement = (targetWidgets: DashboardWidget[]): { x: number; y: number } => {
     const metricWidgets = targetWidgets.filter(
-      (candidate) => candidate.type === 'METRIC_DATA' || candidate.type === 'METRIC_VALUE'
+      (candidate) => candidate.type === 'METRIC_DATA' || candidate.type === 'METRIC_VALUE' || candidate.type === 'MULTI_SERIES'
     );
 
     const leftBottom = metricWidgets
@@ -1397,7 +1475,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       minH: widget.minH ?? widgetConfig.minH,
       title: newTitle,
       metricConfig: duplicateConfig,
-      _metricData: undefined,
       _refreshTrigger: Date.now(),
       _aiFeedback: undefined,
     };
@@ -1526,6 +1603,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       }
     }
 
+    if (widget.type === 'MULTI_SERIES' && widget.multiSeriesConfig) {
+      const cfg = widget.multiSeriesConfig;
+      if (!widget.title || widget.title === `${cfg.deviceName} - Multi-Series`) {
+        return cfg.title || `${cfg.deviceName} - Multi-Series`;
+      }
+    }
+
     if (widget.type === 'TABLE' && widget.tableConfig) {
       const cfg = widget.tableConfig;
       const pathTitle = buildMetricPathTitle(cfg);
@@ -1543,8 +1627,9 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     const WidgetIcon = WIDGET_TYPES[widget.type].icon;
     const isMetricWidget = widget.type === 'METRIC_DATA';
     const isMetricValueWidget = widget.type === 'METRIC_VALUE';
+    const isMultiSeriesWidget = widget.type === 'MULTI_SERIES';
     const isTableWidget = widget.type === 'TABLE';
-    const metricData = widget._metricData;
+    const metricData = widgetMetricBadges[widget.i];
     const isRefreshing = refreshingWidgets.has(widget.i);
     const canAddFromAi = showAI && (isMetricWidget || isMetricValueWidget);
     const isAlreadyAdded = canAddFromAi ? isDuplicateAiWidget(widget) : false;
@@ -1566,14 +1651,14 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                       <>
                         <span className="text-muted-foreground mx-1">·</span>
                         <Badge variant="outline" className="text-xs">
-                          {metricData.metric.protocol}
+                          {metricData.protocol}
                         </Badge>
-                        {metricData.metadata.qualityPercentage && (
+                        {typeof metricData.qualityPercentage === 'number' && (
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <div className="flex items-center">
-                                  {metricData.metadata.qualityPercentage > 95 ? (
+                                  {metricData.qualityPercentage > 95 ? (
                                     <Check className="w-4 h-4 text-green-600" />
                                   ) : (
                                     <AlertTriangle className="w-4 h-4 text-yellow-600" />
@@ -1581,7 +1666,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                                 </div>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>Data Quality: {metricData.metadata.qualityPercentage.toFixed(1)}%</p>
+                                <p>Data Quality: {metricData.qualityPercentage.toFixed(1)}%</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -1751,6 +1836,85 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                     </Button>
                   </>
                 )}
+                {isMultiSeriesWidget && widget.multiSeriesConfig && (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground">Time Range:</span>
+                      <Select
+                        value={widget.multiSeriesConfig.timeRange}
+                        onValueChange={(value: '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d') => {
+                          const updatedWidgets = widgets.map(w =>
+                            w.i === widget.i
+                              ? {
+                                  ...w,
+                                  multiSeriesConfig: { ...w.multiSeriesConfig!, timeRange: value },
+                                  _refreshTrigger: Date.now(),
+                                }
+                              : w
+                          );
+                          setWidgets(updatedWidgets);
+                          setHasUnsavedChanges(true);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[80px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1m">1m</SelectItem>
+                          <SelectItem value="1h">1h</SelectItem>
+                          <SelectItem value="6h">6h</SelectItem>
+                          <SelectItem value="12h">12h</SelectItem>
+                          <SelectItem value="24h">24h</SelectItem>
+                          <SelectItem value="7d">7d</SelectItem>
+                          <SelectItem value="30d">30d</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        const updatedWidgets = widgets.map(w =>
+                          w.i === widget.i ? { ...w, _refreshTrigger: Date.now() } : w
+                        );
+                        setWidgets(updatedWidgets);
+                        setRefreshingWidgets(prev => new Set(prev).add(widget.i));
+                        setTimeout(() => {
+                          setRefreshingWidgets(prev => {
+                            const next = new Set(prev);
+                            next.delete(widget.i);
+                            return next;
+                          });
+                        }, 1500);
+                      }}
+                    >
+                      <RefreshCw
+                        className="w-4 h-4"
+                        style={{
+                          transform: isRefreshing ? 'rotate(360deg)' : 'rotate(0deg)',
+                          transition: isRefreshing ? 'transform 1s linear' : 'none'
+                        }}
+                      />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setConfiguringWidgetId(widget.i);
+                        setIsEditingWidget(true);
+                        setShowMultiSeriesConfigDialog(true);
+                      }}
+                    >
+                      <Settings className="w-4 h-4" />
+                    </Button>
+                  </>
+                )}
                 {isTableWidget && widget.tableConfig && (
                   <>
                     <div className="flex items-center gap-1.5">
@@ -1846,7 +2010,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               </div>
             </div>
           </CardHeader>
-          <CardContent className={`p-4 pt-0 ${widget.type === 'METRIC_VALUE' ? 'h-full' : ''}`}>
+          <CardContent className={`p-4 pt-0 ${widget.type === 'METRIC_VALUE' || widget.type === 'MULTI_SERIES' ? 'h-full' : ''}`}>
             {renderWidgetContent(widget)}
           </CardContent>
         </Card>
@@ -2002,13 +2166,69 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             refreshInterval={refreshInterval}
             refreshTrigger={widget._refreshTrigger}
             onDataLoaded={(data) => {
-              // Store data reference for badge rendering
-              setWidgets(prevWidgets => 
-                prevWidgets.map(w => 
-                  w.i === widget.i ? { ...w, _metricData: data } : w
-                )
-              );
+              const nextBadge = data
+                ? {
+                    protocol: data.metric.protocol,
+                    qualityPercentage: data.metadata.qualityPercentage,
+                  }
+                : undefined;
+
+              setWidgetMetricBadges((current) => {
+                const previous = current[widget.i];
+                if (
+                  previous?.protocol === nextBadge?.protocol &&
+                  previous?.qualityPercentage === nextBadge?.qualityPercentage
+                ) {
+                  return current;
+                }
+
+                if (!nextBadge) {
+                  if (!(widget.i in current)) {
+                    return current;
+                  }
+
+                  const next = { ...current };
+                  delete next[widget.i];
+                  return next;
+                }
+
+                return {
+                  ...current,
+                  [widget.i]: nextBadge,
+                };
+              });
             }}
+          />
+        );
+
+      case 'MULTI_SERIES':
+        if (!widget.multiSeriesConfig) {
+          return (
+            <div className="text-center text-muted-foreground h-full flex items-center justify-center">
+              <div>
+                <div className="mb-2">No multi-series chart configured</div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setConfiguringWidgetId(widget.i);
+                    setIsEditingWidget(true);
+                    setShowMultiSeriesConfigDialog(true);
+                  }}
+                >
+                  Configure Widget
+                </Button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <MultiSeriesMetricCard
+            key={`${widget.i}-${widget.multiSeriesConfig.timeRange}-${widget.multiSeriesConfig.metrics.map(metric => metric.metricName).join('|')}`}
+            config={widget.multiSeriesConfig}
+            refreshInterval={refreshInterval}
+            refreshTrigger={widget._refreshTrigger}
           />
         );
 
@@ -2054,13 +2274,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               setIsEditingWidget(true);
               setShowTableConfigDialog(true);
             }}
-            onDataLoaded={(data) => {
-              setWidgets(prevWidgets => 
-                prevWidgets.map(w => 
-                  w.i === widget.i ? { ...w, _metricData: data } : w
-                )
-              );
-            }}
           />
         );
 
@@ -2092,14 +2305,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             refreshInterval={refreshInterval}
             refreshTrigger={widget._refreshTrigger}
             noWrapper={true}
-            onDataLoaded={(data) => {
-              // Store data reference for badge rendering
-              setWidgets(prevWidgets => 
-                prevWidgets.map(w => 
-                  w.i === widget.i ? { ...w, _metricData: data } : w
-                )
-              );
-            }}
           />
         );
 
@@ -2319,6 +2524,10 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                 <BarChart3 className="w-4 h-4 mr-2" />
                 Metric Card
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => addWidget('MULTI_SERIES')}>
+                <BarChart3 className="w-4 h-4 mr-2" />
+                Multi-Series Chart
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => addWidget('TABLE')}>
                 <Table className="w-4 h-4 mr-2" />
                 Metrics Table
@@ -2522,6 +2731,21 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         onSave={handleSaveMetricValueConfig}
         initialConfig={isEditingWidget && configuringWidgetId 
           ? widgets.find(w => w.i === configuringWidgetId)?.metricValueConfig 
+          : undefined}
+      />
+
+      <MultiSeriesMetricCardConfigDialog
+        open={showMultiSeriesConfigDialog}
+        onOpenChange={(open) => {
+          setShowMultiSeriesConfigDialog(open);
+          if (!open) {
+            setConfiguringWidgetId(null);
+            setIsEditingWidget(false);
+          }
+        }}
+        onSave={handleSaveMultiSeriesConfig}
+        initialConfig={isEditingWidget && configuringWidgetId
+          ? widgets.find(w => w.i === configuringWidgetId)?.multiSeriesConfig
           : undefined}
       />
 
