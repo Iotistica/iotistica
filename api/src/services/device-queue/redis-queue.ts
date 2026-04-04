@@ -39,7 +39,7 @@ const POD_IDENTITY: string = (() => {
   return identity;
 })();
 import { metrics } from './metrics';
-import { circuitBreaker } from './circuit-breaker';
+import { circuitBreaker, CircuitState } from './circuit-breaker';
 import { DiskSpool } from './disk-spool';
 import { FAILURE_TRACKING_KEY } from './dlq';
 import { RedisPipeline } from './pipeline';
@@ -323,6 +323,22 @@ export class RedisDeviceQueue {
     // Run immediately on start, then on interval
     collect();
     this.healthCollector = setInterval(collect, collectInterval);
+  }
+
+  async getIngestionHealth(): Promise<{
+    lastProcessedTimestamp: number | null;
+    ingestionHealthy: boolean;
+    spoolingActive: boolean;
+    backlogSize: number;
+  }> {
+    const backlogSize = await this.diskSpool.getBacklogCount();
+    const state = circuitBreaker.getState();
+    return {
+      lastProcessedTimestamp: metrics.lastProcessedTimestamp,
+      ingestionHealthy: state === CircuitState.CLOSED && metrics.redisConnected === 1,
+      spoolingActive: state !== CircuitState.CLOSED || backlogSize > 0,
+      backlogSize,
+    };
   }
 
   async getStats() {

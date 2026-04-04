@@ -145,6 +145,16 @@ export class DiskSpool {
     }
   }
 
+  async getBacklogCount(): Promise<number> {
+    if (!this.enabled) return 0;
+    try {
+      const files = await fs.readdir(this.spoolPath);
+      return files.filter(f => f.startsWith('spool-')).length;
+    } catch {
+      return 0;
+    }
+  }
+
   private async deleteOldestFile(): Promise<void> {
     try {
       const files = (await fs.readdir(this.spoolPath))

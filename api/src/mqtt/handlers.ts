@@ -30,7 +30,7 @@ export async function handleDeviceData(data: SensorData): Promise<void> {
       const batch = data.data as any;
       const messages = batch.messages as (string | object)[];
       
-      logger.info('Handling endpoints batch', {
+      logger.info('Handling device batch', {
         deviceUuid: data.deviceUuid.substring(0, 8),
         sensorName: data.sensorName,
         count: messages.length,

@@ -3,6 +3,7 @@ import { ReadingsService, ReadingInsert } from '../../services/readings.service'
 import { query } from '../../db/connection';
 import { DeviceDataEntry } from './types';
 import { detectProtocol, expandMessages } from './readings-normalizer';
+import { metrics } from './metrics';
 
 export class ReadingInserter {
   private readonly readingsService = new ReadingsService();
@@ -32,6 +33,7 @@ export class ReadingInserter {
 
       const insertedCount = await this.readingsService.bulkInsert(deduped);
       logger.debug(`Inserted ${insertedCount} readings (chunk ${Math.floor(i / chunkSize) + 1}, deduped ${readings.length - deduped.length})`);
+      metrics.lastProcessedTimestamp = Date.now();
 
       await this.updateLastTelemetryAt(deduped, ingestedAt);
     }

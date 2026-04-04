@@ -20,6 +20,8 @@ export class SensorQueueMetrics {
   messagesFailed = 0;
   messagesDropped = 0;
   readingsInserted = 0;
+  /** Unix-ms timestamp of the last successfully committed DB batch. Null until first successful insert. */
+  lastProcessedTimestamp: number | null = null;
   redisReconnects = 0;
   /** Number of times an OOM response was detected on a pipeline flush */
   oomErrors = 0;

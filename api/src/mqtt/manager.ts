@@ -1231,7 +1231,7 @@ export class MqttManager extends EventEmitter {
     };
 
     this.emitTyped('endpoints', endpointData);
-    logger.info('Endpoints event emitted successfully');
+
   }
 
   /**

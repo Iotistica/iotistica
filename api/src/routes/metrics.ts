@@ -22,6 +22,7 @@ import {
   refreshViews,
 } from '../services/metrics.service';
 import type { TimeRange, Aggregation, RefreshView } from '../services/metrics.service';
+import { redisSensorQueue } from '../services/device-queue/redis-queue';
 
 export const router = express.Router();
 
@@ -107,6 +108,20 @@ router.get('/latest', jwtAuth, async (req, res) => {
       return res.status(400).json({ error: 'Invalid parameters', requestId });
     }
     logger.error('Error getting latest readings', { requestId, userId: (req as any).user?.id, error: error.message });
+    res.status(500).json({ error: 'Internal server error', requestId });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /ingestion-health  — live pipeline health for chart freshness awareness
+// ---------------------------------------------------------------------------
+router.get('/ingestion-health', jwtAuth, async (req, res) => {
+  const requestId = (req as any).id || 'unknown';
+  try {
+    const health = await redisSensorQueue.getIngestionHealth();
+    res.json(health);
+  } catch (error: any) {
+    logger.error('Error getting ingestion health', { requestId, error: error.message });
     res.status(500).json({ error: 'Internal server error', requestId });
   }
 });
