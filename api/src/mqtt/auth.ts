@@ -272,7 +272,7 @@ router.post('/acl', async (req: Request, res: Response) => {
         const hasAccess = (rule.access & resolvedAcc) === resolvedAcc;
 
         if (hasAccess) {
-          authLogger.info('ACL matched pattern, access GRANTED', { username, topic, pattern: rule.topic });
+          authLogger.debug('ACL matched pattern, access GRANTED', { username, topic, pattern: rule.topic });
           return res.status(200).json({ result: 'allow' });
         } else {
           authLogger.info('ACL matched pattern but insufficient access level, access DENIED', { username, topic, pattern: rule.topic });

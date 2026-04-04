@@ -19,12 +19,17 @@
     Cleanup mode: stop containers, remove volumes, and delete images for specified agent range
 .PARAMETER Run
     Automatically run docker-compose up after generating the file
+.PARAMETER ProvisioningKey
+    Optional existing provisioning key to reuse for all generated agents. If omitted in an interactive session,
+    the script prompts once before auto-generating unique keys.
 .EXAMPLE
     .\generate-agents.ps1 -Count 100
 .EXAMPLE
     .\generate-agents.ps1 -Count 50 -StartIndex 101 -OutputFile docker-compose.agents-101-150.yml
 .EXAMPLE
     .\generate-agents.ps1 -Count 3 -Run
+.EXAMPLE
+    .\generate-agents.ps1 -Count 10 -ProvisioningKey your-existing-key
 .EXAMPLE
     .\generate-agents.ps1 -Cleanup -StartIndex 47 -Count 54
 .EXAMPLE
@@ -35,9 +40,8 @@ param(
     [int]$Count = 1,
     [int]$StartIndex = 1,
     [string]$OutputFile = "docker-compose.agents.yml",
-    #[string]$ApiUrl = "https://api.iotistica.com",
-    [string]$ApiUrl = "https://localhost:3443",
-    #[string]$ApiUrl = "https://api-client-b07708418f4e.iotistica.com",
+    [string]$ApiUrl = "https://demo-api.iotistica.com/",
+    #[string]$ApiUrl = "https://localhost:3443",
     # Optional explicit fleet UUID override. If empty (default), script auto-resolves
     # an existing default fleet or creates one in the database.
     [string]$FleetUuid = "",
@@ -49,6 +53,7 @@ param(
     [string]$DbPassword = "postgres",
     [string]$DbSslMode = "",
     [string]$DatabaseUrl = "",
+    [string]$ProvisioningKey = "",
     
     # Cleanup Mode
     [switch]$Cleanup,
@@ -64,8 +69,8 @@ param(
     
     # Agent Configuration
     [string]$NodeEnv = "development",
-    #[string]$IOTISTICA_API = "https://api.iotistica.com",
-    [string]$IOTISTICA_API = "https://api:3443",
+    [string]$IOTISTICA_API = "https://demo-api.iotistica.com",
+    #[string]$IOTISTICA_API = "https://api:3443",
     #[string]$IOTISTICA_API = "https://api-client-b07708418f4e.iotistica.com",
     [int]$ReportInterval = 20000,
     [int]$MetricsInterval = 30000,
@@ -526,6 +531,34 @@ ALTER TABLE provisioning_keys ADD COLUMN IF NOT EXISTS fleet_uuid UUID;
     }
 }
 
+function Resolve-ProvisioningKeyMode {
+    param(
+        [string]$ProvisioningKey,
+        [int]$Count
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ProvisioningKey)) {
+        return $ProvisioningKey.Trim()
+    }
+
+    if (-not [Environment]::UserInteractive) {
+        return ""
+    }
+
+    $promptMessage = if ($Count -gt 1) {
+        "Enter an existing provisioning key to reuse for all generated agents, or press Enter to auto-generate unique keys"
+    } else {
+        "Enter an existing provisioning key to use for this agent, or press Enter to auto-generate one"
+    }
+
+    $enteredKey = Read-Host -Prompt $promptMessage
+    if ([string]::IsNullOrWhiteSpace($enteredKey)) {
+        return ""
+    }
+
+    return $enteredKey.Trim()
+}
+
 # Calculate port in 48xxx-58xxx range (5 digits)
 function Get-UniquePort {
     param([int]$Index)
@@ -876,6 +909,13 @@ Write-Host "🔑 Generating provisioning keys via direct DB access..." -Foregrou
 $resolvedFleetUuid = Get-OrCreateDefaultFleetUuid -PreferredFleetUuid $FleetUuid -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbPassword $DbPassword -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
 Write-Host "📦 Using fleet UUID: $resolvedFleetUuid" -ForegroundColor Gray
 
+$manualProvisioningKey = Resolve-ProvisioningKeyMode -ProvisioningKey $ProvisioningKey -Count $Count
+if ([string]::IsNullOrWhiteSpace($manualProvisioningKey)) {
+    Write-Host "🔐 Provisioning key mode: auto-generate unique keys" -ForegroundColor Gray
+} else {
+    Write-Host "🔐 Provisioning key mode: reusing manually supplied key for all generated agents" -ForegroundColor Yellow
+}
+
 $services = @()
 $volumes = @()
 $provisioningKeys = @()
@@ -884,11 +924,16 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $agentName = "agent-$i"
     $port = Get-UniquePort $i
     
-    # Generate provisioning key via API
-    Write-Host "  Generating key for $agentName..." -ForegroundColor Gray
-    $apiKey = New-ProvisioningKey -ApiUrl $ApiUrl -FleetUuid $resolvedFleetUuid -UseDirectDb $UseDirectDb `
-        -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbPassword $DbPassword `
-        -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
+    if ([string]::IsNullOrWhiteSpace($manualProvisioningKey)) {
+        Write-Host "  Generating key for $agentName..." -ForegroundColor Gray
+        $apiKey = New-ProvisioningKey -ApiUrl $ApiUrl -FleetUuid $resolvedFleetUuid -UseDirectDb $UseDirectDb `
+            -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbPassword $DbPassword `
+            -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
+    } else {
+        Write-Host "  Using manual key for $agentName..." -ForegroundColor Gray
+        $apiKey = $manualProvisioningKey
+    }
+
     $provisioningKeys += "${agentName}: $apiKey"
     
     $volumeName = "$agentName-data"

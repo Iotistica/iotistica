@@ -442,7 +442,7 @@ services:
             - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-1
             - MQTT_DEVICE_UUID=a6c87211-7e40-4229-8632-d238daf58296
-            - MQTT_TOPIC=i/c-3dOFzo/a/rxiDMrFMTAS3z05HDtRf9A/d/UyFldTspTQ6K5ttR9I3eLQ
+            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/nRGjWUzZSA6P0TCmPV7V1A
             - MQTT_METRIC_NAMES=temperature,humidity
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}

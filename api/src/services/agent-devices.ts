@@ -845,7 +845,6 @@ export class AgentDeviceSyncService {
       // When agent discovers Modbus slaves, remove parent from config and add slaves
       await this.updateTargetStateWithDiscoveredSlaves(deviceUuid, runningEndpoints);
 
-      logger.info(`Reconciliation complete: agent reality → table (version ${currentVersion})`);
     } catch (error) {
       logger.error('Error reconciling current state to table:', error);
       throw error;
