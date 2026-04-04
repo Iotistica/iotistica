@@ -50,7 +50,7 @@ export async function provisionWithKey(key: string): Promise<void> {
       body: JSON.stringify(config),
     });
 
-    logger.info('Device provisioned successfully', {
+    logger.info('Agent provisioned successfully', {
       uuid: redact(result.device.uuid),
       deviceId: redact(result.device.deviceId),
       deviceName: result.device.deviceName,

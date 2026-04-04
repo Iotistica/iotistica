@@ -463,7 +463,7 @@ export const provisionDevice = async (config: {
 
 	const result = await deviceManager.provision(config);
 	
-	logger?.infoSync('Device provisioned successfully', {
+	logger?.infoSync('Agent provisioned successfully', {
 		component: LogComponents.deviceManager,
 		operation: 'provision',
 		uuid: result.uuid,
