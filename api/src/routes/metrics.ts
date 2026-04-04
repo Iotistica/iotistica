@@ -22,7 +22,7 @@ import {
   refreshViews,
 } from '../services/metrics.service';
 import type { TimeRange, Aggregation, RefreshView } from '../services/metrics.service';
-import { redisSensorQueue } from '../services/device-queue/redis-queue';
+import { redisDeviceQueue } from '../services/device-queue/redis-queue';
 
 export const router = express.Router();
 
@@ -118,7 +118,7 @@ router.get('/latest', jwtAuth, async (req, res) => {
 router.get('/ingestion-health', jwtAuth, async (req, res) => {
   const requestId = (req as any).id || 'unknown';
   try {
-    const health = await redisSensorQueue.getIngestionHealth();
+    const health = await redisDeviceQueue.getIngestionHealth();
     res.json(health);
   } catch (error: any) {
     logger.error('Error getting ingestion health', { requestId, error: error.message });

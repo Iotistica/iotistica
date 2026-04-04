@@ -3,9 +3,9 @@ import { randomUUID } from 'crypto';
 import { logger } from '../../utils/logger';
 import { getRedisIngestion, getRedisConsumer } from '../../redis/client-factory';
 import {
-  deviceSensorsIngestionStreamKey,
-  deviceSensorsReadyStreamKey,
-  deviceSensorsDlqStreamKey,
+  deviceDevicesIngestionStreamKey,
+  deviceDevicesReadyStreamKey,
+  deviceDevicesDlqStreamKey,
   getTenantId,
   consumerGroupName,
   consumerName as makeConsumerName,
@@ -32,7 +32,7 @@ const POD_IDENTITY: string = (() => {
   // Docker Compose or local dev might produce — they are NOT unique per instance.
   const isUniqueHostname = hostname && hostname.length > 0 && /[-_.]/.test(hostname);
   const identity = isUniqueHostname ? hostname : randomUUID();
-  logger.info('Redis consumer identity established', {
+  logger.debug('Redis consumer identity established', {
     identity,
     source: isUniqueHostname ? 'HOSTNAME' : 'uuid-fallback',
   });
@@ -47,6 +47,18 @@ import { RedisQueueConsumer } from './worker';
 import { RedisQueueProducer } from './producer';
 import { ReadingInserter } from './reading-inserter';
 
+const DEVICE_WRITER_GROUP_SUFFIX =
+  process.env.REDIS_DEVICE_CONSUMER_GROUP_SUFFIX
+  || 'device-writers';
+
+function readIntEnv(key: string, fallback: string): number {
+  return parseInt(process.env[key] || fallback, 10);
+}
+
+function readFloatEnv(key: string, fallback: string): number {
+  return parseFloat(process.env[key] || fallback);
+}
+
 export class RedisDeviceQueue {
   private redisIngestion: Redis;
   private redisConsumer: Redis;
@@ -55,9 +67,9 @@ export class RedisDeviceQueue {
   private consumerGroup: string;
   private consumerName: string;
 
-  private get streamKey(): string { return deviceSensorsIngestionStreamKey(this.resolveTenantId()); }
-  private get processingStreamKey(): string { return deviceSensorsReadyStreamKey(this.resolveTenantId()); }
-  private get dlqStreamKey(): string { return deviceSensorsDlqStreamKey(this.resolveTenantId()); }
+  private get streamKey(): string { return deviceDevicesIngestionStreamKey(this.resolveTenantId()); }
+  private get processingStreamKey(): string { return deviceDevicesReadyStreamKey(this.resolveTenantId()); }
+  private get dlqStreamKey(): string { return deviceDevicesDlqStreamKey(this.resolveTenantId()); }
 
   private readonly maxRetries: number;
   private readonly workerCount: number;
@@ -68,6 +80,14 @@ export class RedisDeviceQueue {
   private readonly dbWaitingHighWatermark: number;
   private readonly dbSaturationHighWatermarkPct: number;
   private readonly backpressureSleepMs: number;
+  private readonly minWorkers: number;
+  private readonly maxWorkers: number;
+  private readonly lagTargetMs: number;
+  private readonly lagScaleUpMs: number;
+  private readonly lagCriticalMs: number;
+  private readonly lagScaleDownStableChecks: number;
+  private readonly scaleCooldownMs: number;
+  private readonly dbScaleUpBlockSaturationPct: number;
   private readonly redisStreamHighWatermarkPct: number;
   private readonly redisMemoryHighWatermarkPct: number;
 
@@ -89,24 +109,32 @@ export class RedisDeviceQueue {
 
     this.tenantId = tenantId || '';
     if (this.tenantId) {
-      this.consumerGroup = consumerGroupName(this.tenantId, 'sensor-writers');
+      this.consumerGroup = consumerGroupName(this.tenantId, DEVICE_WRITER_GROUP_SUFFIX);
       this.consumerName = makeConsumerName(this.tenantId, POD_IDENTITY);
     } else {
-      this.consumerGroup = 'sensor-writers';
+      this.consumerGroup = DEVICE_WRITER_GROUP_SUFFIX;
       this.consumerName = POD_IDENTITY;
     }
 
-    this.workerCount = parseInt(process.env.SENSOR_WORKER_COUNT || '2', 10);
-    this.maxRetries = parseInt(process.env.SENSOR_MAX_RETRIES || '3', 10);
-    this.batchSize = parseInt(process.env.SENSOR_BATCH_SIZE || '100', 10);
-    this.blockTimeMs = parseInt(process.env.SENSOR_FLUSH_INTERVAL_MS || '2000', 10);
+    this.workerCount = readIntEnv('DEVICE_WORKER_COUNT', '2');
+    this.maxRetries = readIntEnv('DEVICE_MAX_RETRIES', '3');
+    this.batchSize = readIntEnv('DEVICE_BATCH_SIZE', '100');
+    this.blockTimeMs = readIntEnv('DEVICE_FLUSH_INTERVAL_MS', '2000');
     this.maxStreamLength = parseInt(process.env.REDIS_INGESTION_STREAM_MAXLEN || '10000', 10);
     this.maxDlqLength = parseInt(process.env.REDIS_DLQ_MAXLEN || '1000', 10);
-    this.dbWaitingHighWatermark = parseInt(process.env.SENSOR_DB_WAITING_HIGH_WATERMARK || '10', 10);
-    this.dbSaturationHighWatermarkPct = parseInt(process.env.SENSOR_DB_SATURATION_HIGH_WATERMARK_PCT || '85', 10);
-    this.backpressureSleepMs = parseInt(process.env.SENSOR_DB_BACKPRESSURE_SLEEP_MS || '250', 10);
+    this.minWorkers = readIntEnv('DEVICE_AUTOSCALE_MIN_WORKERS', '1');
+    this.maxWorkers = readIntEnv('DEVICE_AUTOSCALE_MAX_WORKERS', '20');
+    this.lagTargetMs = readIntEnv('DEVICE_AUTOSCALE_LAG_TARGET_MS', '10000');
+    this.lagScaleUpMs = readIntEnv('DEVICE_AUTOSCALE_LAG_SCALE_UP_MS', '30000');
+    this.lagCriticalMs = readIntEnv('DEVICE_AUTOSCALE_LAG_CRITICAL_MS', '60000');
+    this.lagScaleDownStableChecks = readIntEnv('DEVICE_AUTOSCALE_SCALE_DOWN_STABLE_CHECKS', '3');
+    this.scaleCooldownMs = readIntEnv('DEVICE_AUTOSCALE_COOLDOWN_MS', '30000');
+    this.dbScaleUpBlockSaturationPct = readIntEnv('DEVICE_AUTOSCALE_DB_BLOCK_PCT', '80');
+    this.dbWaitingHighWatermark = readIntEnv('DEVICE_DB_WAITING_HIGH_WATERMARK', '10');
+    this.dbSaturationHighWatermarkPct = readIntEnv('DEVICE_DB_SATURATION_HIGH_WATERMARK_PCT', '85');
+    this.backpressureSleepMs = readIntEnv('DEVICE_DB_BACKPRESSURE_SLEEP_MS', '250');
     // Redis pressure thresholds: fraction of MAXLEN and % of maxmemory that trigger autoscale warning
-    this.redisStreamHighWatermarkPct = parseFloat(process.env.REDIS_STREAM_HIGH_WATERMARK_PCT || '0.8');
+    this.redisStreamHighWatermarkPct = readFloatEnv('REDIS_DEVICE_STREAM_HIGH_WATERMARK_PCT', '0.8');
     this.redisMemoryHighWatermarkPct = parseInt(process.env.REDIS_MEMORY_HIGH_WATERMARK_PCT || '75', 10);
 
     this.pipeline = new RedisPipeline(this.redisIngestion, {
@@ -144,11 +172,11 @@ export class RedisDeviceQueue {
     }
 
     this.redisIngestion.on('error', (err) => {
-      logger.error('Redis sensor ingestion connection error', { error: err.message });
+      logger.error('Redis device ingestion connection error', { error: err.message });
       metrics.redisConnected = 0;
     });
     this.redisIngestion.on('connect', () => {
-      logger.info('Redis device ingestion connected');
+      logger.debug('Redis device ingestion connected');
       metrics.redisConnected = 1;
       metrics.redisReconnects++;
     });
@@ -156,7 +184,7 @@ export class RedisDeviceQueue {
       logger.error('Redis device consumer connection error', { error: err.message });
     });
     this.redisConsumer.on('connect', () => {
-      logger.info('Redis device consumer connected');
+      logger.debug('Redis device consumer connected');
     });
   }
 
@@ -164,8 +192,8 @@ export class RedisDeviceQueue {
     return this.producer.addCompressed(entry);
   }
 
-  async add(sensorData: DeviceDataEntry[]): Promise<AddOutcome> {
-    return this.producer.add(sensorData);
+  async add(deviceData: DeviceDataEntry[]): Promise<AddOutcome> {
+    return this.producer.add(deviceData);
   }
 
   /**
@@ -175,7 +203,7 @@ export class RedisDeviceQueue {
     if (!this.tenantId) {
       const resolvedTenantId = this.resolveTenantId();
       this.tenantId = resolvedTenantId;
-      this.consumerGroup = consumerGroupName(resolvedTenantId, 'sensor-writers');
+      this.consumerGroup = consumerGroupName(resolvedTenantId, DEVICE_WRITER_GROUP_SUFFIX);
       // Use POD_IDENTITY — must be the same stable value as the constructor used,
       // otherwise a second call creates a new orphaned consumer in the group.
       this.consumerName = makeConsumerName(resolvedTenantId, POD_IDENTITY);
@@ -188,7 +216,7 @@ export class RedisDeviceQueue {
       try {
         await this.redisConsumer.xgroup('CREATE', this.streamKey, this.consumerGroup, '0', 'MKSTREAM');
         await this.redisConsumer.xgroup('CREATE', this.processingStreamKey, this.consumerGroup, '0', 'MKSTREAM');
-        logger.info('Created Redis consumer groups for sensors', {
+        logger.debug('Created Redis consumer groups for devices', {
           ingestionStream: this.streamKey,
           processingStream: this.processingStreamKey,
           group: this.consumerGroup,
@@ -196,7 +224,7 @@ export class RedisDeviceQueue {
         return;
       } catch (err: any) {
         if (err.message.includes('BUSYGROUP')) {
-          logger.info('Redis consumer groups already exist', { group: this.consumerGroup });
+          logger.debug('Redis consumer groups already exist', { group: this.consumerGroup });
           return;
         }
         lastError = err;
@@ -218,7 +246,7 @@ export class RedisDeviceQueue {
    */
   async startWorker(): Promise<void> {
     if (this.isRunning) {
-      logger.warn('Sensor worker already running');
+      logger.debug('Device worker already running');
       return;
     }
 
@@ -234,6 +262,8 @@ export class RedisDeviceQueue {
         consumerGroup: this.consumerGroup,
         consumerName: this.consumerName,
         workerCount: this.workerCount,
+        minWorkers: this.minWorkers,
+        maxWorkers: this.maxWorkers,
         batchSize: this.batchSize,
         blockTimeMs: this.blockTimeMs,
         maxRetries: this.maxRetries,
@@ -241,6 +271,12 @@ export class RedisDeviceQueue {
         dbWaitingHighWatermark: this.dbWaitingHighWatermark,
         dbSaturationHighWatermarkPct: this.dbSaturationHighWatermarkPct,
         backpressureSleepMs: this.backpressureSleepMs,
+        lagTargetMs: this.lagTargetMs,
+        lagScaleUpMs: this.lagScaleUpMs,
+        lagCriticalMs: this.lagCriticalMs,
+        lagScaleDownStableChecks: this.lagScaleDownStableChecks,
+        scaleCooldownMs: this.scaleCooldownMs,
+        dbScaleUpBlockSaturationPct: this.dbScaleUpBlockSaturationPct,
         maxStreamLength: this.maxStreamLength,
         redisStreamHighWatermarkPct: this.redisStreamHighWatermarkPct,
         redisMemoryHighWatermarkPct: this.redisMemoryHighWatermarkPct,
@@ -254,7 +290,7 @@ export class RedisDeviceQueue {
   }
 
   async stopWorker(): Promise<void> {
-    logger.info('Stopping Redis sensor worker...');
+    logger.debug('Stopping Redis device worker...');
     this.isRunning = false;
     this.worker?.stop();
     if (this.healthCollector) {
@@ -263,7 +299,7 @@ export class RedisDeviceQueue {
     }
     await new Promise(resolve => setTimeout(resolve, 10000));
     await Promise.all([this.redisIngestion.quit(), this.redisConsumer.quit()]);
-    logger.info('Redis sensor worker stopped');
+    logger.debug('Redis device worker stopped');
   }
 
   /**
@@ -316,7 +352,7 @@ export class RedisDeviceQueue {
             : 'unlimited',
         });
       } catch (err: any) {
-        logger.warn('Health metrics collection failed', { error: err.message });
+        logger.debug('Health metrics collection failed', { error: err.message });
       }
     };
 
@@ -327,14 +363,32 @@ export class RedisDeviceQueue {
 
   async getIngestionHealth(): Promise<{
     lastProcessedTimestamp: number | null;
+    lagMs: number;
+    maxDwellMs: number;
+    workers: number;
+    status: 'healthy' | 'delayed' | 'buffering' | 'offline';
     ingestionHealthy: boolean;
     spoolingActive: boolean;
     backlogSize: number;
   }> {
     const backlogSize = await this.diskSpool.getBacklogCount();
     const state = circuitBreaker.getState();
+    const lagMs = metrics.maxDwellMs;
+    const status: 'healthy' | 'delayed' | 'buffering' | 'offline' =
+      state !== CircuitState.CLOSED || backlogSize > 0
+        ? 'buffering'
+        : metrics.redisConnected !== 1
+          ? 'offline'
+          : lagMs >= this.lagScaleUpMs
+            ? 'delayed'
+            : 'healthy';
+
     return {
       lastProcessedTimestamp: metrics.lastProcessedTimestamp,
+      lagMs,
+      maxDwellMs: metrics.maxDwellMs,
+      workers: metrics.workerCount,
+      status,
       ingestionHealthy: state === CircuitState.CLOSED && metrics.redisConnected === 1,
       spoolingActive: state !== CircuitState.CLOSED || backlogSize > 0,
       backlogSize,
@@ -385,6 +439,13 @@ export class RedisDeviceQueue {
         consumerGroup: this.consumerGroup,
         consumerName: this.consumerName,
         isRunning: this.isRunning,
+        workers: {
+          configured: this.workerCount,
+          current: this.worker?.getCurrentWorkerCount() ?? 0,
+          desired: this.worker?.getDesiredWorkerCount() ?? this.workerCount,
+          min: this.minWorkers,
+          max: this.maxWorkers,
+        },
         maxRetries: this.maxRetries,
         maxStreamLength: this.maxStreamLength,
         // Memory
@@ -411,6 +472,7 @@ export class RedisDeviceQueue {
           /** P95 of max-per-batch queue dwell time: how long messages wait in Redis before processing */
           dwell: metrics.getDwellLatencyP95(),
         },
+        maxDwellMs: metrics.maxDwellMs,
         // How long the current oldest stream entry has been waiting (live snapshot).
         // Derived from the Redis Stream ID timestamp — no extra field required.
         streamHeadDwellMs: firstEntry && firstEntry[0]
@@ -426,4 +488,4 @@ export class RedisDeviceQueue {
   }
 }
 
-export const redisSensorQueue = new RedisDeviceQueue();
+export const redisDeviceQueue = new RedisDeviceQueue();

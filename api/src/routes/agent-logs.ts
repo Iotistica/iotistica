@@ -29,10 +29,24 @@ import { logger } from '../utils/logger';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/agent-auth';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { redisLogQueue } from '../services/logs-queue/redis-log-queue';
-import { redisSensorQueue } from '../services/device-queue';
+import { redisDeviceQueue } from '../services/device-queue';
 
 
 export const router = express.Router();
+
+let lastIdempotencyOomLogAt = 0;
+
+function isRedisOomError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('OOM command not allowed');
+}
+
+function logIdempotencyOom(context: string, meta: Record<string, unknown>): void {
+  const now = Date.now();
+  if (now - lastIdempotencyOomLogAt < 10_000) return;
+  lastIdempotencyOomLogAt = now;
+  logger.warn(`Redis OOM during ${context} - log batch idempotency degraded`, meta);
+}
 
 /**
  * Check if batch ID has been processed before (idempotency)
@@ -50,7 +64,11 @@ async function checkBatchIdempotency(deviceUuid: string, batchId: string): Promi
     const exists = await client.exists(key);
     return exists === 1;
   } catch (error) {
-    logger.warn('Failed to check batch idempotency (Redis unavailable)', { error });
+    if (isRedisOomError(error)) {
+      logIdempotencyOom('batch idempotency check', { deviceUuid: deviceUuid.substring(0, 8), batchId });
+    } else {
+      logger.warn('Failed to check batch idempotency (Redis unavailable)', { error });
+    }
     return false; // Fail open (allow duplicate if Redis down)
   }
 }
@@ -71,7 +89,11 @@ async function storeBatchId(deviceUuid: string, batchId: string): Promise<void> 
     await client.setex(key, TTL, Date.now().toString());
     logger.debug('Stored batch ID for idempotency', { deviceUuid: deviceUuid.substring(0, 8), batchId });
   } catch (error) {
-    logger.warn('Failed to store batch ID (Redis unavailable)', { error });
+    if (isRedisOomError(error)) {
+      logIdempotencyOom('batch idempotency store', { deviceUuid: deviceUuid.substring(0, 8), batchId });
+    } else {
+      logger.warn('Failed to store batch ID (Redis unavailable)', { error });
+    }
     // Don't fail request if Redis unavailable
   }
 }
@@ -371,17 +393,17 @@ router.get('/admin/log-queue/stats', jwtAuth, requireRole('admin'), async (req, 
 });
 
 /**
- * Get Redis Stream sensor queue statistics
- * GET /api/v1/admin/sensor-queue/stats
+ * Get Redis Stream device queue statistics
+ * GET /api/v1/admin/device-queue/stats
  */
-router.get('/admin/sensor-queue/stats', jwtAuth, requireRole('admin'), async (req, res) => {
+router.get('/admin/device-queue/stats', jwtAuth, requireRole('admin'), async (req, res) => {
   try {
-    const stats = await redisSensorQueue.getStats();
+    const stats = await redisDeviceQueue.getStats();
     res.json(stats);
   } catch (error: any) {
-    logger.error('Error getting sensor queue stats', { error: error.message });
+    logger.error('Error getting device queue stats', { error: error.message });
     res.status(500).json({
-      error: 'Failed to get sensor queue stats',
+      error: 'Failed to get device queue stats',
       message: error.message
     });
   }

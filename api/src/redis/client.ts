@@ -23,6 +23,11 @@ import {
   consumerName as makeConsumerName,
 } from './tenant-keys';
 
+function isRedisOomError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('OOM command not allowed');
+}
+
 class RedisClient {
   private static instance: RedisClient;
   private client: Redis | null = null;
@@ -30,6 +35,7 @@ class RedisClient {
   private metricsConsumerGroup = 'metrics-writers';
   private metricsConsumerName: string;
   private subscriberInitialized: boolean = false;
+  private lastMetricsOomLogAt = 0;
   
   // Callback maps for pub/sub subscriptions (prevents duplicate handlers)
   private patternCallbacks: Map<string, Set<(deviceUuid: string, metrics: any) => void>> = new Map();
@@ -234,6 +240,18 @@ class RedisClient {
       await this.client!.xgroup('CREATE', streamKey, groupName, '0', 'MKSTREAM');
       logger.debug(`Created consumer group for ${streamKey}`);
     } catch (err: any) {
+      if (isRedisOomError(err)) {
+        const now = Date.now();
+        if (now - this.lastMetricsOomLogAt > 10_000) {
+          this.lastMetricsOomLogAt = now;
+          logger.warn('Redis OOM while ensuring metrics consumer group - metrics stream reads paused', {
+            tenantId: normalizeTenantId(tenantId),
+            streamKey,
+            groupName,
+          });
+        }
+        throw err;
+      }
       if (!err.message.includes('BUSYGROUP')) {
         throw err; // Unexpected error
       }
@@ -295,7 +313,14 @@ class RedisClient {
       }
 
       // Ensure consumer groups exist for all streams
-      await Promise.all(streamKeys.map(key => this.ensureConsumerGroup(tenantId, key)));
+      try {
+        await Promise.all(streamKeys.map(key => this.ensureConsumerGroup(tenantId, key)));
+      } catch (err) {
+        if (isRedisOomError(err)) {
+          return [];
+        }
+        throw err;
+      }
 
       const entries: Array<{ id: string; deviceUuid: string; metrics: any; timestamp: string }> = [];
 
@@ -359,7 +384,15 @@ class RedisClient {
             }
           }
         } catch (err: any) {
-          logger.error(`Failed to read from ${key}:`, { error: err.message });
+          if (isRedisOomError(err)) {
+            const now = Date.now();
+            if (now - this.lastMetricsOomLogAt > 10_000) {
+              this.lastMetricsOomLogAt = now;
+              logger.warn('Redis OOM while reading metrics stream - skipping read cycle', { key });
+            }
+          } else {
+            logger.error(`Failed to read from ${key}:`, { error: err.message });
+          }
         }
         
         if (entries.length >= count) {
@@ -369,7 +402,15 @@ class RedisClient {
 
       return entries;
     } catch (error) {
-       logger.error('  Failed to read metrics from Redis Stream:', error);
+      if (isRedisOomError(error)) {
+        const now = Date.now();
+        if (now - this.lastMetricsOomLogAt > 10_000) {
+          this.lastMetricsOomLogAt = now;
+          logger.warn('Redis OOM prevented metrics stream read cycle');
+        }
+      } else {
+        logger.error('  Failed to read metrics from Redis Stream:', error);
+      }
       return [];
     }
   }

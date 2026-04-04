@@ -22,7 +22,7 @@ export class DiskSpool {
     try {
       if (!fsSync.existsSync(this.spoolPath)) {
         await fs.mkdir(this.spoolPath, { recursive: true });
-        logger.info('Created disk spool directory', { path: this.spoolPath });
+        logger.debug('Created disk spool directory', { path: this.spoolPath });
       }
 
       // Verify the process can actually write to the directory.
@@ -33,7 +33,7 @@ export class DiskSpool {
       await fs.unlink(testFile);
 
       this.enabled = true;
-      logger.info('Disk spool fallback initialized', {
+      logger.debug('Disk spool fallback initialized', {
         path: this.spoolPath,
         maxSizeMb: this.maxSizeMb,
       });
@@ -103,7 +103,7 @@ export class DiskSpool {
         const content = await fs.readFile(oldestFile, 'utf8');
         const lines = content.split('\n').filter(l => l.trim());
 
-        logger.info('Replaying spooled data to Redis', {
+        logger.debug('Replaying spooled data to Redis', {
           file: files[0],
           batches: lines.length,
           totalSpooledFiles: files.length,
@@ -119,14 +119,14 @@ export class DiskSpool {
 
         for (const line of lines) {
           try {
-            const sensorData = JSON.parse(line) as DeviceDataEntry[];
-            await onBatch(sensorData);
+            const deviceData = JSON.parse(line) as DeviceDataEntry[];
+            await onBatch(deviceData);
           } catch (err: any) {
             logger.error('Failed to replay spooled batch', { error: err.message });
           }
         }
 
-        logger.info('Replayed and deleted spool file', { file: files[0] });
+        logger.debug('Replayed and deleted spool file', { file: files[0] });
       } catch (err: any) {
         logger.error('Spool replay error', { error: err.message });
       }
@@ -164,7 +164,7 @@ export class DiskSpool {
       if (files.length > 0) {
         const oldestFile = path.join(this.spoolPath, files[0]);
         await fs.unlink(oldestFile);
-        logger.info('Deleted oldest spool file (disk full)', { file: files[0] });
+        logger.warn('Deleted oldest spool file (disk full)', { file: files[0] });
       }
     } catch (err: any) {
       logger.error('Failed to delete oldest spool file', { error: err.message });

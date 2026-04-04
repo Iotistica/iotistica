@@ -14,11 +14,13 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  ReferenceArea,
 } from 'recharts';
 import { buildApiUrl } from '@/config/api';
 import { metricsRequestQueue } from '@/utils/metricsRequestQueue';
 import { useGlobalNow } from '../hooks/useGlobalNow';
 import { useVisibilityState } from '../hooks/useVisibilityState';
+import { useIngestionHealth } from '../hooks/useIngestionHealth';
 import { buildMetricChartPipeline, getTimeRangeMs, stabilizeYDomain } from '@/utils/metricChartPipeline';
 
 const Y_DOMAIN_SHRINK_LERP = 0.08;
@@ -27,6 +29,8 @@ const OFFSCREEN_REFRESH_MULTIPLIER = 4;
 const OFFSCREEN_MIN_REFRESH_SECONDS = 120;
 const HIDDEN_TAB_REFRESH_MULTIPLIER = 10;
 const HIDDEN_TAB_MIN_REFRESH_SECONDS = 300;
+/** How stale lastProcessedTimestamp must be before the delay zone is rendered on the chart. */
+const DELAY_THRESHOLD_MS = 120_000;
 
 export interface ThresholdLine {
   value: number;
@@ -195,6 +199,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   const [staleReason, setStaleReason] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const now = useGlobalNow();
+  const ingestionHealth = useIngestionHealth();
   const cardRef = useRef<HTMLDivElement | null>(null);
   const latestDataRef = useRef<TimeSeriesResponse | null>(null);
   const fetchDataRef = useRef<() => Promise<void>>(async () => {});
@@ -505,11 +510,20 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     if (!chartState || !currentData) return null;
 
     const { chartDataWithGaps, gapMarkerTimes, yDomain, xDomain } = chartState;
+    const suppressOfflineGapRendering = isDelayed || isBuffering || isUnhealthy;
+    const renderedChartData = suppressOfflineGapRendering
+      ? chartDataWithGaps.filter((point) => !point.isGapBreak)
+      : chartDataWithGaps;
+    const renderedGapMarkerTimes = suppressOfflineGapRendering ? [] : gapMarkerTimes;
     const lastDataTime = chartDataWithGaps.length > 0
       ? chartDataWithGaps[chartDataWithGaps.length - 1].timeValue
       : null;
+    const delayZoneStart = (isDelayed || isBuffering) && ingestionHealth?.lastProcessedTimestamp != null
+      ? Math.max(ingestionHealth.lastProcessedTimestamp, xDomain[0])
+      : null;
+    const showDelayZone = delayZoneStart !== null && delayZoneStart < xDomain[1];
     const commonProps = {
-      data: chartDataWithGaps,
+      data: renderedChartData,
       margin: { top: 5, right: 10, left: 0, bottom: 5 },
     };
 
@@ -544,6 +558,17 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               <Tooltip 
                 content={renderTooltipContent}
               />
+              {showDelayZone && delayZoneStart !== null && (
+                <ReferenceArea
+                  x1={delayZoneStart}
+                  x2={xDomain[1]}
+                  yAxisId="left"
+                  fill="rgba(156, 163, 175, 0.15)"
+                  stroke="rgba(156, 163, 175, 0.4)"
+                  strokeDasharray="4 2"
+                  label={isBuffering ? { value: 'Data delayed (buffering)', position: 'insideTopRight', fontSize: 11, fill: '#9ca3af' } : undefined}
+                />
+              )}
               <Area 
                 yAxisId="left"
                 type="linear" 
@@ -558,7 +583,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 animationDuration={350}
                 animationEasing="linear"
               />
-              {gapMarkerTimes.map((gapTime, idx) => (
+              {renderedGapMarkerTimes.map((gapTime, idx) => (
                 <ReferenceLine
                   key={`area-gap-${idx}`}
                   x={gapTime}
@@ -627,6 +652,17 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               <Tooltip 
                 content={renderTooltipContent}
               />
+              {showDelayZone && delayZoneStart !== null && (
+                <ReferenceArea
+                  x1={delayZoneStart}
+                  x2={xDomain[1]}
+                  yAxisId="left"
+                  fill="rgba(156, 163, 175, 0.15)"
+                  stroke="rgba(156, 163, 175, 0.4)"
+                  strokeDasharray="4 2"
+                  label={isBuffering ? { value: 'Data delayed (buffering)', position: 'insideTopRight', fontSize: 11, fill: '#9ca3af' } : undefined}
+                />
+              )}
               <Bar 
                 yAxisId="left"
                 dataKey="value" 
@@ -637,7 +673,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                 animationDuration={350}
                 animationEasing="linear"
               />
-              {gapMarkerTimes.map((gapTime, idx) => (
+              {renderedGapMarkerTimes.map((gapTime, idx) => (
                 <ReferenceLine
                   key={`bar-gap-${idx}`}
                   x={gapTime}
@@ -706,6 +742,17 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               <Tooltip 
                 content={renderTooltipContent}
               />
+              {showDelayZone && delayZoneStart !== null && (
+                <ReferenceArea
+                  x1={delayZoneStart}
+                  x2={xDomain[1]}
+                  yAxisId="left"
+                  fill="rgba(156, 163, 175, 0.15)"
+                  stroke="rgba(156, 163, 175, 0.4)"
+                  strokeDasharray="4 2"
+                  label={isBuffering ? { value: 'Data delayed (buffering)', position: 'insideTopRight', fontSize: 11, fill: '#9ca3af' } : undefined}
+                />
+              )}
               <Line 
                 yAxisId="left"
                 type="linear" 
@@ -734,7 +781,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   activeDot={{ r: 5, fill: '#ef4444', stroke: '#ffffff', strokeWidth: 1 }}
                 />
               )}
-              {gapMarkerTimes.map((gapTime, idx) => (
+              {renderedGapMarkerTimes.map((gapTime, idx) => (
                 <ReferenceLine
                   key={`line-gap-${idx}`}
                   x={gapTime}
@@ -781,15 +828,24 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   const staleAgeLabel = lastRefreshed
     ? `${Math.max(1, Math.floor((now - lastRefreshed.getTime()) / 60000))}m ago`
     : null;
+  const isDelayed = ingestionHealth !== null
+    && ingestionHealth.lastProcessedTimestamp !== null
+    && (now - ingestionHealth.lastProcessedTimestamp > DELAY_THRESHOLD_MS);
+  const isBuffering = ingestionHealth?.spoolingActive === true;
+  const isUnhealthy = ingestionHealth?.ingestionHealthy === false;
   const refreshState = refreshInterval <= 0
     ? { label: 'Paused', color: '#9ca3af', detail: 'Auto-refresh disabled' }
-    : stale
-      ? { label: 'Stale', color: '#f59e0b', detail: staleReason || 'Showing last known data' }
-      : !isPageVisible
-        ? { label: 'Background', color: '#64748b', detail: `Throttled to every ${effectiveRefreshInterval}s while tab is hidden` }
-        : !isInViewport
-          ? { label: 'Throttled', color: '#0ea5e9', detail: `Throttled to every ${effectiveRefreshInterval}s while offscreen` }
-          : { label: 'Live', color: '#22c55e', detail: `Refreshing every ${effectiveRefreshInterval}s` };
+    : isUnhealthy
+      ? { label: 'Warning', color: '#ef4444', detail: 'Ingestion pipeline error' }
+      : isBuffering
+        ? { label: 'Buffering', color: '#f97316', detail: 'Data delayed - pipeline is spooling to disk' }
+        : stale
+          ? { label: 'Stale', color: '#f59e0b', detail: staleReason || 'Showing last known data' }
+          : !isPageVisible
+            ? { label: 'Background', color: '#64748b', detail: `Throttled to every ${effectiveRefreshInterval}s while tab is hidden` }
+            : !isInViewport
+              ? { label: 'Throttled', color: '#0ea5e9', detail: `Throttled to every ${effectiveRefreshInterval}s while offscreen` }
+              : { label: 'Live', color: '#22c55e', detail: `Refreshing every ${effectiveRefreshInterval}s` };
 
   return (
     <div ref={cardRef} className="h-full flex flex-col">
@@ -870,6 +926,13 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   </span>
                   {refreshState.label}
                 </div>
+                {isUnhealthy && (
+                  <span
+                    className="text-[11px] leading-none px-2 py-1 rounded border border-red-300/60 bg-red-50/80 text-red-700 whitespace-nowrap"
+                  >
+                    Ingestion offline
+                  </span>
+                )}
                 {stale && (
                   <span
                     className="text-[11px] leading-none px-2 py-1 rounded border border-amber-300/60 bg-amber-50/80 text-amber-800 whitespace-nowrap"

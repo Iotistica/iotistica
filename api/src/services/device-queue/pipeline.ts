@@ -6,6 +6,12 @@ import { backoffDelayMs, sleep } from './retry-utils';
 type RedisPipelineHandle = ReturnType<Redis['pipeline']>;
 type PipelineCallback = (pipeline: RedisPipelineHandle) => void;
 
+interface PendingPipelineEntry {
+  callback: PipelineCallback;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
 export interface PipelineOptions {
   /** Number of commands to accumulate before auto-flushing (default: 10) */
   batchSize?: number;
@@ -29,7 +35,7 @@ export interface PipelineOptions {
  */
 export class RedisPipeline {
   private pending: RedisPipelineHandle | null = null;
-  private pendingCallbacks: PipelineCallback[] = [];
+  private pendingEntries: PendingPipelineEntry[] = [];
   private count = 0;
   private flushTimer: NodeJS.Timeout | null = null;
 
@@ -51,29 +57,32 @@ export class RedisPipeline {
    * so commands can be chained without creating a new pipeline each call.
    */
   async add(fn: PipelineCallback): Promise<void> {
-    if (!this.pending) {
-      this.pending = this.redis.pipeline();
-    }
+    return new Promise<void>((resolve, reject) => {
+      if (!this.pending) {
+        this.pending = this.redis.pipeline();
+      }
 
-    fn(this.pending);
-    this.pendingCallbacks.push(fn);
-    this.count++;
+      fn(this.pending);
+      this.pendingEntries.push({ callback: fn, resolve, reject });
+      this.count++;
 
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
+      if (this.flushTimer) {
+        clearTimeout(this.flushTimer);
+        this.flushTimer = null;
+      }
 
-    if (this.count >= this.batchSize) {
-      return this.flush();
-    }
+      if (this.count >= this.batchSize) {
+        void this.flush().catch(err => reject(err instanceof Error ? err : new Error(String(err))));
+        return;
+      }
 
-    // Schedule flush after 50ms if no more commands arrive
-    this.flushTimer = setTimeout(() => {
-      this.flush().catch(err =>
-        logger.error('Pipeline auto-flush failed', { error: err.message }),
-      );
-    }, 50);
+      // Schedule flush after 50ms if no more commands arrive
+      this.flushTimer = setTimeout(() => {
+        this.flush().catch(err =>
+          logger.error('Pipeline auto-flush failed', { error: err.message }),
+        );
+      }, 50);
+    });
   }
 
   async flush(): Promise<void> {
@@ -81,11 +90,11 @@ export class RedisPipeline {
 
     const count = this.count;
     const pipeline = this.pending;
-    const callbacks = this.pendingCallbacks;
+    const entries = this.pendingEntries;
 
     // Reset before exec to avoid re-entrance issues
     this.pending = null;
-    this.pendingCallbacks = [];
+    this.pendingEntries = [];
     this.count = 0;
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
@@ -98,23 +107,37 @@ export class RedisPipeline {
       const results = await pipeline.exec() as Array<[Error | null, unknown]> | null;
       const duration = Date.now() - startTime;
 
-      // Detect per-command OOM rejections (noeviction policy)
-      const oomCallbacks: PipelineCallback[] = [];
+      // Detect per-command OOM rejections (noeviction policy) and resolve/reject
+      // the individual command promises so callers only see success after durability.
+      const oomEntries: PendingPipelineEntry[] = [];
       if (results) {
         results.forEach(([err], idx) => {
-          if (err?.message?.includes('OOM')) {
-            oomCallbacks.push(callbacks[idx]);
+          const entry = entries[idx];
+          if (!entry) return;
+          if (!err) {
+            entry.resolve();
+            return;
           }
+          if (err.message?.includes('OOM')) {
+            oomEntries.push(entry);
+            return;
+          }
+          entry.reject(err);
         });
+      } else {
+        // Null means pipeline yielded no per-command details; fail safe.
+        for (const entry of entries) {
+          entry.reject(new Error('Redis pipeline exec returned null'));
+        }
       }
 
-      if (oomCallbacks.length > 0) {
+      if (oomEntries.length > 0) {
         metrics.oomErrors++;
         logger.warn('Redis OOM on pipeline flush, retrying with backoff', {
-          oomCount: oomCallbacks.length,
-          successCount: count - oomCallbacks.length,
+          oomCount: oomEntries.length,
+          successCount: count - oomEntries.length,
         });
-        const dropped = await this.retryOomFailures(oomCallbacks, 0);
+        const dropped = await this.retryOomFailures(oomEntries, 0);
         if (dropped > 0) {
           metrics.messagesDropped += dropped;
           logger.error('Redis OOM: exhausted retries, commands dropped', {
@@ -125,8 +148,8 @@ export class RedisPipeline {
         }
       }
 
-      const successCount = count - oomCallbacks.length;
-      logger.debug('Flushed sensor pipeline', {
+      const successCount = count - oomEntries.length;
+      logger.debug('Flushed device pipeline', {
         operations: successCount,
         totalLatencyMs: duration,
         avgLatencyPerOpMs: successCount > 0 ? Math.round(duration / successCount) : 0,
@@ -135,7 +158,10 @@ export class RedisPipeline {
     } catch (err) {
       // Connection-level failure (not per-command) — whole flush failed
       metrics.messagesDropped += count;
-      logger.error('Sensor pipeline exec failed', {
+      for (const entry of entries) {
+        entry.reject(err instanceof Error ? err : new Error(String(err)));
+      }
+      logger.error('Device pipeline exec failed', {
         error: err instanceof Error ? err.message : String(err),
         count,
         totalDropped: metrics.messagesDropped,
@@ -148,50 +174,63 @@ export class RedisPipeline {
    * Returns the number of commands still failing after all retries.
    */
   private async retryOomFailures(
-    failedCallbacks: PipelineCallback[],
+    failedEntries: PendingPipelineEntry[],
     attempt: number,
   ): Promise<number> {
-    if (failedCallbacks.length === 0) return 0;
+    if (failedEntries.length === 0) return 0;
 
     if (attempt >= this.maxOomRetries) {
-      return failedCallbacks.length;
+      for (const entry of failedEntries) {
+        entry.reject(new Error('Redis OOM: exhausted pipeline retries'));
+      }
+      return failedEntries.length;
     }
 
     const delay = backoffDelayMs(attempt);
-    metrics.oomRetries += failedCallbacks.length;
+    metrics.oomRetries += failedEntries.length;
     logger.debug('OOM retry backoff', {
       attempt: attempt + 1,
       maxAttempts: this.maxOomRetries,
       delayMs: delay,
-      commandCount: failedCallbacks.length,
+      commandCount: failedEntries.length,
     });
     await sleep(delay);
 
     // Rebuild a fresh pipeline from the stored callbacks
     const retryPipeline = this.redis.pipeline();
-    for (const cb of failedCallbacks) cb(retryPipeline);
+    for (const entry of failedEntries) entry.callback(retryPipeline);
 
     let results: Array<[Error | null, unknown]> | null = null;
     try {
       results = await retryPipeline.exec() as Array<[Error | null, unknown]> | null;
     } catch {
       // Connection-level failure during retry — retry all callbacks
-      return this.retryOomFailures(failedCallbacks, attempt + 1);
+      return this.retryOomFailures(failedEntries, attempt + 1);
     }
 
-    const stillFailing: PipelineCallback[] = [];
+    const stillFailing: PendingPipelineEntry[] = [];
     if (results) {
       results.forEach(([err], idx) => {
-        if (err?.message?.includes('OOM')) {
-          stillFailing.push(failedCallbacks[idx]);
+        const entry = failedEntries[idx];
+        if (!entry) return;
+        if (!err) {
+          entry.resolve();
+          return;
         }
+        if (err.message?.includes('OOM')) {
+          stillFailing.push(entry);
+          return;
+        }
+        entry.reject(err);
       });
+    } else {
+      return this.retryOomFailures(failedEntries, attempt + 1);
     }
 
     if (stillFailing.length === 0) {
-      logger.info('OOM retry succeeded', {
+      logger.debug('OOM retry succeeded', {
         attempt: attempt + 1,
-        recoveredCount: failedCallbacks.length,
+        recoveredCount: failedEntries.length,
       });
       return 0;
     }

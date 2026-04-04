@@ -31,26 +31,26 @@ export class RedisQueueProducer {
     return ['MAXLEN', '~', len];
   }
 
-  private async fallbackToDiskOrDrop(sensorData: DeviceDataEntry[], reason: string): Promise<AddOutcome> {
+  private async fallbackToDiskOrDrop(deviceData: DeviceDataEntry[], reason: string): Promise<AddOutcome> {
     if (this.diskSpool.isEnabled()) {
       try {
-        await this.diskSpool.spoolToDisk(sensorData);
-        logger.warn(`${reason} - spooled to disk`, { count: sensorData.length });
+        await this.diskSpool.spoolToDisk(deviceData);
+        logger.warn(`${reason} - spooled to disk`, { count: deviceData.length });
         return 'disk';
       } catch (err: any) {
         // Spool write failed (e.g. EACCES, ENOSPC). Count as dropped so metrics reflect reality.
-        metrics.messagesDropped += sensorData.length;
+        metrics.messagesDropped += deviceData.length;
         logger.error(`${reason} - disk spool write failed, data dropped`, {
-          count: sensorData.length,
+          count: deviceData.length,
           totalDropped: metrics.messagesDropped,
           error: err.message,
         });
         return 'dropped';
       }
     } else {
-      metrics.messagesDropped += sensorData.length;
+      metrics.messagesDropped += deviceData.length;
       logger.error(`${reason} and disk spool disabled - data dropped`, {
-        count: sensorData.length, totalDropped: metrics.messagesDropped,
+        count: deviceData.length, totalDropped: metrics.messagesDropped,
       });
       return 'dropped';
     }
@@ -58,7 +58,7 @@ export class RedisQueueProducer {
 
   private logAddResult(count: number, payloadBytes: number, duration: number): void {
     if (duration > 100) {
-      logger.warn('Slow Redis write (sensor batch)', { count, payloadBytes, durationMs: duration });
+      logger.debug('Slow Redis write (device batch)', { count, payloadBytes, durationMs: duration });
     } else {
       logger.debug('Added device data to Redis stream', {
         count, payloadBytes, durationMs: duration,
@@ -72,13 +72,13 @@ export class RedisQueueProducer {
       if (!circuitBreaker.shouldAllowRequest()) {
         logger.warn('Redis circuit OPEN, spooling compressed batch to disk', {
           deviceUuid: this.short(entry.deviceUuid),
-          sensorName: entry.sensorName,
+          deviceName: entry.deviceName,
           batchId: entry.batchId,
         });
-        // Wrap into a SensorDataEntry so the disk spool can replay it through addInternal()
+        // Wrap into a DeviceDataEntry so the disk spool can replay it through addInternal()
         await this.fallbackToDiskOrDrop([{
           deviceUuid: entry.deviceUuid,
-          sensorName: entry.sensorName,
+          deviceName: entry.deviceName,
           data: { _compressedBatchId: entry.batchId },
           timestamp: new Date().toISOString(),
           metadata: {},
@@ -90,7 +90,7 @@ export class RedisQueueProducer {
         circuitBreaker.recordFailure();
         await this.fallbackToDiskOrDrop([{
           deviceUuid: entry.deviceUuid,
-          sensorName: entry.sensorName,
+          deviceName: entry.deviceName,
           data: { _compressedBatchId: entry.batchId },
           timestamp: new Date().toISOString(),
           metadata: {},
@@ -102,12 +102,12 @@ export class RedisQueueProducer {
       const payloadPointer = `${entry.deviceUuid}/${entry.batchId}`;
       const payloadSize = entry.compressedPayload.length;
 
-      void this.pipeline.add(p => {
+      await this.pipeline.add(p => {
         p.xadd(
           streamKey, ...this.maxlenArgs(this.maxStreamLength), '*',
           'compressed', '1',
           'deviceUuid', entry.deviceUuid,
-          'sensorName', entry.sensorName,
+          'deviceName', entry.deviceName,
           'batchId', entry.batchId,
           'encoding', entry.contentEncoding,
           'contentType', entry.contentType,
@@ -116,9 +116,9 @@ export class RedisQueueProducer {
         );
       });
 
-      logger.debug('Queued compressed sensor metadata (pointer-based)', {
+      logger.debug('Queued compressed device metadata (pointer-based)', {
         deviceUuid: this.short(entry.deviceUuid),
-        sensorName: entry.sensorName,
+        deviceName: entry.deviceName,
         batchId: entry.batchId,
         payloadBytes: payloadSize,
         encoding: entry.contentEncoding,
@@ -126,9 +126,9 @@ export class RedisQueueProducer {
       circuitBreaker.recordSuccess();
     } catch (err: any) {
       circuitBreaker.recordFailure();
-      logger.error('Failed to queue compressed sensor metadata to Redis', {
+      logger.error('Failed to queue compressed device metadata to Redis', {
         deviceUuid: this.short(entry.deviceUuid),
-        sensorName: entry.sensorName,
+        deviceName: entry.deviceName,
         batchId: entry.batchId,
         error: err.message,
       });
@@ -154,7 +154,7 @@ export class RedisQueueProducer {
 
       if (!this.isRedisReady()) {
         if (!bypassCircuit) circuitBreaker.recordFailure();
-        logger.info('Redis not ready, routing to disk spool', {
+        logger.debug('Redis not ready, routing to disk spool', {
           redisStatus: this.redis.status,
           count: deviceData.length,
           circuitState: circuitBreaker.getState?.() ?? 'unknown',
@@ -164,7 +164,7 @@ export class RedisQueueProducer {
 
       const streamKey = this.getStreamKey();
       const payload = JSON.stringify(deviceData);
-      void this.pipeline.add(p => {
+      await this.pipeline.add(p => {
         p.xadd(streamKey, ...this.maxlenArgs(this.maxStreamLength), '*', 'data', payload);
       });
 

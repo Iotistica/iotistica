@@ -10,15 +10,15 @@ const inflateAsync = promisify(inflate);
 const shortId = (id?: string): string | undefined => id?.substring(0, 8);
 
 /**
- * Decompress and parse a compressed sensor payload from the Redis stream.
+ * Decompress and parse a compressed device payload from the Redis stream.
  * Supports Brotli, gzip, deflate, and identity (no compression).
  * Runs in the worker loop — offloads CPU from the main request thread.
  */
-export async function decompressAndParseSensors(
+export async function decompressAndParseDevices(
   compressedPayload: Buffer,
   contentEncoding: string,
   deviceUuid: string,
-  sensorName: string,
+  deviceName: string,
 ): Promise<DeviceDataEntry[]> {
   const startTime = Date.now();
 
@@ -48,9 +48,9 @@ export async function decompressAndParseSensors(
       const parsed = JSON.parse(rawJson);
       readings = Array.isArray(parsed) ? parsed : [parsed];
     } catch (parseErr: any) {
-      logger.error('Failed to parse decompressed sensor payload', {
+      logger.error('Failed to parse decompressed device payload', {
         deviceUuid: shortId(deviceUuid),
-        sensorName,
+        deviceName: deviceName,
         encoding: contentEncoding,
         decompressedBytes: decompressed.length,
         error: parseErr.message,
@@ -61,15 +61,15 @@ export async function decompressAndParseSensors(
 
     const entries: DeviceDataEntry[] = readings.map((reading: any) => ({
       deviceUuid: reading.deviceUuid || deviceUuid,
-      sensorName: reading.sensorName || sensorName,
+      deviceName: reading.deviceName || deviceName,
       timestamp: reading.timestamp || new Date().toISOString(),
       data: reading.data || reading,
       metadata: reading.metadata,
     }));
 
-    logger.debug('Decompressed sensor payload', {
+    logger.debug('Decompressed device payload', {
       deviceUuid: shortId(deviceUuid),
-      sensorName,
+      deviceName,
       encoding: contentEncoding,
       compressedBytes: compressedPayload.length,
       decompressedBytes: decompressed.length,
@@ -79,9 +79,9 @@ export async function decompressAndParseSensors(
 
     return entries;
   } catch (err: any) {
-    logger.error('Failed to decompress sensor payload', {
+    logger.error('Failed to decompress device payload', {
       deviceUuid: shortId(deviceUuid),
-      sensorName,
+      deviceName: deviceName,
       encoding: contentEncoding,
       compressedBytes: compressedPayload.length,
       error: err.message,

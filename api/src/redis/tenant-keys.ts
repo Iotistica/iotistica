@@ -200,7 +200,7 @@ export function deviceLogsStreamKey(tenantId: string): string {
  * Stream key for the sensor data ingestion queue 
  * @param tenantId - Tenant identifier (customerId)
  */
-export function deviceSensorsIngestionStreamKey(tenantId: string): string {
+export function deviceDevicesIngestionStreamKey(tenantId: string): string {
   return `${tenantPrefix(tenantId)}:device:sensors:ingestion`;
 }
 
@@ -208,7 +208,7 @@ export function deviceSensorsIngestionStreamKey(tenantId: string): string {
  * Stream key for the sensor data processing queue 
  * @param tenantId - Tenant identifier (customerId)
  */
-export function deviceSensorsReadyStreamKey(tenantId: string): string {
+export function deviceDevicesReadyStreamKey(tenantId: string): string {
   return `${tenantPrefix(tenantId)}:device:sensors:ready`;
 }
 
@@ -216,7 +216,7 @@ export function deviceSensorsReadyStreamKey(tenantId: string): string {
  * Stream key for the sensor data dead-letter queue 
  * @param tenantId - Tenant identifier (customerId)
  */
-export function deviceSensorsDlqStreamKey(tenantId: string): string {
+export function deviceDevicesDlqStreamKey(tenantId: string): string {
   return `${tenantPrefix(tenantId)}:device:sensors:dlq`;
 }
 

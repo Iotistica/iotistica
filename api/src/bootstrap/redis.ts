@@ -2,7 +2,7 @@
  * Redis bootstrap: connect client and start all Redis-dependent workers.
  *
  * Redis client failure is non-fatal (graceful degradation to PostgreSQL).
- * Log queue and sensor queue workers are critical - startup exits if they fail.
+ * Log queue and device queue workers are critical - startup exits if they fail.
  */
 
 import Redis from 'ioredis';
@@ -10,7 +10,7 @@ import logger from '../utils/logger';
 import { redisClient } from '../redis/client';
 import { startMetricsBatchWorker } from '../workers/metrics-batch-worker';
 import { redisLogQueue } from '../services/logs-queue/redis-log-queue';
-import { redisSensorQueue } from '../services/device-queue';
+import { redisDeviceQueue } from '../services/device-queue';
 
 /**
  * Flush the Mosquitto go-auth Redis cache (DB 1) on startup.
@@ -84,12 +84,12 @@ export async function bootstrapRedis(): Promise<void> {
     process.exit(1);
   }
 
-  // Sensor queue worker - CRITICAL: sensor data won't be persisted without it
+  // Device queue worker - CRITICAL: device data won't be persisted without it
   try {
-    await redisSensorQueue.startWorker();
-    logger.info('Redis sensor queue worker started');
+    await redisDeviceQueue.startWorker();
+    logger.info('Redis device queue worker started');
   } catch (error) {
-    logger.error('Failed to start Redis sensor queue worker', { error });
+    logger.error('Failed to start Redis device queue worker', { error });
     process.exit(1);
   }
 }

@@ -3,12 +3,33 @@ import { ReadingInsert } from '../../services/readings.service';
 import { DeviceDataEntry, DeviceIdentity } from './types';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UNKNOWN_DEVICE_NAME = 'unknown';
 const shortId = (id?: string): string | undefined => id?.substring(0, 8);
 
-export function detectProtocol(entry: DeviceDataEntry): string {
-  if (entry.metadata?.protocol) return entry.metadata.protocol;
+function normalizeNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
 
-  const name = entry.sensorName.toLowerCase();
+function resolveEntryDeviceName(entry: DeviceDataEntry): string {
+  const directName = normalizeNonEmptyString(entry.deviceName);
+  if (directName) return directName;
+
+  const payloadIdentity = extractDeviceIdentity(entry.data);
+  if (payloadIdentity.deviceName) return payloadIdentity.deviceName;
+
+  const metadataIdentity = extractDeviceIdentity(entry.metadata);
+  if (metadataIdentity.deviceName) return metadataIdentity.deviceName;
+
+  return UNKNOWN_DEVICE_NAME;
+}
+
+export function detectProtocol(entry: DeviceDataEntry): string {
+  const metadataProtocol = normalizeNonEmptyString(entry.metadata?.protocol);
+  if (metadataProtocol) return metadataProtocol;
+
+  const name = resolveEntryDeviceName(entry).toLowerCase();
   if (name === 'modbus' || name.startsWith('modbus_')) return 'modbus';
   if (name === 'opcua' || name.startsWith('opcua_')) return 'opcua';
   if (name === 'snmp' || name.startsWith('snmp_')) return 'snmp';
@@ -117,6 +138,8 @@ export function normalizeReading(
   messageTimestamp?: string,
   messageContext?: Record<string, any>,
 ): ReadingInsert | null {
+  const resolvedDeviceName = resolveEntryDeviceName(entry);
+
   if (reading.nodeType === 'metadata') {
     logger.debug('Skipping metadata node (not stored in readings table)', {
       metric: reading.metric || reading.nodeName || reading.name,
@@ -129,7 +152,7 @@ export function normalizeReading(
   const extra = buildExtraPayload(reading, entry, ingestedAt, messageContext);
   return {
     agent_uuid: entry.deviceUuid,
-    metric_name: reading.metric || reading.nodeName || reading.name || entry.sensorName,
+    metric_name: reading.metric || reading.nodeName || reading.name || resolvedDeviceName,
     value: typeof reading.value === 'number' ? reading.value : null,
     quality: normalizeQuality(reading.quality),
     unit: reading.unit || null,
@@ -171,6 +194,8 @@ function expandFormat2(entry: DeviceDataEntry, protocol: string, ingestedAt: Dat
 
 // Format 3: single reading (legacy)
 function expandFormat3(entry: DeviceDataEntry, protocol: string, ingestedAt: Date): ReadingInsert[] {
+  const resolvedDeviceName = resolveEntryDeviceName(entry);
+
   if (entry.data && typeof entry.data === 'object' && !Array.isArray(entry.data)) {
     const normalized = normalizeReading(entry.data, entry, protocol, ingestedAt, undefined, entry.data);
     if (normalized) {
@@ -188,7 +213,7 @@ function expandFormat3(entry: DeviceDataEntry, protocol: string, ingestedAt: Dat
       (entry.data && typeof entry.data === 'object'
         ? (entry.data.metric || entry.data.nodeName || entry.data.name)
         : null)
-      || entry.sensorName,
+      || resolvedDeviceName,
     value: typeof value === 'number' ? value : null,
     quality: normalizeQuality(entry.data?.quality),
     unit: entry.data?.unit || null,

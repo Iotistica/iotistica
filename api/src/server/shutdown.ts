@@ -89,13 +89,13 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
       logger.error('Error stopping Redis log queue worker', { error });
     }
 
-    // Redis sensor queue (final batch)
+    // Redis device queue (final batch)
     try {
-      const { redisSensorQueue } = await import('../services/device-queue');
-      await redisSensorQueue.stopWorker();
-      logger.info('Redis sensor queue worker stopped');
+      const { redisDeviceQueue } = await import('../services/device-queue');
+      await redisDeviceQueue.stopWorker();
+      logger.info('Redis device queue worker stopped');
     } catch (error) {
-      logger.error('Error stopping Redis sensor queue worker', { error });
+      logger.error('Error stopping Redis device queue worker', { error });
     }
 
     // Database pool

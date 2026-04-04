@@ -69,6 +69,20 @@ const stats: DedupStats = {
   lastReset: Date.now()
 };
 
+let lastDedupOomLogAt = 0;
+
+function isRedisOomError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('OOM command not allowed');
+}
+
+function logRedisOom(context: string, meta: Record<string, unknown>): void {
+  const now = Date.now();
+  if (now - lastDedupOomLogAt < 10_000) return;
+  lastDedupOomLogAt = now;
+  logger.warn(`Redis OOM during ${context} - deduplication temporarily bypassed`, meta);
+}
+
 /**
  * Check if message is duplicate and mark as seen
  * 
@@ -125,10 +139,14 @@ export async function isDuplicateMessage(
     }
   } catch (error) {
     stats.redisErrors++;
-    logger.error('Error checking message duplication', { 
-      msgId, 
-      error: error instanceof Error ? error.message : String(error)
-    });
+    if (isRedisOomError(error)) {
+      logRedisOom('single-message deduplication check', { msgId });
+    } else {
+      logger.error('Error checking message duplication', {
+        msgId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
     
     // Graceful degradation: if Redis fails, decide whether to process or skip
     return cfg.gracefulFallback ? false : true;
@@ -162,6 +180,11 @@ async function checkWithBloomFilter(
       return true;
     }
   } catch (error) {
+    if (isRedisOomError(error)) {
+      logRedisOom('Bloom-filter deduplication check', { msgId });
+      return cfg.gracefulFallback ? false : true;
+    }
+
     // Redis Bloom module not available - fallback to standard dedup
     logger.warn('Bloom filter not available, using standard deduplication', {
       error: error instanceof Error ? error.message : String(error)
@@ -233,11 +256,16 @@ export async function checkBatchDuplicates(
     }
 
     // Parse results
+    let oomCount = 0;
     pipelineResults.forEach(([error, result], index) => {
       const msgId = msgIds[index];
       
       if (error) {
-        logger.error('Error in batch dedup check', { msgId, error });
+        if (isRedisOomError(error)) {
+          oomCount++;
+        } else {
+          logger.error('Error in batch dedup check', { msgId, error });
+        }
         // Graceful: treat as non-duplicate
         results.set(msgId, cfg.gracefulFallback ? false : true);
       } else {
@@ -246,6 +274,10 @@ export async function checkBatchDuplicates(
         results.set(msgId, isDuplicate);
       }
     });
+
+    if (oomCount > 0) {
+      logRedisOom('batch deduplication check', { count: msgIds.length, oomCount });
+    }
 
     const duplicateCount = Array.from(results.values()).filter(d => d).length;
     logger.debug('Batch deduplication check complete', {
@@ -256,10 +288,14 @@ export async function checkBatchDuplicates(
 
     return results;
   } catch (error) {
-    logger.error('Error in batch deduplication check', { 
-      count: msgIds.length,
-      error: error instanceof Error ? error.message : String(error)
-    });
+    if (isRedisOomError(error)) {
+      logRedisOom('batch deduplication check', { count: msgIds.length });
+    } else {
+      logger.error('Error in batch deduplication check', {
+        count: msgIds.length,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
     
     // Graceful degradation: mark all as non-duplicates to allow processing
     if (cfg.gracefulFallback) {
@@ -335,10 +371,14 @@ export async function calculateAdaptiveTtl(
       return defaultTtl; // 24 hours (default)
     }
   } catch (error) {
-    logger.error('Error calculating adaptive TTL', {
-      deviceUuid,
-      error: error instanceof Error ? error.message : String(error)
-    });
+    if (isRedisOomError(error)) {
+      logRedisOom('adaptive TTL calculation', { deviceUuid });
+    } else {
+      logger.error('Error calculating adaptive TTL', {
+        deviceUuid,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
     return defaultTtl;
   }
 }

@@ -5,9 +5,9 @@
  */
 
 import { query } from '../db/connection';
-import type { SensorData, MetricsData, StateMessage } from './manager';
+import type { DeviceDataMessage, MetricsData, StateMessage } from './manager';
 import { processAgentStateReport } from '../services/agent-state';
-import { redisSensorQueue } from '../services/device-queue';
+import { redisDeviceQueue } from '../services/device-queue';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
 import { getTenantId } from '../redis/tenant-keys';
 import { mqttDevicePattern } from './topics';
@@ -18,9 +18,10 @@ import logger from '../utils/logger';
  * Queue raw parsed data to Redis Stream (FAST - no compression!)
  * Supports both single messages and batches
  */
-export async function handleDeviceData(data: SensorData): Promise<void> {
+export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
   try {
     const startTime = Date.now();
+    const resolvedDeviceName = data.deviceName.trim() || 'unknown';
     
     // Check if this is a batch (from Sensor Publish feature)
     const isBatch = data.data && Array.isArray((data.data as any).messages);
@@ -32,11 +33,11 @@ export async function handleDeviceData(data: SensorData): Promise<void> {
       
       logger.info('Handling device batch', {
         deviceUuid: data.deviceUuid.substring(0, 8),
-        sensorName: data.sensorName,
+        deviceName: resolvedDeviceName,
         count: messages.length,
       });
       
-      // Transform all messages to SensorDataEntry format
+      // Transform all messages to device queue entry format
       // Handle both JSON strings (legacy) and objects (current format)
       const readings = messages
         .map((messageData: string | object) => {
@@ -45,7 +46,7 @@ export async function handleDeviceData(data: SensorData): Promise<void> {
             const message = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
             return {
               deviceUuid: data.deviceUuid,
-              sensorName: data.sensorName,
+              deviceName: resolvedDeviceName,
               data: message,
               timestamp: message.timestamp || batch.timestamp || new Date().toISOString(),
               metadata: data.metadata || {}
@@ -58,12 +59,12 @@ export async function handleDeviceData(data: SensorData): Promise<void> {
         .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       
       // Queue raw parsed data (NO compression - worker handles it if needed)
-      const outcome = await redisSensorQueue.add(readings);
+      const outcome = await redisDeviceQueue.add(readings);
       
       const duration = Date.now() - startTime;
       logger.info('Processed metrics batch', {
         deviceUuid: data.deviceUuid.substring(0, 8),
-        sensorName: data.sensorName,
+        deviceName: resolvedDeviceName,
         received: messages.length,
         submitted: readings.length,
         dropped: messages.length - readings.length,
@@ -72,9 +73,9 @@ export async function handleDeviceData(data: SensorData): Promise<void> {
       });
     } else {
       // Single message
-      const outcome = await redisSensorQueue.add([{
+      const outcome = await redisDeviceQueue.add([{
         deviceUuid: data.deviceUuid,
-        sensorName: data.sensorName,
+        deviceName: resolvedDeviceName,
         data: data.data,
         timestamp: data.timestamp,
         metadata: data.metadata || {}
@@ -83,7 +84,7 @@ export async function handleDeviceData(data: SensorData): Promise<void> {
       const duration = Date.now() - startTime;
       logger.debug('Processed endpoints data', {
         deviceUuid: data.deviceUuid.substring(0, 8),
-        sensorName: data.sensorName,
+        deviceName: resolvedDeviceName,
         destination: outcome,
         durationMs: duration
       });

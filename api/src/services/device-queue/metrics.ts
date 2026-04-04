@@ -1,4 +1,4 @@
-export class SensorQueueMetrics {
+export class DeviceQueueMetrics {
   // Gauges — updated by the periodic health collector in RedisDeviceQueue
   streamLength = 0;
   pendingMessages = 0;
@@ -9,6 +9,8 @@ export class SensorQueueMetrics {
   redisMemoryUsedBytes = 0;
   /** Configured maxmemory limit in bytes (0 = unlimited) */
   redisMemoryMaxBytes = 0;
+  /** Current number of active worker loops in this process. */
+  workerCount = 0;
   /**
    * Worker lag: approximate number of messages in the ingestion stream that
    * have not yet been processed. Mirrors streamLength but named for clarity.
@@ -22,6 +24,8 @@ export class SensorQueueMetrics {
   readingsInserted = 0;
   /** Unix-ms timestamp of the last successfully committed DB batch. Null until first successful insert. */
   lastProcessedTimestamp: number | null = null;
+  /** Most recent per-batch max queue dwell time recorded by the worker. */
+  maxDwellMs = 0;
   redisReconnects = 0;
   /** Number of times an OOM response was detected on a pipeline flush */
   oomErrors = 0;
@@ -50,6 +54,7 @@ export class SensorQueueMetrics {
   }
 
   recordDwellLatency(ms: number): void {
+    this.maxDwellMs = ms;
     this.dwellLatencies.push(ms);
     if (this.dwellLatencies.length > this.maxSamples) this.dwellLatencies.shift();
   }
@@ -71,6 +76,10 @@ export class SensorQueueMetrics {
     const sorted = [...this.dwellLatencies].sort((a, b) => a - b);
     return sorted[Math.floor(sorted.length * 0.95)] || 0;
   }
+
+  setWorkerCount(count: number): void {
+    this.workerCount = Math.max(0, count);
+  }
 }
 
-export const metrics = new SensorQueueMetrics();
+export const metrics = new DeviceQueueMetrics();

@@ -1,9 +1,9 @@
-/** Where a batch of sensor data ultimately landed after an add() call. */
+/** Where a batch of devie data ultimately landed after an add() call. */
 export type AddOutcome = 'redis' | 'disk' | 'dropped';
 
 export interface DeviceDataEntry {
   deviceUuid: string;
-  sensorName: string;
+  deviceName: string;
   timestamp: string;
   data: any;
   metadata?: Record<string, any>;
@@ -17,7 +17,7 @@ export interface DeviceIdentity {
 
 export interface CompressedDeviceEntry {
   deviceUuid: string;
-  sensorName: string;
+  deviceName: string;
   batchId: string;
   compressedPayload: Buffer;
   contentEncoding: string;

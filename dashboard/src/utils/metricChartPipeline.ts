@@ -117,13 +117,7 @@ export function buildMetricChartPipeline<T extends MetricChartSourcePoint>(args:
 
   const chartDataWithGapFlags = detectGaps(visibleChartData);
   const chartDataWithGaps = insertGapBreaks(chartDataWithGapFlags);
-  const gapMarkerTimes = clusterGapTimes(
-    chartDataWithGapFlags
-      .filter((point) => point.isGap)
-      .map((point) => point.timeValue)
-      .slice(-MAX_VISIBLE_GAP_LINES),
-    timeRangeMs,
-  );
+  const gapMarkerTimes = buildGapMarkerTimes(chartDataWithGapFlags);
 
   const targetYDomain = calculateTargetYDomain(chartDataWithGaps, thresholdValues);
   const domainEnd = now - VISUAL_DRIFT_MS;
@@ -209,42 +203,27 @@ function calculateTargetYDomain(
   return [domainMin, domainMax];
 }
 
-function clusterGapTimes(gapTimes: number[], timeRangeMs: number): number[] {
-  if (gapTimes.length <= 1) {
-    return gapTimes;
-  }
+function buildGapMarkerTimes(chartDataWithGapFlags: MetricChartPoint[]): number[] {
+  const gapPairs: Array<[number, number]> = [];
 
-  const clustered: number[] = [];
-  const clusterWindowMs = Math.max(Math.floor(timeRangeMs / 30), 60 * 1000);
-
-  let clusterStart = gapTimes[0];
-  let clusterEnd = gapTimes[0];
-
-  for (let i = 1; i < gapTimes.length; i += 1) {
-    const gapTime = gapTimes[i];
-
-    if ((gapTime - clusterEnd) <= clusterWindowMs) {
-      clusterEnd = gapTime;
+  for (let i = 1; i < chartDataWithGapFlags.length; i += 1) {
+    const point = chartDataWithGapFlags[i];
+    if (!point.isGap) {
       continue;
     }
 
-    clustered.push(Math.round((clusterStart + clusterEnd) / 2));
-    clusterStart = gapTime;
-    clusterEnd = gapTime;
+    gapPairs.push([
+      chartDataWithGapFlags[i - 1].timeValue,
+      point.timeValue,
+    ]);
   }
 
-  clustered.push(Math.round((clusterStart + clusterEnd) / 2));
-
-  if (clustered.length <= MAX_RENDERED_GAP_MARKERS) {
-    return clustered;
+  if (gapPairs.length === 0) {
+    return [];
   }
 
-  const sampled: number[] = [];
-  const step = (clustered.length - 1) / Math.max(MAX_RENDERED_GAP_MARKERS - 1, 1);
-
-  for (let i = 0; i < MAX_RENDERED_GAP_MARKERS; i += 1) {
-    sampled.push(clustered[Math.round(i * step)]);
-  }
-
-  return sampled;
+  const maxGapPairs = Math.max(1, Math.floor(MAX_RENDERED_GAP_MARKERS / 2));
+  return gapPairs
+    .slice(-Math.min(MAX_VISIBLE_GAP_LINES, maxGapPairs))
+    .flatMap(([gapStart, gapEnd]) => [gapStart, gapEnd]);
 }

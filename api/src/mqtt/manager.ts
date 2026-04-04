@@ -103,10 +103,10 @@ export interface MqttConfig {
   qos?: 0 | 1 | 2;
 }
 
-export interface SensorData {
+export interface DeviceDataMessage {
   tenantId?: string;
   deviceUuid: string;
-  sensorName: string;
+  deviceName: string;
   timestamp: string;
   data: any;
   metadata?: Record<string, any>;
@@ -162,7 +162,7 @@ export interface UnknownMessage {
  * Provides type safety for MQTT message handlingddd
  */
 export interface TopicMessageMap {
-  endpoints: SensorData;
+  endpoints: DeviceDataMessage;
   state: StateMessage;
   agent: AgentMessage;
   logs: LogMessage;
@@ -1218,13 +1218,14 @@ export class MqttManager extends EventEmitter {
   /**
    * Handle endpoint data message
    */
-  private handleEndpointsData(deviceUuid: string, sensorName: string | undefined, data: any, rest: string[] = []): void {
+  private handleEndpointsData(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
     let actualData = data.data || data;
     const timestamp = data.timestamp || new Date().toISOString();
+    const resolvedDeviceName = data.deviceName || data.device_name || 'unknown';
 
-    const endpointData: SensorData = {
+    const endpointData: DeviceDataMessage = {
       deviceUuid,
-      sensorName: sensorName || 'unknown',
+      deviceName: resolvedDeviceName,
       timestamp,
       data: actualData,
       metadata: data.metadata

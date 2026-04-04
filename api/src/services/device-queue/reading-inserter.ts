@@ -8,6 +8,10 @@ import { metrics } from './metrics';
 export class ReadingInserter {
   private readonly readingsService = new ReadingsService();
 
+  private short(id?: string): string | undefined {
+    return id?.substring(0, 8);
+  }
+
   async insertBatch(data: DeviceDataEntry[]): Promise<void> {
     const chunkSize = 500;
     const ingestedAt = new Date();
@@ -17,10 +21,27 @@ export class ReadingInserter {
       const readings: ReadingInsert[] = [];
 
       chunk.forEach(entry => {
-        const protocol = detectProtocol(entry);
-        const expanded = expandMessages(entry, protocol, ingestedAt);
-        readings.push(...expanded);
+        try {
+          const protocol = detectProtocol(entry);
+          const expanded = expandMessages(entry, protocol, ingestedAt);
+          readings.push(...expanded);
+        } catch (error: unknown) {
+          metrics.messagesFailed++;
+          logger.warn('Skipping malformed device queue entry during reading normalization', {
+            deviceUuid: this.short(entry.deviceUuid),
+            deviceName: entry.deviceName,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       });
+
+      if (readings.length === 0) {
+        logger.debug('Skipping empty normalized device queue chunk', {
+          chunkIndex: Math.floor(i / chunkSize) + 1,
+          chunkSize: chunk.length,
+        });
+        continue;
+      }
 
       // Deduplicate intra-batch on (agent_uuid, metric_name, time) before hitting the DB.
       // Eliminates ON CONFLICT hits from replay/retry scenarios within the same batch.
