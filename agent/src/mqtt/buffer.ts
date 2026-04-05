@@ -241,8 +241,18 @@ export class MessageBufferSync {
       component: LogComponents.agent
     });
     
-    // Trigger immediate flush
+    // Keep the request flag set so the periodic timer can retry if this immediate attempt is skipped.
     this.requestFlush();
+
+    void this.periodicFlush().catch((error: unknown) => {
+      this.logger?.errorSync(
+        'Immediate buffer flush trigger failed',
+        error instanceof Error ? error : new Error(String(error)),
+        {
+          component: LogComponents.agent,
+        }
+      );
+    });
   }
 
   /**
