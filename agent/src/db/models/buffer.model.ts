@@ -116,6 +116,36 @@ export class MessageBufferModel {
   static enqueue(
     record: Omit<MessageBufferRecord, 'id' | 'created_at' | 'retry_count' | 'expires_at'>
   ): number {
+    return this.insertRecord(record, {
+      status: 'queued',
+      lockId: null,
+      lockedAtIso: null,
+    });
+  }
+
+  /**
+   * Add message already claimed for an immediate inline publish attempt.
+   */
+  static enqueueClaimed(
+    record: Omit<MessageBufferRecord, 'id' | 'created_at' | 'retry_count' | 'expires_at' | 'status'>,
+    lockId: string,
+    lockedAt: Date = new Date(),
+  ): number {
+    return this.insertRecord(record, {
+      status: 'sending',
+      lockId,
+      lockedAtIso: lockedAt.toISOString(),
+    });
+  }
+
+  private static insertRecord(
+    record: Omit<MessageBufferRecord, 'id' | 'created_at' | 'retry_count' | 'expires_at'>,
+    options: {
+      status: 'queued' | 'sending';
+      lockId: string | null;
+      lockedAtIso: string | null;
+    },
+  ): number {
     const db = this.getDb();
     this.ensureMetadataDefaults();
     const ttlHours = this.getTtlHours();
@@ -153,9 +183,9 @@ export class MessageBufferModel {
           record.payload,
           record.msg_id ?? null,
           record.is_critical ?? 0,
-          'queued',
-          null,
-          null,
+          options.status,
+          options.lockId,
+          options.lockedAtIso,
           payloadBytes,
           0,
           null,

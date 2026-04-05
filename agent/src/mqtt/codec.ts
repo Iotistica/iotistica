@@ -18,9 +18,12 @@ export type MqttPayload =
  * Use this for messages that need HA deduplication
  */
 export function createJsonPayload(data: object, msgIdGenerator?: MessageIdGenerator): MqttPayload {
-	const enrichedData = msgIdGenerator
-		? { ...data, msgId: msgIdGenerator.generate() }
-		: data;
+	const existingMsgId = (data as { msgId?: string }).msgId;
+	const enrichedData = existingMsgId
+		? data
+		: msgIdGenerator
+			? { ...data, msgId: msgIdGenerator.generate() }
+			: data;
 	return { format: 'json', data: enrichedData };
 }
 
@@ -29,9 +32,12 @@ export function createJsonPayload(data: object, msgIdGenerator?: MessageIdGenera
  * Use this for high-frequency sensor data (better compression + faster)
  */
 export function createMsgpackPayload(data: object, msgIdGenerator?: MessageIdGenerator): MqttPayload {
-	const enrichedData = msgIdGenerator
-		? { ...data, msgId: msgIdGenerator.generate() }
-		: data;
+	const existingMsgId = (data as { msgId?: string }).msgId;
+	const enrichedData = existingMsgId
+		? data
+		: msgIdGenerator
+			? { ...data, msgId: msgIdGenerator.generate() }
+			: data;
 	return { format: 'msgpack', data: enrichedData };
 }
 

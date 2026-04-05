@@ -9,6 +9,9 @@ module.exports = {
   roots: ['<rootDir>/test/integration'],
   testMatch: ['**/*.integration.spec.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts'],
   transformIgnorePatterns: [
     'node_modules/(?!(uuid)/)'

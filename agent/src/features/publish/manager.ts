@@ -286,18 +286,64 @@ export class PublishManager extends EventEmitter {
   }
 
   private buildPayload(endpointName: string, messages: any[]): {
-    data: { sensor: string; timestamp: string; messages: any[] };
+    data: { sensor: string; timestamp: string; messages: any[]; msgId: string };
     baselineSize: number;
   } {
     const timestampIso = new Date().toISOString();
-    const data = { sensor: endpointName, timestamp: timestampIso, messages };
+    const msgId = this.mqttConnection.getMessageIdGenerator?.()?.generate();
+    const data = {
+      sensor: endpointName,
+      timestamp: timestampIso,
+      messages,
+      msgId: msgId ?? `${this.deviceUuid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    };
     const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
     return { data, baselineSize };
   }
 
+  private async persistQueuedBatch(
+    topic: string,
+    data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
+  ): Promise<number> {
+    const MessageBufferModel = await this.getMessageBufferModel();
+    const jsonPayload = JSON.stringify(data);
+
+    return MessageBufferModel.enqueue({
+      endpoint_name: this.config.name || 'unknown',
+      topic,
+      qos: 1,
+      payload: jsonPayload,
+      msg_id: data.msgId,
+      payload_bytes: Buffer.byteLength(jsonPayload, 'utf8'),
+    });
+  }
+
+  private async persistClaimedBatch(
+    topic: string,
+    data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
+  ): Promise<{ id: number; lockId: string }> {
+    const MessageBufferModel = await this.getMessageBufferModel();
+    const jsonPayload = JSON.stringify(data);
+    const lockId = `inline-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+    const id = MessageBufferModel.enqueueClaimed(
+      {
+        endpoint_name: this.config.name || 'unknown',
+        topic,
+        qos: 1,
+        payload: jsonPayload,
+        msg_id: data.msgId,
+        payload_bytes: Buffer.byteLength(jsonPayload, 'utf8'),
+      },
+      lockId,
+    );
+
+    return { id, lockId };
+  }
+
   private async publishOnline(
     topic: string,
-    data: { sensor: string; timestamp: string; messages: any[] },
+    data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
     baselineSize: number,
     messageCount: number,
     batchBytes: number,
@@ -305,40 +351,81 @@ export class PublishManager extends EventEmitter {
     endpointName: string,
   ): Promise<void> {
     if (this.needStop) return;
+    let bufferedRecordId: number | undefined;
+    let publishConfirmed = false;
+
     try {
+      const claimed = await this.persistClaimedBatch(topic, data);
+      bufferedRecordId = claimed.id;
+      if (this.needStop) {
+        const MessageBufferModel = await this.getMessageBufferModel();
+        MessageBufferModel.markRetryFailed(claimed.id, 'Publish interrupted during shutdown');
+        this.batcher.reset();
+        return;
+      }
+
       const { payload, info } = await this.compressor.compress(data, baselineSize, this.stats.data.messagesPublished);
-      if (this.needStop) return;
+      if (this.needStop) {
+        const MessageBufferModel = await this.getMessageBufferModel();
+        MessageBufferModel.markRetryFailed(claimed.id, 'Publish interrupted during shutdown');
+        this.batcher.reset();
+        return;
+      }
+
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
+      publishConfirmed = true;
+
+      const MessageBufferModel = await this.getMessageBufferModel();
+      MessageBufferModel.deleteByIds([claimed.id]);
       this.stats.recordPublish(messageCount, batchBytes);
       this.stats.logPublishSuccess(messageCount, batchBytes, info, endpointName, this.logger);
       this.batcher.reset();
     } catch (err) {
       this.logger?.error(`Failed to publish batch from endpoint '${endpointName}'`, err);
+
+      try {
+        if (publishConfirmed) {
+          this.batcher.reset();
+          this.logger?.error(
+            `Published batch from endpoint '${endpointName}' but failed to clean durable buffer record; leaving claimed row for timeout recovery`,
+            err,
+          );
+        } else if (bufferedRecordId !== undefined) {
+          const MessageBufferModel = await this.getMessageBufferModel();
+          MessageBufferModel.markRetryFailed(
+            bufferedRecordId,
+            err instanceof Error ? err.message : String(err),
+          );
+          this.batcher.reset();
+          this.logger?.warn(`Queued failed publish for endpoint '${endpointName}' for durable retry`);
+        } else {
+          await this.publishOffline(topic, data, messageCount);
+          this.logger?.warn(`Buffered failed publish for endpoint '${endpointName}' to durable storage`);
+        }
+      } catch (bufferError) {
+        this.logger?.error(`Failed to durably buffer publish failure for endpoint '${endpointName}'`, bufferError);
+      }
     }
   }
 
   private async publishOffline(
     topic: string,
-    data: { sensor: string; timestamp: string; messages: any[] },
+    data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
     messageCount: number,
   ): Promise<void> {
     if (this.needStop) return;
     await this.bufferOfflineMessages(topic, data, messageCount);
   }
 
-  private async bufferOfflineMessages(topic: string, data: unknown, messageCount: number): Promise<void> {
+  private async bufferOfflineMessages(
+    topic: string,
+    data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
+    messageCount: number,
+  ): Promise<void> {
     const name = this.config.name || 'unknown';
     this.logger?.warn(`MQTT not connected  buffering ${messageCount} messages from '${name}'`);
     try {
-      const MessageBufferModel = await this.getMessageBufferModel();
-      const jsonPayload = JSON.stringify(data);
-      MessageBufferModel.enqueue({
-        endpoint_name: name,
-        topic,
-        qos: 1,
-        payload: jsonPayload,
-        payload_bytes: Buffer.byteLength(jsonPayload, 'utf8'),
-      });
+      await this.persistQueuedBatch(topic, data);
       this.batcher.reset();
     } catch (err) {
       this.logger?.error(`Failed to buffer messages from device '${name}'`, err);
