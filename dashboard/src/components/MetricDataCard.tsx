@@ -154,6 +154,10 @@ function mergeTimeSeriesResponse(
     return { merged: next, changed: true };
   }
 
+  if (previous.metadata.aggregationLevel !== next.metadata.aggregationLevel) {
+    return { merged: next, changed: true };
+  }
+
   const mergedByTime = new Map(previous.data.map((point) => [point.time, point] as const));
 
   for (const point of next.data) {
@@ -242,6 +246,10 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   useEffect(() => {
     yDomainRef.current = null;
   }, [config.deviceUuid, config.metricName, config.timeRange]);
+
+  useEffect(() => {
+    yDomainRef.current = null;
+  }, [zoomWindow?.startTimeMs, zoomWindow?.endTimeMs]);
 
   useEffect(() => {
     setZoomWindow(null);
