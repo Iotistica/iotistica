@@ -17,16 +17,27 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-const requestedPoolSize = parseIntEnv('DB_POOL_SIZE', 50);
-const boundedPoolSize = clamp(requestedPoolSize, 5, 100);
-if (requestedPoolSize !== boundedPoolSize) {
-  logger.warn('DB_POOL_SIZE out of safe bounds; clamping value', {
-    requestedPoolSize,
-    boundedPoolSize,
-    minAllowed: 5,
-    maxAllowed: 100,
-  });
+function readClampedIntEnv(name: string, fallback: number, min: number, max: number): number {
+  const requestedValue = parseIntEnv(name, fallback);
+  const boundedValue = clamp(requestedValue, min, max);
+
+  if (requestedValue !== boundedValue) {
+    logger.warn(`${name} out of safe bounds; clamping value`, {
+      requestedValue,
+      boundedValue,
+      minAllowed: min,
+      maxAllowed: max,
+    });
+  }
+
+  return boundedValue;
 }
+
+const boundedPoolSize = readClampedIntEnv('DB_POOL_SIZE', 50, 5, 100);
+const idleTimeoutMillis = readClampedIntEnv('DB_IDLE_TIMEOUT_MS', 30000, 1000, 300000);
+const connectionTimeoutMillis = readClampedIntEnv('DB_CONNECTION_TIMEOUT_MS', 30000, 1000, 120000);
+const statementTimeout = readClampedIntEnv('DB_STATEMENT_TIMEOUT_MS', 60000, 1000, 600000);
+const dbApplicationName = process.env.DB_APPLICATION_NAME || 'iotistic-api';
 
 // Database configuration from environment variables
 const dbConfig = {
@@ -36,9 +47,10 @@ const dbConfig = {
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'postgres',
   max: boundedPoolSize,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 30000, // 30 seconds to handle load spikes from multiple agents
-  statementTimeout: 60000, // 60 seconds max query execution time
+  idleTimeoutMillis,
+  connectionTimeoutMillis,
+  statementTimeout,
+  application_name: dbApplicationName,
   // Queue incoming requests when all connections busy
   allowExitOnIdle: false,
   // TCP keepalive to prevent Azure from closing idle connections during long operations
@@ -174,6 +186,11 @@ export async function testConnection(): Promise<boolean> {
       port: dbConfig.port,
       database: dbConfig.database,
       user: dbConfig.user,
+      applicationName: dbApplicationName,
+      poolMax: boundedPoolSize,
+      idleTimeoutMillis,
+      connectionTimeoutMillis,
+      statementTimeout,
     });
     
     const result = await query('SELECT NOW() as now');
