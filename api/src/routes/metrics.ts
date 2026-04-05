@@ -36,6 +36,7 @@ const metricNameSchema = z.string().min(1).max(100).regex(/^[a-zA-Z0-9_\-\.]+$/,
 const timeRangeSchema = z.enum(['1m', '1h', '6h', '12h', '24h', '7d', '30d']).default('1h');
 const aggregationSchema = z.enum(['auto', '1min', '1hour', '1day']).default('auto');
 const viewSchema = z.enum(['catalog', 'agents', 'latest', 'all']);
+const optionalDateTimeSchema = z.string().refine((value) => !Number.isNaN(Date.parse(value)), 'Invalid datetime').optional();
 
 // ---------------------------------------------------------------------------
 // GET /catalog  — metric catalog with statistics
@@ -137,6 +138,12 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
     const validatedTimeRange   = timeRangeSchema.parse(req.query.timeRange) as TimeRange;
     const validatedAggregation = aggregationSchema.parse(req.query.aggregation) as Aggregation;
     const validatedAgentUuid   = uuidSchema.parse(req.query.agentUuid);
+    const validatedStartTime   = optionalDateTimeSchema.parse(req.query.startTime);
+    const validatedEndTime     = optionalDateTimeSchema.parse(req.query.endTime);
+
+    if (validatedStartTime && validatedEndTime && new Date(validatedEndTime) <= new Date(validatedStartTime)) {
+      return res.status(400).json({ error: 'endTime must be greater than startTime', requestId });
+    }
 
     const result = await getTimeseries({
       deviceUuid:  validatedDeviceUuid,
@@ -144,6 +151,8 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
       timeRange:   validatedTimeRange,
       aggregation: validatedAggregation,
       agentUuid:   validatedAgentUuid,
+      startTime:   validatedStartTime ? new Date(validatedStartTime) : undefined,
+      endTime:     validatedEndTime ? new Date(validatedEndTime) : undefined,
     });
     res.json(result);
   } catch (error: any) {

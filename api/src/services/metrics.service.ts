@@ -27,6 +27,9 @@ export type TimeRange = '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
 export type Aggregation = 'auto' | '1min' | '1hour' | '1day';
 export type RefreshView = 'catalog' | 'agents' | 'latest' | 'all';
 
+const RAW_ZOOM_MAX_WINDOW_MS = 15 * 60 * 1000;
+const RAW_ZOOM_BUCKET_INTERVAL = '5 seconds';
+
 export interface RefreshViewsResult {
   accepted: true;
   alreadyInProgress: boolean;
@@ -44,7 +47,29 @@ export interface GetTimeseriesParams {
   timeRange: TimeRange;
   aggregation: Aggregation;
   agentUuid?: string;
+  startTime?: Date;
+  endTime?: Date;
 }
+
+interface QueryWindow {
+  startTime: Date;
+  endTime: Date;
+  spanMs: number;
+}
+
+interface ViewSource {
+  kind: 'view';
+  viewName: string;
+  aggregationLevel: string;
+}
+
+interface RawSource {
+  kind: 'raw';
+  bucketInterval: string;
+  aggregationLevel: string;
+}
+
+type TimeseriesSource = ViewSource | RawSource;
 
 // ---------------------------------------------------------------------------
 // Service methods
@@ -261,17 +286,93 @@ function resolveStartTime(timeRange: TimeRange, now = new Date()): Date {
   return new Date(nowMs - rangeMsByTimeRange[timeRange]);
 }
 
-export async function getTimeseries(params: GetTimeseriesParams) {
-  const { deviceUuid, metricName, timeRange, aggregation, agentUuid } = params;
+function inferTimeRangeFromSpan(spanMs: number): TimeRange {
+  if (spanMs <= 60 * 1000) {
+    return '1m';
+  }
+  if (spanMs <= 60 * 60 * 1000) {
+    return '1h';
+  }
+  if (spanMs <= 6 * 60 * 60 * 1000) {
+    return '6h';
+  }
+  if (spanMs <= 12 * 60 * 60 * 1000) {
+    return '12h';
+  }
+  if (spanMs <= 24 * 60 * 60 * 1000) {
+    return '24h';
+  }
+  if (spanMs <= 7 * 24 * 60 * 60 * 1000) {
+    return '7d';
+  }
+  return '30d';
+}
 
-  const { viewName } = resolveView(timeRange, aggregation);
-  const startTime = resolveStartTime(timeRange);
-  const buildBucketExpr = (timeExpr: string) => viewName === 'readings_daily'
-    ? `time_bucket('1 day', ${timeExpr})`
-    : (viewName === 'readings_1h' || viewName === 'readings_hourly')
-      ? `time_bucket('1 hour', ${timeExpr})`
-      : `time_bucket('1 minute', ${timeExpr})`;
+function resolveQueryWindow(timeRange: TimeRange, startTime?: Date, endTime?: Date): QueryWindow {
+  const resolvedEndTime = endTime ?? new Date();
+  const resolvedStartTime = startTime ?? resolveStartTime(timeRange, resolvedEndTime);
+  const spanMs = resolvedEndTime.getTime() - resolvedStartTime.getTime();
 
+  if (!Number.isFinite(spanMs) || spanMs <= 0) {
+    throw new Error('Invalid timeseries window: endTime must be greater than startTime.');
+  }
+
+  return {
+    startTime: resolvedStartTime,
+    endTime: resolvedEndTime,
+    spanMs,
+  };
+}
+
+function resolveTimeseriesSource(queryWindow: QueryWindow, aggregation: Aggregation): TimeseriesSource {
+  if (aggregation !== 'auto') {
+    const map: Record<Exclude<Aggregation, 'auto'>, ViewSource> = {
+      '1min': { kind: 'view', viewName: 'readings_1m', aggregationLevel: '1m' },
+      '1hour': { kind: 'view', viewName: 'readings_1h', aggregationLevel: '1h' },
+      '1day': { kind: 'view', viewName: 'readings_daily', aggregationLevel: 'daily' },
+    };
+    return map[aggregation];
+  }
+
+  if (queryWindow.spanMs <= RAW_ZOOM_MAX_WINDOW_MS) {
+    return {
+      kind: 'raw',
+      bucketInterval: RAW_ZOOM_BUCKET_INTERVAL,
+      aggregationLevel: '5s',
+    };
+  }
+
+  const inferredTimeRange = inferTimeRangeFromSpan(queryWindow.spanMs);
+  const { viewName } = resolveView(inferredTimeRange, 'auto');
+
+  return {
+    kind: 'view',
+    viewName,
+    aggregationLevel: viewName.replace('readings_', ''),
+  };
+}
+
+function buildViewBucketExpr(viewName: string, timeExpr: string): string {
+  if (viewName === 'readings_daily') {
+    return `time_bucket('1 day', ${timeExpr})`;
+  }
+
+  if (viewName === 'readings_1h' || viewName === 'readings_hourly') {
+    return `time_bucket('1 hour', ${timeExpr})`;
+  }
+
+  return `time_bucket('1 minute', ${timeExpr})`;
+}
+
+async function queryFromAggregateView(args: {
+  deviceUuid: string;
+  metricName: string;
+  agentUuid?: string;
+  viewName: string;
+  queryWindow: QueryWindow;
+}) {
+  const { deviceUuid, metricName, agentUuid, viewName, queryWindow } = args;
+  const buildBucketExpr = (timeExpr: string) => buildViewBucketExpr(viewName, timeExpr);
   const qualityCol = (viewName === 'readings_hourly' || viewName === 'readings_daily')
     ? 'NULL::float as quality_ratio'
     : 'quality_ratio';
@@ -291,17 +392,21 @@ export async function getTimeseries(params: GetTimeseriesParams) {
       AND ae.metric = $2
   `;
 
-  const sqlParams: any[] = [deviceUuid, metricName];
+  const sqlParams: unknown[] = [deviceUuid, metricName];
   let idx = 2;
 
-  sqlParams.push(startTime);
+  sqlParams.push(queryWindow.startTime);
   filteredWhereSql += ` AND bucket >= $${++idx}::timestamptz`;
-  anomalyWhereSql  += ` AND to_timestamp(ae.timestamp_ms::double precision / 1000.0) >= $${idx}::timestamptz`;
+  anomalyWhereSql += ` AND to_timestamp(ae.timestamp_ms::double precision / 1000.0) >= $${idx}::timestamptz`;
+
+  sqlParams.push(queryWindow.endTime);
+  filteredWhereSql += ` AND bucket <= $${++idx}::timestamptz`;
+  anomalyWhereSql += ` AND to_timestamp(ae.timestamp_ms::double precision / 1000.0) <= $${idx}::timestamptz`;
 
   if (agentUuid) {
     sqlParams.push(agentUuid);
     filteredWhereSql += ` AND agent_uuid = $${++idx}::uuid`;
-    anomalyWhereSql  += ` AND ae.agent_uuid = $${idx}::text`;
+    anomalyWhereSql += ` AND ae.agent_uuid = $${idx}::text`;
   }
 
   const sql = `
@@ -340,10 +445,10 @@ export async function getTimeseries(params: GetTimeseriesParams) {
     ),
     anomaly_buckets AS (
       SELECT
-        ${anomalyBucketExpr}                          AS bucket,
-        COUNT(*)::int                                 AS anomaly_event_count,
-        MAX(ae.anomaly_score)::double precision       AS anomaly_score,
-        MAX(ae.confidence)::double precision          AS anomaly_confidence
+        ${anomalyBucketExpr}                    AS bucket,
+        COUNT(*)::int                           AS anomaly_event_count,
+        MAX(ae.anomaly_score)::double precision AS anomaly_score,
+        MAX(ae.confidence)::double precision    AS anomaly_confidence
       FROM anomaly_events ae
       ${anomalyWhereSql}
       GROUP BY 1
@@ -366,8 +471,122 @@ export async function getTimeseries(params: GetTimeseriesParams) {
     ORDER BY a.time ASC
   `;
 
+  return query(sql, sqlParams);
+}
+
+async function queryFromRawReadings(args: {
+  deviceUuid: string;
+  metricName: string;
+  agentUuid?: string;
+  bucketInterval: string;
+  queryWindow: QueryWindow;
+}) {
+  const { deviceUuid, metricName, agentUuid, bucketInterval, queryWindow } = args;
+  const bucketExpr = `time_bucket('${bucketInterval}', time)`;
+  const anomalyBucketExpr = `time_bucket('${bucketInterval}', to_timestamp(ae.timestamp_ms::double precision / 1000.0))`;
+
+  let filteredWhereSql = `
+    WHERE COALESCE(NULLIF(extra->>'device_uuid', ''), NULLIF(extra->>'deviceUuid', '')) = $1::text
+      AND metric_name = $2
+      AND time >= $3::timestamptz
+      AND time <= $4::timestamptz
+  `;
+  let anomalyWhereSql = `
+    WHERE ae.device_uuid = $1::text
+      AND ae.metric = $2
+      AND to_timestamp(ae.timestamp_ms::double precision / 1000.0) >= $3::timestamptz
+      AND to_timestamp(ae.timestamp_ms::double precision / 1000.0) <= $4::timestamptz
+  `;
+
+  const sqlParams: unknown[] = [deviceUuid, metricName, queryWindow.startTime, queryWindow.endTime];
+  let idx = 4;
+
+  if (agentUuid) {
+    sqlParams.push(agentUuid);
+    filteredWhereSql += ` AND agent_uuid = $${++idx}::uuid`;
+    anomalyWhereSql += ` AND ae.agent_uuid = $${idx}::text`;
+  }
+
+  const sql = `
+    WITH filtered AS (
+      SELECT
+        time,
+        agent_uuid,
+        COALESCE(NULLIF(extra->>'device_uuid', ''), NULLIF(extra->>'deviceUuid', '')) AS device_uuid,
+        COALESCE(NULLIF(extra->>'endpoint_uuid', ''), NULLIF(extra->>'endpointUuid', '')) AS endpoint_uuid,
+        value,
+        quality,
+        anomaly_score
+      FROM readings
+      ${filteredWhereSql}
+    ),
+    aggregated AS (
+      SELECT
+        ${bucketExpr}                              AS time,
+        agent_uuid,
+        device_uuid,
+        endpoint_uuid,
+        AVG(value)::double precision               AS avg_value,
+        MIN(value)::double precision               AS min_value,
+        MAX(value)::double precision               AS max_value,
+        COUNT(*)::bigint                           AS sample_count,
+        SUM(CASE WHEN quality = 'good' THEN 1 ELSE 0 END)::double precision / NULLIF(COUNT(*), 0) AS quality_ratio,
+        MAX(anomaly_score)::double precision       AS anomaly_score
+      FROM filtered
+      GROUP BY 1, 2, 3, 4
+    ),
+    anomaly_buckets AS (
+      SELECT
+        ${anomalyBucketExpr}                       AS bucket,
+        COUNT(*)::int                              AS anomaly_event_count,
+        MAX(ae.anomaly_score)::double precision    AS anomaly_score,
+        MAX(ae.confidence)::double precision       AS anomaly_confidence
+      FROM anomaly_events ae
+      ${anomalyWhereSql}
+      GROUP BY 1
+    )
+    SELECT
+      a.time,
+      a.agent_uuid,
+      a.device_uuid,
+      a.endpoint_uuid,
+      a.avg_value,
+      a.min_value,
+      a.max_value,
+      a.sample_count,
+      a.quality_ratio,
+      COALESCE(a.anomaly_score, ab.anomaly_score) AS anomaly_score,
+      ab.anomaly_confidence,
+      COALESCE(ab.anomaly_event_count, 0)::int    AS anomaly_event_count
+    FROM aggregated a
+    LEFT JOIN anomaly_buckets ab ON ab.bucket = a.time
+    ORDER BY a.time ASC
+  `;
+
+  return query(sql, sqlParams);
+}
+
+export async function getTimeseries(params: GetTimeseriesParams) {
+  const { deviceUuid, metricName, timeRange, aggregation, agentUuid, startTime, endTime } = params;
+  const queryWindow = resolveQueryWindow(timeRange, startTime, endTime);
+  const source = resolveTimeseriesSource(queryWindow, aggregation);
+
   const [dataResult, metaResult] = await Promise.all([
-    query(sql, sqlParams),
+    source.kind === 'raw'
+      ? queryFromRawReadings({
+          deviceUuid,
+          metricName,
+          agentUuid,
+          bucketInterval: source.bucketInterval,
+          queryWindow,
+        })
+      : queryFromAggregateView({
+          deviceUuid,
+          metricName,
+          agentUuid,
+          viewName: source.viewName,
+          queryWindow,
+        }),
     query(
       `SELECT unit, protocol, quality_percentage
        FROM metric_catalog
@@ -390,7 +609,7 @@ export async function getTimeseries(params: GetTimeseriesParams) {
       sampleCount: dataResult.rows.length,
       startTime: dataResult.rows[0]?.time,
       endTime: dataResult.rows[dataResult.rows.length - 1]?.time,
-      aggregationLevel: viewName.replace('readings_', ''),
+      aggregationLevel: source.aggregationLevel,
       timeRange,
       qualityPercentage: metadata.quality_percentage,
     },

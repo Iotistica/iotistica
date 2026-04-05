@@ -80,8 +80,10 @@ export function buildMetricChartPipeline<T extends MetricChartSourcePoint>(args:
   timeRangeMs: number;
   thresholdValues?: number[];
   formatTimeLabel: (timeValue: number) => string;
+  domainStartTime?: number;
+  domainEndTime?: number;
 }): MetricChartPipelineResult | null {
-  const { rawData, now, timeRangeMs, thresholdValues = [], formatTimeLabel } = args;
+  const { rawData, now, timeRangeMs, thresholdValues = [], formatTimeLabel, domainStartTime, domainEndTime } = args;
 
   if (rawData.length === 0) {
     return null;
@@ -108,8 +110,9 @@ export function buildMetricChartPipeline<T extends MetricChartSourcePoint>(args:
   }
 
   const dedupedChartData = Array.from(pointByTime.values()).sort((a, b) => a.timeValue - b.timeValue);
-  const visibleWindowStart = now - VISUAL_DRIFT_MS - timeRangeMs;
-  const visibleChartData = dedupedChartData.filter((point) => point.timeValue >= visibleWindowStart);
+  const resolvedDomainEnd = domainEndTime ?? (now - VISUAL_DRIFT_MS);
+  const resolvedDomainStart = domainStartTime ?? (resolvedDomainEnd - timeRangeMs);
+  const visibleChartData = dedupedChartData.filter((point) => point.timeValue >= resolvedDomainStart && point.timeValue <= resolvedDomainEnd);
 
   if (visibleChartData.length === 0) {
     return null;
@@ -120,13 +123,11 @@ export function buildMetricChartPipeline<T extends MetricChartSourcePoint>(args:
   const gapMarkerTimes = buildGapMarkerTimes(chartDataWithGapFlags);
 
   const targetYDomain = calculateTargetYDomain(chartDataWithGaps, thresholdValues);
-  const domainEnd = now - VISUAL_DRIFT_MS;
-
   return {
     chartDataWithGaps,
     gapMarkerTimes,
     targetYDomain,
-    xDomain: [domainEnd - timeRangeMs, domainEnd],
+    xDomain: [resolvedDomainStart, resolvedDomainEnd],
   };
 }
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import { Badge } from './ui/badge';
+import { Button } from './ui/button';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import {
   LineChart,
@@ -31,6 +32,12 @@ const HIDDEN_TAB_REFRESH_MULTIPLIER = 10;
 const HIDDEN_TAB_MIN_REFRESH_SECONDS = 300;
 /** How stale lastProcessedTimestamp must be before the delay zone is rendered on the chart. */
 const DELAY_THRESHOLD_MS = 120_000;
+const MIN_ZOOM_WINDOW_MS = 10_000;
+
+interface ZoomWindow {
+  startTimeMs: number;
+  endTimeMs: number;
+}
 
 export interface ThresholdLine {
   value: number;
@@ -198,6 +205,9 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
   const [stale, setStale] = useState(false);
   const [staleReason, setStaleReason] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [zoomWindow, setZoomWindow] = useState<ZoomWindow | null>(null);
+  const [zoomSelectionStart, setZoomSelectionStart] = useState<number | null>(null);
+  const [zoomSelectionEnd, setZoomSelectionEnd] = useState<number | null>(null);
   const now = useGlobalNow();
   const ingestionHealth = useIngestionHealth();
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -233,6 +243,18 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     yDomainRef.current = null;
   }, [config.deviceUuid, config.metricName, config.timeRange]);
 
+  useEffect(() => {
+    setZoomWindow(null);
+    setZoomSelectionStart(null);
+    setZoomSelectionEnd(null);
+  }, [config.deviceUuid, config.metricName, config.timeRange, config.agentUuid]);
+
+  const resetZoom = useCallback(() => {
+    setZoomWindow(null);
+    setZoomSelectionStart(null);
+    setZoomSelectionEnd(null);
+  }, []);
+
   const fetchData = async () => {
     try {
       if (!config.deviceUuid) {
@@ -244,7 +266,10 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       const cacheTtlMs = effectiveRefreshInterval > 0
         ? Math.min(Math.max(effectiveRefreshInterval * 1000, 5000), 60000)
         : 15000;
-      const requestKey = `${config.agentUuid || 'all'}|${config.deviceUuid}|${config.metricName}|${config.timeRange}`;
+      const zoomKey = zoomWindow
+        ? `${zoomWindow.startTimeMs}|${zoomWindow.endTimeMs}`
+        : 'full';
+      const requestKey = `${config.agentUuid || 'all'}|${config.deviceUuid}|${config.metricName}|${config.timeRange}|${zoomKey}`;
 
       const result: TimeSeriesResponse = await metricsRequestQueue.enqueue(
         requestKey,
@@ -258,6 +283,10 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
           }
           if (config.agentUuid) {
             params.set('agentUuid', config.agentUuid);
+          }
+          if (zoomWindow) {
+            params.set('startTime', new Date(zoomWindow.startTimeMs).toISOString());
+            params.set('endTime', new Date(zoomWindow.endTimeMs).toISOString());
           }
           const url = buildApiUrl(
             `/api/v1/metrics/timeseries?${params.toString()}`
@@ -290,14 +319,16 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
         },
         cacheTtlMs
       );
-      const { merged } = mergeTimeSeriesResponse(latestDataRef.current, result, config.timeRange);
-      setData(merged);
-      latestDataRef.current = merged;
+      const nextData = zoomWindow
+        ? result
+        : mergeTimeSeriesResponse(latestDataRef.current, result, config.timeRange).merged;
+      setData(nextData);
+      latestDataRef.current = nextData;
       setError(null);
       setStale(false);
       setStaleReason(null);
       setLastRefreshed(new Date());
-      onDataLoaded?.(merged);
+      onDataLoaded?.(nextData);
     } catch (err: any) {
       console.error('Error fetching metric data:', err);
       const message = err?.status === 429
@@ -336,7 +367,7 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       }, effectiveRefreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [config.deviceUuid, config.metricName, config.timeRange, effectiveRefreshInterval, refreshTrigger]);
+  }, [config.deviceUuid, config.metricName, config.timeRange, effectiveRefreshInterval, refreshTrigger, config.agentUuid, zoomWindow]);
 
   const formatTimeValue = useCallback((timeValue: number) => {
     const date = new Date(timeValue);
@@ -359,6 +390,9 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
 
   const formatTimeLabel = useCallback((timeValue: number) => formatTimeValue(timeValue), [formatTimeValue]);
   const timeRangeMs = useMemo(() => getTimeRangeMs(config.timeRange), [config.timeRange]);
+  const activeTimeRangeMs = zoomWindow
+    ? Math.max(zoomWindow.endTimeMs - zoomWindow.startTimeMs, MIN_ZOOM_WINDOW_MS)
+    : timeRangeMs;
 
   const chartState = useMemo(() => {
     if (!data) {
@@ -372,9 +406,11 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     const pipeline = buildMetricChartPipeline({
       rawData: data.data,
       now,
-      timeRangeMs,
+      timeRangeMs: activeTimeRangeMs,
       thresholdValues,
       formatTimeLabel,
+      domainStartTime: zoomWindow?.startTimeMs,
+      domainEndTime: zoomWindow?.endTimeMs,
     });
 
     if (!pipeline) {
@@ -394,7 +430,78 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
       yDomain,
       xDomain: pipeline.xDomain,
     };
-  }, [config.thresholds, config.thresholdsEnabled, data, formatTimeLabel, now, timeRangeMs]);
+  }, [activeTimeRangeMs, config.thresholds, config.thresholdsEnabled, data, formatTimeLabel, now, zoomWindow]);
+
+  const handleChartMouseDown = useCallback((state: { activeLabel?: number | string }) => {
+    const labelValue = Number(state?.activeLabel);
+    if (!Number.isFinite(labelValue)) {
+      return;
+    }
+
+    setZoomSelectionStart(labelValue);
+    setZoomSelectionEnd(labelValue);
+  }, []);
+
+  const handleChartMouseMove = useCallback((state: { activeLabel?: number | string }) => {
+    if (zoomSelectionStart === null) {
+      return;
+    }
+
+    const labelValue = Number(state?.activeLabel);
+    if (!Number.isFinite(labelValue)) {
+      return;
+    }
+
+    setZoomSelectionEnd(labelValue);
+  }, [zoomSelectionStart]);
+
+  const handleChartMouseUp = useCallback(() => {
+    if (zoomSelectionStart === null || zoomSelectionEnd === null) {
+      return;
+    }
+
+    const startTimeMs = Math.min(zoomSelectionStart, zoomSelectionEnd);
+    const endTimeMs = Math.max(zoomSelectionStart, zoomSelectionEnd);
+
+    setZoomSelectionStart(null);
+    setZoomSelectionEnd(null);
+
+    if (endTimeMs - startTimeMs < MIN_ZOOM_WINDOW_MS) {
+      return;
+    }
+
+    setZoomWindow({ startTimeMs, endTimeMs });
+  }, [zoomSelectionEnd, zoomSelectionStart]);
+
+  const activeSelectionRange = useMemo(() => {
+    if (zoomSelectionStart === null || zoomSelectionEnd === null) {
+      return null;
+    }
+
+    return {
+      startTimeMs: Math.min(zoomSelectionStart, zoomSelectionEnd),
+      endTimeMs: Math.max(zoomSelectionStart, zoomSelectionEnd),
+    };
+  }, [zoomSelectionEnd, zoomSelectionStart]);
+
+  const zoomWindowLabel = useMemo(() => {
+    if (!zoomWindow) {
+      return null;
+    }
+
+    const minutes = Math.round((zoomWindow.endTimeMs - zoomWindow.startTimeMs) / 60000);
+    if (minutes < 1) {
+      const seconds = Math.max(1, Math.round((zoomWindow.endTimeMs - zoomWindow.startTimeMs) / 1000));
+      return `${seconds}s window`;
+    }
+
+    if (minutes < 60) {
+      return `${minutes}m window`;
+    }
+
+    const hours = ((zoomWindow.endTimeMs - zoomWindow.startTimeMs) / (60 * 60 * 1000)).toFixed(1);
+    return `${hours}h window`;
+  }, [zoomWindow]);
 
   const calculateStats = () => {
     if (!data || data.data.length === 0) return null;
@@ -525,6 +632,10 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     const commonProps = {
       data: renderedChartData,
       margin: { top: 5, right: 10, left: 0, bottom: 5 },
+      onMouseDown: handleChartMouseDown,
+      onMouseMove: handleChartMouseMove,
+      onMouseUp: handleChartMouseUp,
+      onDoubleClick: resetZoom,
     };
 
     const color = config.color || '#3b82f6'; // Use config color or default blue-500
@@ -567,6 +678,16 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   stroke="rgba(156, 163, 175, 0.4)"
                   strokeDasharray="4 2"
                   label={isBuffering ? { value: 'Data delayed (buffering)', position: 'insideTopRight', fontSize: 11, fill: '#9ca3af' } : undefined}
+                />
+              )}
+              {activeSelectionRange && (
+                <ReferenceArea
+                  x1={activeSelectionRange.startTimeMs}
+                  x2={activeSelectionRange.endTimeMs}
+                  yAxisId="left"
+                  fill="rgba(59, 130, 246, 0.14)"
+                  stroke="rgba(59, 130, 246, 0.6)"
+                  strokeDasharray="3 3"
                 />
               )}
               <Area 
@@ -663,6 +784,16 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   label={isBuffering ? { value: 'Data delayed (buffering)', position: 'insideTopRight', fontSize: 11, fill: '#9ca3af' } : undefined}
                 />
               )}
+              {activeSelectionRange && (
+                <ReferenceArea
+                  x1={activeSelectionRange.startTimeMs}
+                  x2={activeSelectionRange.endTimeMs}
+                  yAxisId="left"
+                  fill="rgba(59, 130, 246, 0.14)"
+                  stroke="rgba(59, 130, 246, 0.6)"
+                  strokeDasharray="3 3"
+                />
+              )}
               <Bar 
                 yAxisId="left"
                 dataKey="value" 
@@ -751,6 +882,16 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   stroke="rgba(156, 163, 175, 0.4)"
                   strokeDasharray="4 2"
                   label={isBuffering ? { value: 'Data delayed (buffering)', position: 'insideTopRight', fontSize: 11, fill: '#9ca3af' } : undefined}
+                />
+              )}
+              {activeSelectionRange && (
+                <ReferenceArea
+                  x1={activeSelectionRange.startTimeMs}
+                  x2={activeSelectionRange.endTimeMs}
+                  yAxisId="left"
+                  fill="rgba(59, 130, 246, 0.14)"
+                  stroke="rgba(59, 130, 246, 0.6)"
+                  strokeDasharray="3 3"
                 />
               )}
               <Line 
@@ -902,8 +1043,25 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
             </div>
 
             <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
-              <span>{data.metadata.sampleCount} points • {data.metadata.aggregationLevel} aggregation</span>
+              <div className="flex items-center gap-2">
+                <span>{data.metadata.sampleCount} points • {data.metadata.aggregationLevel} aggregation</span>
+                {zoomWindow && zoomWindowLabel && (
+                  <span className="text-[11px] leading-none px-2 py-1 rounded border border-blue-300/60 bg-blue-50/80 text-blue-800 whitespace-nowrap">
+                    Zoomed • {zoomWindowLabel}
+                  </span>
+                )}
+                {!zoomWindow && (
+                  <span className="text-[11px] text-muted-foreground/80 whitespace-nowrap">
+                    Drag chart to zoom
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-3">
+                {zoomWindow && (
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={resetZoom}>
+                    Reset zoom
+                  </Button>
+                )}
                 <div
                   className="flex items-center gap-1 text-xs"
                   style={{ color: refreshState.color }}
