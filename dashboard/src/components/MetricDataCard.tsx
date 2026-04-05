@@ -503,6 +503,12 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
     return `${hours}h window`;
   }, [zoomWindow]);
 
+  const zoomHelpText = activeSelectionRange
+    ? 'Release to zoom into the selected range'
+    : zoomWindow
+      ? 'Zoom active. Drag again to re-zoom, or reset to return to the full range'
+      : 'Drag across the chart to zoom into a smaller time window';
+
   const calculateStats = () => {
     if (!data || data.data.length === 0) return null;
 
@@ -1038,8 +1044,26 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
               </div>
             )}
 
-            <div className="flex-1">
-              {renderChart()}
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] leading-none px-2 py-1 rounded border border-sky-300/70 bg-sky-50/80 text-sky-800 whitespace-nowrap">
+                    Zoom
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {zoomHelpText}
+                  </span>
+                </div>
+                {zoomWindow && (
+                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px] shrink-0" onClick={resetZoom}>
+                    Reset zoom
+                  </Button>
+                )}
+              </div>
+
+              <div className="flex-1 min-h-0 rounded-md border border-sky-200/60 bg-sky-50/20 px-1 pt-1" style={{ cursor: 'crosshair' }}>
+                {renderChart()}
+              </div>
             </div>
 
             <div className="flex items-center justify-between text-xs text-muted-foreground mt-2">
@@ -1051,17 +1075,12 @@ function MetricDataCardComponent({ config, refreshInterval = 30, refreshTrigger,
                   </span>
                 )}
                 {!zoomWindow && (
-                  <span className="text-[11px] text-muted-foreground/80 whitespace-nowrap">
-                    Drag chart to zoom
+                  <span className="text-[11px] text-sky-700 whitespace-nowrap">
+                    Drag to zoom
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-3">
-                {zoomWindow && (
-                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={resetZoom}>
-                    Reset zoom
-                  </Button>
-                )}
                 <div
                   className="flex items-center gap-1 text-xs"
                   style={{ color: refreshState.color }}
