@@ -15,6 +15,7 @@ export enum DeviceState {
  */
 export const DeviceConfigSchema = z.object({
   name: z.string().optional(),
+  protocol: z.string().optional(),
   enabled: z.boolean().optional().default(true),
   addr: z.string(),
   addrPollSec: z.number().optional().default(10),

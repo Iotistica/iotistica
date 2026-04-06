@@ -214,36 +214,38 @@ export class DevicePublishFeature extends BaseFeature {
   private createDeviceManager(config: DeviceConfig, index: number, total: number): PublishManager {
     config.name = config.name || `device-${index + 1}`;
     this.logger.debug(`Creating device '${config.name}' (${index + 1}/${total})`);
-    const protocolName = config.name.split('-')[0] || 'unknown';
-    // Safely convert derived protocol name to valid Protocol type
-    const protocol: Protocol = this.isValidProtocol(protocolName) ? (protocolName as Protocol) : 'mqtt';
+    const protocolName = config.protocol || config.name.split('-')[0];
+    if (!this.isValidProtocol(protocolName)) {
+      throw new Error(`Unknown protocol '${protocolName}' for endpoint '${config.name}'`);
+    }
+    const protocol = protocolName as Protocol;
 
     const protocolLogger = {
       debug: (message: string, ...args: any[]) => {
         this.agentLogger.debugSync(message, {
           component: LogComponents.sensorPublish,
-          protocol: protocol || 'unknown',
+          protocol,
           ...args[0]
         });
       },
       info: (message: string, ...args: any[]) => {
         this.agentLogger.infoSync(message, {
           component: LogComponents.sensorPublish,
-          protocol: protocol || 'unknown',
+          protocol,
           ...args[0]
         });
       },
       warn: (message: string, ...args: any[]) => {
         this.agentLogger.warnSync(message, {
           component: LogComponents.sensorPublish,
-          protocol: protocol || 'unknown',
+          protocol,
           ...args[0]
         });
       },
       error: (message: string, ...args: any[]) => {
         this.agentLogger.errorSync(message, args[0] instanceof Error ? args[0] : undefined, {
           component: LogComponents.sensorPublish,
-          protocol: protocol || 'unknown',
+          protocol,
           ...(args[0] instanceof Error ? args[1] : args[0])
         });
       }

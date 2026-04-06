@@ -318,6 +318,7 @@ export class FeatureInitializer {
         .filter(output => enabledDevices.has(output.protocol))
         .map((output) => ({
           name: `${output.protocol}-pipe`,
+          protocol: output.protocol,
           addr: output.socket_path,
           eomDelimiter: output.delimiter || '\n',
           mqttTopic: output.protocol,
