@@ -644,6 +644,25 @@ export class FeatureInitializer {
           savedCount: data.savedCount,
           skippedCount: data.skippedCount
         });
+
+        // pre-discovery stopped SensorPublish before discovery ran; restart it so
+        // existing endpoints keep publishing even when no new devices were saved.
+        if (!this.features.sensorPublish) {
+          try {
+            await this.initDevicePublish();
+            if (this.cloudSync && this.features.sensors) {
+              this.cloudSync.setDevices(this.features.sensors);
+            }
+            logger.infoSync('Restarted Sensor Publish after discovery (no new devices)', {
+              component: LogComponents.agent,
+              trigger: data.trigger
+            });
+          } catch (error) {
+            logger.errorSync('Failed to restart Sensor Publish after discovery', error as Error, {
+              component: LogComponents.agent
+            });
+          }
+        }
       }
     });
 

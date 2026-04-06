@@ -12,7 +12,7 @@ function formatConnection(protocol: string, connection: Record<string, any>): st
     case 'opcua':
       return connection.endpointUrl || 'opc.tcp://...';
     case 'mqtt':
-      return `${connection.host || connection.broker}:${connection.port || 1883}`;
+      return process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883';
     case 'snmp':
       return `${connection.host}:${connection.port || 161}`;
     case 'bacnet':

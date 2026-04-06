@@ -470,7 +470,7 @@ services:
             - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-2
             - MQTT_DEVICE_UUID=253bd0b3-61e0-4109-a490-29f91ddbf381
-            - MQTT_TOPIC=i/c-3dOFzo/a/SB910wqiRFSPauq9bVVV8A/d/xlokRCK5RKuxJG4DYGrmWQ
+            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/ke8v2rFzQsug0U5dSxzfRQ
             - MQTT_METRIC_NAMES=pressure,vibration,temperature2
             - MQTT_METRIC_UNITS=temperature2:C
             - MQTT_METRIC_BASES=temperature2:26
@@ -497,13 +497,44 @@ services:
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
             - MQTT_USERNAME=mqtt-user-3
-            - MQTT_PASSWORD=test12345
+            - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-3
             - MQTT_DEVICE_UUID=7451b394-efc5-471d-9c4c-8fa13711566c
-            - MQTT_TOPIC=iot/73eddd385ce8/agent/5196da95-fbb8-4fd1-8dec-5b296c8e8e91/mqtt/d1f7c01f-8bf8-41a2-a733-31f07e3afd37
+            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/kgouTq8yQeeU2CoTzGJRzA
             - MQTT_METRIC_NAMES=temperature3
             - MQTT_METRIC_UNITS=temperature3:C
             - MQTT_METRIC_BASES=temperature3:29
+            - MQTT_QOS=${MQTT_SIM_QOS:-0}
+            - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
+            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
+            - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
+        depends_on:
+            mosquitto-agent:
+                condition: service_started
+        networks:
+            - iotistica-net
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "5m"
+                max-file: "2"
+
+    sim-mqtt-4:
+        build:
+            context: ./simulators/mqtt-simulator
+            dockerfile: Dockerfile
+        container_name: sim-mqtt-4
+        restart: unless-stopped
+        environment:
+            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
+            - MQTT_USERNAME=mqtt-user-4
+            - MQTT_PASSWORD=test123
+            - MQTT_CLIENT_ID=mqtt-device-4
+            - MQTT_DEVICE_UUID=9b2e4f1a-3d8c-4e5f-b6a7-2c1d9e8f7a0b
+            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/LS0AxxzXQq6pWshDUtMylA
+            - MQTT_METRIC_NAMES=co2,noise,lux,wind_speed,power
+            - MQTT_METRIC_UNITS=co2:ppm,noise:dB,lux:lux,wind_speed:m/s,power:W
+            - MQTT_METRIC_BASES=co2:420,noise:55,lux:300,wind_speed:5,power:150
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
             - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}

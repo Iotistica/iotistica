@@ -5,6 +5,7 @@ import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
 import { MqttAdapterConfig, MqttDevice, MqttMetricConfig } from './types.js';
 import { parsePayload, coerceType } from './payload.js';
 import { agentTopic } from '../../../mqtt/topics.js';
+import { EndpointModel } from '../../../db/models/endpoint.model.js';
 
 /**
  * MQTT Adapter
@@ -867,6 +868,8 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
         return 'mbar';
       case 'mm/s':
         return 'mm/s';
+      case 'm/s':
+        return 'm/s';
       case 'psi':
         return 'psi';
       case 'atm':
@@ -875,6 +878,28 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
       case 'percent':
       case 'percentage':
         return '%';
+      case 'ppm':
+        return 'ppm';
+      case 'ppb':
+        return 'ppb';
+      case 'db':
+      case 'dba':
+        return 'dB';
+      case 'lux':
+      case 'lx':
+        return 'lux';
+      case 'w':
+        return 'W';
+      case 'kw':
+        return 'kW';
+      case 'kwh':
+        return 'kWh';
+      case 'v':
+        return 'V';
+      case 'a':
+        return 'A';
+      case 'rpm':
+        return 'RPM';
       default:
         this.logger.warn('Unknown unit encountered', { unit: trimmed });
         return trimmed;
@@ -1375,7 +1400,12 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
     status.lastPoll = now;
     status.registersUpdated = (status.registersUpdated || 0) + 1;
     status.communicationQuality = 'good';
-    
+
+    // Persist lastSeen to DB so stale-device checks don't flag MQTT endpoints as null
+    EndpointModel.updateLastSeenByName(deviceName).catch((err: Error) => {
+      this.logger.warn(`Failed to update lastSeen for ${deviceName}: ${err.message}`);
+    });
+
     // Note: Don't set connected=true here
     // Let higher-level logic decide connectivity based on:
     // - Time since lastSeen (staleness)

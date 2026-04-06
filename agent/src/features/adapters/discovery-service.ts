@@ -1018,8 +1018,14 @@ export class DiscoveryService extends EventEmitter {
             });
           }
           
-          // Check if config changed
-          const configChanged = JSON.stringify(existing.connection) !== JSON.stringify(sensor.connection);
+          // Check if config changed - compare only the fields the discovery plugin provides.
+          // Stored connections may carry extra defaults (sessionTimeout, useSubscription, etc.)
+          // that the plugin never emits, so a full JSON comparison would always differ.
+          const sensorConnectionKeys = Object.keys(sensor.connection || {});
+          const existingConnectionSubset = Object.fromEntries(
+            sensorConnectionKeys.map((k) => [k, (existing.connection as any)?.[k]])
+          );
+          const configChanged = JSON.stringify(existingConnectionSubset) !== JSON.stringify(sensor.connection);
           const fingerprintChanged = existing.metadata?.fingerprint !== sensor.fingerprint;
           // Treat undefined profile as "Generic" (backward compatibility)
           const existingProfile = existing.metadata?.profile || 'Generic';
