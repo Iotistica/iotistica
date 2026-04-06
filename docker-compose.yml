@@ -122,9 +122,6 @@ services:
             # Providers: ollama (local, free) | openai (cloud, paid)
             # Azure OpenAI: Set AI_PROVIDER=openai, OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<deployment>
             - AI_PROVIDER=${AI_PROVIDER:-ollama}
-            # Ollama settings (local LLM - memory intensive)
-            - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
-            - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1}
             # OpenAI/Azure OpenAI settings
             - OPENAI_API_KEY=${OPENAI_API_KEY:-}
             - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}  # For Azure: https://<resource>.openai.azure.com/openai/deployments/<deployment>
