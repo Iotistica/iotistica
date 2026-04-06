@@ -73,7 +73,7 @@
     "@types/pg": "^8.10.9",
     "knex": "^3.1.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.0"
+    "typescript": "^6.0.0"
   },
   "overrides": {
     "path-to-regexp": "0.1.13",
