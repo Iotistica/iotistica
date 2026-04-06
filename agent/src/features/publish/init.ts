@@ -216,7 +216,7 @@ export class DevicePublishFeature extends BaseFeature {
     this.logger.debug(`Creating device '${config.name}' (${index + 1}/${total})`);
     const protocolName = config.name.split('-')[0] || 'unknown';
     // Safely convert derived protocol name to valid Protocol type
-    const protocol: Protocol | undefined = this.isValidProtocol(protocolName) ? (protocolName as Protocol) : undefined;
+    const protocol: Protocol = this.isValidProtocol(protocolName) ? (protocolName as Protocol) : 'mqtt';
 
     const protocolLogger = {
       debug: (message: string, ...args: any[]) => {

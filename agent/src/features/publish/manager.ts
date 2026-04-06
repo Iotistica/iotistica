@@ -85,7 +85,7 @@ export class PublishManager extends EventEmitter {
     useMsgpackPoc = false,
     useKeyCompactionPoc = false,
     useDeflatePoc = false,
-    private readonly protocol?: Protocol,
+    private readonly protocol: Protocol = 'mqtt',
     private anomalyService?: AnomalyDetectionService,
   ) {
     super();
@@ -286,7 +286,7 @@ export class PublishManager extends EventEmitter {
   }
 
   private buildPayload(endpointName: string, messages: any[]): {
-    data: { sensor: string; timestamp: string; messages: any[]; msgId: string };
+    data: { sensor: string; timestamp: string; protocol: Protocol; messages: any[]; msgId: string };
     baselineSize: number;
   } {
     const timestampIso = new Date().toISOString();
@@ -294,6 +294,7 @@ export class PublishManager extends EventEmitter {
     const data = {
       sensor: endpointName,
       timestamp: timestampIso,
+      protocol: this.protocol,
       messages,
       msgId: msgId ?? `${this.deviceUuid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
     };

@@ -49,7 +49,10 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
               deviceName: resolvedDeviceName,
               data: message,
               timestamp: message.timestamp || batch.timestamp || new Date().toISOString(),
-              metadata: data.metadata || {}
+              metadata: {
+                ...(data.metadata || {}),
+                ...(batch.protocol ? { protocol: batch.protocol } : {}),
+              }
             };
           } catch (parseError) {
             logger.error(`Failed to parse message in batch: ${messageData}`, parseError);

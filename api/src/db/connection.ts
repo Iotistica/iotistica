@@ -129,10 +129,37 @@ function isTransientError(error: unknown): boolean {
   return TRANSIENT_PG_CODES.has(code) || TRANSIENT_NODE_CODES.has(code);
 }
 
+/** True for INSERT / UPDATE / DELETE / MERGE — writes that must not be silently dropped. */
+function isWriteQuery(text: string): boolean {
+  return /^\s*(INSERT|UPDATE|DELETE|MERGE)\b/i.test(text);
+}
+
+/** Extract the most useful fields from a pg DatabaseError for structured logging. */
+function pgErrorContext(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return {};
+  const e = error as any;
+  return {
+    pgCode: e.code,
+    pgSeverity: e.severity,
+    pgDetail: e.detail,       // e.g. "Key (id)=(5) already exists."
+    pgHint: e.hint,
+    pgTable: e.table,
+    pgConstraint: e.constraint,
+    pgColumn: e.column,
+    message: e.message,
+  };
+}
+
 /**
  * Execute a query with parameterized values.
  * Automatically retries up to 3 times on transient connection errors
  * (e.g. PostgreSQL pod restart, brief network blip).
+ *
+ * Logging strategy:
+ *   - Transient error mid-retry  → WARN  (expected, being recovered)
+ *   - Write (INSERT/UPDATE/DELETE) fails after all retries → ERROR  (data may be lost)
+ *   - Read fails after all retries                        → WARN   (degraded, not data loss)
+ *   - Non-transient SQL error (constraint, syntax, etc.)  → ERROR  (programming or data issue)
  */
 export async function query<T = any>(
   text: string,
@@ -140,12 +167,17 @@ export async function query<T = any>(
 ): Promise<QueryResult<T>> {
   const maxAttempts = 3;
   let lastError: unknown;
+  const isWrite = isWriteQuery(text);
+
+  const maxQueryPreview = 1000;
+  const textPreview = text.length > maxQueryPreview
+    ? `${text.slice(0, maxQueryPreview)}... [truncated ${text.length - maxQueryPreview} chars]`
+    : text;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const start = Date.now();
     try {
       const result = await pool.query<T>(text, params);
-      const duration = Date.now() - start;
       return result;
     } catch (error) {
       lastError = error;
@@ -156,26 +188,42 @@ export async function query<T = any>(
           attempt,
           maxAttempts,
           retryInMs: delayMs,
-          code: (error as any).code,
+          isWrite,
+          ...pgErrorContext(error),
         });
         await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
         continue;
       }
 
-      // Non-transient or final attempt — log and rethrow
-      const maxQueryPreview = 1000;
-      const textPreview = text.length > maxQueryPreview
-        ? `${text.slice(0, maxQueryPreview)}... [truncated ${text.length - maxQueryPreview} chars]`
-        : text;
-
       const poolStats = getPoolStats();
-      logger.error('Query error', {
-        text: textPreview,
-        textLength: text.length,
-        paramsCount: Array.isArray(params) ? params.length : 0,
-        dbPool: poolStats,
-        error,
-      });
+      const transientExhausted = isTransientError(error);
+
+      if (isWrite || !transientExhausted) {
+        // Writes that failed (data may be lost) or non-transient SQL errors → ERROR
+        logger.error(
+          transientExhausted
+            ? 'Write query failed after all retries — data may not have been persisted'
+            : 'Query failed with non-transient error',
+          {
+            isWrite,
+            attemptsUsed: attempt,
+            text: textPreview,
+            paramsCount: Array.isArray(params) ? params.length : 0,
+            dbPool: poolStats,
+            ...pgErrorContext(error),
+          }
+        );
+      } else {
+        // Read exhausted retries → WARN (degraded experience, no data loss)
+        logger.warn('Read query failed after all retries', {
+          attemptsUsed: attempt,
+          text: textPreview,
+          paramsCount: Array.isArray(params) ? params.length : 0,
+          dbPool: poolStats,
+          ...pgErrorContext(error),
+        });
+      }
+
       throw error;
     }
   }
