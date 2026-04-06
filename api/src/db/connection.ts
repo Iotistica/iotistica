@@ -101,34 +101,86 @@ pool.on('error', (err) => {
 });
 
 /**
- * Execute a query with parameterized values
+ * Transient network/server errors that are safe to retry.
+ * These indicate the connection was lost, not a SQL logic error.
+ */
+const TRANSIENT_PG_CODES = new Set([
+  '57P01', // admin_shutdown
+  '57P02', // crash_shutdown
+  '57P03', // cannot_connect_now (PostgreSQL starting up)
+  '08000', // connection_exception
+  '08006', // connection_failure
+  '08001', // sqlclient_unable_to_establish_sqlconnection
+  '08004', // sqlserver_rejected_establishment_of_sqlconnection
+]);
+
+const TRANSIENT_NODE_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+]);
+
+function isTransientError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const code = (error as any).code as string | undefined;
+  if (!code) return false;
+  return TRANSIENT_PG_CODES.has(code) || TRANSIENT_NODE_CODES.has(code);
+}
+
+/**
+ * Execute a query with parameterized values.
+ * Automatically retries up to 3 times on transient connection errors
+ * (e.g. PostgreSQL pod restart, brief network blip).
  */
 export async function query<T = any>(
   text: string,
   params?: any[]
 ): Promise<QueryResult<T>> {
-  const start = Date.now();
-  try {
-    const result = await pool.query<T>(text, params);
-    const duration = Date.now() - start;
-    return result;
-  } catch (error) {
-    const maxQueryPreview = 1000;
-    const textPreview = text.length > maxQueryPreview
-      ? `${text.slice(0, maxQueryPreview)}... [truncated ${text.length - maxQueryPreview} chars]`
-      : text;
+  const maxAttempts = 3;
+  let lastError: unknown;
 
-    const poolStats = getPoolStats();
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const start = Date.now();
+    try {
+      const result = await pool.query<T>(text, params);
+      const duration = Date.now() - start;
+      return result;
+    } catch (error) {
+      lastError = error;
 
-    logger.error('Query error', {
-      text: textPreview,
-      textLength: text.length,
-      paramsCount: Array.isArray(params) ? params.length : 0,
-      dbPool: poolStats,
-      error
-    });
-    throw error;
+      if (isTransientError(error) && attempt < maxAttempts) {
+        const delayMs = attempt * 500;
+        logger.warn('Transient DB error, retrying query...', {
+          attempt,
+          maxAttempts,
+          retryInMs: delayMs,
+          code: (error as any).code,
+        });
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      // Non-transient or final attempt — log and rethrow
+      const maxQueryPreview = 1000;
+      const textPreview = text.length > maxQueryPreview
+        ? `${text.slice(0, maxQueryPreview)}... [truncated ${text.length - maxQueryPreview} chars]`
+        : text;
+
+      const poolStats = getPoolStats();
+      logger.error('Query error', {
+        text: textPreview,
+        textLength: text.length,
+        paramsCount: Array.isArray(params) ? params.length : 0,
+        dbPool: poolStats,
+        error,
+      });
+      throw error;
+    }
   }
+
+  throw lastError;
 }
 
 /**

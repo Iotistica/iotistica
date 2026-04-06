@@ -7,6 +7,22 @@ import { testConnection } from '../db/connection';
 import { getMigrationStatus, runMigrations } from '../db/migrations';
 import { initializeMqttAdmin, initializeNodeRedMqttCredentials } from '../mqtt/bootstrap';
 
+/**
+ * Poll testConnection() with exponential backoff until the database is ready.
+ * Delays: 1s, 2s, 4s, 8s, 16s, 30s, 30s, 30s, 30s (capped at 30s).
+ * Throws after all attempts are exhausted so the caller can exit(1).
+ */
+async function waitForDatabase(maxAttempts = 10): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (await testConnection()) return;
+    if (attempt === maxAttempts) break;
+    const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+    logger.warn('PostgreSQL not ready, retrying...', { attempt, maxAttempts, retryInMs: delayMs });
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error(`PostgreSQL did not become ready after ${maxAttempts} attempts`);
+}
+
 export async function bootstrapDatabase(): Promise<void> {
   logger.info('Attempting PostgreSQL connection:', {
     host: process.env.DB_HOST || 'localhost',
@@ -15,10 +31,7 @@ export async function bootstrapDatabase(): Promise<void> {
     user: process.env.DB_USER || 'postgres',
   });
 
-  const connected = await testConnection();
-  if (!connected) {
-    throw new Error('Failed to connect to PostgreSQL database - check connection settings above');
-  }
+  await waitForDatabase();
 
   if (process.env.DB_SKIP_MIGRATIONS !== 'true') {
     const migrationStatus = await getMigrationStatus();
