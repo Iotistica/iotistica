@@ -112,9 +112,9 @@ this.redisConsumer = new Redis({   // Read-only: XREADGROUP, XACK
 
 ### Stream Naming Convention
 ```
-tenant:{tenantId}:device:sensors:ingestion    # Sensor ingestion queue
-tenant:{tenantId}:device:sensors:ready        # Sensor ready queue
-tenant:{tenantId}:device:sensors:dlq          # Dead letter queue for failed sensor writes
+tenant:{tenantId}:agent:devices:ingestion    # Sensor ingestion queue
+tenant:{tenantId}:agent:devices:ready        # Sensor ready queue
+tenant:{tenantId}:agent:devices:dlq          # Dead letter queue for failed sensor writes
 tenant:{tenantId}:device:logs                 # Device logs stream
 tenant:{tenantId}:metrics:{deviceUuid}        # Per-device metrics stream
 ```
@@ -396,8 +396,8 @@ XREADGROUP GROUP mygroup worker1 STREAMS mystream 0
 
 ### DLQ Structure
 ```typescript
-private streamKey = `tenant:{${tenantId}}:device:sensors:ingestion`;
-private dlqStreamKey = `tenant:{${tenantId}}:device:sensors:dlq`;
+private streamKey = `tenant:{${tenantId}}:agent:devices:ingestion`;
+private dlqStreamKey = `tenant:{${tenantId}}:agent:devices:dlq`;
 ```
 
 ### Failure Tracking
@@ -653,10 +653,10 @@ do {
 ### Issue: DLQ Growing
 **Cause**: Poison messages failing repeatedly
 **Solutions**:
-1. Inspect DLQ: `XRANGE tenant:{tenantId}:device:sensors:dlq - +`
+1. Inspect DLQ: `XRANGE tenant:{tenantId}:agent:devices:dlq - +`
 2. Fix data format issues
 3. Increase `maxRetries` if transient DB errors
-4. Purge DLQ after fixing: `DEL tenant:{tenantId}:device:sensors:dlq`
+4. Purge DLQ after fixing: `DEL tenant:{tenantId}:agent:devices:dlq`
 
 ## Production Best Practices
 

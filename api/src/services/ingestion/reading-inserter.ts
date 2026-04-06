@@ -13,51 +13,49 @@ export class ReadingInserter {
   }
 
   async insertBatch(data: DeviceDataEntry[]): Promise<void> {
-    const chunkSize = 500;
     const ingestedAt = new Date();
+    const allReadings: ReadingInsert[] = [];
 
-    for (let i = 0; i < data.length; i += chunkSize) {
-      const chunk = data.slice(i, i + chunkSize);
-      const readings: ReadingInsert[] = [];
-
-      chunk.forEach(entry => {
-        try {
-          const protocol = detectProtocol(entry);
-          const expanded = expandMessages(entry, protocol, ingestedAt);
-          readings.push(...expanded);
-        } catch (error: unknown) {
-          metrics.messagesFailed++;
-          logger.warn('Skipping malformed device queue entry during reading normalization', {
-            deviceUuid: this.short(entry.deviceUuid),
-            deviceName: entry.deviceName,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      });
-
-      if (readings.length === 0) {
-        logger.debug('Skipping empty normalized device queue chunk', {
-          chunkIndex: Math.floor(i / chunkSize) + 1,
-          chunkSize: chunk.length,
+    for (const entry of data) {
+      try {
+        const protocol = detectProtocol(entry);
+        const expanded = expandMessages(entry, protocol, ingestedAt);
+        allReadings.push(...expanded);
+      } catch (error: unknown) {
+        metrics.messagesFailed++;
+        logger.warn('Skipping malformed device queue entry during reading normalization', {
+          deviceUuid: this.short(entry.deviceUuid),
+          deviceName: entry.deviceName,
+          error: error instanceof Error ? error.message : String(error),
         });
-        continue;
       }
-
-      // Deduplicate intra-batch on (agent_uuid, metric_name, time) before hitting the DB.
-      // Eliminates ON CONFLICT hits from replay/retry scenarios within the same batch.
-      const seen = new Map<string, ReadingInsert>();
-      for (const r of readings) {
-        const key = `${r.agent_uuid}:${r.metric_name}:${(r.time ?? ingestedAt).getTime()}`;
-        seen.set(key, r); // last writer wins (most recent re-send is authoritative)
-      }
-      const deduped = [...seen.values()];
-
-      const insertedCount = await this.readingsService.bulkInsert(deduped);
-      logger.debug(`Inserted ${insertedCount} readings (chunk ${Math.floor(i / chunkSize) + 1}, deduped ${readings.length - deduped.length})`);
-      metrics.lastProcessedTimestamp = Date.now();
-
-      await this.updateLastTelemetryAt(deduped, ingestedAt);
     }
+
+    if (allReadings.length === 0) return;
+
+    // Deduplicate intra-batch on (agent_uuid, metric_name, time) before hitting the DB.
+    // Eliminates ON CONFLICT hits from replay/retry scenarios within the same batch.
+    const seen = new Map<string, ReadingInsert>();
+    for (const r of allReadings) {
+      const key = `${r.agent_uuid}:${r.metric_name}:${(r.time ?? ingestedAt).getTime()}`;
+      seen.set(key, r); // last writer wins (most recent re-send is authoritative)
+    }
+    const deduped = [...seen.values()];
+
+    const insertStart = Date.now();
+    const insertedCount = await this.readingsService.bulkInsert(deduped);
+    const insertMs = Date.now() - insertStart;
+
+    const telemetryStart = Date.now();
+    await this.updateLastTelemetryAt(deduped, ingestedAt);
+    const telemetryMs = Date.now() - telemetryStart;
+
+    logger.debug(`Inserted ${insertedCount} readings (deduped ${allReadings.length - deduped.length})`, {
+      insertMs,
+      telemetryMs,
+      rows: deduped.length,
+    });
+    metrics.lastProcessedTimestamp = Date.now();
   }
 
   /**

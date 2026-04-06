@@ -17,9 +17,9 @@
  *   tenant:{cust_abc123}:metrics:uuid-1         (stream key)
  *   tenant:{cust_abc123}:metrics:*              (stream scan pattern)
  *   tenant:{cust_abc123}:device:logs            (log stream key)
- *   tenant:{cust_abc123}:device:sensors:ingestion
- *   tenant:{cust_abc123}:device:sensors:ready
- *   tenant:{cust_abc123}:device:sensors:dlq
+ *   tenant:{cust_abc123}:agent:devices:ingestion
+ *   tenant:{cust_abc123}:agent:devices:ready
+ *   tenant:{cust_abc123}:agent:devices:dlq
  *
  * SECURITY NOTES:
  * - Never allow global wildcards (tenant:*:...) - always scope to single tenant
@@ -200,24 +200,24 @@ export function deviceLogsStreamKey(tenantId: string): string {
  * Stream key for the sensor data ingestion queue 
  * @param tenantId - Tenant identifier (customerId)
  */
-export function deviceDevicesIngestionStreamKey(tenantId: string): string {
-  return `${tenantPrefix(tenantId)}:device:sensors:ingestion`;
+export function agentDevicesIngestionStreamKey(tenantId: string): string {
+  return `${tenantPrefix(tenantId)}:agent:devices:ingestion`;
 }
 
 /** 
  * Stream key for the sensor data processing queue 
  * @param tenantId - Tenant identifier (customerId)
  */
-export function deviceDevicesReadyStreamKey(tenantId: string): string {
-  return `${tenantPrefix(tenantId)}:device:sensors:ready`;
+export function agentDevicesReadyStreamKey(tenantId: string): string {
+  return `${tenantPrefix(tenantId)}:agent:devices:ready`;
 }
 
 /** 
  * Stream key for the sensor data dead-letter queue 
  * @param tenantId - Tenant identifier (customerId)
  */
-export function deviceDevicesDlqStreamKey(tenantId: string): string {
-  return `${tenantPrefix(tenantId)}:device:sensors:dlq`;
+export function agentDevicesDlqStreamKey(tenantId: string): string {
+  return `${tenantPrefix(tenantId)}:agent:devices:dlq`;
 }
 
 // ─── Consumer Group Helpers ──────────────────────────────────────────────────

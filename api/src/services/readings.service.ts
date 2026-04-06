@@ -116,7 +116,7 @@ export class ReadingsService {
   // Keeps packets small, reduces lock hold time, and improves concurrency.
   private readonly MAX_ROWS_PER_BULK_INSERT = 500;
   private readonly COPY_STAGE_ROWS_PER_BATCH = 5000;
-  private readonly BULK_INSERT_MODE = (process.env.READINGS_BULK_INSERT_MODE || 'insert').toLowerCase();
+  private readonly BULK_INSERT_MODE = (process.env.READINGS_BULK_INSERT_MODE || 'copy').toLowerCase();
   private readonly COPY_MIN_ROWS = Math.max(
     1,
     Number.isFinite(parseInt(process.env.READINGS_COPY_MIN_ROWS || '1000', 10))

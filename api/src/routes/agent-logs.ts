@@ -394,9 +394,9 @@ router.get('/admin/log-queue/stats', jwtAuth, requireRole('admin'), async (req, 
 
 /**
  * Get Redis Stream device queue statistics
- * GET /api/v1/admin/device-queue/stats
+ * GET /api/v1/admin/ingestion/stats
  */
-router.get('/admin/device-queue/stats', jwtAuth, requireRole('admin'), async (req, res) => {
+router.get('/admin/ingestion/stats', jwtAuth, requireRole('admin'), async (req, res) => {
   try {
     const stats = await redisDeviceQueue.getStats();
     res.json(stats);

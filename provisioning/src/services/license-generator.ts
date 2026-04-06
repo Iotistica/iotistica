@@ -201,7 +201,8 @@ export class LicenseGenerator {
    */
   static async generateLicense(
     customer: Customer,
-    subscription: Subscription
+    subscription: Subscription,
+    tenantIdOverride?: string
   ): Promise<string> {
     if (!this.privateKey) {
       throw new Error('License generator not initialized. Call init() first.');
@@ -209,7 +210,7 @@ export class LicenseGenerator {
 
     const planConfig = PLAN_CONFIG[subscription.plan] || PLAN_CONFIG.starter;
     const clientId = this.toClientId(customer.customer_id);
-    const tenantId = clientId;
+    const tenantId = tenantIdOverride || clientId;
 
     const licenseData: LicenseData = {
       tenantId,

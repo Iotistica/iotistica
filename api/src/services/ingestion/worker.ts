@@ -270,7 +270,7 @@ export class RedisQueueConsumer {
 
         const staleEntries = await this.claimStaleMessages(workerRedis);
         if (staleEntries.length > 0) {
-          await this.processBatch(staleEntries);
+          await this.processBatch(staleEntries, workerRedis);
           continue;
         }
 
@@ -302,7 +302,7 @@ export class RedisQueueConsumer {
         for (const pe of parseErrors) await this.sendDecodeFailureToDlq(pe.entry, pe.reason);
         if (entries.length === 0) continue;
 
-        await this.processBatch(entries);
+        await this.processBatch(entries, workerRedis);
       } catch (err: any) {
         await this.handleWorkerError(workerId, err);
       }
@@ -326,11 +326,15 @@ export class RedisQueueConsumer {
     const streamWatermark = Math.floor(
       this.config.maxStreamLength * this.config.redisStreamHighWatermarkPct,
     );
-    const streamLen = metrics.streamLength;
+    // Use real consumer-group lag (undelivered entries) rather than XLEN so that
+    // a stream full of already-processed entries (e.g. after a direct-Redis load
+    // test that bypassed the producer's MAXLEN) doesn't trigger false alarms.
+    const streamLen = metrics.streamLength; // physical XLEN, kept for log reporting
+    const effectiveBacklog = metrics.workerLag + metrics.pendingMessages;
     const memUsed = metrics.redisMemoryUsedBytes;
     const memMax = metrics.redisMemoryMaxBytes;
 
-    const streamPressure = streamWatermark > 0 && streamLen >= streamWatermark;
+    const streamPressure = streamWatermark > 0 && effectiveBacklog >= streamWatermark;
     const memUsedPct = memMax > 0 ? (memUsed / memMax) * 100 : 0;
     const memPressure =
       this.config.redisMemoryHighWatermarkPct > 0 &&
@@ -357,8 +361,9 @@ export class RedisQueueConsumer {
       const logContext = {
         action: 'autoscale_signal',
         streamLength: streamLen,
+        effectiveBacklog,
         streamHighWatermark: streamWatermark,
-        streamUtilizationPct: streamWatermark > 0 ? Math.round((streamLen / streamWatermark) * 100) : null,
+        streamUtilizationPct: streamWatermark > 0 ? Math.round((effectiveBacklog / streamWatermark) * 100) : null,
         memoryUsedMb: Math.round(memUsed / 1024 / 1024),
         memoryMaxMb: memMax > 0 ? Math.round(memMax / 1024 / 1024) : 'unlimited',
         memoryUtilizationPct: memMax > 0 ? Math.round(memUsedPct) : null,
@@ -723,7 +728,12 @@ export class RedisQueueConsumer {
     }
   }
 
-  private logBatchSuccess(entries: RedisDeviceEntry[], allData: DeviceDataEntry[], startTime: number): void {
+  private logBatchSuccess(
+    entries: RedisDeviceEntry[],
+    allData: DeviceDataEntry[],
+    startTime: number,
+    phases?: { resolveMs: number; ackMs: number },
+  ): void {
     const duration = Date.now() - startTime;
     const now = Date.now();
 
@@ -743,6 +753,8 @@ export class RedisQueueConsumer {
       agents: new Set(allData.map(d => d.deviceUuid)).size,
       devices: new Set(allData.map(d => `${d.deviceUuid}/${d.deviceName}`)).size,
       durationMs: duration,
+      resolveMs: phases?.resolveMs,
+      ackMs: phases?.ackMs,
       readingsPerSecond: Math.round((entries.length / duration) * 1000),
       maxDwellMs,
       avgDwellMs,
@@ -757,14 +769,14 @@ export class RedisQueueConsumer {
    * trip. Redis XACK already accepts N IDs in one command, so a single call here is
    * still one RTT — the gain is when two groups are merged into one exec().
    */
-  private async xackBatch(ids: string[]): Promise<void> {
+  private async xackBatch(ids: string[], workerRedis: Redis): Promise<void> {
     if (ids.length === 0) return;
-    const pl = this.redis.pipeline();
+    const pl = workerRedis.pipeline();
     pl.xack(this.config.streamKey, this.config.consumerGroup, ...ids);
     await pl.exec();
   }
 
-  private async processBatch(entries: RedisDeviceEntry[]): Promise<void> {
+  private async processBatch(entries: RedisDeviceEntry[], workerRedis: Redis): Promise<void> {
     const startTime = Date.now();
 
     // Suppress in-process redeliveries: collect IDs but do NOT send immediately.
@@ -784,7 +796,7 @@ export class RedisQueueConsumer {
     }
     if (fresh.length === 0) {
       // Nothing new to process — ACK the duplicates and exit.
-      await this.xackBatch(alreadySeenIds);
+      await this.xackBatch(alreadySeenIds, workerRedis);
       return;
     }
 
@@ -794,6 +806,7 @@ export class RedisQueueConsumer {
     const pendingAck: RedisDeviceEntry[] = [];
     const allData: DeviceDataEntry[] = [];
 
+    const resolveStart = Date.now();
     for (const entry of fresh) {
       const data = await this.resolveEntryData(entry);
       if (data !== null) {
@@ -801,12 +814,13 @@ export class RedisQueueConsumer {
         allData.push(...data);
       }
     }
+    const resolveMs = Date.now() - resolveStart;
 
     if (allData.length === 0) {
       // All entries were either decode-failures (moved to DLQ) or produced empty payloads.
       // Merge alreadySeen + empty-payload pendingAck into one pipeline flush — one RTT covers both.
       const toAck = [...alreadySeenIds, ...pendingAck.map(e => e.id)];
-      await this.xackBatch(toAck);
+      await this.xackBatch(toAck, workerRedis);
       if (pendingAck.length > 0) {
         this.messageTracker.markAll(pendingAck.map(e => e.id));
         logger.debug('ACK\'d entries that decoded to empty data payloads', { count: pendingAck.length });
@@ -819,13 +833,15 @@ export class RedisQueueConsumer {
       // XACK only after successful DB write — the core at-least-once guarantee.
       // Merge alreadySeen + pendingAck into one pipeline flush — one RTT covers both.
       const toAck = [...alreadySeenIds, ...pendingAck.map(e => e.id)];
-      await this.xackBatch(toAck);
+      const ackStart = Date.now();
+      await this.xackBatch(toAck, workerRedis);
+      const ackMs = Date.now() - ackStart;
       this.messageTracker.markAll(pendingAck.map(e => e.id));
-      this.logBatchSuccess(pendingAck, allData, startTime);
+      this.logBatchSuccess(pendingAck, allData, startTime, { resolveMs, ackMs });
     } catch (err: any) {
       // ACK alreadySeen independently — those entries are definitively done regardless of
       // whether this batch's DB insert failed. pendingAck remains in the PEL for retry.
-      await this.xackBatch(alreadySeenIds);
+      await this.xackBatch(alreadySeenIds, workerRedis);
       logger.error('Failed to process device data batch', { count: pendingAck.length, error: err.message });
       // Only retry entries that actually attempted a DB write — not decode-failures already disposed above
       await this.handleBatchFailures(pendingAck, err);

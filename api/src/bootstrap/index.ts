@@ -34,7 +34,9 @@ async function fatal(name: string, fn: () => Promise<void>): Promise<void> {
   try {
     await fn();
   } catch (error) {
-    logger.error(`${name} initialization failed`, { error });
+    logger.error(`${name} initialization failed`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
     process.exit(1);
   }
 }

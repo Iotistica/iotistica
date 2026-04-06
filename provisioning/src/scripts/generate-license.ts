@@ -11,6 +11,7 @@ type Plan = 'starter' | 'professional' | 'enterprise';
 
 interface CliArgs {
   customerId: string;
+  tenantId?: string;
   email: string;
   companyName: string;
   plan: Plan;
@@ -26,6 +27,7 @@ function usage(): void {
       '',
       'Options:',
       '  --customer-id <id>     Required. Source customer identifier used to derive clientId',
+      '  --tenant-id <id>       Optional. Override the derived tenantId (e.g. use existing tenant: 73eddd385ce8)',
       '  --email <email>        Optional. Default: test@example.com',
       '  --company <name>       Optional. Default: Test Corp',
       '  --plan <plan>          Optional. starter|professional|enterprise (default: starter)',
@@ -66,6 +68,7 @@ function parseArgs(argv: string[]): CliArgs {
 
   return {
     customerId,
+    tenantId: getArg('--tenant-id'),
     email: getArg('--email') || 'test@example.com',
     companyName: getArg('--company') || 'Test Corp',
     plan: planArg as Plan,
@@ -103,7 +106,7 @@ async function main(): Promise<void> {
     updated_at: now,
   };
 
-  const token = await LicenseGenerator.generateLicense(customer, subscription);
+  const token = await LicenseGenerator.generateLicense(customer, subscription, args.tenantId);
   const decoded = LicenseGenerator.verifyLicense(token);
 
   if (args.out) {

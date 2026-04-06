@@ -3,9 +3,9 @@ import { randomUUID } from 'crypto';
 import { logger } from '../../utils/logger';
 import { getRedisIngestion, getRedisConsumer } from '../../redis/client-factory';
 import {
-  deviceDevicesIngestionStreamKey,
-  deviceDevicesReadyStreamKey,
-  deviceDevicesDlqStreamKey,
+  agentDevicesIngestionStreamKey,
+  agentDevicesReadyStreamKey,
+  agentDevicesDlqStreamKey,
   getTenantId,
   consumerGroupName,
   consumerName as makeConsumerName,
@@ -67,9 +67,9 @@ export class RedisDeviceQueue {
   private consumerGroup: string;
   private consumerName: string;
 
-  private get streamKey(): string { return deviceDevicesIngestionStreamKey(this.resolveTenantId()); }
-  private get processingStreamKey(): string { return deviceDevicesReadyStreamKey(this.resolveTenantId()); }
-  private get dlqStreamKey(): string { return deviceDevicesDlqStreamKey(this.resolveTenantId()); }
+  private get streamKey(): string { return agentDevicesIngestionStreamKey(this.resolveTenantId()); }
+  private get processingStreamKey(): string { return agentDevicesReadyStreamKey(this.resolveTenantId()); }
+  private get dlqStreamKey(): string { return agentDevicesDlqStreamKey(this.resolveTenantId()); }
 
   private readonly maxRetries: number;
   private readonly workerCount: number;
@@ -314,16 +314,47 @@ export class RedisDeviceQueue {
 
     const collect = async () => {
       try {
-        // Stream length → worker lag
+        // Stream length (physical XLEN — used for memory pressure tracking)
         const streamLen = await this.redisConsumer.xlen(this.streamKey).catch(() => 0);
         metrics.streamLength = streamLen;
-        metrics.workerLag = streamLen;
 
         // Pending entries list (messages delivered but not yet ACK'd)
         const pending = await this.redisConsumer
           .xpending(this.streamKey, this.consumerGroup)
           .catch(() => null);
-        if (pending) metrics.pendingMessages = (pending as any[])[0] as number;
+        const pendingCount = pending ? ((pending as any[])[0] as number) : 0;
+        if (pending) metrics.pendingMessages = pendingCount;
+
+        // Consumer-group lag: undelivered entries not yet seen by the group.
+        // Using XINFO GROUPS is more accurate than XLEN because XLEN counts
+        // already-processed entries that haven't been trimmed yet (e.g. after
+        // a load test that bypassed the producer's MAXLEN enforcement).
+        let consumerGroupLag = streamLen; // pessimistic fallback
+        try {
+          const rawGroups = await this.redisConsumer.xinfo('GROUPS', this.streamKey) as unknown[];
+          for (const groupData of rawGroups) {
+            const pairs = groupData as (string | number)[];
+            const nameIdx = pairs.indexOf('name');
+            if (nameIdx >= 0 && pairs[nameIdx + 1] === this.consumerGroup) {
+              const lagIdx = pairs.indexOf('lag');
+              if (lagIdx >= 0) consumerGroupLag = pairs[lagIdx + 1] as number;
+              break;
+            }
+          }
+        } catch { /* XINFO GROUPS unsupported or stream absent — keep XLEN fallback */ }
+        metrics.workerLag = consumerGroupLag;
+
+        // Auto-trim: if the stream has grown beyond maxStreamLength (e.g. a load
+        // test injected directly into Redis bypassing the producer's MAXLEN) and
+        // all work is done, trim it back so pressure checks don't false-alarm.
+        if (streamLen > this.maxStreamLength && consumerGroupLag === 0 && pendingCount === 0) {
+          await this.redisConsumer.xtrim(this.streamKey, 'MAXLEN', String(this.maxStreamLength)).catch(() => {});
+          metrics.streamLength = this.maxStreamLength;
+          logger.info('Trimmed oversized ingestion stream back to configured maxlen', {
+            from: streamLen,
+            to: this.maxStreamLength,
+          });
+        }
 
         // DLQ length
         metrics.dlqLength = await this.redisConsumer.xlen(this.dlqStreamKey).catch(() => 0);

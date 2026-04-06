@@ -74,51 +74,35 @@ export class CloudMqttClient extends EventEmitter {
   private client: MqttClient | null = null;
   private connected = false;
   private readonly router = new MqttRouter();
-  private subscribedTopics = new Set<string>(); // Tracks topics actually subscribed with the broker
+  private subscribedTopics = new Map<string, number>(); // ref count: topic → number of active subscribers
   private connectionPromise: Promise<void> | null = null;
   private debug = false;
   private logger?: AgentLogger;
   private bufferSync?: MessageBufferSync;
   private publishMode: PublishMode = 'direct';
   
-  // TODO (FUTURE): Store format metadata in pending queue for better observability
-  // 
-  // Current approach (Buffer only) works but loses format information:
-  // - Can't re-log compression stats when draining queue
-  // - Can't differentiate msgpack/JSON/binary in debug logs
-  // - Can't implement format-specific retry logic
-  // 
-  // Enhanced structure (if needed):
-  // private pendingPublishes: Array<{
-  //   topic: string;
-  //   payload: { buffer: Buffer; format: MqttPayload['format'] };
-  //   options?: IClientPublishOptions;
-  // }> = [];
-  // 
-  // Trade-offs:
-  // - Pro: Better debugging, format-aware retry, compression stats on drain
-  // - Con: Extra memory per queued message (~8 bytes per message)
-  // - Con: More complex queue logic
-  // 
-  // Decision: Not needed for POC. Consider if queue debugging becomes important.
+  // Volatile in-memory queue — used ONLY when bufferSync is disabled.
+  // When bufferSync is enabled, all offline messages go to SQLite instead (see publish()).
+  // Messages here are lost on process crash; drained on reconnect via drainPendingPublishes().
   private pendingPublishes: Array<{
     topic: string;
     payload: string | Buffer;
     options?: IClientPublishOptions;
   }> = [];
-  private readonly MAX_PENDING_PUBLISHES = 1000; // Prevent memory overflow
+  private readonly MAX_PENDING_PUBLISHES = 1000; // Hard cap — oldest dropped above this
+  private readonly PENDING_BACKPRESSURE_THRESHOLD = 750; // 75% of cap — warn once when queue crosses this
   private readonly MAX_INFLIGHT = 10; // Max concurrent publishes (prevents socket congestion)
   private inflightPublishes = 0; // Current inflight publish count (token bucket)
   private reconnectAttempts = 0;
   private readonly MAX_RECONNECT_DELAY_MS = 30000; // 30 seconds max
   private readonly BASE_RECONNECT_DELAY_MS = 1000; // 1 second base
-  private readonly MIN_RECONNECT_INTERVAL = 1000; // Minimum time between reconnect attempts (prevents thrashing)
-  private lastReconnectAt = 0; // Timestamp of last reconnect attempt
+  private reconnectTimer: NodeJS.Timeout | null = null; // Single source of truth — set synchronously, never races
+  private consecutivePublishFailures = 0; // Reset on success or reconnect
+  private readonly PUBLISH_FAILURE_THRESHOLD = 3; // Consecutive failures before forcing reconnect
   private lastBrokerUrl?: string;
   private lastOptions?: IClientOptions;
   private lastDeviceUuid?: string; // Store device UUID for reuse on reconnects
   private messageIdGenerator?: MessageIdGenerator; // For HA deduplication
-  private isReconnecting: boolean = false; // Prevent overlapping reconnection chains
 
   private constructor() {
     super();
@@ -140,6 +124,18 @@ export class CloudMqttClient extends EventEmitter {
 
   public getPublishMode(): PublishMode {
     return this.publishMode;
+  }
+
+  /**
+   * Returns the current in-memory queue depth.
+   * Callers can use this to apply backpressure before publishing.
+   * Note: when bufferSync is enabled this queue is always 0 — use bufferSync.getStats() instead.
+   */
+  public getQueueDepth(): { pending: number; inflight: number } {
+    return {
+      pending: this.pendingPublishes.length,
+      inflight: this.inflightPublishes,
+    };
   }
 
   public setPublishMode(mode: PublishMode, reason?: string): void {
@@ -317,11 +313,14 @@ export class CloudMqttClient extends EventEmitter {
   private createClient(brokerUrl: string, options?: IClientOptions): MqttClient {
     return mqtt.connect(brokerUrl, {
       ...options,
-      clean: true,
-      reconnectPeriod: 0, // Disable auto-reconnect, we'll handle it manually
-      connectTimeout: 10000,
-      keepalive: 60, // Send PINGREQ every 60s to detect dead connections
-      reschedulePings: true, // Reschedule ping timer on activity
+      // NOTE: 'clean' is intentionally NOT overridden here.
+      // Callers pass clean via options (infra.ts: config.cleanSession ?? true).
+      // With clean:false + a stable clientId (device_<uuid>), the broker preserves
+      // session state across reconnects — subscriptions and in-flight QoS1/2 messages
+      // are resumed. resubscribeAll() provides belt-and-suspenders for subscriptions.
+      //
+      // Intentional overrides (manager owns these, caller value is irrelevant):
+      reconnectPeriod: 0, // Never: we manage reconnects manually via scheduleReconnect()
     });
   }
 
@@ -387,7 +386,13 @@ export class CloudMqttClient extends EventEmitter {
     clearTimeout(connectionTimeout);
     this.connected = true;
     this.reconnectAttempts = 0; // Reset backoff counter on successful connect
-    this.isReconnecting = false; // Reset reconnection state
+    this.consecutivePublishFailures = 0; // Reset publish failure counter on reconnect
+
+    // Cancel any pending reconnect timer — connection succeeded
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
 
     this.logInfo('Connected to MQTT broker', {
       brokerUrl,
@@ -470,13 +475,22 @@ export class CloudMqttClient extends EventEmitter {
 
   /**
    * Publish message to MQTT topic
-   * 
-   * If offline, queues message for delivery on reconnect.
-   * 
+   *
+   * Routing decisions (in order):
+   * 1. bufferSync enabled:
+   *    - publishMode !== 'direct' OR offline → SQLite (durable, survives crash)
+   *    - publishMode === 'direct' AND online  → live publish
+   * 2. bufferSync disabled:
+   *    - offline (no client / not connected)   → in-memory queue (volatile)
+   *    - publishMode !== 'direct' AND online   → in-memory queue (mode ENFORCED here)
+   *    - publishMode === 'direct' AND online   → live publish
+   *
+   * publishMode is always enforced: 'buffer-only' and 'recovering' never reach live publish.
+   *
    * @param topic - MQTT topic
    * @param payload - Buffer, MqttPayload, or string (for backward compatibility)
    * @param options - MQTT publish options
-   * 
+   *
    * Note: For HA deduplication, use createJsonPayload() with msgIdGenerator before calling this.
    */
   public async publish(
@@ -495,52 +509,79 @@ export class CloudMqttClient extends EventEmitter {
     }
 
     if (!this.client || !this.connected) {
-      // Trigger reconnection if we have broker config (self-healing)
-      if (this.lastBrokerUrl && !this.connectionPromise) {
-        this.logWarn('MQTT disconnected - triggering reconnection', {
-          pendingMessages: this.pendingPublishes.length
-        });
-        this.scheduleReconnect(this.lastBrokerUrl, this.lastOptions);
+      // Trigger passive self-healing reconnect (fire-and-forget — does not block message queuing).
+      void this.ensureConnected().catch(() => {});
+
+      if (this.bufferSync?.isEnabled()) {
+        // Durable path: at this point isConnected()=false, so bufferSync.handlePublish()
+        // sees shouldBuffer=true and persists to SQLite — survives a process crash.
+        // This closes the race where the top-of-publish bufferSync check returned false
+        // (MQTT was up) but MQTT dropped before client.publish() was reached.
+        await this.bufferSync.handlePublish(topic, buffer, options);
+        return;
       }
-      
-      // Queue message for delivery on reconnect
-      if (this.pendingPublishes.length >= this.MAX_PENDING_PUBLISHES) {
-        this.logWarn(`Pending publish queue full (${this.MAX_PENDING_PUBLISHES}), dropping oldest message`);
-        this.pendingPublishes.shift(); // Remove oldest
-      }
-      
-      this.pendingPublishes.push({ topic, payload: buffer, options });
-      this.debugLog(`Queued message for offline delivery: ${topic} (queue size: ${this.pendingPublishes.length})`);
-      return Promise.resolve();
+
+      // Volatile fallback (bufferSync disabled): in-memory queue, lost on crash.
+      this.enqueuePending(topic, buffer, options);
+      return;
+    }
+
+    // publishMode enforcement: 'buffer-only' and 'recovering' must never reach live publish,
+    // even when the MQTT socket is open. bufferSync enforces this automatically when enabled
+    // (shouldBuffer = publishMode !== 'direct'). This guard covers the bufferSync-disabled case.
+    if (this.publishMode !== 'direct') {
+      this.enqueuePending(topic, buffer, options);
+      return;
     }
 
     return new Promise((resolve, reject) => {
+      // Timeout: slow broker or QoS1 PUBACK delay — not necessarily a broken connection.
+      // Log and reject, but do NOT force a reconnect (would cause TCP churn and duplication).
       const timeout = setTimeout(() => {
-        const timeoutError = new Error(`MQTT publish timeout after 5s: ${topic}`);
-        console.warn('[MQTT] Publish timeout - forcing reconnect:', topic);
-        
-        // Force reconnect on timeout
-        if (this.lastBrokerUrl) {
-          this.connected = false; // Mark as disconnected
+        this.consecutivePublishFailures++;
+        this.logWarn('MQTT publish timeout', {
+          topic,
+          consecutivePublishFailures: this.consecutivePublishFailures,
+          threshold: this.PUBLISH_FAILURE_THRESHOLD,
+        });
+        if (
+          this.consecutivePublishFailures >= this.PUBLISH_FAILURE_THRESHOLD &&
+          this.lastBrokerUrl
+        ) {
+          this.logWarn('Consecutive publish timeout threshold reached — scheduling reconnect', {
+            topic,
+            consecutivePublishFailures: this.consecutivePublishFailures,
+          });
           this.scheduleReconnect(this.lastBrokerUrl, this.lastOptions);
         }
-        reject(timeoutError);
+        reject(new Error(`MQTT publish timeout after 5s: ${topic}`));
       }, 5000);
-      
+
       this.client!.publish(topic, buffer, options || {}, (error) => {
         clearTimeout(timeout);
         if (error) {
-          this.logWarn('MQTT publish failed - forcing reconnect', {
+          this.consecutivePublishFailures++;
+          this.logWarn('MQTT publish failed', {
             topic,
-            error: error.message
+            error: error.message,
+            consecutivePublishFailures: this.consecutivePublishFailures,
+            threshold: this.PUBLISH_FAILURE_THRESHOLD,
           });
-          // Force reconnect on publish error (e.g., ACL denied)
-          if (this.lastBrokerUrl) {
-            this.connected = false; // Mark as disconnected
+          // Only schedule reconnect after N consecutive failures; a single error
+          // (e.g. broker ACL rejection) is not a sign of a broken socket.
+          if (
+            this.consecutivePublishFailures >= this.PUBLISH_FAILURE_THRESHOLD &&
+            this.lastBrokerUrl
+          ) {
+            this.logWarn('Consecutive publish failure threshold reached — scheduling reconnect', {
+              topic,
+              consecutivePublishFailures: this.consecutivePublishFailures,
+            });
             this.scheduleReconnect(this.lastBrokerUrl, this.lastOptions);
           }
           reject(error);
         } else {
+          this.consecutivePublishFailures = 0; // Reset on any successful publish
           resolve();
         }
       });
@@ -605,15 +646,9 @@ export class CloudMqttClient extends EventEmitter {
     options?: mqtt.IClientSubscribeOptions,
     handler?: (topic: string, payload: Buffer) => void
   ): Promise<void> {
-    // Auto-reconnect if disconnected (self-healing)
     if (!this.isConnected()) {
-      if (!this.lastBrokerUrl) {
-        throw new Error('MQTT client not connected and no broker URL available for reconnect');
-      }
-      this.logInfo('Auto-reconnecting for subscribe operation', {
-        topic
-      });
-      await this.connect(this.lastBrokerUrl, this.lastOptions);
+      this.logInfo('Auto-reconnecting for subscribe operation', { topic });
+      await this.ensureConnected();
     }
 
     // Register handler and topic BEFORE the broker subscribe call so that
@@ -621,16 +656,28 @@ export class CloudMqttClient extends EventEmitter {
     if (handler) {
       this.router.addHandler(topic, handler);
     }
-    this.subscribedTopics.add(topic);
+    const existingCount = this.subscribedTopics.get(topic) ?? 0;
+    this.subscribedTopics.set(topic, existingCount + 1);
 
+    // Already subscribed at broker level: skip the redundant SUBSCRIBE packet.
+    // The handler is registered above and will receive messages immediately.
+    if (existingCount > 0) {
+      this.debugLog(`Topic already subscribed (ref=${existingCount + 1}): ${topic}`);
+      return;
+    }
+
+    // First subscriber for this topic — issue broker SUBSCRIBE.
     return new Promise((resolve, reject) => {
       const rollback = () => {
         if (handler) {
           this.router.removeHandler(handler);
         }
-        // Only remove from set if no other handler still references this topic
-        if (!this.router.hasPattern(topic)) {
+        // Undo the ref increment above.
+        const count = this.subscribedTopics.get(topic) ?? 1;
+        if (count <= 1) {
           this.subscribedTopics.delete(topic);
+        } else {
+          this.subscribedTopics.set(topic, count - 1);
         }
       };
 
@@ -674,20 +721,35 @@ export class CloudMqttClient extends EventEmitter {
 
   /**
    * Unsubscribe from MQTT topic
+   *
+   * Decrements the subscriber ref count. Only sends broker UNSUBSCRIBE and
+   * removes handlers from the router when the last subscriber unsubscribes.
+   * This prevents one caller from silently destroying another caller's subscription.
    */
   public async unsubscribe(topic: string): Promise<void> {
     if (!this.client) {
       throw new Error('MQTT client not initialized');
     }
 
+    const count = this.subscribedTopics.get(topic) ?? 0;
+
+    if (count > 1) {
+      // Other subscribers still active: decrement ref, retain broker subscription and all handlers.
+      this.subscribedTopics.set(topic, count - 1);
+      this.debugLog(`Unsubscribe deferred for topic: ${topic} (ref now ${count - 1}, broker subscription retained)`);
+      return;
+    }
+
+    // Last subscriber (or topic not tracked): remove from map and issue broker UNSUBSCRIBE.
+    this.subscribedTopics.delete(topic);
+
     return new Promise((resolve, reject) => {
       this.client!.unsubscribe(topic, (error) => {
         if (error) {
           reject(error);
         } else {
-          // Remove all handlers and the tracked topic for this pattern
+          // Remove all handlers for this pattern now that no subscribers remain.
           this.router.removePattern(topic);
-          this.subscribedTopics.delete(topic);
           this.debugLog(`Unsubscribed from topic: ${topic}`);
           resolve();
         }
@@ -752,14 +814,6 @@ export class CloudMqttClient extends EventEmitter {
   }
 
   /**
-   * Schedule reconnect with exponential backoff
-   * 
-   * Guards against reconnection thrashing:
-   * - isReconnecting: Prevents overlapping reconnect chains
-   * - MIN_RECONNECT_INTERVAL: Prevents rapid-fire reconnects in pathological cases
-   *   (e.g., flapping network + slow DNS → repeated forced teardowns)
-   */
-  /**
    * Resubscribe all registered handlers after a reconnect.
    * Each reconnect creates a new MQTT client/session, so the broker has no
    * record of previous subscriptions — we must re-issue them explicitly.
@@ -769,7 +823,7 @@ export class CloudMqttClient extends EventEmitter {
       return;
     }
 
-    const topics = [...this.subscribedTopics];
+    const topics = [...this.subscribedTopics.keys()];
     this.logInfo(`Resubscribing to ${topics.length} topic(s) after reconnect`, {
       topics
     });
@@ -794,84 +848,121 @@ export class CloudMqttClient extends EventEmitter {
     }
   }
 
+  /**
+   * Ensure the client is connected, awaiting or initiating reconnect as needed.
+   *
+   * - Already connected: returns immediately
+   * - Connection already in progress: joins the existing promise (no duplicate attempt)
+   * - Disconnected with known broker URL: initiates an immediate connect attempt
+   * - No broker URL known: throws
+   *
+   * subscribe() awaits this directly to block until a live socket exists.
+   * publish() calls it fire-and-forget (void ...catch) to nudge self-healing without
+   * blocking the message-queuing return path.
+   */
+  private async ensureConnected(): Promise<void> {
+    if (this.isConnected()) return;
+    if (!this.lastBrokerUrl) {
+      throw new Error('MQTT client not connected and no broker URL available for reconnect');
+    }
+    // If a connection attempt is already in flight, join it rather than starting another.
+    if (this.connectionPromise) {
+      return this.connectionPromise;
+    }
+    await this.connect(this.lastBrokerUrl, this.lastOptions);
+  }
+
   private scheduleReconnect(brokerUrl: string, options?: IClientOptions): void {
-    // Guard 1: Prevent overlapping reconnection chains
-    if (this.isReconnecting) {
+    // Single source of truth guard: if a timer is already pending, all concurrent
+    // triggers (offline, close, disconnect, publish timeout) are silently dropped.
+    // This is race-free because timer assignment is synchronous — no async gap.
+    if (this.reconnectTimer) {
       return;
     }
 
-    // Guard 2: Prevent reconnection thrashing (minimum interval between attempts)
-    const now = Date.now();
-    if (now - this.lastReconnectAt < this.MIN_RECONNECT_INTERVAL) {
-      console.log(`[MQTT] Reconnect throttled (min interval: ${this.MIN_RECONNECT_INTERVAL}ms)`);
-      return;
-    }
-    this.lastReconnectAt = now;
-    this.isReconnecting = true;
-    
     this.reconnectAttempts++;
-    const delay = Math.min(
+    const exponential = Math.min(
       this.MAX_RECONNECT_DELAY_MS,
       this.BASE_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempts - 1)
     );
-    
-    // Use console.log to avoid logging system recursion
+    // Full-jitter in [0.85, 1.15) of the exponential window.
+    // Spreads simultaneous reconnects across all agents to prevent thundering herd.
+    const jitter = Math.random() * 0.3 + 0.85;
+    const delay = Math.round(exponential * jitter);
+
     console.log(`[MQTT] Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
-    
-    setTimeout(() => {
+
+    this.reconnectTimer = setTimeout(() => {
+      // Clear timer handle synchronously before any awaits so that a subsequent
+      // scheduleReconnect() call (e.g. from a failed connect) is never blocked.
+      this.reconnectTimer = null;
+
       if (this.connected) {
-        // Connection recovered while waiting for backoff delay.
-        this.isReconnecting = false;
         return;
       }
 
       if (this.connectionPromise) {
-        // Another connect attempt is already in flight. Wait for it to settle,
-        // then continue the reconnect chain if we're still offline.
+        // Another connect attempt is already in flight — wait for it to settle,
+        // then re-schedule if we're still offline.
         this.connectionPromise
-          .catch(() => {
-            // Ignore here; follow-up scheduling is handled below.
-          })
+          .catch(() => {})
           .finally(() => {
-            if (this.connected) {
-              this.isReconnecting = false;
-              return;
+            if (!this.connected) {
+              this.connectionPromise = null;
+              this.scheduleReconnect(brokerUrl, options);
             }
-
-            this.isReconnecting = false;
-            this.connectionPromise = null;
-            this.scheduleReconnect(brokerUrl, options);
           });
         return;
       }
 
-      if (!this.connected) {
-        // Force close stale client before reconnecting (critical for stuck connections)
-        if (this.client) {
-          console.warn(`[MQTT] Forcefully closing stale client before reconnect (attempt ${this.reconnectAttempts})`);
-          this.client.removeAllListeners();
-          try {
-            this.client.end(true); // Force disconnect
-          } catch (error) {
-            this.debugLog(`Error ending stale client: ${error}`);
-          }
-          this.client = null;
+      // Force close stale client before reconnecting (critical for stuck connections)
+      if (this.client) {
+        console.warn(`[MQTT] Forcefully closing stale client before reconnect (attempt ${this.reconnectAttempts})`);
+        this.client.removeAllListeners();
+        try {
+          this.client.end(true);
+        } catch (error) {
+          this.debugLog(`Error ending stale client: ${error}`);
         }
-        
-        this.connect(brokerUrl, options).catch((error) => {
-          console.error(`[MQTT] Reconnect attempt ${this.reconnectAttempts} failed:`, error);
-          // Reset reconnection state (including connection promise) and schedule next attempt
-          this.isReconnecting = false;
-          this.connectionPromise = null; // Critical: clear promise so next attempt can proceed
-          this.scheduleReconnect(brokerUrl, options);
-        });
+        this.client = null;
       }
+
+      this.connect(brokerUrl, options).catch((error) => {
+        console.error(`[MQTT] Reconnect attempt ${this.reconnectAttempts} failed:`, error);
+        this.connectionPromise = null;
+        this.scheduleReconnect(brokerUrl, options);
+      });
     }, delay);
   }
 
   /**
+   * Enqueue a message in the volatile in-memory queue.
+   * Shared by: offline branch (not connected) and publishMode guard (connected but non-direct).
+   * Applies cap eviction and backpressure warning.
+   */
+  private enqueuePending(
+    topic: string,
+    payload: Buffer,
+    options?: IClientPublishOptions
+  ): void {
+    if (this.pendingPublishes.length >= this.MAX_PENDING_PUBLISHES) {
+      this.logWarn(`Pending publish queue full (${this.MAX_PENDING_PUBLISHES}), dropping oldest message`);
+      this.pendingPublishes.shift();
+    }
+    this.pendingPublishes.push({ topic, payload, options });
+    // Backpressure signal: warn exactly once when queue crosses the threshold.
+    if (this.pendingPublishes.length === this.PENDING_BACKPRESSURE_THRESHOLD) {
+      this.logWarn('Backpressure: pending publish queue growing', {
+        queueSize: this.pendingPublishes.length,
+        cap: this.MAX_PENDING_PUBLISHES,
+      });
+    }
+    this.debugLog(`Queued message for offline delivery: ${topic} (queue size: ${this.pendingPublishes.length})`);
+  }
+
+  /**
    * Drain pending publishes on reconnect
-   * 
+   *
    * Uses inflight limiting (token bucket) to prevent memory spikes and socket congestion.
    * - Max 10 concurrent publishes (MAX_INFLIGHT)
    * - Continues draining as callbacks complete
