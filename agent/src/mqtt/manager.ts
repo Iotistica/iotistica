@@ -10,7 +10,6 @@ import { serializePayload } from './codec';
 import type { MqttPayload } from './codec';
 import { MqttRouter } from './router';
 
-// Backward-compatible re-exports: existing imports from './manager' keep working.
 export {
   createJsonPayload,
   createMsgpackPayload,
@@ -19,6 +18,8 @@ export {
   logCompressionStats,
 } from './codec';
 export type { MqttPayload } from './codec';
+
+export type PublishMode = 'direct' | 'buffer-only' | 'recovering';
 
 export interface MqttConnectOptions {
   bufferSync?: boolean;
@@ -68,8 +69,8 @@ export interface MqttConnectOptions {
  * 
  * Decision: Keep monolithic for now. Refactor when adding second codec or protocol.
  */
-export class MqttManager extends EventEmitter {
-  private static instance: MqttManager;
+export class CloudMqttClient extends EventEmitter {
+  private static instance: CloudMqttClient;
   private client: MqttClient | null = null;
   private connected = false;
   private readonly router = new MqttRouter();
@@ -78,6 +79,7 @@ export class MqttManager extends EventEmitter {
   private debug = false;
   private logger?: AgentLogger;
   private bufferSync?: MessageBufferSync;
+  private publishMode: PublishMode = 'direct';
   
   // TODO (FUTURE): Store format metadata in pending queue for better observability
   // 
@@ -122,11 +124,11 @@ export class MqttManager extends EventEmitter {
     super();
   }
 
-  public static getInstance(): MqttManager {
-    if (!MqttManager.instance) {
-      MqttManager.instance = new MqttManager();
+  public static getInstance(): CloudMqttClient {
+    if (!CloudMqttClient.instance) {
+      CloudMqttClient.instance = new CloudMqttClient();
     }
-    return MqttManager.instance;
+    return CloudMqttClient.instance;
   }
 
   /**
@@ -134,6 +136,34 @@ export class MqttManager extends EventEmitter {
    */
   public setLogger(logger: AgentLogger | undefined): void {
     this.logger = logger;
+  }
+
+  public getPublishMode(): PublishMode {
+    return this.publishMode;
+  }
+
+  public setPublishMode(mode: PublishMode, reason?: string): void {
+    if (this.publishMode === mode) {
+      return;
+    }
+
+    const previousMode = this.publishMode;
+    this.publishMode = mode;
+
+    this.logInfo('MQTT publish mode changed', {
+      previousMode,
+      nextMode: mode,
+      ...(reason ? { reason } : {}),
+    });
+  }
+
+  public requestBufferedFlush(reason?: string): void {
+    if (!this.bufferSync?.isEnabled()) {
+      return;
+    }
+
+    this.debugLog(`Requesting buffered flush${reason ? ` (${reason})` : ''}`);
+    this.bufferSync.requestFlush();
   }
 
   /**

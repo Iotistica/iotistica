@@ -4,7 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { MqttDiscoveryPlugin } from '../../../../src/features/adapters/mqtt/discovery';
+import { LocalBrokerMqttDiscoveryPlugin } from '../../../../src/features/adapters/mqtt/discovery';
 import { LogComponents } from '../../../../src/logging/types';
 
 /**
@@ -29,11 +29,11 @@ class FakeMqttClient extends EventEmitter {
   });
 }
 
-describe('MqttDiscoveryPlugin', () => {
+describe('LocalBrokerMqttDiscoveryPlugin', () => {
   let mockLogger: any;
   let fakeClient: FakeMqttClient;
   let mockFactory: jest.Mock;
-  let plugin: MqttDiscoveryPlugin;
+  let plugin: LocalBrokerMqttDiscoveryPlugin;
 
   beforeEach(() => {
     // Mock logger
@@ -51,7 +51,7 @@ describe('MqttDiscoveryPlugin', () => {
     mockFactory = jest.fn().mockReturnValue(fakeClient);
 
     // Create plugin with mocked dependencies
-    plugin = new MqttDiscoveryPlugin(mockLogger, mockFactory);
+    plugin = new LocalBrokerMqttDiscoveryPlugin(mockLogger, mockFactory);
   });
 
   afterEach(() => {
@@ -60,99 +60,99 @@ describe('MqttDiscoveryPlugin', () => {
 
   describe('inferDataType', () => {
     it('should detect number from plain numeric string', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       // Access private method using bracket notation
       const result = (plugin as any).inferDataType('42');
       expect(result).toBe('number');
     });
 
     it('should detect number from decimal string', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('12.5');
       expect(result).toBe('number');
     });
 
     it('should detect number with whitespace', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType(' 42 ');
       expect(result).toBe('number');
     });
 
     it('should detect negative numbers', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('-123.45');
       expect(result).toBe('number');
     });
 
     it('should detect boolean true', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('true');
       expect(result).toBe('boolean');
     });
 
     it('should detect boolean false', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('false');
       expect(result).toBe('boolean');
     });
 
     it('should detect boolean case-insensitive', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       expect((plugin as any).inferDataType('TRUE')).toBe('boolean');
       expect((plugin as any).inferDataType('False')).toBe('boolean');
     });
 
     it('should treat NaN as string', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('NaN');
       expect(result).toBe('string');
     });
 
     it('should treat Infinity as string', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('Infinity');
       expect(result).toBe('string');
     });
 
     it('should treat leading zeros as number', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       // Based on regex ^-?\d+(\.\d+)?$ this should match
       const result = (plugin as any).inferDataType('00123');
       expect(result).toBe('number');
     });
 
     it('should detect JSON object', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('{"a":1}');
       expect(result).toBe('json');
     });
 
     it('should detect JSON array', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('[1,2,3]');
       expect(result).toBe('json');
     });
 
     it('should detect JSON number', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('42');
       expect(result).toBe('number'); // Valid JSON number
     });
 
     it('should detect JSON boolean', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('true');
       expect(result).toBe('boolean'); // Valid JSON boolean
     });
 
     it('should treat plain text as string', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('hello world');
       expect(result).toBe('string');
     });
 
     it('should treat empty string as string', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = (plugin as any).inferDataType('');
       expect(result).toBe('string');
     });
@@ -160,7 +160,7 @@ describe('MqttDiscoveryPlugin', () => {
 
   describe('handleMessage', () => {
     it('should track first message received', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validatedTopics = (plugin as any).validatedTopics;
 
       (plugin as any).handleMessage('test/topic', '42', false);
@@ -173,7 +173,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should detect retained message', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validatedTopics = (plugin as any).validatedTopics;
 
       (plugin as any).handleMessage('test/topic', '42', true);
@@ -185,7 +185,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should detect live message', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validatedTopics = (plugin as any).validatedTopics;
 
       (plugin as any).handleMessage('test/topic', '42', false);
@@ -197,7 +197,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should increment message count', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validatedTopics = (plugin as any).validatedTopics;
 
       (plugin as any).handleMessage('test/topic', '1', false);
@@ -211,7 +211,7 @@ describe('MqttDiscoveryPlugin', () => {
     it('should update lastSeen on each message', () => {
       jest.useFakeTimers();
       try {
-        const plugin = new MqttDiscoveryPlugin();
+        const plugin = new LocalBrokerMqttDiscoveryPlugin();
         const validatedTopics = (plugin as any).validatedTopics;
 
         (plugin as any).handleMessage('test/topic', '1', false);
@@ -230,7 +230,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should handle both retained and live messages', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validatedTopics = (plugin as any).validatedTopics;
 
       (plugin as any).handleMessage('test/topic', '1', true);  // Retained
@@ -244,7 +244,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should preserve first payload across messages', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validatedTopics = (plugin as any).validatedTopics;
 
       (plugin as any).handleMessage('test/topic', 'first', false);
@@ -259,7 +259,7 @@ describe('MqttDiscoveryPlugin', () => {
 
   describe('convertToDevices', () => {
     it('should generate stable fingerprint', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validations = [
         {
           topic: 'device/sensor01/temperature',
@@ -285,7 +285,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should truncate long topic names', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const longTopic = 'a/'.repeat(50) + 'temperature'; // Very long topic
       const validations = [
         {
@@ -308,7 +308,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should infer data type from first payload', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validations = [
         {
           topic: 'test/number',
@@ -350,7 +350,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should set confidence to high for validated topics', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validations = [
         {
           topic: 'test/topic',
@@ -370,7 +370,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should set validated to false', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validations = [
         {
           topic: 'test/topic',
@@ -390,7 +390,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should set protocol to mqtt', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const validations = [
         {
           topic: 'test/topic',
@@ -410,7 +410,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should include discoveredAt timestamp', () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const now = new Date();
       const validations = [
         {
@@ -434,7 +434,7 @@ describe('MqttDiscoveryPlugin', () => {
 
   describe('discover', () => {
     it('should return empty array when no topics provided', async () => {
-      const plugin = new MqttDiscoveryPlugin(mockLogger, mockFactory);
+      const plugin = new LocalBrokerMqttDiscoveryPlugin(mockLogger, mockFactory);
       
       const result = await plugin.discover({ 
         brokerUrl: 'mqtt://test:1883',
@@ -449,7 +449,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should use mqtt factory to create client', async () => {
-      const plugin = new MqttDiscoveryPlugin(mockLogger, mockFactory);
+      const plugin = new LocalBrokerMqttDiscoveryPlugin(mockLogger, mockFactory);
 
       // Simulate connection immediately
       setTimeout(() => {
@@ -480,7 +480,7 @@ describe('MqttDiscoveryPlugin', () => {
     });
 
     it('should pass authentication options to client', async () => {
-      const plugin = new MqttDiscoveryPlugin(mockLogger, mockFactory);
+      const plugin = new LocalBrokerMqttDiscoveryPlugin(mockLogger, mockFactory);
 
       setTimeout(() => fakeClient.emit('connect'), 10);
 
@@ -510,7 +510,7 @@ describe('MqttDiscoveryPlugin', () => {
 
   describe('isAvailable', () => {
     it('should return true (MQTT always available)', async () => {
-      const plugin = new MqttDiscoveryPlugin();
+      const plugin = new LocalBrokerMqttDiscoveryPlugin();
       const result = await plugin.isAvailable();
       expect(result).toBe(true);
     });

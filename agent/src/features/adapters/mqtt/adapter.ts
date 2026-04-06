@@ -25,7 +25,7 @@ import { agentTopic } from '../../../mqtt/topics.js';
  * - 'device-disconnected': Emitted when broker disconnects
  * - 'device-error': Emitted when an error occurs
  */
-export class MqttAdapter extends EventEmitter {
+export class LocalBrokerMqttAdapter extends EventEmitter {
   private static readonly MAX_QUEUE_DEPTH = 1000; // Max buffered data batches
   private static readonly MAX_PAYLOAD_BYTES = 1 * 1024 * 1024; // 1MB max payload (edge-safe default)
   
@@ -708,13 +708,13 @@ export class MqttAdapter extends EventEmitter {
   }
 
   private enqueueData(points: DeviceDataPoint[], topic: string): void {
-    if (this.emitQueue.length >= MqttAdapter.MAX_QUEUE_DEPTH) {
+    if (this.emitQueue.length >= LocalBrokerMqttAdapter.MAX_QUEUE_DEPTH) {
       this.droppedMessageCount++;
       if (this.droppedMessageCount % 100 === 1) {
         this.logger.warn('Dropping MQTT messages due to bounded queue limit', {
           queueDepth: this.emitQueue.length,
           droppedTotal: this.droppedMessageCount,
-          maxQueueDepth: MqttAdapter.MAX_QUEUE_DEPTH,
+          maxQueueDepth: LocalBrokerMqttAdapter.MAX_QUEUE_DEPTH,
           topic
         });
       }
@@ -1112,12 +1112,12 @@ export class MqttAdapter extends EventEmitter {
     
     // Production fix #8: Max payload size guard
     // Protects against memory exhaustion from malicious/corrupt messages
-    if (payload.length > MqttAdapter.MAX_PAYLOAD_BYTES) {
+    if (payload.length > LocalBrokerMqttAdapter.MAX_PAYLOAD_BYTES) {
       this.droppedMessageCount++;
       this.logger.warn('Dropping oversized MQTT message', {
         topic,
         payloadSize: payload.length,
-        maxAllowed: MqttAdapter.MAX_PAYLOAD_BYTES,
+        maxAllowed: LocalBrokerMqttAdapter.MAX_PAYLOAD_BYTES,
         droppedTotal: this.droppedMessageCount,
         hint: 'Possible JSON bomb or malicious payload'
       });

@@ -69,7 +69,7 @@ import { agentTopic } from '../mqtt/topics.js';
  *   const original = { temperature: 21.5, timestamp: Date.now(), status: "active" };
  *   const { compacted, compressionRatio } = manager.compact(original);
  *   
- *   // Publish separately (via MqttManager or sensor-publish)
+ *   // Publish separately (via CloudMqttClient or sensor-publish)
  *   await mqttManager.publish(topic, compacted, options);
  *   
  *   // Check metrics
@@ -89,7 +89,7 @@ import { agentTopic } from '../mqtt/topics.js';
  * See: docs/MQTT-KEY-COMPACTION-STRATEGY.md (Alternative 6)
  */
 
-import type { MqttManager } from '../mqtt/manager.js';
+import type { CloudMqttClient } from '../mqtt/manager.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 
@@ -254,7 +254,7 @@ export class DictionaryManager {
   private deltaSyncDebounceTimer?: NodeJS.Timeout;
 
   constructor(
-    private mqttManager: MqttManager,
+    private mqttManager: CloudMqttClient,
     private logger?: AgentLogger,
     deviceUuid?: string
   ) {

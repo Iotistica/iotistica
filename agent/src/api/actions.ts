@@ -13,7 +13,7 @@ import type { SensorsFeature } from '../features/adapters';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/health-arbiter';
 import { MessageBufferModel } from '../db/models/buffer.model';
-import { MqttManager } from '../mqtt/manager';
+import { CloudMqttClient } from '../mqtt/manager';
 
 let containerManager: ContainerManager;
 let deviceManager: DeviceManager;
@@ -119,6 +119,7 @@ export async function getBufferStatusPayload(): Promise<{
 	mode: 'standalone' | 'provisioned-online' | 'provisioned-degraded-offline';
 	cloudReportQueueCount: number;
 	cloudReportOldestAge?: number;
+	transportPublishMode?: 'direct' | 'buffer-only' | 'recovering';
 	mqttMessageBufferCount: number;
 	mqttBufferBytes: number;
 	mqttBufferOldestAge?: number;
@@ -135,12 +136,21 @@ export async function getBufferStatusPayload(): Promise<{
 	agentLogLastFlushError?: string;
 }> {
 	const info = deviceManager.getDeviceInfo();
-	const mqttConnected = MqttManager.getInstance().isConnected();
+	const mqttConnected = CloudMqttClient.getInstance().isConnected();
 	const cloudOnline = cloudSync?.isOnline() === true;
 	const mqttStats = MessageBufferModel.getStats();
+	const defaultCloudStats: {
+		cloudReportQueueCount: number;
+		cloudReportOldestAge?: number;
+		transportPublishMode?: 'direct' | 'buffer-only' | 'recovering';
+		lastFlushAttempt?: string;
+		lastFlushSuccess?: string;
+	} = {
+		cloudReportQueueCount: 0,
+	};
 	const cloudStats = cloudSync
 		? await cloudSync.getBufferStatus()
-		: { cloudReportQueueCount: 0 };
+		: defaultCloudStats;
 
 	const mode = !info.provisioned
 		? 'standalone'
@@ -159,6 +169,7 @@ export async function getBufferStatusPayload(): Promise<{
 		mode,
 		cloudReportQueueCount: cloudStats.cloudReportQueueCount,
 		...(cloudStats.cloudReportOldestAge !== undefined ? { cloudReportOldestAge: cloudStats.cloudReportOldestAge } : {}),
+		...(cloudStats.transportPublishMode ? { transportPublishMode: cloudStats.transportPublishMode } : {}),
 		mqttMessageBufferCount: mqttStats.current_count,
 		mqttBufferBytes: mqttStats.current_bytes,
 		...(mqttStats.oldest_record_age_hours !== undefined ? { mqttBufferOldestAge: mqttStats.oldest_record_age_hours } : {}),

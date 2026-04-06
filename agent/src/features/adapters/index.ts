@@ -17,7 +17,7 @@ import { BaseFeature, FeatureConfig } from '../index.js';
 import { AgentLogger } from '../../logging/agent-logger.js';
 import { ModbusAdapter } from './modbus/adapter.js';
 import { ModbusAdapterConfig } from './modbus/types.js';
-import { MqttAdapter } from './mqtt/adapter.js';
+import { LocalBrokerMqttAdapter } from './mqtt/adapter.js';
 import { MqttAdapterConfig } from './mqtt/types.js';
 import { SocketServer } from './common/socket-server.js';
 import { DeviceDataPoint, SocketOutput } from './types.js';
@@ -644,7 +644,7 @@ export class SensorsFeature extends BaseFeature {
 
       // Hot-update path: if the adapter is already running, diff subscriptions in-place
       // instead of tearing down the broker connection and recreating everything.
-      const existingAdapter = this.adapters.get('mqtt') as MqttAdapter | undefined;
+      const existingAdapter = this.adapters.get('mqtt') as LocalBrokerMqttAdapter | undefined;
       if (existingAdapter) {
         this.logger.info('MQTT adapter already running — applying hot device update');
         rebuildUuidMap(mqttConfig.devices);
@@ -673,7 +673,7 @@ export class SensorsFeature extends BaseFeature {
       this.socketServers.set('mqtt', mqttSocket);
    
       // Create MQTT adapter (socket-agnostic)
-      const mqttAdapter = new MqttAdapter(mqttConfig, this.logger, this.deviceUuid);
+      const mqttAdapter = new LocalBrokerMqttAdapter(mqttConfig, this.logger, this.deviceUuid);
       this.adapters.set('mqtt', mqttAdapter);
 
       // Wire up event handlers
@@ -746,8 +746,8 @@ export class SensorsFeature extends BaseFeature {
   /**
    * Get MQTT adapter instance (for testing/debugging)
    */
-  getMQTTAdapter(): MqttAdapter | undefined {
-    return this.adapters.get('mqtt') as MqttAdapter | undefined;
+  getMQTTAdapter(): LocalBrokerMqttAdapter | undefined {
+    return this.adapters.get('mqtt') as LocalBrokerMqttAdapter | undefined;
   }
 
   /**

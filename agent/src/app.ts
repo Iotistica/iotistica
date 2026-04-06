@@ -17,7 +17,7 @@ import Agent from './agent';
 import { startWatchdog, notifySystemd, notifyReady } from './system/watchdog';
 import { HealthArbiter } from './health/health-arbiter';
 import { healthcheck } from './system/memory';
-import { MqttManager } from './mqtt';
+import { CloudMqttClient } from './mqtt';
 import { DatabaseModel } from './db/models';
 import { setHealthReporter } from './api/actions';
 
@@ -133,7 +133,7 @@ function registerRuntimeHealthSubsystems(): void {
 		if (!isProvisioned) {
 			return true;
 		}
-		return MqttManager.getInstance().isConnected();
+		return CloudMqttClient.getInstance().isConnected();
 	}, {
 		// Non-critical: temporary broker restarts must not force agent restarts.
 		// MQTT has built-in reconnect; restarting the agent won't fix a downed broker.

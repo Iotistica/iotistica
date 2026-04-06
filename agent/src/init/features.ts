@@ -17,7 +17,7 @@ import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js
 import type { PipelineService } from '../features/pipeline/index.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
-import { MqttManager } from '../mqtt/manager.js';
+import { CloudMqttClient } from '../mqtt/manager.js';
 import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
 import { StateManager } from '../managers/state.js';
 import { getPackageVersion } from '../utils/api-utils.js';
@@ -25,7 +25,7 @@ import { getPackageVersion } from '../utils/api-utils.js';
 export interface FeatureContext {
   logger: AgentLogger;
   deviceInfo: DeviceInfo;
-  mqttManager: MqttManager;
+  mqttManager: CloudMqttClient;
   httpClient: any; // Shared HTTP client with connection pooling (singleton pattern)
   containerManager: any;
   deviceManager: any;
@@ -967,7 +967,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
     deviceInfo: ctx.deviceInfo,
     deviceManager: ctx.deviceManager,
     stateReconciler: ctx.stateReconciler,
-		mqttManager: (await import('../mqtt/manager.js')).MqttManager.getInstance(),
+    mqttManager: (await import('../mqtt/manager.js')).CloudMqttClient.getInstance(),
     httpClient: ctx.sharedHttpClient,
     containerManager: ctx.containerManager,
 		configSettings: targetState?.config?.settings || {},

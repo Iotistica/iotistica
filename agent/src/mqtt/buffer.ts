@@ -13,7 +13,7 @@
  * - Statistics tracking
  */
 
-import type { MqttManager } from './manager';
+import type { CloudMqttClient } from './manager';
 import { createJsonPayload, serializePayload } from './codec';
 import { MessageBufferModel } from '../db/models';
 import type { BufferAdmissionDecision } from '../db/models';
@@ -39,7 +39,7 @@ export type MessageBufferSyncOptions = BufferSyncConfig;
 export class MessageBufferSync {
   private static readonly SQLITE_BUSY_PATTERN = /SQLITE_BUSY|database is locked/i;
   private config: BufferSyncConfig;
-  private mqttManager: MqttManager;
+  private mqttManager: CloudMqttClient;
   private logger?: AgentLogger;
   
   private flushIntervalHandle?: NodeJS.Timeout;
@@ -52,7 +52,7 @@ export class MessageBufferSync {
   };
 
   constructor(
-    mqttManager: MqttManager,
+    mqttManager: CloudMqttClient,
     logger?: AgentLogger,
     config?: Partial<BufferSyncConfig>
   ) {
@@ -168,7 +168,13 @@ export class MessageBufferSync {
       return false;
     }
 
-    if (this.mqttManager.isConnected() && !this.config.bufferEvenWhenOnline) {
+    const publishMode = this.mqttManager.getPublishMode();
+    const shouldBuffer =
+      !this.mqttManager.isConnected() ||
+      this.config.bufferEvenWhenOnline ||
+      publishMode !== 'direct';
+
+    if (!shouldBuffer) {
       return false;
     }
 
@@ -216,7 +222,8 @@ export class MessageBufferSync {
       component: LogComponents.agent,
       topic,
       payloadBytes,
-      qos: options?.qos ?? 0
+      qos: options?.qos ?? 0,
+      publishMode,
     });
 
     return true;
@@ -261,9 +268,12 @@ export class MessageBufferSync {
   private async periodicFlush(): Promise<void> {
     // Skip if already flushing or no flush requested
     if (this.isFlushing) return;
+
+    const publishMode = this.mqttManager.getPublishMode();
+    const canFlushNow = this.mqttManager.isConnected() && publishMode === 'direct';
     
     // Only flush if requested OR MQTT is connected
-    if (!this.isFlushRequested && !this.mqttManager.isConnected()) {
+    if (!this.isFlushRequested && !canFlushNow) {
       return;
     }
 
@@ -284,6 +294,14 @@ export class MessageBufferSync {
     if (!this.mqttManager.isConnected()) {
       this.logger?.debugSync('MQTT not connected, skipping flush', {
         component: LogComponents.agent
+      });
+      return;
+    }
+
+    if (this.mqttManager.getPublishMode() !== 'direct') {
+      this.logger?.debugSync('MQTT publish mode is buffering, skipping flush', {
+        component: LogComponents.agent,
+        publishMode: this.mqttManager.getPublishMode(),
       });
       return;
     }

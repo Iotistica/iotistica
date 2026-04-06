@@ -8,7 +8,7 @@
 import type Database from 'better-sqlite3';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
-import type { MqttManager } from '../mqtt/manager';
+import type { CloudMqttClient } from '../mqtt/manager';
 import { createJsonPayload } from '../mqtt/manager';
 import { agentTopic } from '../mqtt/topics.js';
 import type {
@@ -42,7 +42,7 @@ export class AnomalyDetectionService {
 	private buffers = new Map<string, StatisticalBuffer>();
 	private alertManager: AlertManager;
 	private logger?: AgentLogger;
-	private mqttManager?: MqttManager;
+	private mqttManager?: CloudMqttClient;
 	private deviceUuid?: string;
 	private deviceName?: string;     // Monitored device name (e.g., 'COMAP-Main-Controller')
 	private deviceType?: Protocol; // Default protocol (overridden by dataPoint.protocol per metric)
@@ -69,7 +69,7 @@ export class AnomalyDetectionService {
 	private startupTimestamp: number = Date.now();
 	private warmupPeriodMs: number;
 	
-	constructor(config: AnomalyConfig, db?: Database.Database, logger?: AgentLogger, mqttManager?: MqttManager, deviceUuid?: string, deviceName?: string, deviceType?: import('./types').Protocol) {
+	constructor(config: AnomalyConfig, db?: Database.Database, logger?: AgentLogger, mqttManager?: CloudMqttClient, deviceUuid?: string, deviceName?: string, deviceType?: import('./types').Protocol) {
 		this.config = config;
 		this.logger = logger;
 		this.mqttManager = mqttManager;
@@ -1630,7 +1630,7 @@ export class AnomalyDetectionService {
 	/**
 	 * Get MQTT manager for publishing data (used by simulator)
 	 */
-	getMqttManager(): MqttManager | undefined {
+	getMqttManager(): CloudMqttClient | undefined {
 		return this.mqttManager;
 	}
 

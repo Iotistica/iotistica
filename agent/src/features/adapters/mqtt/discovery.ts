@@ -72,7 +72,7 @@ function generateMqttFingerprint(topic: string): string {
     .substring(0, 32);
 }
 
-export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
+export class LocalBrokerMqttDiscoveryPlugin extends BaseDiscoveryPlugin {
   private client?: mqtt.MqttClient;
   private validatedTopics: Map<string, TopicValidation> = new Map();
   private brokerConfig?: MqttDiscoveryOptions; // Store for validate() reuse

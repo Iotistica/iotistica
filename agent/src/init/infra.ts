@@ -1,6 +1,6 @@
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types.js';
-import { MqttManager } from '../mqtt/manager.js';
+import { CloudMqttClient } from '../mqtt/manager.js';
 
 export async function initInfrastructure(ctx: AgentInitContext): Promise<void> {
 	await Promise.all([
@@ -19,7 +19,7 @@ export async function initializeMqttManager(ctx: AgentInitContext): Promise<void
 
 		const config = ctx.deviceInfo.mqttBrokerConfig;
 		const mqttBrokerUrl = `${config.protocol || 'mqtt'}://${config.host}:${config.port}`;
-		const mqttManager = MqttManager.getInstance();
+		const mqttManager = CloudMqttClient.getInstance();
 
 		mqttManager.setLogger(ctx.agentLogger!);
 
@@ -77,7 +77,7 @@ export async function initializeDictionaryManager(ctx: AgentInitContext): Promis
 
 	try {
 		const { DictionaryManager } = await import('../managers/dictionary.js');
-		const mqttManager = MqttManager.getInstance();
+		const mqttManager = CloudMqttClient.getInstance();
 
 		ctx.dictionaryManager = new DictionaryManager(mqttManager, ctx.agentLogger, ctx.deviceInfo.uuid);
 		await ctx.dictionaryManager.initialize();

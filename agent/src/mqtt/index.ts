@@ -7,14 +7,14 @@
  * Quick Start: See agent/docs/mqtt/QUICK-START.md
  * 
  * Exports:
- * - MqttManager: Singleton MQTT connection manager
+ * - CloudMqttClient: Singleton cloud MQTT connection manager
  * - DictionaryManager: MQTT message key compaction with auto-discovery
  * 
  * Usage:
  * ```typescript
- * import { MqttManager, DictionaryManager } from './mqtt';
+ * import { CloudMqttClient, DictionaryManager } from './mqtt';
  * 
- * const mqttManager = MqttManager.getInstance();
+ * const mqttManager = CloudMqttClient.getInstance();
  * await mqttManager.publish(topic, payload, { qos: 1 });
  * 
  * const dictManager = new DictionaryManager(mqttManager, logger, deviceUuid);
@@ -23,7 +23,7 @@
  * ```
  */
 
-export { MqttManager } from './manager';
+export { CloudMqttClient } from './manager';
 export { DictionaryManager} from '../managers/dictionary';
 export type { DictionaryMetrics } from '../managers/dictionary';
 export { MessageBufferSync } from './buffer';

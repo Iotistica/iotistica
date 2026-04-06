@@ -12,7 +12,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { join } from 'path';
 import { AgentLogger } from './logging/agent-logger.js';
 import { LogComponents } from './logging/types.js';
-import { MqttManager, createJsonPayload } from './mqtt/manager.js';
+import { CloudMqttClient, createJsonPayload } from './mqtt/manager.js';
 import { notifySystemd } from './system/watchdog.js';
 import { agentTopic } from './mqtt/topics.js';
 
@@ -304,7 +304,7 @@ export class AgentUpdater {
     // Check for pending updates from previous agent run (survives restarts)
     await this.loadPendingUpdate();
 
-    const mqttManager = MqttManager.getInstance();
+    const mqttManager = CloudMqttClient.getInstance();
     
     if (!mqttManager.isConnected()) {
       this.logger.debugSync("MQTT not connected - skipping update listener", {
@@ -837,7 +837,7 @@ export class AgentUpdater {
    * This ensures backend doesn't miss critical state transitions during network drops or restarts
    */
   private async publishStatus(payload: Record<string, any>): Promise<void> {
-    const mqttManager = MqttManager.getInstance();
+    const mqttManager = CloudMqttClient.getInstance();
     
     if (!mqttManager.isConnected()) {
       return;
@@ -919,7 +919,7 @@ export class AgentUpdater {
     }
 
     // Check 2: Connectivity (MQTT connection active)
-    const mqttManager = MqttManager.getInstance();
+    const mqttManager = CloudMqttClient.getInstance();
     checks.connectivity = mqttManager.isConnected();
 
     this.logger.debugSync("Connectivity check", {
@@ -1117,7 +1117,7 @@ export class AgentUpdater {
       this.scheduledUpdateTimeout = undefined;
     }
 
-    const mqttManager = MqttManager.getInstance();
+    const mqttManager = CloudMqttClient.getInstance();
     
     if (!mqttManager.isConnected()) {
       return;

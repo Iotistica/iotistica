@@ -1,7 +1,7 @@
 import type { AgentInitContext } from './context.js';
 import * as deviceActions from '../api/actions.js';
 import { LogComponents } from '../logging/types.js';
-import { MqttManager } from '../mqtt/manager.js';
+import { CloudMqttClient } from '../mqtt/manager.js';
 import { CloudSync } from '../managers/cloud-sync.js';
 import { initAnomalyDetection } from './ai.js';
 
@@ -70,7 +70,7 @@ export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
 		ctx.agentLogger,
 		undefined,
 		features.sensors,
-		MqttManager.getInstance(),
+		CloudMqttClient.getInstance(),
 		ctx.sharedHttpClient,
 		ctx.updater
 	);

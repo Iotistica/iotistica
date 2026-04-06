@@ -1,7 +1,7 @@
 import * as pty from 'node-pty';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
-import type { MqttManager } from '../../mqtt/manager';
+import type { CloudMqttClient } from '../../mqtt/manager';
 import { agentTopic } from '../../mqtt/topics.js';
 import * as os from 'os';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -87,7 +87,7 @@ export class ShellHandler {
 
   private deviceUuid: string;
   private logger: AgentLogger;
-  private mqtt: MqttManager;
+  private mqtt: CloudMqttClient;
   private ptyProcess: pty.IPty | null = null;
   private commandTopic: string;
   private outputTopic: string;
@@ -168,7 +168,7 @@ export class ShellHandler {
       }
     }
 
-  constructor(deviceUuid: string, mqtt: MqttManager, logger: AgentLogger) {
+  constructor(deviceUuid: string, mqtt: CloudMqttClient, logger: AgentLogger) {
     this.deviceUuid = deviceUuid;
     this.mqtt = mqtt;
     this.logger = logger;

@@ -977,6 +977,8 @@ PATCH /api/devices/{uuid}/config
 - No manual SSH/container access required
 - Centralized configuration management from cloud dashboard
 
+For transport handoff and local buffering behavior, see `docs/transport-switch-buffering-review.md`.
+
 ---
 
 ## 🐳 Docker Integration

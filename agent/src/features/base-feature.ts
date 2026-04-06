@@ -10,7 +10,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { MqttManager } from '../mqtt/manager.js';
+import { CloudMqttClient } from '../mqtt/manager.js';
 import { AgentLogger } from '../logging/agent-logger.js';
 
 export interface FeatureConfig {
@@ -112,16 +112,16 @@ export abstract class BaseFeature extends EventEmitter {
   }
 
   /**
-   * Setup MQTT connection using centralized MqttManager
+  * Setup MQTT connection using centralized CloudMqttClient
    */
   private setupMqttConnection(): MqttConnection {
-    const mqttManager = MqttManager.getInstance();
+    const mqttManager = CloudMqttClient.getInstance();
 
     if (!mqttManager.isConnected()) {
       this.logger.warn('MQTT Manager not connected - feature will have limited functionality');
     }
 
-    // Return MqttManager directly (it implements MqttConnection interface)
+    // Return CloudMqttClient directly (it implements MqttConnection interface)
     return mqttManager;
   }
 

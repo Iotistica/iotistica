@@ -3,11 +3,11 @@
  * Tests message handling, payload parsing, backpressure, and wildcard matching
  */
 
-import { MqttAdapter } from '../../../../src/features/adapters/mqtt/adapter';
+import { LocalBrokerMqttAdapter } from '../../../../src/features/adapters/mqtt/adapter';
 import { MqttAdapterConfig } from '../../../../src/features/adapters/mqtt/types';
 import { parsePayload, coerceType } from '../../../../src/features/adapters/mqtt/payload';
 
-describe('MqttAdapter', () => {
+describe('LocalBrokerMqttAdapter', () => {
   let mockLogger: any;
   let mockConfig: MqttAdapterConfig;
 
@@ -162,14 +162,14 @@ describe('MqttAdapter', () => {
 
   describe('reconnect backoff', () => {
     it('should keep a fixed reconnect period by default', () => {
-      const adapter = new MqttAdapter(mockConfig, mockLogger) as any;
+      const adapter = new LocalBrokerMqttAdapter(mockConfig, mockLogger) as any;
 
       expect(adapter.computeReconnectPeriod(1)).toBe(5000);
       expect(adapter.computeReconnectPeriod(4)).toBe(5000);
     });
 
     it('should compute exponential reconnect periods when enabled', () => {
-      const adapter = new MqttAdapter({
+      const adapter = new LocalBrokerMqttAdapter({
         ...mockConfig,
         reconnect: {
           period: 1000,
@@ -206,7 +206,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -251,7 +251,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -293,7 +293,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -337,7 +337,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -383,7 +383,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -431,7 +431,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -472,7 +472,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -516,7 +516,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -561,7 +561,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -604,7 +604,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -642,7 +642,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -678,7 +678,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -723,7 +723,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -759,7 +759,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       
       // Fill the emitQueue to exceed MAX_QUEUE_DEPTH (1000)
       (adapter as any).emitQueue = new Array(1000).fill([]);
@@ -788,7 +788,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
       
@@ -820,7 +820,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       
       // Create buffer > 10MB (MAX_PAYLOAD_BYTES)
       const oversizedPayload = Buffer.alloc(11 * 1024 * 1024); // 11MB
@@ -849,7 +849,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -881,7 +881,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       
       // Initialize subscriptions
       (adapter as any).subscriptions.set('device/room1/temp', config.devices[0]);
@@ -903,7 +903,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       
       // Initialize subscriptions with wildcard
       (adapter as any).subscriptions.set('device/+/temp', config.devices[0]);
@@ -925,7 +925,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       
       // Initialize subscriptions with wildcard
       (adapter as any).subscriptions.set('device/#', config.devices[0]);
@@ -947,7 +947,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       
       (adapter as any).subscriptions.set('device/room1/temp', config.devices[0]);
 
@@ -967,7 +967,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       
       (adapter as any).subscriptions.set('building/+/floor/+/sensor/#', config.devices[0]);
 
@@ -980,12 +980,12 @@ describe('MqttAdapter', () => {
 
   describe('Basic Adapter Functions', () => {
     it('should create adapter instance', () => {
-      const adapter = new MqttAdapter(mockConfig, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(mockConfig, mockLogger);
       expect(adapter).toBeDefined();
     });
 
     it('should return empty device statuses when no devices', () => {
-      const adapter = new MqttAdapter(mockConfig, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(mockConfig, mockLogger);
       const statuses = adapter.getDeviceStatuses();
       expect(statuses).toEqual([]);
     });
@@ -1001,7 +1001,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       
       const statuses = adapter.getDeviceStatuses();
       expect(statuses).toHaveLength(1);
@@ -1020,7 +1020,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
 
       const status = adapter.getDeviceStatus('test_device');
       expect(status).toBeDefined();
@@ -1028,7 +1028,7 @@ describe('MqttAdapter', () => {
     });
 
     it('should return undefined for non-existent device', () => {
-      const adapter = new MqttAdapter(mockConfig, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(mockConfig, mockLogger);
       const status = adapter.getDeviceStatus('non_existent');
       expect(status).toBeUndefined();
     });
@@ -1046,7 +1046,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
 
       // Track message activity
       (adapter as any).trackMessageActivity('test_device');
@@ -1068,7 +1068,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
 
       // Track multiple messages
       (adapter as any).trackMessageActivity('test_device');
@@ -1092,7 +1092,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -1121,7 +1121,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -1141,7 +1141,7 @@ describe('MqttAdapter', () => {
 
   describe('Unconfigured Topics', () => {
     it('should ignore messages for unconfigured topics', () => {
-      const adapter = new MqttAdapter(mockConfig, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(mockConfig, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 
@@ -1168,7 +1168,7 @@ describe('MqttAdapter', () => {
         }]
       };
 
-      const adapter = new MqttAdapter(config, mockLogger);
+      const adapter = new LocalBrokerMqttAdapter(config, mockLogger);
       const dataSpy = jest.fn();
       adapter.on('data', dataSpy);
 

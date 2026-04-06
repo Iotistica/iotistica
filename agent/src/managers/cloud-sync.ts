@@ -32,6 +32,7 @@ import { createHash } from 'crypto';
 import { MetadataModel } from '../db/models/metadata.model.js';
 import { DeviceModel } from '../db/models/device.model.js';
 import { agentTopic } from '../mqtt/topics.js';
+import type { PublishMode } from '../mqtt/manager.js';
 
 /**
  * Stable JSON stringify - sorts object keys recursively to ensure deterministic output
@@ -147,6 +148,23 @@ interface TargetStateResponse {
 	};
 }
 
+interface CloudSyncMqttManager {
+	isConnected(): boolean;
+	publishNoQueue(topic: string, payload: string | Buffer, options?: { qos?: 0 | 1 | 2 }): Promise<void>;
+	getPublishMode?(): PublishMode;
+	setPublishMode?(mode: PublishMode, reason?: string): void;
+	requestBufferedFlush?(reason?: string): void;
+	on?(event: string, listener: (...args: any[]) => void): void;
+	removeListener?(event: string, listener: (...args: any[]) => void): void;
+}
+
+class CloudTransportBufferedError extends Error {
+	constructor(mode: PublishMode) {
+		super(`Cloud transport is buffering reports while publish mode is ${mode}`);
+		this.name = 'CloudTransportBufferedError';
+	}
+}
+
 export class CloudSync extends EventEmitter {
 	private stateManager: StateManager;
 	private deviceManager: DeviceManager;
@@ -202,10 +220,12 @@ export class CloudSync extends EventEmitter {
 	private logger?: AgentLogger;
 	private devicePublish?: any; // Optional sensor-publish feature for health reporting
 	private endpoints?: any; // Optional endpoints feature for health reporting
-	private mqttManager?: any; // Optional MQTT manager for state reporting
+	private mqttManager?: CloudSyncMqttManager; // Optional MQTT manager for state reporting
 	
 	// Event handlers (stored for proper cleanup)
 	private onlineHandler = () => {
+		this.setPublishMode('direct', 'cloudsync-online');
+		this.mqttManager?.requestBufferedFlush?.('cloudsync-online');
 		this.logger?.infoSync('Connection restored - flushing offline queue', { 
 			component: LogComponents.cloudSync,
 			queueSize: this.reportQueue.size()
@@ -219,6 +239,7 @@ export class CloudSync extends EventEmitter {
 	};
 	
 	private offlineHandler = () => {
+		this.setPublishMode('buffer-only', 'cloudsync-offline');
 		const health = this.connectionMonitor.getHealth();
 		this.emit('offline');
 		this.logger?.errorSync('Connection lost', undefined, {
@@ -232,6 +253,7 @@ export class CloudSync extends EventEmitter {
 	};
 	
 	private degradedHandler = () => {
+		this.setPublishMode('buffer-only', 'cloudsync-degraded');
 		this.emit('degraded');
 		this.logger?.warnSync('Connection degraded (experiencing failures)', {
 			component: LogComponents.cloudSync
@@ -246,6 +268,9 @@ export class CloudSync extends EventEmitter {
 	};
 	
 	private mqttReconnectHandler = () => {
+		this.setPublishMode('recovering', 'mqtt-reconnect');
+		this.forceNextReport = true;
+		this.requestImmediateReport('mqtt-reconnect');
 		this.logger?.infoSync('MQTT reconnected - triggering fresh state report', {
 			component: LogComponents.cloudSync,
 			operation: 'mqtt-reconnect'
@@ -259,7 +284,7 @@ export class CloudSync extends EventEmitter {
 		logger?: AgentLogger,
 		devicePublish?: any,
 		endpoints?: any,
-		mqttManager?: any,
+		mqttManager?: CloudSyncMqttManager,
 		httpClient?: HttpClient,
 		agentUpdater?: any
 	) {
@@ -453,6 +478,7 @@ export class CloudSync extends EventEmitter {
 			httpFallbackEndpoint: this.config.cloudApiEndpoint,
 			transportStrategy: 'mqtt-primary-http-fallback',
 			mqttConnected: this.mqttManager?.isConnected?.() ?? false,
+			publishMode: this.getPublishMode(),
 			eventType: 'reporting-startup',
 			intervalMs: this.config.reportInterval
 		});
@@ -560,6 +586,7 @@ export class CloudSync extends EventEmitter {
 		cloudReportOldestAge?: number;
 		lastFlushAttempt?: string;
 		lastFlushSuccess?: string;
+		transportPublishMode: PublishMode;
 	}> {
 		const stats = await this.reportQueue.getStats();
 		return {
@@ -567,7 +594,16 @@ export class CloudSync extends EventEmitter {
 			...(stats.oldestAgeHours !== undefined ? { cloudReportOldestAge: stats.oldestAgeHours } : {}),
 			...(this.lastQueueFlushAttemptAt ? { lastFlushAttempt: new Date(this.lastQueueFlushAttemptAt).toISOString() } : {}),
 			...(this.lastQueueFlushSuccessAt ? { lastFlushSuccess: new Date(this.lastQueueFlushSuccessAt).toISOString() } : {}),
+			transportPublishMode: this.getPublishMode(),
 		};
+	}
+
+	private getPublishMode(): PublishMode {
+		return this.mqttManager?.getPublishMode?.() ?? 'direct';
+	}
+
+	private setPublishMode(mode: PublishMode, reason: string): void {
+		this.mqttManager?.setPublishMode?.(mode, reason);
 	}
 	
 	/**
@@ -925,37 +961,46 @@ export class CloudSync extends EventEmitter {
 				await this.flushOfflineQueue();
 			}
 		} catch (error) {
-			this.reportErrors = Math.min(this.reportErrors + 1, 10); // Cap at 10
-			
-			const circuitOpened = this.reportCircuit.recordFailure();
-			this.connectionMonitor.markFailure('report', error as Error); // Track failure
-			
 			// Extract the root cause for better error visibility
 			const err = error instanceof Error ? error : new Error(String(error));
 			const cause = (err as any).cause;
-			
-			if (circuitOpened) {
-				this.logger?.errorSync('Report circuit breaker tripped', err, {
+
+			if (err instanceof CloudTransportBufferedError) {
+				this.logger?.debugSync('State report buffered during transport transition', {
 					component: LogComponents.cloudSync,
-					operation: 'report-circuit-trip',
-					consecutiveFailures: this.reportCircuit.getFailureCount(),
-					cooldownMs: 5 * 60 * 1000,
-					cooldownMin: 5
+					operation: 'report-buffered-transition',
+					publishMode: this.getPublishMode(),
+					queueSize: this.reportQueue.size(),
 				});
 			} else {
-				this.logger?.errorSync('Failed to report current state', err, {
-					component: LogComponents.cloudSync,
-					operation: 'report',
-					errorCount: this.reportErrors,
-					...(cause && { 
-						cause: {
-							message: cause.message,
-							code: cause.code,
-							errno: cause.errno,
-							syscall: cause.syscall
-						}
-					})
-				});
+				this.reportErrors = Math.min(this.reportErrors + 1, 10); // Cap at 10
+				
+				const circuitOpened = this.reportCircuit.recordFailure();
+				this.connectionMonitor.markFailure('report', err); // Track failure
+				
+				if (circuitOpened) {
+					this.logger?.errorSync('Report circuit breaker tripped', err, {
+						component: LogComponents.cloudSync,
+						operation: 'report-circuit-trip',
+						consecutiveFailures: this.reportCircuit.getFailureCount(),
+						cooldownMs: 5 * 60 * 1000,
+						cooldownMin: 5
+					});
+				} else {
+					this.logger?.errorSync('Failed to report current state', err, {
+						component: LogComponents.cloudSync,
+						operation: 'report',
+						errorCount: this.reportErrors,
+						...(cause && { 
+							cause: {
+								message: cause.message,
+								code: cause.code,
+								errno: cause.errno,
+								syscall: cause.syscall
+							}
+						})
+					});
+				}
 			}
 		}
 		
@@ -1475,6 +1520,10 @@ export class CloudSync extends EventEmitter {
 		// Send report to cloud
 		try {
 			const transport = await this.sendReport(reportToSend);
+			if (this.getPublishMode() === 'recovering') {
+				this.setPublishMode('direct', `cloudsync-report-${transport}`);
+				this.mqttManager?.requestBufferedFlush?.('cloudsync-report-success');
+			}
 
 			// Update hashes after successful send (ALWAYS, even if unchanged)
 			this.lastConfigHash = configHash;
@@ -1570,6 +1619,11 @@ export class CloudSync extends EventEmitter {
 	private async sendReport(report: DeviceStateReport): Promise<'mqtt' | 'http'> {
 		const deviceInfo = this.deviceManager.getDeviceInfo();
 		let topic: string | null = null;
+		const publishMode = this.getPublishMode();
+
+		if (publishMode === 'buffer-only') {
+			throw new CloudTransportBufferedError(publishMode);
+		}
 
 		// Tenant-scoped topic is required for MQTT state reporting.
 		try {
@@ -1586,7 +1640,7 @@ export class CloudSync extends EventEmitter {
 		const mqttHealthy = this.mqttManager?.isConnected() ?? false;
 		
 		// Try MQTT first if manager is available AND healthy
-		if (mqttHealthy && topic) {
+		if (publishMode === 'direct' && mqttHealthy && topic) {
 			try {
 				const payload = stableStringify(report);
 		
@@ -1604,6 +1658,12 @@ export class CloudSync extends EventEmitter {
 					transport: 'mqtt→http'
 				});
 			}
+		} else if (publishMode === 'recovering') {
+			this.logger?.infoSync('MQTT publish suspended during transport recovery - using HTTP fallback', {
+				component: LogComponents.cloudSync,
+				operation: 'mqtt-recovering-http-fallback',
+				transport: 'http-only-during-recovery'
+			});
 		} else if (this.mqttManager) {
 			// MQTT manager exists but is unhealthy - skip MQTT attempt
 			this.logger?.warnSync('MQTT disconnected, attempting HTTP fallback', {

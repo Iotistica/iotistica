@@ -1,7 +1,7 @@
 import { LogComponents } from '../logging/types.js';
 import { DatabaseModel } from '../db/models/index.js';
 import { loadConfigFromTargetState } from '../anomaly/utils.js';
-import { MqttManager } from '../mqtt/manager.js';
+import { CloudMqttClient } from '../mqtt/manager.js';
 import type { AgentInitContext } from './context.js';
 
 export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void> {
@@ -71,7 +71,7 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 			config,
 			dbInstance,
 			ctx.agentLogger,
-			MqttManager.getInstance(),
+			CloudMqttClient.getInstance(),
 			ctx.deviceInfo.uuid,
 			ctx.deviceInfo.deviceName,
 			'system'

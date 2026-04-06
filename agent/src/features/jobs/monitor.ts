@@ -22,7 +22,7 @@ import { HttpClient, FetchHttpClient } from '../../lib/http-client.js';
 import { BaseFeature, FeatureConfig } from '../base-feature.js';
 import { AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
-import { MqttManager } from '../../mqtt/manager.js';
+import { CloudMqttClient } from '../../mqtt/manager.js';
 import { agentTopic } from '../../mqtt/topics.js';
 import { JobEngine } from './engine.js';
 import { JobDocument, JobStatus, JobExecutionData } from './types.js';
@@ -329,7 +329,7 @@ export class JobsFeature extends BaseFeature {
    */
   private async initializeMqttSubscriptions(): Promise<void> {
     try {
-      const mqttManager = MqttManager.getInstance();
+      const mqttManager = CloudMqttClient.getInstance();
       if (!mqttManager.isConnected()) {
         this.logger.warn(`MQTT not connected, using HTTP-only mode`);
         return;
@@ -425,7 +425,7 @@ export class JobsFeature extends BaseFeature {
    */
   private async unsubscribeFromMqtt(): Promise<void> {
     try {
-      const mqttManager = MqttManager.getInstance();
+      const mqttManager = CloudMqttClient.getInstance();
       const notifyTopic = agentTopic(this.deviceUuid, 'jobs', 'notify-next');
       await mqttManager.unsubscribe(notifyTopic);
       this.mqttSubscribed = false;
@@ -540,7 +540,7 @@ export class JobsFeature extends BaseFeature {
    * Update job status (MQTT primary, HTTP fallback)
    */
   private async updateJobStatus(jobId: string, update: JobStatusUpdate): Promise<void> {
-    const mqttManager = MqttManager.getInstance();
+    const mqttManager = CloudMqttClient.getInstance();
     let mqttSuccess = false;
 
     // Check MQTT health FIRST - skip if disconnected to avoid wasted attempts
@@ -605,7 +605,7 @@ export class JobsFeature extends BaseFeature {
    * Monitor MQTT connection and coordinate HTTP pause/resume
    */
   private startConnectionMonitor(): void {
-    const mqttManager = MqttManager.getInstance();
+    const mqttManager = CloudMqttClient.getInstance();
     this.lastMqttState = mqttManager.isConnected();
 
     // Initially pause HTTP if MQTT is connected
@@ -655,7 +655,7 @@ export class JobsFeature extends BaseFeature {
    * Check if MQTT jobs are active
    */
   public isMqttActive(): boolean {
-    return this.mqttSubscribed && MqttManager.getInstance().isConnected();
+    return this.mqttSubscribed && CloudMqttClient.getInstance().isConnected();
   }
 
   /**

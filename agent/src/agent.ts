@@ -17,7 +17,7 @@ import { DeviceAPI } from "./api/index.js";
 import { CloudSync } from "./managers/cloud-sync.js";
 import { AgentLogger } from "./logging/agent-logger.js";
 import { LogComponents } from "./logging/types.js";
-import { MqttManager } from "./mqtt";
+import { CloudMqttClient } from "./mqtt";
 import { AgentFirewall } from "./network/firewall.js";
 import { AgentUpdater } from "./updater.js";
 import { 
@@ -445,8 +445,8 @@ export default class Agent {
         }
       }, cleanupFailures);
 
-      await this.safeStopSubsystem('MQTT Manager', MqttManager.getInstance().isConnected(), async () => {
-        const mqttManager = MqttManager.getInstance();
+      await this.safeStopSubsystem('Cloud MQTT Client', CloudMqttClient.getInstance().isConnected(), async () => {
+        const mqttManager = CloudMqttClient.getInstance();
         await mqttManager.disconnect();
       }, cleanupFailures);
 
