@@ -18,6 +18,7 @@
 import express from 'express';
 import { query } from '../db/connection';
 import { logger } from '../utils/logger';
+import { metrics } from '../services/ingestion/metrics';
 
 export const router = express.Router();
 
@@ -137,6 +138,76 @@ router.get('/metrics', async (req, res) => {
         `device_status{agent_uuid="${sanitizedUuid}",device_name="${status.name}"} ${status.online}`
       );
     }
+
+    // Ingestion pipeline metrics
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_stream_length Current number of messages in the ingestion stream backlog');
+    lines.push('# TYPE iotistic_ingestion_stream_length gauge');
+    lines.push(`iotistic_ingestion_stream_length ${metrics.streamLength}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_worker_lag Undelivered messages in the consumer group (stream lag)');
+    lines.push('# TYPE iotistic_ingestion_worker_lag gauge');
+    lines.push(`iotistic_ingestion_worker_lag ${metrics.workerLag}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_pending_count Delivered but unacknowledged messages (PEL size)');
+    lines.push('# TYPE iotistic_ingestion_pending_count gauge');
+    lines.push(`iotistic_ingestion_pending_count ${metrics.pendingMessages}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_dlq_length Number of messages in the dead-letter queue');
+    lines.push('# TYPE iotistic_ingestion_dlq_length gauge');
+    lines.push(`iotistic_ingestion_dlq_length ${metrics.dlqLength}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_worker_count Number of active ingestion worker loops');
+    lines.push('# TYPE iotistic_ingestion_worker_count gauge');
+    lines.push(`iotistic_ingestion_worker_count ${metrics.workerCount}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_redis_connected Redis connectivity status (1=connected, 0=disconnected)');
+    lines.push('# TYPE iotistic_ingestion_redis_connected gauge');
+    lines.push(`iotistic_ingestion_redis_connected ${metrics.redisConnected}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_redis_memory_used_bytes Redis memory currently in use (bytes)');
+    lines.push('# TYPE iotistic_ingestion_redis_memory_used_bytes gauge');
+    lines.push(`iotistic_ingestion_redis_memory_used_bytes ${metrics.redisMemoryUsedBytes}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_redis_memory_max_bytes Redis maxmemory configuration in bytes (0=unlimited)');
+    lines.push('# TYPE iotistic_ingestion_redis_memory_max_bytes gauge');
+    lines.push(`iotistic_ingestion_redis_memory_max_bytes ${metrics.redisMemoryMaxBytes}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_batch_latency_p95_ms P95 Redis pipeline flush duration (ms)');
+    lines.push('# TYPE iotistic_ingestion_batch_latency_p95_ms gauge');
+    lines.push(`iotistic_ingestion_batch_latency_p95_ms ${metrics.getBatchLatencyP95()}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_insert_latency_p95_ms P95 TimescaleDB batch insert duration (ms)');
+    lines.push('# TYPE iotistic_ingestion_insert_latency_p95_ms gauge');
+    lines.push(`iotistic_ingestion_insert_latency_p95_ms ${metrics.getInsertLatencyP95()}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_dwell_latency_p95_ms P95 message dwell time in Redis stream before processing (ms)');
+    lines.push('# TYPE iotistic_ingestion_dwell_latency_p95_ms gauge');
+    lines.push(`iotistic_ingestion_dwell_latency_p95_ms ${metrics.getDwellLatencyP95()}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_messages_processed_total Total messages successfully committed to database');
+    lines.push('# TYPE iotistic_ingestion_messages_processed_total counter');
+    lines.push(`iotistic_ingestion_messages_processed_total ${metrics.messagesProcessed}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_readings_inserted_total Total sensor reading rows inserted into TimescaleDB');
+    lines.push('# TYPE iotistic_ingestion_readings_inserted_total counter');
+    lines.push(`iotistic_ingestion_readings_inserted_total ${metrics.readingsInserted}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_messages_failed_total Total messages that failed normalization');
+    lines.push('# TYPE iotistic_ingestion_messages_failed_total counter');
+    lines.push(`iotistic_ingestion_messages_failed_total ${metrics.messagesFailed}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_messages_dropped_total Total messages dropped due to OOM pressure');
+    lines.push('# TYPE iotistic_ingestion_messages_dropped_total counter');
+    lines.push(`iotistic_ingestion_messages_dropped_total ${metrics.messagesDropped}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_oom_errors_total Total OOM errors on Redis pipeline flush');
+    lines.push('# TYPE iotistic_ingestion_oom_errors_total counter');
+    lines.push(`iotistic_ingestion_oom_errors_total ${metrics.oomErrors}`);
+    lines.push('');
+    lines.push('# HELP iotistic_ingestion_redis_reconnects_total Total Redis reconnection events');
+    lines.push('# TYPE iotistic_ingestion_redis_reconnects_total counter');
+    lines.push(`iotistic_ingestion_redis_reconnects_total ${metrics.redisReconnects}`);
 
     // Send response
     res.send(lines.join('\n') + '\n');

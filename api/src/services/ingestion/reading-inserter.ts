@@ -46,6 +46,10 @@ export class ReadingInserter {
     const insertedCount = await this.readingsService.bulkInsert(deduped);
     const insertMs = Date.now() - insertStart;
 
+    metrics.messagesProcessed += deduped.length;
+    metrics.readingsInserted += insertedCount;
+    metrics.recordInsertLatency(insertMs);
+
     const telemetryStart = Date.now();
     await this.updateLastTelemetryAt(deduped, ingestedAt);
     const telemetryMs = Date.now() - telemetryStart;
