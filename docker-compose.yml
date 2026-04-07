@@ -522,7 +522,6 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
-
     sim-mqtt-4:
         build:
             context: ./simulators/mqtt-simulator
@@ -536,6 +535,36 @@ services:
             - MQTT_CLIENT_ID=mqtt-device-4
             - MQTT_DEVICE_UUID=9b2e4f1a-3d8c-4e5f-b6a7-2c1d9e8f7a0b
             - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/LS0AxxzXQq6pWshDUtMylA
+            - MQTT_METRIC_NAMES=co2,noise,lux,wind_speed,power
+            - MQTT_METRIC_UNITS=co2:ppm,noise:dB,lux:lux,wind_speed:m/s,power:W
+            - MQTT_METRIC_BASES=co2:420,noise:55,lux:300,wind_speed:5,power:150
+            - MQTT_QOS=${MQTT_SIM_QOS:-0}
+            - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
+            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
+            - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
+        depends_on:
+            mosquitto-agent:
+                condition: service_started
+        networks:
+            - iotistica-net
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "5m"
+                max-file: "2"
+    sim-mqtt-5:
+        build:
+            context: ./simulators/mqtt-simulator
+            dockerfile: Dockerfile
+        container_name: sim-mqtt-5
+        restart: unless-stopped
+        environment:
+            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
+            - MQTT_USERNAME=mqtt-user-5
+            - MQTT_PASSWORD=test123
+            - MQTT_CLIENT_ID=mqtt-device-5
+            - MQTT_DEVICE_UUID=9b2e4f1a-3d8c-4e5f-b6a7-2c1d9e8f7a0b
+            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/GadMRxuNQzmmKewi2KHcDw/d/v80XUbEuQSSjiveZqyQ4cA
             - MQTT_METRIC_NAMES=co2,noise,lux,wind_speed,power
             - MQTT_METRIC_UNITS=co2:ppm,noise:dB,lux:lux,wind_speed:m/s,power:W
             - MQTT_METRIC_BASES=co2:420,noise:55,lux:300,wind_speed:5,power:150

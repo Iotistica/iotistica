@@ -772,6 +772,13 @@ export class FeatureInitializer {
   private async initAgentUpdater(): Promise<void> {
     const { logger, deviceInfo } = this.context;
 
+    if (!deviceInfo.provisioned) {
+      logger.debugSync('Agent Updater skipped — device not yet provisioned', {
+        component: LogComponents.agent,
+      });
+      return;
+    }
+
     try {
       this.features.updater = new AgentUpdater({
         deviceUuid: deviceInfo.uuid,

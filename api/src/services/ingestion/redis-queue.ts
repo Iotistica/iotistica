@@ -401,6 +401,16 @@ export class RedisDeviceQueue {
     ingestionHealthy: boolean;
     spoolingActive: boolean;
     backlogSize: number;
+    workerLag: number;
+    pendingMessages: number;
+    streamLength: number;
+    dlqLength: number;
+    workerCount: number;
+    messagesProcessed: number;
+    readingsInserted: number;
+    messagesDropped: number;
+    dwellP95Ms: number;
+    batchLatP95Ms: number;
   }> {
     const backlogSize = await this.diskSpool.getBacklogCount();
     const state = circuitBreaker.getState();
@@ -423,6 +433,16 @@ export class RedisDeviceQueue {
       ingestionHealthy: state === CircuitState.CLOSED && metrics.redisConnected === 1,
       spoolingActive: state !== CircuitState.CLOSED || backlogSize > 0,
       backlogSize,
+      workerLag: metrics.workerLag,
+      pendingMessages: metrics.pendingMessages,
+      streamLength: metrics.streamLength,
+      dlqLength: metrics.dlqLength,
+      workerCount: metrics.workerCount,
+      messagesProcessed: metrics.messagesProcessed,
+      readingsInserted: metrics.readingsInserted,
+      messagesDropped: metrics.messagesDropped,
+      dwellP95Ms: metrics.getDwellLatencyP95(),
+      batchLatP95Ms: metrics.getBatchLatencyP95(),
     };
   }
 

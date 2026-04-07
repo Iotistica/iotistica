@@ -132,7 +132,7 @@ function Get-DeviceTopic {
     "i/$EncodedTenant/a/$EncodedAgent/endpoints/load-test"
 }
 
-# ─── Shared helpers (identical to load-test-ingestion.ps1) ───────────────────
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function Invoke-Redis {
     param([string[]]$RedisArgs)
@@ -156,28 +156,6 @@ Expected pattern: tenant:{<tenantId>}:agent:devices:ingestion
     # Extract the hex ID from  tenant:{73eddd385ce8}:agent:...
     if ($key -match 'tenant:\{([0-9a-f]+)\}') { return $Matches[1] }
     Write-Error "Could not parse tenant ID from key: $key"; exit 1
-}
-
-function Get-ConsumerLag {
-    param([string]$Key)
-    $info = Invoke-Redis @("XINFO", "GROUPS", $Key)
-    $lag = 0; $pending = 0
-    $lines = @(($info -join "`n") -split "`n" |
-               ForEach-Object { $_.Trim() } |
-               Where-Object   { $_ })
-    if ($lines.Count -eq 0 -or ($lines.Count -eq 1 -and $lines[0] -match 'empty')) {
-        return @{ lag = -1; pending = -1 }
-    }
-    for ($i = 0; $i -lt $lines.Count - 1; $i++) {
-        if ($lines[$i] -eq 'lag')     { $lag     = [int]($lines[$i+1] -replace '\(integer\)\s*', '') }
-        if ($lines[$i] -eq 'pending') { $pending = [int]($lines[$i+1] -replace '\(integer\)\s*', '') }
-    }
-    return @{ lag = $lag; pending = $pending }
-}
-
-function Get-StreamKey {
-    param([string]$TenantHexId)
-    "tenant:{$TenantHexId}:agent:devices:ingestion"
 }
 
 function Get-JwtToken {
@@ -210,14 +188,14 @@ function Write-HealthRow {
 
     $rate = if ($ElapsedSec -gt 0) { [int]($Injected / $ElapsedSec) } else { 0 }
 
-    $streamLen = $h.streamLength     ?? $h.data.streamLength     ?? "?"
-    $workers   = $h.workerCount      ?? $h.data.workerCount      ?? "?"
-    $lag       = $h.workerLag        ?? $h.data.workerLag        ?? "?"
-    $processed = $h.messagesProcessed ?? $h.data.messagesProcessed ?? "?"
-    $inserted  = $h.readingsInserted  ?? $h.data.readingsInserted  ?? "?"
-    $dropped   = $h.messagesDropped   ?? $h.data.messagesDropped   ?? "?"
-    $dwellP95  = $h.dwellP95Ms       ?? $h.data.dwellP95Ms       ?? "?"
-    $batchP95  = $h.batchLatP95Ms    ?? $h.data.batchLatP95Ms    ?? "?"
+    $streamLen = $h.streamLength      ?? "?"
+    $workers   = $h.workerCount       ?? $h.workers ?? "?"
+    $lag       = $h.workerLag         ?? "?"
+    $processed = $h.messagesProcessed ?? "?"
+    $inserted  = $h.readingsInserted  ?? "?"
+    $dropped   = $h.messagesDropped   ?? "?"
+    $dwellP95  = $h.dwellP95Ms        ?? "?"
+    $batchP95  = $h.batchLatP95Ms     ?? "?"
 
     $droppedColor = if ($dropped -gt 0) { "Red" } else { "Green" }
     $lagColor     = if ($lag -gt 20000) { "Red" } elseif ($lag -gt 5000) { "Yellow" } else { "Cyan" }
@@ -326,7 +304,6 @@ if ($TenantId) {
     Write-Host " $TenantId" -ForegroundColor Green
 }
 $encodedTenant = Encode-HexId $TenantId
-$streamKey     = Get-StreamKey $TenantId
 
 # Resolve agent UUIDs (same as ingestion script: real UUIDs from DB, synthetic fallback)
 $dbUuids = @()
@@ -481,59 +458,55 @@ Write-Host ("  Injected : {0} messages ({1} readings) in {2:F2}s = {3} msg/s act
 
 # ─── Drain wait ───────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "Waiting for worker to drain stream (lag=0, pending=0)..." -ForegroundColor Yellow
 $drainTimeout = [System.Diagnostics.Stopwatch]::StartNew()
 
-while ($drainTimeout.Elapsed.TotalSeconds -lt 120) {
-    Start-Sleep -Seconds $PollIntervalSec
-    $cgState    = Get-ConsumerLag $streamKey
-    $currentLen = [int](Invoke-Redis @("XLEN", $streamKey))
-
-    if ($JwtToken) {
+if ($JwtToken) {
+    Write-Host "Waiting for worker to drain stream (lag=0, pending=0)..." -ForegroundColor Yellow
+    while ($drainTimeout.Elapsed.TotalSeconds -lt 120) {
+        Start-Sleep -Seconds $PollIntervalSec
         $health = Get-IngestionHealth -Url $ApiUrl -Token $JwtToken
         Write-HealthRow -h $health -Injected $injected -Total $MessageCount `
             -ElapsedSec ($totalSec + $drainTimeout.Elapsed.TotalSeconds)
-    } else {
-        Write-Host ("  [{0:HH:mm:ss}] stream={1}  lag={2}  pending={3}" -f `
-            (Get-Date), $currentLen, $cgState.lag, $cgState.pending)
-    }
 
-    if ($cgState.lag -eq 0 -and $cgState.pending -eq 0) {
-        Write-Host ""
-        Write-Host "Worker caught up (lag=0, pending=0)." -ForegroundColor Green
-        break
+        $wlag    = [int]($health.workerLag     ?? -1)
+        $pending = [int]($health.pendingMessages ?? -1)
+        if ($wlag -eq 0 -and $pending -eq 0) {
+            Write-Host ""
+            Write-Host "Worker caught up (lag=0, pending=0)." -ForegroundColor Green
+            break
+        }
     }
+} else {
+    Write-Host "(pass -JwtToken to enable live drain monitoring)" -ForegroundColor DarkGray
 }
 
 # ─── Final summary ────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "=== Final Stats ===" -ForegroundColor Cyan
-$finalCgState = Get-ConsumerLag $streamKey
-Write-Host ("  Consumer lag    : {0}  pending: {1}" -f $finalCgState.lag, $finalCgState.pending)
 
 $finalHealth = Get-IngestionHealth -Url $ApiUrl -Token $JwtToken
 if ($finalHealth) {
-    $processed = $finalHealth.messagesProcessed ?? $finalHealth.data.messagesProcessed ?? "?"
-    $inserted  = $finalHealth.readingsInserted  ?? $finalHealth.data.readingsInserted  ?? "?"
-    $dropped   = $finalHealth.messagesDropped   ?? $finalHealth.data.messagesDropped   ?? "?"
-    $dlq       = $finalHealth.dlqLength         ?? $finalHealth.data.dlqLength         ?? "?"
+    $processed = $finalHealth.messagesProcessed ?? "?"
+    $inserted  = $finalHealth.readingsInserted  ?? "?"
+    $dropped   = $finalHealth.messagesDropped   ?? "?"
+    $lag       = $finalHealth.workerLag         ?? "?"
+    $pending   = $finalHealth.pendingMessages   ?? "?"
+    $dlq       = $finalHealth.dlqLength         ?? "?"
+    Write-Host ("  Consumer lag    : {0}  pending: {1}" -f $lag, $pending)
     Write-Host ("  Processed       : {0}" -f $processed)
     Write-Host ("  Readings in DB  : {0}" -f $inserted)
-    $droppedColor = if ($dropped -gt 0) { "Red" } else { "Green" }
+    $droppedColor = if ([int]$dropped -gt 0) { "Red" } else { "Green" }
     Write-Host ("  Dropped         : {0}" -f $dropped) -ForegroundColor $droppedColor
     Write-Host ("  DLQ length      : {0}" -f $dlq)
-}
 
-# Check DLQ
-$dlqKeys = Invoke-Redis @("KEYS", "*:agent:devices:dlq*")
-if ($dlqKeys -and $dlqKeys -ne "(empty array)") {
-    $dlqLen = Invoke-Redis @("XLEN", (($dlqKeys -split "`n")[0]).Trim())
-    if ([int]$dlqLen -gt 0) {
-        $dlqKey  = $streamKey -replace ":ingestion$", ":dlq"
+    if ([int]($dlq) -gt 0) {
+        $dlqKey = "tenant:{$TenantId}:agent:devices:dlq"
         Write-Host ""
-        Write-Host "  WARNING: $dlqLen messages landed in the DLQ!" -ForegroundColor Red
+        Write-Host "  WARNING: $dlq messages landed in the DLQ!" -ForegroundColor Red
         Write-Host "  Inspect with: docker exec iotistic-redis redis-cli XRANGE $dlqKey - + COUNT 5" -ForegroundColor Yellow
     }
+} else {
+    Write-Host "  (health poll unavailable — pass -JwtToken for final stats)" -ForegroundColor DarkGray
 }
 
 Write-Host ""

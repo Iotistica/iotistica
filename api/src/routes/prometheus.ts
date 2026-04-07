@@ -44,35 +44,34 @@ router.get('/metrics', async (req, res) => {
     lines.push('# TYPE device_status gauge');
     lines.push('');
 
-    // Get latest readings using TimescaleDB continuous aggregate (readings_hourly)
-    // This is 100x faster than querying raw readings table (9M+ rows)
-    // Uses pre-aggregated hourly buckets with last_value (only ~7K rows, no need for time filter)
+    // Get latest readings for each (agent, device, metric) tuple.
+    // Queries raw readings with a 2-hour window — TimescaleDB only scans the
+    // most recent 1-2 hypertable chunks, so this is fast even with millions of rows.
+    // We use raw readings (not readings_hourly) for two reasons:
+    //   1. readings_hourly has no device_name column
+    //   2. readings_hourly has end_offset=1h, so new agents lag up to 1 hour
     const readingsResult = await query(`
-      WITH latest_hourly AS (
-        SELECT DISTINCT ON (agent_uuid, device_name, metric_name)
-          agent_uuid,
-          device_name,
-          metric_name,
-          protocol,
-          last_value,
-          EXTRACT(EPOCH FROM last_time) as timestamp_unix
-        FROM readings_hourly
-        ORDER BY agent_uuid, device_name, metric_name, bucket DESC
-      )
-      SELECT 
+      SELECT DISTINCT ON (r.agent_uuid, device_name, r.metric_name)
         r.agent_uuid,
-        r.device_name,
+        COALESCE(
+          NULLIF(r.extra->>'deviceName', ''),
+          NULLIF(r.extra->>'device_name', ''),
+          'unknown'
+        ) AS device_name,
         r.metric_name,
         r.protocol,
-        r.last_value as value,
-        '' as unit,  -- Unit not tracked in aggregate
-        r.timestamp_unix,
-        CASE 
+        r.value AS last_value,
+        '' AS unit,
+        EXTRACT(EPOCH FROM r.time) AS timestamp_unix,
+        CASE
           WHEN d.last_connectivity_event > NOW() - INTERVAL '5 minutes' THEN 1
           ELSE 0
-        END as device_online
-      FROM latest_hourly r
+        END AS device_online
+      FROM readings r
       LEFT JOIN agents d ON d.uuid = r.agent_uuid
+      WHERE r.time > NOW() - INTERVAL '2 hours'
+        AND r.quality = 'good'
+      ORDER BY r.agent_uuid, device_name, r.metric_name, r.time DESC
       LIMIT 10000
     `);
 
@@ -93,7 +92,7 @@ router.get('/metrics', async (req, res) => {
         device_name,
         metric_name,
         protocol,
-        value,
+        last_value: value,
         unit,
         timestamp_unix,
         device_online

@@ -4,14 +4,5 @@
 user admin
 topic readwrite #
 
-user mqtt-user-1
-topic write i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/nRGjWUzZSA6P0TCmPV7V1A/#
-
-user mqtt-user-2
-topic write i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/ke8v2rFzQsug0U5dSxzfRQ/#
-
-user mqtt-user-3
-topic write i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/kgouTq8yQeeU2CoTzGJRzA/#
-
-user mqtt-user-4
-topic write i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/LS0AxxzXQq6pWshDUtMylA/#
+user mqtt-user-5
+topic write i/84c49f7b9cb5462c886c02b7ce3003aa/a/GadMRxuNQzmmKewi2KHcDw/d/v80XUbEuQSSjiveZqyQ4cA/#
