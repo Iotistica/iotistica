@@ -22,7 +22,7 @@ import {
   refreshViews,
 } from '../services/metrics.service';
 import type { TimeRange, Aggregation, RefreshView } from '../services/metrics.service';
-import { redisDeviceQueue } from '../services/ingestion/redis-queue';
+import { redisDeviceQueue } from '../services/ingestion/redis-device-queue';
 
 export const router = express.Router();
 

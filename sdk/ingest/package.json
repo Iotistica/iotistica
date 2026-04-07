@@ -1,0 +1,20 @@
+{
+  "name": "@iotistica/ingest",
+  "version": "0.1.0",
+  "description": "Iotistica device ingest SDK — send IoT readings to the Iotistica platform",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  },
+  "keywords": ["iotistica", "iot", "ingest", "telemetry"],
+  "license": "UNLICENSED"
+}
