@@ -8,11 +8,13 @@
 .PARAMETER Count
     Number of agents to generate (default: 10)
 .PARAMETER StartIndex
-    Starting index for agent naming (default: 47)
+    Starting index for agent naming. If omitted, the script auto-detects the next available agent index.
 .PARAMETER OutputFile
     Output docker-compose file (default: docker-compose.agents.yml)
 .PARAMETER ApiUrl
     API base URL for provisioning key generation (default: https://api:3663)
+.PARAMETER EnvironmentProfile
+    Environment preset for API and database settings. Use auto to prompt for Docker or cloud K8s.
 .PARAMETER FleetId
     Fleet ID for provisioning keys (default: default-fleet)
 .PARAMETER Cleanup
@@ -40,6 +42,8 @@ param(
     [int]$Count = 1,
     [int]$StartIndex = 1,
     [string]$OutputFile = "docker-compose.agents.yml",
+    [ValidateSet('auto', 'docker', 'cloud-k8s')]
+    [string]$EnvironmentProfile = 'auto',
     [string]$ApiUrl = "https://demo-api.iotistica.com/",
     #[string]$ApiUrl = "https://localhost:3443",
     # Optional explicit fleet UUID override. If empty (default), script auto-resolves
@@ -151,6 +155,182 @@ $SimulationSampleVariables = @{
         } | ConvertTo-Json -Depth 10 -Compress
     )
 }
+
+$ProfileDefaults = @{
+    'docker' = @{
+        ApiUrl = 'http://localhost:4002'
+        UseDirectDb = $true
+        DbHost = 'localhost'
+        DbPort = 5432
+        DbName = 'iotistica'
+        DbUser = 'postgres'
+        DbPassword = 'postgres'
+        DbSslMode = ''
+        DatabaseUrl = ''
+        IOTISTICA_API = 'http://host.docker.internal:4002'
+    }
+    'cloud-k8s' = @{
+        ApiUrl = 'https://demo-api.iotistica.com/'
+        UseDirectDb = $true
+        DbHost = '20.220.137.172'
+        DbPort = 5432
+        DbName = 'demo'
+        DbUser = 'billing'
+        DbPassword = '2GyDA3MMJvKLwvfo6t@btpmTA9f'
+        DbSslMode = ''
+        DatabaseUrl = ''
+        IOTISTICA_API = 'https://demo-api.iotistica.com'
+    }
+}
+
+function Resolve-EnvironmentProfile {
+    param(
+        [string]$RequestedProfile
+    )
+
+    if ($RequestedProfile -ne 'auto') {
+        return $RequestedProfile
+    }
+
+    if (-not [Environment]::UserInteractive) {
+        return 'cloud-k8s'
+    }
+
+    Write-Host "`nEnvironment profile:" -ForegroundColor Cyan
+    Write-Host "  1) docker       (local API + local Postgres)" -ForegroundColor Gray
+    Write-Host "  2) cloud-k8s     (cloud API + cloud Postgres)" -ForegroundColor Gray
+
+    $selection = (Read-Host -Prompt 'Select environment profile [1/2] (default: 2)').Trim()
+
+    switch ($selection) {
+        '1' { return 'docker' }
+        'local' { return 'docker' }
+        'docker' { return 'docker' }
+        'local-docker' { return 'docker' }
+        '2' { return 'cloud-k8s' }
+        'cloud' { return 'cloud-k8s' }
+        'cloud-k8s' { return 'cloud-k8s' }
+        '' { return 'cloud-k8s' }
+        default {
+            Write-Host "Unrecognized selection '$selection'. Defaulting to cloud-k8s." -ForegroundColor Yellow
+            return 'cloud-k8s'
+        }
+    }
+}
+
+function Set-ProfileDefault {
+    param(
+        [string]$ParameterName,
+        $Value
+    )
+
+    if (-not $script:PSBoundParameters.ContainsKey($ParameterName)) {
+        Set-Variable -Scope Script -Name $ParameterName -Value $Value
+    }
+}
+
+function Apply-EnvironmentProfile {
+    param(
+        [string]$ProfileName
+    )
+
+    $defaults = $ProfileDefaults[$ProfileName]
+    if (-not $defaults) {
+        throw "Unknown environment profile '$ProfileName'"
+    }
+
+    foreach ($entry in $defaults.GetEnumerator()) {
+        Set-ProfileDefault -ParameterName $entry.Key -Value $entry.Value
+    }
+}
+
+function Resolve-AgentApiEndpoint {
+    param(
+        [string]$ProfileName,
+        [bool]$UseHostNetwork,
+        [string]$ConfiguredEndpoint
+    )
+
+    if ($ProfileName -eq 'docker') {
+        if ($UseHostNetwork) {
+            return 'http://localhost:4002'
+        }
+
+        return 'http://host.docker.internal:4002'
+    }
+
+    if ($UseHostNetwork) {
+        return $ConfiguredEndpoint -replace 'api:', 'localhost:'
+    }
+
+    return $ConfiguredEndpoint
+}
+
+function Get-NextAvailableAgentIndex {
+    param(
+        [string]$OutputFile
+    )
+
+    $maxIndex = 0
+
+    $candidateSources = New-Object System.Collections.Generic.List[string]
+
+    try {
+        $containerNames = @(docker ps -a --format '{{.Names}}' 2>$null)
+        foreach ($name in $containerNames) {
+            if (-not [string]::IsNullOrWhiteSpace($name)) {
+                $candidateSources.Add($name)
+            }
+        }
+    } catch {
+        # Ignore Docker lookup failures and fall back to file inspection.
+    }
+
+    try {
+        $volumeNames = @(docker volume ls --format '{{.Name}}' 2>$null)
+        foreach ($name in $volumeNames) {
+            if (-not [string]::IsNullOrWhiteSpace($name)) {
+                $candidateSources.Add($name)
+            }
+        }
+    } catch {
+        # Ignore Docker lookup failures and fall back to file inspection.
+    }
+
+    $outputPath = Join-Path $PSScriptRoot '..' $OutputFile
+    if (Test-Path $outputPath) {
+        try {
+            $candidateSources.Add((Get-Content $outputPath -Raw))
+        } catch {
+            # Ignore file read issues.
+        }
+    }
+
+    $regex = [regex]'agent-(\d+)'
+    foreach ($source in $candidateSources) {
+        foreach ($match in $regex.Matches($source)) {
+            $value = [int]$match.Groups[1].Value
+            if ($value -gt $maxIndex) {
+                $maxIndex = $value
+            }
+        }
+    }
+
+    return $maxIndex + 1
+}
+
+$ResolvedEnvironmentProfile = Resolve-EnvironmentProfile -RequestedProfile $EnvironmentProfile
+Apply-EnvironmentProfile -ProfileName $ResolvedEnvironmentProfile
+
+if (-not $PSBoundParameters.ContainsKey('StartIndex')) {
+    $StartIndex = Get-NextAvailableAgentIndex -OutputFile $OutputFile
+    Write-Host "Auto-selected StartIndex: $StartIndex" -ForegroundColor Cyan
+}
+
+Write-Host "Using environment profile: $ResolvedEnvironmentProfile" -ForegroundColor Cyan
+Write-Host "  ApiUrl: $ApiUrl" -ForegroundColor Gray
+Write-Host "  DbHost: $DbHost`:$DbPort / $DbName" -ForegroundColor Gray
+Write-Host "  Agent API base: $IOTISTICA_API" -ForegroundColor Gray
 
 function New-DbConnectionString {
     param(
@@ -952,14 +1132,8 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
         Write-Host "    Simulation profile: $($simConfig.name) [$($simConfig.scenarioNames -join ', ')]" -ForegroundColor DarkGray
     }
     
-    # Adjust IOTISTICA_API based on network mode
-    # Host mode: use localhost (shares host network stack)
-    # Bridge mode: use service name (container networking)
-    $cloudApiEndpoint = if ($UseHostNetwork) {
-        $IOTISTICA_API -replace "api:", "localhost:"
-    } else {
-        $IOTISTICA_API
-    }
+    # Resolve API endpoint for the selected environment profile and network mode.
+    $cloudApiEndpoint = Resolve-AgentApiEndpoint -ProfileName $ResolvedEnvironmentProfile -UseHostNetwork $UseHostNetwork -ConfiguredEndpoint $IOTISTICA_API
     
     # Build configuration: use build context if -BuildFromSource, otherwise use image
     $buildOrImage = if ($BuildFromSource) {
