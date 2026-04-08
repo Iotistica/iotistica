@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   };
 
   const token = await LicenseGenerator.generateLicense(customer, subscription, args.tenantId);
-  const decoded = LicenseGenerator.verifyLicense(token);
+  const decoded = await LicenseGenerator.verifyLicense(token);
 
   if (args.out) {
     const outPath = path.resolve(args.out);

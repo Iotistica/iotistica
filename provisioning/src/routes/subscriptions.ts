@@ -76,7 +76,7 @@ router.post('/trial', async (req, res) => {
 
     // ✅ Log trial creation
     const licenseHash = crypto.createHash('sha256').update(license).digest('hex');
-    const decoded = LicenseGenerator.verifyLicense(license);
+    const decoded = await LicenseGenerator.verifyLicense(license);
     
     await LicenseHistoryModel.log({
       customerId: customer_id,
@@ -232,7 +232,7 @@ router.post('/upgrade', async (req, res) => {
 
     // ✅ Log upgrade/downgrade
     const licenseHash = crypto.createHash('sha256').update(license).digest('hex');
-    const decoded = LicenseGenerator.verifyLicense(license);
+    const decoded = await LicenseGenerator.verifyLicense(license);
     const action = new_plan > oldPlan ? 'upgraded' : 'downgraded';
     
     await LicenseHistoryModel.log({

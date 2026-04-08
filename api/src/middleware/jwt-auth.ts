@@ -14,14 +14,15 @@
 
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { createHash, createPublicKey } from 'crypto';
-import jwt, { Secret } from 'jsonwebtoken';
+import { importJWK, jwtVerify, type JWK } from 'jose';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
 import { fetch } from 'undici';
+import { decodeJwtHeader, signHs256Token, verifyHs256Token } from '../utils/hs256-jwt';
 
 // JWT Configuration
 // CRITICAL: JWT_SECRET must be set in environment - no fallback to prevent security bypass
-const JWT_SECRET: Secret = (() => {
+const JWT_SECRET: string = (() => {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     throw new Error(
@@ -179,16 +180,14 @@ async function getAuth0JWKS(): Promise<any> {
 /**
  * Get Public Key from JWKS by Key ID (kid)
  */
-function getPublicKeyFromJWKS(jwks: any, kid: string): string {
+async function getPublicKeyFromJWKS(jwks: any, kid: string) {
   const key = jwks.keys.find((k: any) => k.kid === kid);
 
   if (!key) {
     throw new Error(`Key ID ${kid} not found in Auth0 JWKS`);
   }
 
-  // Convert JWK to PEM format
-  const publicKey = createPublicKey({ key, format: 'jwk' });
-  return publicKey.export({ format: 'pem', type: 'spki' }).toString();
+  return importJWK(key as JWK, 'RS256');
 }
 
 function getRbacCacheKey(auth0Sub: string, customerId: string): string {
@@ -379,26 +378,26 @@ export async function validateAuth0JWT(token: string): Promise<{
   }
 
   // Decode without verification first to get kid
-  const decoded = jwt.decode(token, { complete: true });
+  const decoded = decodeJwtHeader(token);
 
   if (!decoded) {
     throw new Error('Invalid JWT format');
   }
 
   // Validate algorithm is RS256 (reject HS256)
-  if (decoded.header?.alg !== 'RS256') {
-    throw new Error(`Invalid algorithm: ${decoded.header?.alg} (must be RS256)`);
+  if (decoded.alg !== 'RS256') {
+    throw new Error(`Invalid algorithm: ${String(decoded.alg)} (must be RS256)`);
   }
 
   // Get Key ID
-  const kid = decoded.header?.kid;
+  const kid = typeof decoded.kid === 'string' ? decoded.kid : undefined;
   if (!kid) {
     throw new Error('Missing Key ID (kid) in JWT header');
   }
 
   // Fetch JWKS and get public key
   const jwks = await getAuth0JWKS();
-  const publicKey = getPublicKeyFromJWKS(jwks, kid);
+  const publicKey = await getPublicKeyFromJWKS(jwks, kid);
 
   // Verify JWT signature and claims
   const audienceCandidates = [AUTH0_AUDIENCE, AUTH0_CLIENT_ID].filter(Boolean);
@@ -406,15 +405,23 @@ export async function validateAuth0JWT(token: string): Promise<{
     ? (audienceCandidates as [string, ...string[]])
     : audienceCandidates[0];
 
-  const payload = jwt.verify(token, publicKey, {
+  const { payload } = await jwtVerify(token, publicKey, {
     algorithms: ['RS256'],
     issuer: AUTH0_ISSUER,
     audience
-  }) as any;
+  });
 
   // Additional validation — email is not guaranteed in access JWTs (only in id_token)
   if (!payload.sub) {
     throw new Error('Missing required claim: sub');
+  }
+
+  if (payload.email !== undefined && typeof payload.email !== 'string') {
+    throw new Error('Invalid email claim type');
+  }
+
+  if (typeof payload.exp !== 'number') {
+    throw new Error('Missing exp claim');
   }
 
   const exp = Math.floor(Date.now() / 1000);
@@ -424,7 +431,7 @@ export async function validateAuth0JWT(token: string): Promise<{
 
   return {
     sub: payload.sub,
-    email: payload.email,
+    email: payload.email || '',
     exp: payload.exp
   };
 }
@@ -484,6 +491,13 @@ export interface JWTPayload {
   auth0Sub?: string;
   customerId?: string;
   type: 'access' | 'refresh';
+  aud?: string | string[];
+  exp?: number;
+  iat?: number;
+  iss?: string;
+  nbf?: number;
+  sub?: string;
+  [key: string]: unknown;
 }
 
 /**
@@ -507,10 +521,10 @@ export function generateAccessToken(user: {
     type: 'access'
   };
 
-  return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: JWT_ACCESS_TOKEN_EXPIRY as any,
+  return signHs256Token(payload, JWT_SECRET, {
+    expiresIn: JWT_ACCESS_TOKEN_EXPIRY,
     issuer: 'iotistic-api',
-    audience: 'iotistic-dashboard'
+    audience: 'iotistic-dashboard',
   });
 }
 
@@ -535,10 +549,10 @@ export function generateRefreshToken(user: {
     type: 'refresh'
   };
 
-  return jwt.sign(payload, JWT_SECRET, {
-    expiresIn: JWT_REFRESH_TOKEN_EXPIRY as any,
+  return signHs256Token(payload, JWT_SECRET, {
+    expiresIn: JWT_REFRESH_TOKEN_EXPIRY,
     issuer: 'iotistic-api',
-    audience: 'iotistic-dashboard'
+    audience: 'iotistic-dashboard',
   });
 }
 
@@ -547,10 +561,10 @@ export function generateRefreshToken(user: {
  */
 export function verifyToken(token: string): JWTPayload {
   try {
-    return jwt.verify(token, JWT_SECRET, {
+    return verifyHs256Token<JWTPayload>(token, JWT_SECRET, {
       issuer: 'iotistic-api',
-      audience: 'iotistic-dashboard'
-    }) as JWTPayload;
+      audience: 'iotistic-dashboard',
+    });
   } catch (error: any) {
     throw new Error(`Invalid token: ${error.message}`);
   }
@@ -581,7 +595,12 @@ export async function jwtValidate(
 
     const token = authHeader.substring(7);
 
-    const decoded = jwt.decode(token, { complete: true });
+    let decoded: Record<string, unknown> | null = null;
+    try {
+      decoded = decodeJwtHeader(token);
+    } catch {
+      decoded = null;
+    }
     if (!decoded) {
       if (AUTH0_ENABLED) {
         logger.info('Token is not decodable JWT; trying Auth0 /userinfo fallback');
@@ -606,7 +625,7 @@ export async function jwtValidate(
       return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid token format' });
     }
 
-    const algorithm = decoded.header?.alg;
+    const algorithm = decoded.alg;
 
     if (algorithm === 'RS256' && AUTH0_ENABLED) {
       logger.info('Detected RS256 token, validating with Auth0 JWKS...');

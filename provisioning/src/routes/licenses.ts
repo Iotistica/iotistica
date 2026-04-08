@@ -53,7 +53,7 @@ router.get('/:customerId', async (req, res) => {
     const license = await LicenseGenerator.generateLicense(customer, subscription);
 
     // Decode for response (but don't verify - we just generated it)
-    const decoded = LicenseGenerator.verifyLicense(license);
+    const decoded = await LicenseGenerator.verifyLicense(license);
 
     // ✅ GOOD: Log metadata (NOT the actual JWT)
     const licenseHash = crypto.createHash('sha256').update(license).digest('hex');
@@ -150,7 +150,7 @@ router.post('/verify', async (req, res) => {
       return res.status(400).json({ error: 'License token required' });
     }
 
-    const decoded = LicenseGenerator.verifyLicense(license);
+    const decoded = await LicenseGenerator.verifyLicense(license);
 
     res.json({
       valid: true,

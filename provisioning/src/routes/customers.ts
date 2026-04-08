@@ -108,7 +108,7 @@ router.post('/signup', strictLimiter, async (req, res) => {
     // Step 4: Generate trial license JWT
     // ========================================
     const license = await LicenseGenerator.generateLicense(customer, subscription);
-    const decoded = LicenseGenerator.verifyLicense(license);
+    const decoded = await LicenseGenerator.verifyLicense(license);
 
     console.log(`🔑 License generated: ${decoded.features.maxDevices} devices max`);
 
@@ -258,7 +258,7 @@ router.post('/login', strictLimiter, async (req, res) => {
       ? await LicenseGenerator.generateLicense(customer, subscription)
       : null;
 
-    const decoded = license ? LicenseGenerator.verifyLicense(license) : null;
+    const decoded = license ? await LicenseGenerator.verifyLicense(license) : null;
 
     console.log(`🔓 Customer login: ${email} (${customer.customer_id})`);
 

@@ -1,5 +1,4 @@
 import { WebSocket } from 'ws';
-import { JwtPayload } from 'jsonwebtoken';
 import { z } from 'zod';
 import { createHmac } from 'crypto';
 import { sessionManager } from '../auth/session-manager';
@@ -7,13 +6,14 @@ import { query } from '../../db/connection';
 import logger from '../../utils/logger';
 import { mqttDeviceTopic } from '../../mqtt/topics';
 import { getTenantId } from '../../redis/tenant-keys';
+import type { JWTPayload } from '../../middleware/jwt-auth';
 
 // ─── Shared WebSocket Types ──────────────────────────────────────────────────
 
 export interface WebSocketClient {
   ws: WebSocket;
   deviceUuid: string | null;
-  user: JwtPayload | null;
+  user: JWTPayload | null;
   subscriptions: Set<string>;
   intervals: Map<string, NodeJS.Timeout>;
   serviceName?: string;
@@ -122,7 +122,7 @@ export const LegacyShellSchema = z.object({
 export interface ShellHandlerDeps {
   send: (ws: WebSocket, message: any) => void;
   broadcast: (deviceUuid: string, message: any) => void;
-  getUserIdentifier: (user: JwtPayload | null | undefined) => string;
+  getUserIdentifier: (user: JWTPayload | null | undefined) => string;
 }
 
 export class ShellHandler {

@@ -49,13 +49,13 @@
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server as HTTPServer } from 'http';
-import jwt, { JwtPayload } from 'jsonwebtoken';
 import { z } from 'zod';
 import { AgentModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
 import logger from '../../utils/logger';
 import { fetch } from 'undici';
 import { sessionManager } from '../auth/session-manager';
 import { agentMetricsPattern, getTenantId, tenantPrefix } from '../../redis/tenant-keys';
+import { verifyToken, type JWTPayload } from '../../middleware/jwt-auth';
 import {
   WebSocketClient,
   WebSocketMessage,
@@ -161,9 +161,9 @@ export class WebSocketManager {
   });
 
   // Normalize user identifier across token formats (legacy HS256, Auth0-minted, etc.)
-  private getUserIdentifier(user: JwtPayload | null | undefined): string {
+  private getUserIdentifier(user: JWTPayload | null | undefined): string {
     if (!user) return 'unknown';
-    return String((user as any).id ?? (user as any).userId ?? (user as any).sub ?? 'unknown');
+    return String(user.userId ?? user.sub ?? 'unknown');
   }
   
   // Metrics batching buffers (per device)
@@ -200,7 +200,7 @@ export class WebSocketManager {
     
     // Check if exceeds limit
     if (client.messageTimestamps.length >= this.RATE_LIMIT_MAX_MESSAGES) {
-      logger.warn(` 🔐 Rate limit exceeded for ${client.deviceUuid ? `device ${client.deviceUuid.substring(0, 8)}...` : 'global client'} (user: ${client.user?.id || 'unknown'})`);
+      logger.warn(` 🔐 Rate limit exceeded for ${client.deviceUuid ? `device ${client.deviceUuid.substring(0, 8)}...` : 'global client'} (user: ${client.user?.userId || 'unknown'})`);
       logger.warn(` 🔐 Messages in window: ${client.messageTimestamps.length}, limit: ${this.RATE_LIMIT_MAX_MESSAGES} per ${this.RATE_LIMIT_WINDOW_MS}ms`);
       
       // Close connection
@@ -453,7 +453,7 @@ export class WebSocketManager {
         const token = url.searchParams.get('token');
         
         // 🔐 JWT Authentication - validate token for all connections
-        let user: JwtPayload | null = null;
+        let user: JWTPayload | null = null;
         
         if (!token) {
           logger.warn(' WebSocket connection rejected: missing JWT token');
@@ -463,7 +463,7 @@ export class WebSocketManager {
         }
 
         try {
-          user = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+          user = verifyToken(token);
 
           if (user.type !== 'access') {
             logger.warn(' WebSocket connection rejected: invalid token type');
@@ -523,7 +523,7 @@ export class WebSocketManager {
     logger.debug('WebSocket server initialized');
   }
 
-  private handleConnection(ws: WebSocket, deviceUuid: string, user: JwtPayload, tokenExpiryMs?: number): void {
+  private handleConnection(ws: WebSocket, deviceUuid: string, user: JWTPayload, tokenExpiryMs?: number): void {
     logger.info(`Device connected: ${deviceUuid.substring(0, 8)}... (user: ${this.getUserIdentifier(user)})`);
 
     const client: WebSocketClient = {
@@ -546,7 +546,7 @@ export class WebSocketManager {
     // 🔐 Setup token expiry handler - auto-close connection when JWT expires
     if (tokenExpiryMs && tokenExpiryMs > 0) {
       const expiryTimeout = setTimeout(() => {
-        logger.info(` 🔐 JWT expired for user ${user.id}, closing connection for device ${deviceUuid.substring(0, 8)}...`);
+        logger.info(` 🔐 JWT expired for user ${user.userId}, closing connection for device ${deviceUuid.substring(0, 8)}...`);
         ws.close(1008, 'Token expired');
       }, tokenExpiryMs);
       
@@ -608,7 +608,7 @@ export class WebSocketManager {
     });
   }
 
-  private handleGlobalConnection(ws: WebSocket, user: JwtPayload, tokenExpiryMs?: number): void {
+  private handleGlobalConnection(ws: WebSocket, user: JWTPayload, tokenExpiryMs?: number): void {
     logger.info(`✅ Global client connected: ${this.getUserIdentifier(user)}`);
 
     const client: WebSocketClient = {
@@ -626,7 +626,7 @@ export class WebSocketManager {
     // 🔐 Setup token expiry handler - auto-close connection when JWT expires
     if (tokenExpiryMs && tokenExpiryMs > 0) {
       const expiryTimeout = setTimeout(() => {
-        logger.info(` 🔐 JWT expired for user ${user.id}, closing global connection`);
+        logger.info(` 🔐 JWT expired for user ${user.userId}, closing global connection`);
         ws.close(1008, 'Token expired');
       }, tokenExpiryMs);
       

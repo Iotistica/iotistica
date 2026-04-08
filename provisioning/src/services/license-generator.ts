@@ -3,10 +3,10 @@
  * Generates JWT-based licenses for customer instances
  */
 
-import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { SignJWT, importPKCS8, importSPKI, jwtVerify } from 'jose';
 import { Subscription } from '../db/subscription-model';
 import { Customer } from '../db/customer-model';
 
@@ -250,10 +250,12 @@ export class LicenseGenerator {
     };
 
     // Sign with RS256
-    const token = jwt.sign(licenseData, this.privateKey, {
-      algorithm: 'RS256',
-      expiresIn: '365d',
-    });
+    const privateKey = await importPKCS8(this.privateKey, 'RS256');
+    const token = await new SignJWT(licenseData)
+      .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
+      .setIssuedAt()
+      .setExpirationTime('365d')
+      .sign(privateKey);
 
     return token;
   }
@@ -271,17 +273,18 @@ export class LicenseGenerator {
   /**
    * Verify license (for testing)
    */
-  static verifyLicense(token: string): LicenseData {
+  static async verifyLicense(token: string): Promise<LicenseData> {
     if (!this.publicKey) {
       throw new Error('License generator not initialized. Call init() first.');
     }
 
     try {
-      const decoded = jwt.verify(token, this.publicKey, {
+      const publicKey = await importSPKI(this.publicKey, 'RS256');
+      const { payload } = await jwtVerify(token, publicKey, {
         algorithms: ['RS256'],
-      }) as LicenseData;
+      });
 
-      return decoded;
+      return payload as unknown as LicenseData;
     } catch (error: any) {
       throw new Error(`License verification failed: ${error.message}`);
     }

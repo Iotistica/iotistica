@@ -4,7 +4,7 @@
  * Enforces feature flags and usage limits
  */
 
-import jwt from 'jsonwebtoken';
+import { importSPKI, jwtVerify } from 'jose';
 import fs from 'fs';
 import { SystemConfigModel } from '../../db/models';
 import logger from '../../utils/logger';
@@ -180,9 +180,11 @@ export class LicenseValidator {
         throw new Error('LICENSE_PUBLIC_KEY must be in PEM format (-----BEGIN PUBLIC KEY-----)');
       }
 
-      const decoded = jwt.verify(licenseKey, LicenseValidator.PUBLIC_KEY, {
+      const publicKey = await importSPKI(LicenseValidator.PUBLIC_KEY, 'RS256');
+      const { payload } = await jwtVerify(licenseKey, publicKey, {
         algorithms: ['RS256'], // Asymmetric signing
-      }) as LicenseData;
+      });
+      const decoded = payload as unknown as LicenseData;
 
       // Normalize legacy tokens: if tenantId is missing, fall back to customerId.
       // New tokens must provide tenantId.

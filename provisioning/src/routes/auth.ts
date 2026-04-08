@@ -7,12 +7,13 @@
 import express, { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import axios from 'axios';
-import jwt, { Secret } from 'jsonwebtoken';
+import { decodeJwt } from 'jose';
 import crypto from 'crypto';
 import { CustomerModel } from '../db/customer-model';
 import { query } from '../db/connection';
 import { logger } from '../utils/logger';
 import { StripeService } from '../services/stripe-service';
+import { signHs256Token, verifyHs256Token } from '../utils/hs256-jwt';
 
 const router = express.Router();
 const SIGNUP_STATE_TTL_MS = 10 * 60 * 1000;
@@ -210,11 +211,7 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
     // Note: We should validate the ID token signature, but for now we trust Auth0 since we got it via backend channel
     let userInfo;
     try {
-      const parts = id_token.split('.');
-      if (parts.length !== 3) {
-        throw new Error('Invalid JWT format');
-      }
-      userInfo = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      userInfo = decodeJwt(id_token);
     } catch (error: any) {
       logger.error('[Auth0] Failed to parse ID token', { error: error.message });
       return res.status(401).json({
@@ -310,12 +307,11 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
     if (!jwtSecretEnv || jwtSecretEnv.trim().length === 0) {
       throw new Error('JWT_SECRET is required for federated token signing');
     }
-    const JWT_SECRET: Secret = jwtSecretEnv;
     const accessExpiry = process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m';
     const refreshExpiry = process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d';
 
     // Step 4: Generate JWT with real user/tenant claims
-    const accessToken = jwt.sign(
+    const accessToken = signHs256Token(
       {
         userId: membership.id,
         username: auth0Sub,
@@ -325,15 +321,15 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
         customerId: membership.customer_id,
         type: 'access'
       },
-      JWT_SECRET,
+      jwtSecretEnv,
       {
-        expiresIn: accessExpiry as any,
+        expiresIn: accessExpiry,
         issuer: 'iotistic-api',
-        audience: 'iotistic-dashboard'
+        audience: 'iotistic-dashboard',
       }
     );
 
-    const refreshToken = jwt.sign(
+    const refreshToken = signHs256Token(
       {
         userId: membership.id,
         username: auth0Sub,
@@ -343,11 +339,11 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
         customerId: membership.customer_id,
         type: 'refresh'
       },
-      JWT_SECRET,
+      jwtSecretEnv,
       {
-        expiresIn: refreshExpiry as any,
+        expiresIn: refreshExpiry,
         issuer: 'iotistic-api',
-        audience: 'iotistic-dashboard'
+        audience: 'iotistic-dashboard',
       }
     );
 
@@ -622,7 +618,7 @@ router.post('/direct-signup', async (req: Request, res: Response) => {
             });
           }
 
-          const directSignupToken = jwt.sign(
+          const directSignupToken = signHs256Token(
             {
               type: 'direct-signup',
               email,
@@ -1197,10 +1193,10 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
       }
 
       try {
-        const decoded = jwt.verify(directSignupToken, directSignupSecret, {
+        const decoded = verifyHs256Token<{ type?: string; email?: string; name?: string }>(directSignupToken, directSignupSecret, {
           issuer: 'iotistic-provisioning',
           audience: 'iotistic-signup',
-        }) as any;
+        });
 
         if (decoded?.type !== 'direct-signup' || !decoded?.email) {
           throw new Error('Invalid direct signup token payload');
@@ -1423,11 +1419,10 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
     if (!jwtSecretEnv || jwtSecretEnv.trim().length === 0) {
       throw new Error('JWT_SECRET is required for federated token signing');
     }
-    const JWT_SECRET: Secret = jwtSecretEnv;
     const accessExpiry = process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m';
     const refreshExpiry = process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d';
 
-    const accessToken = jwt.sign(
+    const accessToken = signHs256Token(
       {
         type: 'access',
         userId: null, // No user ID yet in customer instance
@@ -1438,15 +1433,15 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
         customerId: customerId,
         auth0Sub: auth0Sub,
       },
-      JWT_SECRET,
+      jwtSecretEnv,
       {
-        expiresIn: accessExpiry as any,
+        expiresIn: accessExpiry,
         issuer: 'iotistic-api',
-        audience: 'iotistic-dashboard'
+        audience: 'iotistic-dashboard',
       }
     );
 
-    const refreshToken = jwt.sign(
+    const refreshToken = signHs256Token(
       {
         type: 'refresh',
         userId: null,
@@ -1455,11 +1450,11 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
         customerId: customerId,
         auth0Sub: auth0Sub,
       },
-      JWT_SECRET,
+      jwtSecretEnv,
       {
-        expiresIn: refreshExpiry as any,
+        expiresIn: refreshExpiry,
         issuer: 'iotistic-api',
-        audience: 'iotistic-dashboard'
+        audience: 'iotistic-dashboard',
       }
     );
 
@@ -1521,13 +1516,11 @@ router.post('/create-bridge-token', async (req: Request, res: Response) => {
         error: 'Server configuration error',
       });
     }
-    const JWT_SECRET: Secret = jwtSecretEnv;
-
     let decoded: any;
     try {
-      decoded = jwt.verify(accessToken, JWT_SECRET, {
+      decoded = verifyHs256Token(accessToken, jwtSecretEnv, {
         audience: 'iotistic-dashboard',
-        algorithms: ['HS256'],
+        issuer: 'iotistic-api',
       });
     } catch (error: any) {
       logger.warn('[BridgeToken] JWT verification failed', {
@@ -1546,7 +1539,7 @@ router.post('/create-bridge-token', async (req: Request, res: Response) => {
       });
     }
 
-    const bridgeTokenPayload = jwt.sign(
+    const bridgeTokenPayload = signHs256Token(
       {
         userId,
         username,
@@ -1556,7 +1549,7 @@ router.post('/create-bridge-token', async (req: Request, res: Response) => {
         type: 'bridge',
         nonce: crypto.randomBytes(16).toString('hex'),
       },
-      JWT_SECRET,
+      jwtSecretEnv,
       {
         expiresIn: '5m',
         issuer: 'iotistic-provisioning',
@@ -1616,13 +1609,11 @@ router.post('/exchange-bridge-token', async (req: Request, res: Response) => {
         error: 'Server configuration error',
       });
     }
-    const JWT_SECRET: Secret = jwtSecretEnv;
-
     let decoded: any;
     try {
-      decoded = jwt.verify(bridgeToken, JWT_SECRET, {
+      decoded = verifyHs256Token(bridgeToken, jwtSecretEnv, {
         audience: 'nodered-iframe',
-        algorithms: ['HS256'],
+        issuer: 'iotistic-provisioning',
       });
     } catch (error: any) {
       logger.warn('[ExchangeBridgeToken] Bridge token verification failed', {
@@ -1647,7 +1638,7 @@ router.post('/exchange-bridge-token', async (req: Request, res: Response) => {
     const accessExpiry = process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m';
     const refreshExpiry = process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d';
 
-    const accessToken = jwt.sign(
+    const accessToken = signHs256Token(
       {
         userId,
         username,
@@ -1656,15 +1647,15 @@ router.post('/exchange-bridge-token', async (req: Request, res: Response) => {
         role,
         type: 'access',
       },
-      JWT_SECRET,
+      jwtSecretEnv,
       {
-        expiresIn: accessExpiry as any,
+        expiresIn: accessExpiry,
         issuer: 'iotistic-provisioning',
         audience: 'nodered',
       }
     );
 
-    const refreshToken = jwt.sign(
+    const refreshToken = signHs256Token(
       {
         userId,
         username,
@@ -1673,9 +1664,9 @@ router.post('/exchange-bridge-token', async (req: Request, res: Response) => {
         role,
         type: 'refresh',
       },
-      JWT_SECRET,
+      jwtSecretEnv,
       {
-        expiresIn: refreshExpiry as any,
+        expiresIn: refreshExpiry,
         issuer: 'iotistic-provisioning',
         audience: 'nodered',
       }
