@@ -29,7 +29,7 @@ export async function initializeMqttAdmin() {
   try {
     logger.info('Initializing MQTT admin user...');
     
-    // Hash password with bcrypt (same as K8s job did)
+    // Hash password with native scrypt
     const passwordHash = await hashPassword(password);
 
     // Create/update admin user (idempotent)
@@ -85,7 +85,7 @@ export async function initializeNodeRedMqttCredentials(): Promise<{ username: st
 
     if (existingUser.rows.length > 0) {
       logger.info(`Node-RED MQTT user '${username}' already exists, skipping creation`);
-      // Cannot retrieve existing password (bcrypt is one-way)
+      // Cannot retrieve existing password because the stored hash is one-way
       // This is expected - credentials should be set once and persisted in environment
       return null;
     }
@@ -93,7 +93,7 @@ export async function initializeNodeRedMqttCredentials(): Promise<{ username: st
     // Generate secure random password (32 chars, URL-safe)
     password = crypto.randomBytes(24).toString('base64url');
     
-    // Hash password with bcrypt
+    // Hash password with native scrypt
     const passwordHash = await hashPassword(password);
 
     // Create Node-RED MQTT user (superuser for full access)

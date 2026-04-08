@@ -1,9 +1,7 @@
 import crypto from 'crypto';
-import bcrypt from 'bcryptjs';
 
 const SCRYPT_PREFIX = 'scrypt';
 const HMAC_PREFIX = 'hmac-sha256';
-const LEGACY_BCRYPT_PATTERN = /^\$2[aby]\$/;
 const SCRYPT_N = parseInt(process.env.SCRYPT_N || '16384', 10);
 const SCRYPT_R = parseInt(process.env.SCRYPT_R || '8', 10);
 const SCRYPT_P = parseInt(process.env.SCRYPT_P || '1', 10);
@@ -34,10 +32,6 @@ function timingSafeHexEqual(left: string, right: string): boolean {
   }
 
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function isLegacyBcryptHash(value: string): boolean {
-  return LEGACY_BCRYPT_PATTERN.test(value);
 }
 
 function scryptAsync(secret: string, salt: Buffer): Promise<Buffer> {
@@ -113,14 +107,6 @@ export async function verifyPassword(password: string, storedHash: string): Prom
     };
   }
 
-  if (isLegacyBcryptHash(storedHash)) {
-    const valid = await bcrypt.compare(password, storedHash);
-    return {
-      valid,
-      upgradedHash: valid ? await hashPassword(password) : undefined,
-    };
-  }
-
   return { valid: false };
 }
 
@@ -161,14 +147,6 @@ export async function verifyMachineSecret(
 
     const expectedDigest = hashMachineSecretDigest(secret, purpose);
     return { valid: timingSafeHexEqual(expectedDigest, digest) };
-  }
-
-  if (isLegacyBcryptHash(storedHash)) {
-    const valid = await bcrypt.compare(secret, storedHash);
-    return {
-      valid,
-      upgradedHash: valid ? hashMachineSecret(secret, purpose) : undefined,
-    };
   }
 
   return { valid: false };

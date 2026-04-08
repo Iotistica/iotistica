@@ -9,11 +9,13 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import swagger from '@fastify/swagger';
-import swaggerUi from '@fastify/swagger-ui';
+import { createRequire } from 'node:module';
 import { openApiSpec } from './openapi';
 import { paths } from './routes';
 import logger from '../utils/logger';
+
+const runtimeRequire = createRequire(__filename);
+let hasWarnedAboutMissingDocsDependencies = false;
 
 // Merge paths into spec
 const completeSpec = {
@@ -21,17 +23,53 @@ const completeSpec = {
   paths
 };
 
+function areApiDocsDependenciesAvailable(): boolean {
+  try {
+    runtimeRequire.resolve('@fastify/swagger');
+    runtimeRequire.resolve('@fastify/swagger-ui');
+    return true;
+  } catch (error) {
+    if (!hasWarnedAboutMissingDocsDependencies) {
+      hasWarnedAboutMissingDocsDependencies = true;
+      logger.warn('API documentation requested but Swagger dependencies are unavailable; disabling docs at runtime', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return false;
+  }
+}
+
 export function areApiDocsEnabled(): boolean {
-  if (process.env.API_DOCS_ENABLED !== undefined) {
-    return process.env.API_DOCS_ENABLED === 'true';
+  const docsEnabledByConfig = process.env.API_DOCS_ENABLED !== undefined
+    ? process.env.API_DOCS_ENABLED === 'true'
+    : process.env.NODE_ENV !== 'production';
+
+  if (!docsEnabledByConfig) {
+    return false;
   }
 
-  return process.env.NODE_ENV !== 'production';
+  return areApiDocsDependenciesAvailable();
 }
 
 export async function setupApiDocs(fastify: FastifyInstance, basePath: string = '/api/v1'): Promise<void> {
   if (!areApiDocsEnabled()) {
     logger.info('API documentation disabled');
+    return;
+  }
+
+  let swagger: typeof import('@fastify/swagger').default;
+  let swaggerUi: typeof import('@fastify/swagger-ui').default;
+
+  try {
+    [{ default: swagger }, { default: swaggerUi }] = await Promise.all([
+      import('@fastify/swagger'),
+      import('@fastify/swagger-ui'),
+    ]);
+  } catch (error) {
+    logger.warn('Failed to load Swagger modules at runtime; API documentation will remain disabled', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return;
   }
 

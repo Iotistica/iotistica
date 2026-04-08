@@ -1,14 +1,14 @@
 {
-  "name": "iotistic-api",
+  "name": "iotistica-api",
   "version": "0.0.4",
-  "description": "Unified Iotistic API - combines Grafana control, Docker management, and cloud multi-device management",
+  "description": "Iotistica API - cloud multi-device management and high-perfomance ingestion api",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc --incremental --tsBuildInfoFile .tsbuildinfo",
     "watch": "tsc --watch",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "clean": "rimraf dist"
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "keywords": [
     "iot",
@@ -21,10 +21,7 @@
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
-    "@fastify/swagger": "^9.7.0",
-    "@fastify/swagger-ui": "^5.2.5",
     "@kubernetes/client-node": "^1.4.0",
-    "bcryptjs": "^3.0.2",
     "fastify": "^5.8.4",
     "ioredis": "^5.3.2",
     "jose": "^6.2.2",
@@ -41,7 +38,8 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
+    "@fastify/swagger": "^9.7.0",
+    "@fastify/swagger-ui": "^5.2.5",
     "@types/cron": "^2.4.3",
     "@types/is-utf8": "^0.2.3",
     "@types/node": "^20.19.22",

@@ -9,6 +9,7 @@ import fastifyHelmet from '@fastify/helmet';
 import fastifyCors from '@fastify/cors';
 import logger from '../utils/logger';
 import { createCorsOptions } from './cors';
+import { areApiDocsEnabled } from '../docs';
 
 const RUNNING_IN_K8S = process.env.KUBERNETES_SERVICE_HOST !== undefined;
 
@@ -17,13 +18,15 @@ export async function applySecurity(fastify: FastifyInstance): Promise<void> {
     logger.info('[OK] Trust proxy enabled (configured in Fastify factory options)');
   }
 
+  const apiDocsEnabled = areApiDocsEnabled();
+
   // SECURITY: Helmet - sets secure HTTP headers
   await fastify.register(fastifyHelmet, {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"], // Allow inline scripts for Swagger UI
-        styleSrc: ["'self'", "'unsafe-inline'"],  // Allow inline styles for Swagger UI
+        scriptSrc: apiDocsEnabled ? ["'self'", "'unsafe-inline'"] : ["'self'"],
+        styleSrc: apiDocsEnabled ? ["'self'", "'unsafe-inline'"] : ["'self'"],
         imgSrc: ["'self'", 'data:', 'https:'],
         connectSrc: ["'self'", 'ws:', 'wss:'],    // Allow WebSocket connections
         frameSrc: ["'none'"],                      // Prevent clickjacking
@@ -48,6 +51,10 @@ export async function applySecurity(fastify: FastifyInstance): Promise<void> {
     hidePoweredBy: true,
     xssFilter: true,
   });
+
+  if (!apiDocsEnabled) {
+    logger.info('Swagger UI disabled; strict CSP applied without inline script/style allowances');
+  }
 
   // CORS - see server/cors.ts
   await fastify.register(fastifyCors, createCorsOptions());
