@@ -88,6 +88,7 @@ export class RedisDeviceQueue {
   private readonly lagScaleDownStableChecks: number;
   private readonly scaleCooldownMs: number;
   private readonly dbScaleUpBlockSaturationPct: number;
+  private readonly idleTrimStreamLength: number;
   private readonly redisStreamHighWatermarkPct: number;
   private readonly redisMemoryHighWatermarkPct: number;
 
@@ -121,6 +122,13 @@ export class RedisDeviceQueue {
     this.batchSize = readIntEnv('DEVICE_BATCH_SIZE', '100');
     this.blockTimeMs = readIntEnv('DEVICE_FLUSH_INTERVAL_MS', '2000');
     this.maxStreamLength = parseInt(process.env.REDIS_INGESTION_STREAM_MAXLEN || '10000', 10);
+    this.idleTrimStreamLength = Math.max(
+      0,
+      Math.min(
+        this.maxStreamLength,
+        parseInt(process.env.REDIS_IDLE_INGESTION_STREAM_MAXLEN || String(this.maxStreamLength), 10),
+      ),
+    );
     this.maxDlqLength = parseInt(process.env.REDIS_DLQ_MAXLEN || '1000', 10);
     this.minWorkers = readIntEnv('DEVICE_AUTOSCALE_MIN_WORKERS', '1');
     this.maxWorkers = readIntEnv('DEVICE_AUTOSCALE_MAX_WORKERS', '20');
@@ -344,15 +352,21 @@ export class RedisDeviceQueue {
         } catch { /* XINFO GROUPS unsupported or stream absent — keep XLEN fallback */ }
         metrics.workerLag = consumerGroupLag;
 
-        // Auto-trim: if the stream has grown beyond maxStreamLength (e.g. a load
-        // test injected directly into Redis bypassing the producer's MAXLEN) and
-        // all work is done, trim it back so pressure checks don't false-alarm.
-        if (streamLen > this.maxStreamLength && consumerGroupLag === 0 && pendingCount === 0) {
-          await this.redisConsumer.xtrim(this.streamKey, 'MAXLEN', String(this.maxStreamLength)).catch(() => {});
-          metrics.streamLength = this.maxStreamLength;
-          logger.info('Trimmed oversized ingestion stream back to configured maxlen', {
+        // Auto-trim: when the queue is fully drained, keep only a small retained tail
+        // in Redis so acknowledged stream history does not pin memory after overload.
+        // If the stream grew beyond the producer cap, trim it back to that cap first.
+        const streamFullyDrained = consumerGroupLag === 0 && pendingCount === 0;
+        const trimTarget = streamFullyDrained
+          ? Math.min(this.maxStreamLength, Math.max(0, this.idleTrimStreamLength))
+          : this.maxStreamLength;
+        if (streamFullyDrained && streamLen > trimTarget) {
+          await this.redisConsumer.xtrim(this.streamKey, 'MAXLEN', String(trimTarget)).catch(() => {});
+          metrics.streamLength = trimTarget;
+          logger.info('Trimmed drained ingestion stream to retention target', {
             from: streamLen,
-            to: this.maxStreamLength,
+            to: trimTarget,
+            maxStreamLength: this.maxStreamLength,
+            idleTrimStreamLength: this.idleTrimStreamLength,
           });
         }
 
