@@ -106,22 +106,41 @@ function normalizeRawBody(body: RawLogBody): Buffer {
   return Buffer.from(JSON.stringify(body));
 }
 
-function resolveContentEncoding(body: RawLogBody, headerValue: string | undefined): string {
+function hasGzipHeader(buffer: Buffer): boolean {
+  return buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b;
+}
+
+function hasZlibHeader(buffer: Buffer): boolean {
+  if (buffer.length < 2) {
+    return false;
+  }
+
+  const cmf = buffer[0];
+  const flg = buffer[1];
+  return (cmf & 0x0f) === 0x08 && ((cmf << 8) + flg) % 31 === 0;
+}
+
+function resolveContentEncoding(body: Buffer, headerValue: string | undefined): string {
   if (!headerValue) {
     return 'identity';
   }
 
-  // Brotli is already decompressed by Fastify middleware before route parsing.
-  if (headerValue === 'br') {
+  const normalizedHeader = headerValue.toLowerCase();
+
+  if (normalizedHeader === 'gzip') {
+    return hasGzipHeader(body) ? 'gzip' : 'identity';
+  }
+
+  if (normalizedHeader === 'deflate') {
+    return hasZlibHeader(body) ? 'deflate' : 'identity';
+  }
+
+  // Fastify hands route handlers decompressed Brotli payloads in the current setup.
+  if (normalizedHeader === 'br') {
     return 'identity';
   }
 
-  // If the body is no longer raw bytes, treat it as already decoded.
-  if (!Buffer.isBuffer(body)) {
-    return 'identity';
-  }
-
-  return headerValue;
+  return normalizedHeader;
 }
 
 async function checkBatchIdempotency(deviceUuid: string, batchId: string): Promise<boolean> {
@@ -205,10 +224,10 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      const contentEncodingHeader = getSingleHeaderValue(req.headers['content-encoding']);
-      const finalEncoding = resolveContentEncoding(req.body, contentEncodingHeader);
       const contentType = getSingleHeaderValue(req.headers['content-type']) || 'application/x-ndjson';
       const finalPayload = normalizeRawBody(req.body);
+      const contentEncodingHeader = getSingleHeaderValue(req.headers['content-encoding']);
+      const finalEncoding = resolveContentEncoding(finalPayload, contentEncodingHeader);
 
       logger.info('Queueing log payload', {
         uuid: uuid.substring(0, 8),
