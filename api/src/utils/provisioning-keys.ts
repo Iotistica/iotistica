@@ -34,6 +34,22 @@ export interface ProvisioningKeyValidationResult {
   error?: string;
 }
 
+async function verifyLegacyProvisioningKeyWithPgcrypto(key: string, storedHash: string): Promise<boolean> {
+  if (!storedHash || storedHash.startsWith('hmac-sha256$')) {
+    return false;
+  }
+
+  try {
+    const result = await query<{ valid: boolean }>(
+      'SELECT crypt($1, $2) = $2 AS valid',
+      [key, storedHash],
+    );
+    return result.rows[0]?.valid === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Validate a provisioning key against the database
  * Optimized with SHA-256 fast hash for O(1) lookup (300ms) vs O(N) bcrypt (N*300ms)
@@ -69,26 +85,33 @@ export async function validateProvisioningKey(
     // Verify with bcrypt (only 1 comparison now instead of N)
     const record = result.rows[0];
     const verification = await verifyMachineSecret(key, record.key_hash, 'provisioning-key');
-    
-    if (!verification.valid) {
-      // SHA-256 collision or tampered key - extremely rare
-      await logAuditEvent({
-        eventType: AuditEventType.PROVISIONING_KEY_INVALID,
-        ipAddress,
-        severity: AuditSeverity.WARNING,
-        details: { reason: 'Bcrypt verification failed after fast hash match' }
-      });
-      return { valid: false, error: 'Invalid provisioning key' };
+    let upgradedHash = verification.upgradedHash;
+    let isValid = verification.valid;
+
+    if (!isValid) {
+      const legacyValid = await verifyLegacyProvisioningKeyWithPgcrypto(key, record.key_hash);
+      if (!legacyValid) {
+        await logAuditEvent({
+          eventType: AuditEventType.PROVISIONING_KEY_INVALID,
+          ipAddress,
+          severity: AuditSeverity.WARNING,
+          details: { reason: 'Provisioning key verification failed after fast hash match' }
+        });
+        return { valid: false, error: 'Invalid provisioning key' };
+      }
+
+      isValid = true;
+      upgradedHash = hashMachineSecret(key, 'provisioning-key');
     }
 
-    if (verification.upgradedHash || record.key_hash_fast !== fastHash) {
+    if (upgradedHash || record.key_hash_fast !== fastHash) {
       await query(
         `UPDATE provisioning_keys
          SET key_hash = $1, key_hash_fast = $2
          WHERE id = $3`,
-        [verification.upgradedHash ?? record.key_hash, fastHash, record.id],
+        [upgradedHash ?? record.key_hash, fastHash, record.id],
       );
-      record.key_hash = verification.upgradedHash ?? record.key_hash;
+      record.key_hash = upgradedHash ?? record.key_hash;
       record.key_hash_fast = fastHash;
     }
 

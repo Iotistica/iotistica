@@ -14,7 +14,7 @@
 .PARAMETER ApiUrl
     API base URL for provisioning key generation (default: https://api:3663)
 .PARAMETER EnvironmentProfile
-    Environment preset for API and database settings. Use auto to prompt for Docker or cloud K8s.
+    Environment preset for API and database settings. Use auto to prompt for Docker or cloud.
 .PARAMETER FleetId
     Fleet ID for provisioning keys (default: default-fleet)
 .PARAMETER Cleanup
@@ -42,7 +42,7 @@ param(
     [int]$Count = 1,
     [int]$StartIndex = 1,
     [string]$OutputFile = "docker-compose.agents.yml",
-    [ValidateSet('auto', 'docker', 'cloud-k8s')]
+    [ValidateSet('auto', 'docker', 'cloud', 'local-docker', 'cloud-k8s')]
     [string]$EnvironmentProfile = 'auto',
     [string]$ApiUrl = "https://demo-api.iotistica.com/",
     #[string]$ApiUrl = "https://localhost:3443",
@@ -169,7 +169,7 @@ $ProfileDefaults = @{
         DatabaseUrl = ''
         IOTISTICA_API = 'http://host.docker.internal:4002'
     }
-    'cloud-k8s' = @{
+    'cloud' = @{
         ApiUrl = 'https://demo-api.iotistica.com/'
         UseDirectDb = $true
         DbHost = '20.220.137.172'
@@ -189,16 +189,20 @@ function Resolve-EnvironmentProfile {
     )
 
     if ($RequestedProfile -ne 'auto') {
-        return $RequestedProfile
+        switch ($RequestedProfile) {
+            'local-docker' { return 'docker' }
+            'cloud-k8s' { return 'cloud' }
+            default { return $RequestedProfile }
+        }
     }
 
     if (-not [Environment]::UserInteractive) {
-        return 'cloud-k8s'
+        return 'cloud'
     }
 
     Write-Host "`nEnvironment profile:" -ForegroundColor Cyan
     Write-Host "  1) docker       (local API + local Postgres)" -ForegroundColor Gray
-    Write-Host "  2) cloud-k8s     (cloud API + cloud Postgres)" -ForegroundColor Gray
+    Write-Host "  2) cloud        (cloud API + cloud Postgres)" -ForegroundColor Gray
 
     $selection = (Read-Host -Prompt 'Select environment profile [1/2] (default: 2)').Trim()
 
@@ -207,13 +211,13 @@ function Resolve-EnvironmentProfile {
         'local' { return 'docker' }
         'docker' { return 'docker' }
         'local-docker' { return 'docker' }
-        '2' { return 'cloud-k8s' }
-        'cloud' { return 'cloud-k8s' }
-        'cloud-k8s' { return 'cloud-k8s' }
-        '' { return 'cloud-k8s' }
+        '2' { return 'cloud' }
+        'cloud' { return 'cloud' }
+        'cloud-k8s' { return 'cloud' }
+        '' { return 'cloud' }
         default {
-            Write-Host "Unrecognized selection '$selection'. Defaulting to cloud-k8s." -ForegroundColor Yellow
-            return 'cloud-k8s'
+            Write-Host "Unrecognized selection '$selection'. Defaulting to cloud." -ForegroundColor Yellow
+            return 'cloud'
         }
     }
 }
@@ -264,6 +268,28 @@ function Resolve-AgentApiEndpoint {
     }
 
     return $ConfiguredEndpoint
+}
+
+function Get-AgentContainerPrefix {
+    param(
+        [string]$ProfileName
+    )
+
+    switch ($ProfileName) {
+        'docker' { return 'local' }
+        'cloud' { return 'cloud' }
+        default { return $ProfileName }
+    }
+}
+
+function Get-AgentContainerName {
+    param(
+        [int]$Index,
+        [string]$ProfileName
+    )
+
+    $prefix = Get-AgentContainerPrefix -ProfileName $ProfileName
+    return "$prefix-agent-$Index"
 }
 
 function Get-NextAvailableAgentIndex {
@@ -500,8 +526,10 @@ function Remove-AgentResources {
     }
     
     for ($i = $StartIndex; $i -le $endIndex; $i++) {
-        # Agent container
+        # Agent containers: remove both legacy and prefixed names for compatibility
         $containerNames += "agent-$i"
+        $containerNames += (Get-AgentContainerName -Index $i -ProfileName 'docker')
+        $containerNames += (Get-AgentContainerName -Index $i -ProfileName 'cloud')
         
         # Agent data volume (match exact and prefixed compose names)
         $baseVolumeName = "agent-$i-data"
@@ -519,6 +547,8 @@ function Remove-AgentResources {
         $imageName = "zemfyre-sensor-agent-{0}:latest" -f $i
         $imageNames += $imageName
     }
+
+    $containerNames = $containerNames | Sort-Object -Unique
     
     # Stop and remove containers
     Write-Host "`n🛑 Stopping containers..." -ForegroundColor Cyan
@@ -663,9 +693,44 @@ ALTER TABLE provisioning_keys ADD COLUMN IF NOT EXISTS fleet_uuid UUID;
         $escapedCreatedBy = "script" -replace "'", "''"
         $escapedFleetUuid = $FleetUuid -replace "'", "''"
 
+        $digestPepper = $env:SECRET_DIGEST_PEPPER
+        if ([string]::IsNullOrWhiteSpace($digestPepper)) {
+            $digestPepper = $env:JWT_SECRET
+        }
+        if ([string]::IsNullOrWhiteSpace($digestPepper) -and (Test-Path '.env')) {
+            $envLines = Get-Content '.env'
+            foreach ($line in $envLines) {
+                if ($line -match '^\s*#') {
+                    continue
+                }
+                if ($line -match '^\s*SECRET_DIGEST_PEPPER\s*=\s*(.*)$') {
+                    $digestPepper = $matches[1].Trim().Trim('"')
+                    break
+                }
+                if ([string]::IsNullOrWhiteSpace($digestPepper) -and $line -match '^\s*JWT_SECRET\s*=\s*(.*)$') {
+                    $digestPepper = $matches[1].Trim().Trim('"')
+                }
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($digestPepper)) {
+            $digestPepper = 'iotistic-dev-secret-digest-pepper'
+        }
+
+        $hmac = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($digestPepper))
+        try {
+            $digestBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes("provisioning-key:$key"))
+        }
+        finally {
+            $hmac.Dispose()
+        }
+        $keyHashFast = ([System.BitConverter]::ToString($digestBytes)).Replace('-', '').ToLowerInvariant()
+        $keyHash = "hmac-sha256`$provisioning-key`$$keyHashFast"
+        $escapedKeyHash = $keyHash -replace "'", "''"
+        $escapedKeyHashFast = $keyHashFast -replace "'", "''"
+
         $columns = @('key_hash', 'description', 'max_agents', 'expires_at', 'created_by')
         $values = @(
-            "crypt('$escapedKey', gen_salt('bf', 10))",
+            "'$escapedKeyHash'",
             "'$escapedDescription'",
             "1",
             "NOW() + (30 || ' days')::interval",
@@ -674,7 +739,7 @@ ALTER TABLE provisioning_keys ADD COLUMN IF NOT EXISTS fleet_uuid UUID;
 
         if ($hasKeyHashFast -match '1') {
             $columns += 'key_hash_fast'
-            $values += "encode(digest('$escapedKey','sha256'),'hex')"
+            $values += "'$escapedKeyHashFast'"
         }
         if ($hasFleetUuid -match '1') {
             $columns += 'fleet_uuid'
@@ -1102,6 +1167,7 @@ $provisioningKeys = @()
 
 for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $agentName = "agent-$i"
+    $containerName = Get-AgentContainerName -Index $i -ProfileName $ResolvedEnvironmentProfile
     $port = Get-UniquePort $i
     
     if ([string]::IsNullOrWhiteSpace($manualProvisioningKey)) {
@@ -1136,75 +1202,78 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $cloudApiEndpoint = Resolve-AgentApiEndpoint -ProfileName $ResolvedEnvironmentProfile -UseHostNetwork $UseHostNetwork -ConfiguredEndpoint $IOTISTICA_API
     
     # Build configuration: use build context if -BuildFromSource, otherwise use image
-    $buildOrImage = if ($BuildFromSource) {
-        @"
-    build:
-      context: .
-      dockerfile: agent/Dockerfile
-"@
+    $buildOrImageLines = if ($BuildFromSource) {
+        @(
+            '    build:',
+            '      context: .',
+            '      dockerfile: agent/Dockerfile'
+        )
     } else {
-        "    image: iotistic/agent:latest"
+        @('    image: iotistic/agent:latest')
     }
     
     # Network configuration: host mode for discovery or bridge for isolation
-    $networkConfig = if ($UseHostNetwork) {
-        @"
-    network_mode: host
-"@
+    $networkConfigLines = if ($UseHostNetwork) {
+        @('    network_mode: host')
     } else {
-        @"
-    networks:
-      - iotistic-net
-"@
+        @(
+            '    networks:',
+            '      - iotistic-net'
+        )
     }
 
     $agentShellHmacKeyEnv = '${AGENT_SHELL_HMAC_KEY}'
     
-    # Service definition
-    $service = @"
-  $agentName`:
-    container_name: $agentName
-$buildOrImage
-    restart: always
-    mem_limit: $MemLimit
-    mem_reservation: $MemReservation
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-$networkConfig
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - $volumeName`:/app/data
-      - ./certs/ca.crt:/app/certs/ca.crt:ro
-      - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth
-    environment:
-      - DEVICE_API_PORT=$port
-      - IOTISTICA_API=$cloudApiEndpoint
-      - NODE_ENV=$NodeEnv
-      - MQTT_AUTH_DIR=/app/data/mosquitto-auth
-      - MQTT_BROKER_URL=$MqttBrokerUrl
-      - MQTT_USERNAME=$MqttUsername
-      - MQTT_PASSWORD=$MqttPassword
-      # Bootstrap & Security (not dashboard-controlled)
-      - REQUIRE_PROVISIONING=$RequireProvisioning
-      - PROVISIONING_KEY=$apiKey
-      - API_SECURITY_MODE=$ApiSecurityMode
-      - FIREWALL_ENABLED=$FirewallEnabled
-      # Testing & Development (not dashboard-controlled)
-      - SIMULATION_MODE=$($simConfig.enabled)
-      - SIMULATION_PROFILE=$($simConfig.name)
-      - SIMULATION_CONFIG='$($simConfig.config)'
-      - USE_MSGPACK_POC=$UseMsgpackPoc
-      - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc
-      - USE_DEFLATE_COMPRESSION=$UseDeflateCompression
-      - ENABLE_HEAP_PROFILING=$EnableHeapProfiling
-      - PIPELINE_FLOWS_FILE=$PipelineFlowsFile
-      # Shell security (HMAC signature verification)
-      - AGENT_SHELL_HMAC_KEY=$agentShellHmacKeyEnv
-      - AGENT_SHELL_MAX_SESSION_MS=3600000
-"@
+        # Service definition
+        $serviceLines = @(
+                "  ${agentName}:",
+                "    container_name: $containerName"
+        )
+        $serviceLines += $buildOrImageLines
+        $serviceLines += @(
+                '    restart: always',
+                "    mem_limit: $MemLimit",
+                "    mem_reservation: $MemReservation",
+                '    cap_add:',
+                '      - NET_ADMIN',
+                '      - SYS_MODULE',
+                '    devices:',
+                '      - /dev/net/tun:/dev/net/tun'
+        )
+        $serviceLines += $networkConfigLines
+        $serviceLines += @(
+                '    volumes:',
+                '      - /var/run/docker.sock:/var/run/docker.sock',
+                "      - ${volumeName}:/app/data",
+                '      - ./certs/ca.crt:/app/certs/ca.crt:ro',
+                '      - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth',
+                '    environment:',
+                "      - DEVICE_API_PORT=$port",
+                "      - IOTISTICA_API=$cloudApiEndpoint",
+                "      - NODE_ENV=$NodeEnv",
+                '      - MQTT_AUTH_DIR=/app/data/mosquitto-auth',
+                "      - MQTT_BROKER_URL=$MqttBrokerUrl",
+                "      - MQTT_USERNAME=$MqttUsername",
+                "      - MQTT_PASSWORD=$MqttPassword",
+                '      # Bootstrap & Security (not dashboard-controlled)',
+                "      - REQUIRE_PROVISIONING=$RequireProvisioning",
+                "      - PROVISIONING_KEY=$apiKey",
+                "      - API_SECURITY_MODE=$ApiSecurityMode",
+                "      - FIREWALL_ENABLED=$FirewallEnabled",
+                '      # Testing & Development (not dashboard-controlled)',
+                "      - SIMULATION_MODE=$($simConfig.enabled)",
+                "      - SIMULATION_PROFILE=$($simConfig.name)",
+                "      - SIMULATION_CONFIG='$($simConfig.config)'",
+                "      - USE_MSGPACK_POC=$UseMsgpackPoc",
+                "      - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc",
+                "      - USE_DEFLATE_COMPRESSION=$UseDeflateCompression",
+                "      - ENABLE_HEAP_PROFILING=$EnableHeapProfiling",
+                "      - PIPELINE_FLOWS_FILE=$PipelineFlowsFile",
+                '      # Shell security (HMAC signature verification)',
+                "      - AGENT_SHELL_HMAC_KEY=$agentShellHmacKeyEnv",
+                '      - AGENT_SHELL_MAX_SESSION_MS=3600000'
+        )
+        $service = [string]::Join("`n", $serviceLines)
     
     $services += $service
     $volumes += "  $volumeName`:"

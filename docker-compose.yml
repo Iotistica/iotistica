@@ -22,7 +22,7 @@ services:
         container_name: iotistic-postgres
         restart: unless-stopped
         environment:
-            - POSTGRES_DB=${POSTGRES_DB:-iotistic}
+            - POSTGRES_DB=${POSTGRES_DB:-iotistica}
             - POSTGRES_USER=${POSTGRES_USER:-postgres}
             - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
         ports:
@@ -103,7 +103,7 @@ services:
             # TigerData Cloud TimescaleDB Configuration
             - DB_HOST=${DB_HOST:-bg4k3yxway.pcwz234dvp.tsdb.cloud.timescale.com}
             - DB_PORT=${DB_PORT:-30692}
-            - DB_NAME=${DB_NAME:-tsdb}
+            - DB_NAME=${POSTGRES_DB:-iotistica}
             - DB_USER=${DB_USER:-tsdbadmin}
             - DB_PASSWORD=${DB_PASSWORD:-w2qm8tm693xd3b9v}
             - DB_POOL_SIZE=${DB_POOL_SIZE:-20}

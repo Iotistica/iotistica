@@ -67,6 +67,30 @@ function daysBetween(laterDate: Date, earlierDate: Date): number {
   return Math.ceil((laterDate.getTime() - earlierDate.getTime()) / MS_PER_DAY);
 }
 
+function shouldUseDevelopmentLicense(): boolean {
+  return process.env.NODE_ENV !== 'production';
+}
+
+function applyDevelopmentLicenseProfile(decoded: LicenseData): void {
+  const developmentMaxDevices = 1000;
+  const originalMaxDevices = decoded.features.maxDevices;
+
+  if (decoded.features.maxDevices < developmentMaxDevices) {
+    decoded.features.maxDevices = developmentMaxDevices;
+  }
+
+  if (!decoded.customerName.includes('(Development)')) {
+    decoded.customerName = `${decoded.customerName} (Development)`;
+  }
+
+  logger.info('Applied development license profile', {
+    originalPlan: decoded.plan,
+    originalMaxDevices,
+    effectiveMaxDevices: decoded.features.maxDevices,
+    nodeEnv: process.env.NODE_ENV,
+  });
+}
+
 export class LicenseValidator {
   private static instance: LicenseValidator;
   private licenseData: LicenseData | null = null;
@@ -212,6 +236,10 @@ export class LicenseValidator {
       // Check subscription status
       if (decoded.subscription.status === 'canceled') {
         throw new Error('Subscription has been canceled');
+      }
+
+      if (shouldUseDevelopmentLicense()) {
+        applyDevelopmentLicenseProfile(decoded);
       }
 
       return decoded;
