@@ -151,7 +151,7 @@ jobs:
             --set fleet.replicaCount=5 \
             --set fleet.cloudApiEndpoint=https://api1.iotistica.com:443 \
             --set fleet.fleetId=test-fleet \
-            --set agent.env.MQTT_BROKER_URL=mqtt://mqtt1.iotistica.com:1883 \
+            --set agent.env.MQTT_BROKER_URL=mqtts://demo-mqtt.iotistica.com:8883 \
             --set agent.env.ENABLE_SENSOR_PUBLISH=true \
             --set agent.env.ANOMALY_DETECTION_ENABLED=false > /tmp/rendered.yaml
           
@@ -259,7 +259,7 @@ jobs:
             --set opcuaSimulator.count="$OPCUA_COUNT" \
             --set opcuaSimulator.enabled="$OPCUA_ENABLED" \
             --set sensorSimulator.enabled="$SENSOR_ENABLED" \
-            --set agent.env.MQTT_BROKER_URL=mqtt://mqtt1.iotistica.com:1883 \
+            --set agent.env.MQTT_BROKER_URL=mqtts://demo-mqtt.iotistica.com:8883 \
             --set agent.env.POLL_INTERVAL_MS=300000 \
             --set agent.env.REPORT_INTERVAL_MS=300000 \
             --set agent.env.METRICS_INTERVAL_MS=600000 \

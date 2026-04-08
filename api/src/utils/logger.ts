@@ -322,7 +322,7 @@ function wrapLogger(loggerInstance: PinoLogger): AppLogger {
 function createStreams() {
   const configuredLevel = getConfiguredLevel();
   const streams: Array<{ stream: LogStream; level?: string }> = [{
-    stream: isKubernetes ? process.stdout : createPrettyConsoleStream(),
+    stream: createPrettyConsoleStream(),
     level: configuredLevel
   }];
 
