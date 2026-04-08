@@ -44,6 +44,7 @@ interface NormalizedLogArgs {
 }
 
 type LogStream = ReturnType<typeof destination> | NodeJS.WriteStream | Writable;
+type PinoLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 const PINO_LEVEL_LABELS: Record<number, string> = {
   10: 'trace',
@@ -53,6 +54,33 @@ const PINO_LEVEL_LABELS: Record<number, string> = {
   50: 'error',
   60: 'fatal'
 };
+
+const ANSI_RESET = '\u001b[0m';
+
+const LEVEL_COLORS: Partial<Record<string, string>> = {
+  trace: '\u001b[90m',
+  debug: '\u001b[34m',
+  info: '\u001b[32m',
+  warn: '\u001b[33m',
+  error: '\u001b[31m',
+  fatal: '\u001b[31m'
+};
+
+function getConfiguredLevel(): PinoLevel {
+  const configuredLevel = (process.env.LOG_LEVEL || 'info').toLowerCase();
+
+  switch (configuredLevel) {
+    case 'trace':
+    case 'debug':
+    case 'info':
+    case 'warn':
+    case 'error':
+    case 'fatal':
+      return configuredLevel;
+    default:
+      return 'info';
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -146,6 +174,19 @@ function getLevelLabel(level?: number): string {
   return PINO_LEVEL_LABELS[level] ?? String(level);
 }
 
+function colorizeLevel(level: string): string {
+  if (!process.stdout.isTTY) {
+    return level;
+  }
+
+  const color = LEVEL_COLORS[level];
+  if (!color) {
+    return level;
+  }
+
+  return `${color}${level}${ANSI_RESET}`;
+}
+
 function formatConsoleMeta(record: ConsoleLogRecord): string {
   const {
     level,
@@ -169,12 +210,13 @@ function formatConsoleMeta(record: ConsoleLogRecord): string {
 function formatConsoleLine(record: ConsoleLogRecord): string {
   const timestamp = getDisplayTime(record.time);
   const level = getLevelLabel(record.level);
+  const displayLevel = colorizeLevel(level);
   const operationPrefix = record.operation
     ? `[${String(record.operation)}]${record.step ? ` ${String(record.step)} ->` : ''} `
     : '';
   const message = record.msg ?? '';
 
-  return `${timestamp} [${level}]: ${operationPrefix}${message}${formatConsoleMeta(record)}`;
+  return `${timestamp} [${displayLevel}]: ${operationPrefix}${message}${formatConsoleMeta(record)}`;
 }
 
 function createPrettyConsoleStream(): Writable {
@@ -278,13 +320,15 @@ function wrapLogger(loggerInstance: PinoLogger): AppLogger {
 }
 
 function createStreams() {
+  const configuredLevel = getConfiguredLevel();
   const streams: Array<{ stream: LogStream; level?: string }> = [{
-    stream: isKubernetes ? process.stdout : createPrettyConsoleStream()
+    stream: isKubernetes ? process.stdout : createPrettyConsoleStream(),
+    level: configuredLevel
   }];
 
   if (!isKubernetes) {
     fs.mkdirSync(path.join(process.cwd(), 'logs'), { recursive: true });
-    streams.push({ stream: destination(path.join('logs', 'combined.log')) });
+    streams.push({ stream: destination(path.join('logs', 'combined.log')), level: configuredLevel });
     streams.push({ stream: destination(path.join('logs', 'error.log')), level: 'error' });
   }
 
@@ -301,7 +345,7 @@ const isKubernetes = !!process.env.KUBERNETES_SERVICE_HOST;
 
 const rootLogger = pino(
   {
-    level: process.env.LOG_LEVEL || 'info',
+    level: getConfiguredLevel(),
     timestamp: pino.stdTimeFunctions.isoTime,
     base: {
       service: 'iotistic-api'
