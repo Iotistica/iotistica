@@ -1028,4 +1028,20 @@ export class SystemConfigModel {
       return acc;
     }, {} as Record<string, any>);
   }
+
+  static async getByPattern<T = any>(pattern: string): Promise<Array<{ key: string; value: T }>> {
+    const result = await query<{ key: string; value: T }>(
+      'SELECT key, value FROM system_config WHERE key LIKE $1',
+      [pattern]
+    );
+    return result.rows;
+  }
+
+  static async has(key: string): Promise<boolean> {
+    const result = await query(
+      'SELECT 1 FROM system_config WHERE key = $1',
+      [key]
+    );
+    return result.rows.length > 0;
+  }
 }

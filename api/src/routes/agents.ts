@@ -25,7 +25,7 @@ import {
 } from '../utils/audit-logger';
 import { EventPublisher } from '../services/event-sourcing';
 import logger from '../utils/logger';
-import { SystemConfig } from '../config/system-config';
+import { SystemConfig } from '../services/system-config.service';
 import deviceAuth from '../middleware/agent-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
 import { virtualAgentDeployer } from '../services/provisioning/virtual-agent-deployer';

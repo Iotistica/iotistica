@@ -197,6 +197,7 @@ class RedisLogQueue {
       // Add to pipeline for batching (reduces network round trips)
       this.addToPipeline(() => {
         const pipeline = this.pendingPipeline || this.redisIngestion.pipeline();
+        const payloadBase64 = entry.compressedPayload.toString('base64');
         pipeline.xadd(
           this.streamKey,
           'MAXLEN',
@@ -208,7 +209,8 @@ class RedisLogQueue {
           'batchId', entry.batchId,
           'encoding', entry.contentEncoding,
           'contentType', entry.contentType,
-          'payload', entry.compressedPayload // Raw buffer (no encoding!)
+          'payload_b64', payloadBase64,
+          'payloadSize', entry.compressedPayload.length.toString()
         );
         return pipeline;
       }).catch(err => {
@@ -315,17 +317,17 @@ class RedisLogQueue {
             
             const compressedFlag = fieldMap.compressed;
             if (compressedFlag === '1') {
-              // Compressed payload stored as raw binary string in Redis
-              // We need to convert it back to Buffer
+              const payloadBase64 = fieldMap.payload_b64;
               const payloadRaw = fieldMap.payload;
-              if (!payloadRaw) {
+              if (!payloadBase64 && !payloadRaw) {
                 logger.warn('Skipping log message with missing payload', { messageId: id });
                 invalidMessageIds.push(id);
                 return null;
               }
-              
-              // Payload comes back as binary string - convert to Buffer
-              const compressedPayload = Buffer.from(payloadRaw, 'binary');
+
+              const compressedPayload = payloadBase64
+                ? Buffer.from(payloadBase64, 'base64')
+                : Buffer.from(payloadRaw, 'binary');
               
               return {
                 id,
