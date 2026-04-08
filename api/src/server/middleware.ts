@@ -39,6 +39,20 @@ export async function applyMiddleware(fastify: FastifyInstance): Promise<void> {
       }
     },
   );
+  fastify.addContentTypeParser(
+    'application/x-ndjson',
+    { parseAs: 'buffer', bodyLimit: 16 * 1024 * 1024 },
+    (_req, body, done) => {
+      done(null, body);
+    },
+  );
+  fastify.addContentTypeParser(
+    'text/plain',
+    { parseAs: 'buffer', bodyLimit: 16 * 1024 * 1024 },
+    (_req, body, done) => {
+      done(null, body);
+    },
+  );
 
 
   // Per-request logging (skips 200s to reduce noise)
