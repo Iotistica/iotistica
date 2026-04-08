@@ -13,7 +13,7 @@ import { applySecurity } from './security';
 import { applyMiddleware } from './middleware';
 import { mountRoutes } from './routes';
 import { mountProxies } from './proxies';
-import logger from '../utils/logger';
+import logger, { pinoLogger } from '../utils/logger';
 
 // Trust proxy: K8s deployments always run behind a load balancer
 function getTrustProxy(): boolean | number | string {
@@ -34,15 +34,14 @@ export async function createApp(): Promise<FastifyInstance> {
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID(),
     trustProxy: getTrustProxy(),
-    // Disable Fastify's built-in logger — request logging runs through our app logger hooks
-    logger: false,
+    loggerInstance: pinoLogger,
     // Relax content-type check so clients can send application/json without charset
     ajv: {
       customOptions: {
         allowUnionTypes: true,
       },
     },
-  });
+  }) as unknown as FastifyInstance;
 
   // Decorate request properties so Fastify's strict type system is satisfied
   fastify.decorateRequest('user', null);

@@ -1,13 +1,11 @@
 /**
- * General application hooks: body parsing (built-in Fastify), brotli decompression,
- * traffic logging, and request logging.
+ * General application hooks: body parsing and related request preprocessing.
  *
- * Note: Request ID is handled automatically by Fastify via the `requestIdHeader`
- * and `genReqId` options passed to the Fastify factory — no custom middleware needed.
+ * Request IDs and request/response logging are handled by Fastify itself via the
+ * factory options configured in server/app.ts.
  */
 
 import type { FastifyInstance } from 'fastify';
-import { registerRequestLogger } from '../middleware/request-logger';
 
 
 export async function applyMiddleware(fastify: FastifyInstance): Promise<void> {
@@ -53,8 +51,4 @@ export async function applyMiddleware(fastify: FastifyInstance): Promise<void> {
       done(null, body);
     },
   );
-
-
-  // Per-request logging (skips 200s to reduce noise)
-  registerRequestLogger(fastify);
 }

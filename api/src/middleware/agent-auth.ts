@@ -12,6 +12,7 @@
 
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { query } from '../db/connection';
+import { AgentModel } from '../db/models';
 import logger from '../utils/logger';
 import { verifyMachineSecret } from '../utils/secret-hashing';
 
@@ -23,6 +24,10 @@ type DeviceAuthBody = {
   uuid?: string;
   deviceUuid?: string;
   [key: string]: unknown;
+};
+
+type UuidBody = {
+  uuid?: string;
 };
 
 interface CachedDeviceAuth {
@@ -130,6 +135,56 @@ export async function invalidateDeviceAuthCache(deviceUuid: string): Promise<voi
     logger.info('Device auth cache invalidated', { deviceUuid });
   } catch (error: any) {
     logger.debug('Auth cache invalidation failed', { deviceUuid, error: error.message });
+  }
+}
+
+export async function checkUuidImmutability(
+  request: FastifyRequest<{ Body: UuidBody }>,
+  reply: FastifyReply
+): Promise<void> {
+  try {
+    const { uuid } = request.body ?? {};
+    if (!uuid) {
+      return;
+    }
+
+    const existingDevice = await AgentModel.getByUuid(uuid);
+    if (existingDevice && existingDevice.provisioning_state === 'registered') {
+      logger.warn(`Re-provisioning attempt for registered device: ${uuid.substring(0, 8)}...`);
+      return reply.status(409).send({
+        error: 'Device already registered',
+        message: 'Device already registered with this UUID. Factory reset to re-provision.',
+        details: {
+          uuid,
+          provisioning_state: existingDevice.provisioning_state,
+          provisioned_at: existingDevice.provisioned_at,
+        },
+      });
+    }
+  } catch (error: unknown) {
+    logger.error('Error checking UUID immutability', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    // Soft fail - let service layer handle it
+  }
+}
+
+export async function optionalUuidImmutabilityCheck(
+  request: FastifyRequest<{ Body: UuidBody }>,
+  _reply: FastifyReply
+): Promise<void> {
+  try {
+    const { uuid } = request.body ?? {};
+    if (!uuid) {
+      return;
+    }
+
+    const existingDevice = await AgentModel.getByUuid(uuid);
+    if (existingDevice?.provisioning_state === 'registered') {
+      logger.debug('Optional UUID check: device already registered', { uuid: uuid.substring(0, 8) });
+    }
+  } catch {
+    // Soft fail
   }
 }
 

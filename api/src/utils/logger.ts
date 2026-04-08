@@ -336,14 +336,14 @@ function createStreams() {
 }
 
 export function createAppLogger(bindings?: Record<string, unknown>): AppLogger {
-  const loggerInstance = bindings ? rootLogger.child(bindings) : rootLogger;
+  const loggerInstance = bindings ? pinoLogger.child(bindings) : pinoLogger;
   return wrapLogger(loggerInstance);
 }
 
 // Detect Kubernetes environment (KUBERNETES_SERVICE_HOST is auto-injected)
 const isKubernetes = !!process.env.KUBERNETES_SERVICE_HOST;
 
-const rootLogger = pino(
+const pinoLogger = pino(
   {
     level: getConfiguredLevel(),
     timestamp: pino.stdTimeFunctions.isoTime,
@@ -388,4 +388,5 @@ export default logger;
 
 // Also export named
 export { logger };
+export { pinoLogger };
 
