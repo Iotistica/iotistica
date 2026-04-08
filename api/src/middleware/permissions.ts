@@ -1,8 +1,7 @@
 /**
  * Permission Middleware
  * 
- * Provides middleware functions for checking user permissions and roles
- * in Express routes.
+ * Provides Fastify preHandlers for checking user permissions and roles.
  */
 
 import type { FastifyRequest, FastifyReply } from 'fastify';
@@ -12,7 +11,7 @@ import { Permission, Role, ROLE_PERMISSIONS, ROLES } from '../types/permissions'
  * Middleware to check if user has ALL required permissions (AND logic)
  * 
  * @param requiredPermissions - Array of permissions that user must have
- * @returns Express middleware function
+ * @returns Fastify preHandler
  * 
  * @example
  * router.post('/users', hasPermission(PERMISSIONS.USER_WRITE), createUser);
@@ -43,7 +42,7 @@ export function hasPermission(...requiredPermissions: Permission[]) {
  * Middleware to check if user has ANY of the required permissions (OR logic)
  * 
  * @param requiredPermissions - Array of permissions (user needs at least one)
- * @returns Express middleware function
+ * @returns Fastify preHandler
  * 
  * @example
  * router.get('/data', hasAnyPermission(PERMISSIONS.DATA_READ, PERMISSIONS.DATA_EXPORT), getData);
@@ -73,7 +72,7 @@ export function hasAnyPermission(...requiredPermissions: Permission[]) {
  * Middleware to check if user has specific role(s)
  * 
  * @param allowedRoles - Array of allowed roles
- * @returns Express middleware function
+ * @returns Fastify preHandler
  * 
  * @example
  * router.get('/billing', hasRole(ROLES.OWNER), getBilling);
@@ -100,7 +99,7 @@ export function hasRole(...allowedRoles: Role[]) {
 /**
  * Middleware to check if user is owner (convenience function)
  * 
- * @returns Express middleware function
+ * @returns Fastify preHandler
  * 
  * @example
  * router.post('/billing/subscribe', isOwner(), subscribe);
@@ -112,7 +111,7 @@ export function isOwner() {
 /**
  * Middleware to check if user is admin or owner
  * 
- * @returns Express middleware function
+ * @returns Fastify preHandler
  * 
  * @example
  * router.delete('/users/:id', isAdminOrOwner(), deleteUser);

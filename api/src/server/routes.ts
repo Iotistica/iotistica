@@ -47,6 +47,7 @@ import {
   authRateLimitOptions,
   deviceDataRateLimitOptions,
   adminRateLimitOptions,
+  withRedisRateLimitOptions,
 } from '../middleware/rate-limit';
 import jwtAuth from '../middleware/jwt-auth';
 
@@ -109,11 +110,11 @@ export async function mountRoutes(fastify: FastifyInstance): Promise<void> {
   // ============================================================================
   await fastify.register(async function apiBase(f) {
     // Global rate limit — covers all versioned routes
-    await f.register(rateLimit, globalRateLimitOptions);
+    await f.register(rateLimit, withRedisRateLimitOptions(globalRateLimitOptions, 'global:'));
 
     // Auth — strict rate limit (brute-force protection)
     await f.register(async function authScope(af) {
-      await af.register(rateLimit, authRateLimitOptions);
+      await af.register(rateLimit, withRedisRateLimitOptions(authRateLimitOptions, 'auth:'));
       await af.register(authRoutes);
     }, { prefix: PATHS.auth });
 
@@ -122,7 +123,7 @@ export async function mountRoutes(fastify: FastifyInstance): Promise<void> {
 
     // User / admin management — JWT required + admin rate limit
     await f.register(async function adminScope(af) {
-      await af.register(rateLimit, adminRateLimitOptions);
+      await af.register(rateLimit, withRedisRateLimitOptions(adminRateLimitOptions, 'admin:'));
       await af.register(usersRoutes, { prefix: PATHS.users });
       await af.register(adminRoutes, { prefix: PATHS.admin });
     });
@@ -132,7 +133,7 @@ export async function mountRoutes(fastify: FastifyInstance): Promise<void> {
 
     // Device data ingestion — high rate limits (supports 16Hz sensor data)
     await f.register(async function deviceDataScope(df) {
-      await df.register(rateLimit, deviceDataRateLimitOptions);
+      await df.register(rateLimit, withRedisRateLimitOptions(deviceDataRateLimitOptions, 'device-data:'));
       await df.register(deviceLogsRoutes);
       await df.register(deviceMetricsRoutes);
       await df.register(deviceSensorsRoutes);

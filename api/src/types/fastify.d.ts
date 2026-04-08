@@ -32,7 +32,7 @@ declare module 'fastify' {
     apiKey?: {
       id: number;
       name: string;
-      description: string;
+      description: string | null;
     };
 
     // Private middleware state – populated by jwtValidate, consumed by downstream preHandlers

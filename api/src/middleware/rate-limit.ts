@@ -9,14 +9,23 @@
  * scoped Fastify plugins in server/routes.ts.
  */
 
+import crypto from 'crypto';
 import type { FastifyRequest } from 'fastify';
-import type { RateLimitOptions } from '@fastify/rate-limit';
+import type { RateLimitOptions, RateLimitPluginOptions } from '@fastify/rate-limit';
 import logger from '../utils/logger';
+import { getRedisClient } from '../redis/client-factory';
+
+const RATE_LIMIT_NAMESPACE = process.env.RATE_LIMIT_NAMESPACE || 'iotistica-rate-limit:';
+
+function hashSecret(value: string): string {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
 
 /** Token-based key generator: device key → user ID → IP fallback */
 function tokenKeyGenerator(request: FastifyRequest): string {
-  const deviceApiKey = request.headers['x-device-api-key'] as string;
-  if (deviceApiKey) return `device:${deviceApiKey}`;
+  const deviceApiKeyHeader = request.headers['x-device-api-key'];
+  const deviceApiKey = typeof deviceApiKeyHeader === 'string' ? deviceApiKeyHeader : undefined;
+  if (deviceApiKey) return `device:${hashSecret(deviceApiKey)}`;
 
   const userId = request.user?.id;
   if (userId) return `user:${userId}`;
@@ -37,6 +46,18 @@ function onRateLimitExceeded(request: FastifyRequest, _key: string): void {
   });
 }
 
+export function withRedisRateLimitOptions(
+  options: RateLimitOptions,
+  namespaceSuffix: string,
+): RateLimitPluginOptions {
+  return {
+    ...options,
+    redis: getRedisClient(),
+    nameSpace: `${RATE_LIMIT_NAMESPACE}${namespaceSuffix}`,
+    skipOnError: true,
+  };
+}
+
 /**
  * Global API rate limit: 300 req/min per device/user.
  * Applied to all /api/v* routes.
@@ -46,7 +67,7 @@ export const globalRateLimitOptions: RateLimitOptions = {
   timeWindow: 60_000,
   keyGenerator: tokenKeyGenerator,
   onExceeded: onRateLimitExceeded,
-  skipOnError: false,
+  skipOnError: true,
   errorResponseBuilder: (_request, context) => ({
     error: 'Too many requests',
     message: 'Rate limit exceeded. Please try again later.',
@@ -63,7 +84,7 @@ export const authRateLimitOptions: RateLimitOptions = {
   timeWindow: 60_000,
   keyGenerator: ipKeyGenerator,
   onExceeded: onRateLimitExceeded,
-  skipOnError: false,
+  skipOnError: true,
   errorResponseBuilder: (_request, context) => ({
     error: 'Too many requests',
     message: 'Too many authentication attempts. Please wait before retrying.',
@@ -79,7 +100,7 @@ export const deviceDataRateLimitOptions: RateLimitOptions = {
   timeWindow: 60_000,
   keyGenerator: tokenKeyGenerator,
   onExceeded: onRateLimitExceeded,
-  skipOnError: false,
+  skipOnError: true,
   errorResponseBuilder: (_request, context) => ({
     error: 'Too many requests',
     message: 'Device data rate limit exceeded.',
@@ -95,7 +116,7 @@ export const adminRateLimitOptions: RateLimitOptions = {
   timeWindow: 60_000,
   keyGenerator: tokenKeyGenerator,
   onExceeded: onRateLimitExceeded,
-  skipOnError: false,
+  skipOnError: true,
   errorResponseBuilder: (_request, context) => ({
     error: 'Too many requests',
     message: 'Admin rate limit exceeded.',

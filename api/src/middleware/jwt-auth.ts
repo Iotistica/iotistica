@@ -13,6 +13,7 @@
  */
 
 import type { FastifyRequest, FastifyReply } from 'fastify';
+import { createHash, createPublicKey } from 'crypto';
 import jwt, { Secret } from 'jsonwebtoken';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
@@ -43,6 +44,25 @@ const AUTH0_ENABLED = process.env.AUTH0_ENABLED === 'true' && AUTH0_DOMAIN && AU
 
 // JWKS cache TTL in seconds (default: 1 hour = 3600 seconds)
 const JWKS_CACHE_TTL = parseInt(process.env.JWKS_CACHE_TTL || '3600', 10);
+const RBAC_CACHE_TTL_SECONDS = parseInt(process.env.RBAC_CACHE_TTL_SECONDS || '300', 10);
+const RBAC_STALE_CACHE_TTL_SECONDS = parseInt(process.env.RBAC_STALE_CACHE_TTL_SECONDS || '3600', 10);
+const PROVISIONING_API_URL = process.env.PROVISIONING_API_URL || 'http://provisioning:3100';
+const INTERNAL_AUTH_TOKEN = process.env.INTERNAL_AUTH_TOKEN || '';
+
+interface RoleAndStatus {
+  auth0_sub: string;
+  customer_id: string;
+  role: string;
+  customer_status: 'active' | 'suspended' | 'provisioning';
+  last_updated_at: string;
+  role_assigned_at?: string;
+}
+
+interface RbacCacheEntry {
+  data: RoleAndStatus;
+  fetched_at: number;
+  expires_at: number;
+}
 
 // Lazy-load Redis client
 let redisClient: any = null;
@@ -167,9 +187,174 @@ function getPublicKeyFromJWKS(jwks: any, kid: string): string {
   }
 
   // Convert JWK to PEM format
-  const { createPublicKey } = require('crypto');
   const publicKey = createPublicKey({ key, format: 'jwk' });
-  return publicKey.export({ format: 'pem', type: 'spki' });
+  return publicKey.export({ format: 'pem', type: 'spki' }).toString();
+}
+
+function getRbacCacheKey(auth0Sub: string, customerId: string): string {
+  return `auth:rbac:${createHash('sha256').update(`${auth0Sub}:${customerId}`).digest('hex')}`;
+}
+
+async function getRbacCacheEntry(
+  auth0Sub: string,
+  customerId: string,
+): Promise<RbacCacheEntry | null> {
+  try {
+    const redis = await getRedisClient();
+    if (!redis || !redis.isReady()) {
+      return null;
+    }
+
+    const cached = await redis.getClient().get(getRbacCacheKey(auth0Sub, customerId));
+    if (!cached) {
+      return null;
+    }
+
+    return JSON.parse(cached) as RbacCacheEntry;
+  } catch (error: any) {
+    logger.debug('RBAC cache read failed', {
+      auth0Sub,
+      customerId,
+      message: error.message,
+    });
+    return null;
+  }
+}
+
+async function setRbacCacheEntry(
+  auth0Sub: string,
+  customerId: string,
+  entry: RbacCacheEntry,
+  ttlSeconds: number,
+): Promise<void> {
+  try {
+    const redis = await getRedisClient();
+    if (!redis || !redis.isReady()) {
+      return;
+    }
+
+    const redisTtlSeconds = Math.max(ttlSeconds, RBAC_STALE_CACHE_TTL_SECONDS);
+    await redis.getClient().setex(
+      getRbacCacheKey(auth0Sub, customerId),
+      redisTtlSeconds,
+      JSON.stringify(entry),
+    );
+  } catch (error: any) {
+    logger.debug('RBAC cache write failed', {
+      auth0Sub,
+      customerId,
+      message: error.message,
+    });
+  }
+}
+
+async function fetchRoleAndStatusFromProvisioning(
+  auth0Sub: string,
+  customerId: string,
+): Promise<RoleAndStatus> {
+  if (!INTERNAL_AUTH_TOKEN) {
+    throw new Error('INTERNAL_AUTH_TOKEN not configured (required for provisioning API calls)');
+  }
+
+  let response: Awaited<ReturnType<typeof fetch>>;
+  try {
+    response = await fetch(
+      `${PROVISIONING_API_URL}/api/internal/users/${auth0Sub}/tenants/${customerId}/role`,
+      {
+        headers: {
+          'X-Internal-Token': INTERNAL_AUTH_TOKEN,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(5000),
+      },
+    );
+  } catch (error: any) {
+    throw new Error(`Provisioning API unreachable: ${error.message}`);
+  }
+
+  if (response.status === 404) {
+    throw new Error(`User ${auth0Sub} not found in customer ${customerId} (provisioning returned 404)`);
+  }
+
+  if (response.status === 401) {
+    throw new Error('Invalid INTERNAL_AUTH_TOKEN (provisioning rejected request)');
+  }
+
+  if (!response.ok) {
+    throw new Error(`Provisioning API returned ${response.status}`);
+  }
+
+  const data = await response.json() as any;
+  if (!data?.success || !data?.data) {
+    throw new Error(`Invalid response from provisioning API: ${JSON.stringify(data)}`);
+  }
+
+  return data.data as RoleAndStatus;
+}
+
+async function getRoleAndStatus(
+  auth0Sub: string,
+  customerId: string,
+  jwtExpSeconds?: number,
+): Promise<RoleAndStatus> {
+  const now = Date.now() / 1000;
+
+  let ttlSeconds = RBAC_CACHE_TTL_SECONDS;
+  if (jwtExpSeconds && jwtExpSeconds > now) {
+    ttlSeconds = Math.min(ttlSeconds, Math.floor(jwtExpSeconds - now));
+  }
+
+  const cached = await getRbacCacheEntry(auth0Sub, customerId);
+  if (cached && cached.expires_at > now) {
+    logger.debug('RBAC cache hit', {
+      auth0Sub,
+      customerId,
+      expiresInSeconds: Math.round(cached.expires_at - now),
+    });
+    return cached.data;
+  }
+
+  if (cached) {
+    logger.debug('RBAC cache expired, refreshing', { auth0Sub, customerId });
+  } else {
+    logger.debug('RBAC cache miss, fetching from provisioning', { auth0Sub, customerId });
+  }
+
+  try {
+    const data = await fetchRoleAndStatusFromProvisioning(auth0Sub, customerId);
+    await setRbacCacheEntry(auth0Sub, customerId, {
+      data,
+      fetched_at: now,
+      expires_at: now + ttlSeconds,
+    }, ttlSeconds);
+
+    logger.info('RBAC fetched from provisioning and cached', {
+      auth0Sub,
+      customerId,
+      cacheTtlSeconds: ttlSeconds,
+      staleTtlSeconds: Math.max(ttlSeconds, RBAC_STALE_CACHE_TTL_SECONDS),
+    });
+    return data;
+  } catch (error: any) {
+    logger.warn('RBAC fetch failed', {
+      auth0Sub,
+      customerId,
+      error: error.message,
+    });
+
+    if (cached) {
+      logger.warn('Using stale RBAC cache due to provisioning error', {
+        auth0Sub,
+        customerId,
+        expiredSecondsAgo: Math.round(now - cached.expires_at),
+      });
+      return cached.data;
+    }
+
+    throw new Error(
+      `Cannot determine role for ${auth0Sub} in ${customerId}: provisioning unreachable and no cached role available. Deny by default.`
+    );
+  }
 }
 
 /**
@@ -548,7 +733,6 @@ export async function rbacLookup(
 
       let roleData: any;
       try {
-        const { getRoleAndStatus } = await import('../services/auth/rbac-cache.service');
         roleData = await getRoleAndStatus(auth0Payload.sub, customerId, auth0Payload.exp);
       } catch (error: any) {
         if (process.env.NODE_ENV !== 'production' && process.env.DEVELOPMENT_TENANT_ID) {

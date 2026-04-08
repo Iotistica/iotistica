@@ -2,12 +2,16 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { AgentModel } from '../db/models';
 import logger from '../utils/logger';
 
+type UuidBody = {
+  uuid?: string;
+};
+
 export async function checkUuidImmutability(
-  request: FastifyRequest,
+  request: FastifyRequest<{ Body: UuidBody }>,
   reply: FastifyReply
 ): Promise<void> {
   try {
-    const { uuid } = request.body as any;
+    const { uuid } = request.body ?? {};
     if (!uuid) return;
 
     const existingDevice = await AgentModel.getByUuid(uuid);
@@ -23,18 +27,20 @@ export async function checkUuidImmutability(
         }
       });
     }
-  } catch (error: any) {
-    logger.error('Error checking UUID immutability:', error);
+  } catch (error: unknown) {
+    logger.error('Error checking UUID immutability', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     // Soft fail - let service layer handle it
   }
 }
 
 export async function optionalUuidImmutabilityCheck(
-  request: FastifyRequest,
+  request: FastifyRequest<{ Body: UuidBody }>,
   _reply: FastifyReply
 ): Promise<void> {
   try {
-    const { uuid } = request.body as any;
+    const { uuid } = request.body ?? {};
     if (!uuid) return;
 
     const existingDevice = await AgentModel.getByUuid(uuid);

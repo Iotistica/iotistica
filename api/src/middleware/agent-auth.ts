@@ -15,6 +15,16 @@ import { query } from '../db/connection';
 import logger from '../utils/logger';
 import { verifyMachineSecret } from '../utils/secret-hashing';
 
+type DeviceUuidParams = {
+  uuid: string;
+};
+
+type DeviceAuthBody = {
+  uuid?: string;
+  deviceUuid?: string;
+  [key: string]: unknown;
+};
+
 interface CachedDeviceAuth {
   id: number;
   uuid: string;
@@ -132,7 +142,7 @@ export async function invalidateDeviceAuthCache(deviceUuid: string): Promise<voi
  * Sets: request.device with authenticated device information
  */
 export async function deviceAuth(
-  request: FastifyRequest,
+  request: FastifyRequest<{ Params: DeviceUuidParams }>,
   reply: FastifyReply
 ): Promise<void> {
   const startTime = Date.now();
@@ -150,7 +160,7 @@ export async function deviceAuth(
       });
     }
 
-    const deviceUuid = (request.params as any).uuid;
+    const { uuid: deviceUuid } = request.params;
 
     if (!deviceUuid) {
       return reply.status(400).send({
@@ -247,7 +257,7 @@ export async function deviceAuth(
     const duration = Date.now() - startTime;
 
     logger.error('Device authentication error', {
-      deviceUuid: (request.params as any).uuid,
+      deviceUuid: request.params.uuid,
       duration: duration + 'ms',
       error: error.message,
       stack: error.stack
@@ -267,7 +277,7 @@ export async function deviceAuth(
  * Extracts UUID from request body instead.
  */
 export async function deviceAuthFromBody(
-  request: FastifyRequest,
+  request: FastifyRequest<{ Body: DeviceAuthBody }>,
   reply: FastifyReply
 ): Promise<void> {
   try {
@@ -282,8 +292,12 @@ export async function deviceAuthFromBody(
       });
     }
 
-    const body = request.body as any;
-    let deviceUuid = body?.uuid || body?.deviceUuid;
+    const body = request.body ?? {};
+    let deviceUuid = typeof body.uuid === 'string'
+      ? body.uuid
+      : typeof body.deviceUuid === 'string'
+        ? body.deviceUuid
+        : undefined;
 
     if (!deviceUuid) {
       const keys = Object.keys(body || {});
@@ -297,7 +311,7 @@ export async function deviceAuthFromBody(
     }
 
     if (!deviceUuid) {
-      logger.error('Failed to extract UUID from body:', JSON.stringify(body, null, 2));
+      logger.error('Failed to extract UUID from body', { body });
       return reply.status(400).send({
         error: 'Bad Request',
         message: 'Device UUID required in request body (as uuid/deviceUuid field or as state report key)'
@@ -351,7 +365,10 @@ export async function deviceAuthFromBody(
     };
 
   } catch (error: any) {
-    logger.error('Device authentication error:', error);
+    logger.error('Device authentication error', {
+      error: error.message,
+      stack: error.stack,
+    });
     if (!reply.sent) {
       reply.status(500).send({ error: 'Internal Server Error', message: 'Authentication failed' });
     }

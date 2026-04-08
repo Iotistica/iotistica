@@ -4,9 +4,95 @@
  * Used for internal service-to-service communication (e.g., Node-RED storage)
  */
 
+import crypto from 'crypto';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
+
+type ApiKeyRow = {
+  id: number;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  expires_at: string | null;
+};
+
+const API_KEY_CACHE_TTL_SECONDS = parseInt(process.env.API_KEY_AUTH_CACHE_TTL_SECONDS || '60', 10);
+
+function getApiKeyCacheKey(apiKey: string): string {
+  const digest = crypto.createHash('sha256').update(apiKey).digest('hex');
+  return `auth:api-key:${digest}`;
+}
+
+async function getRedisCacheClient() {
+  try {
+    const { redisClient } = await import('../redis/client');
+    if (!redisClient.isReady()) {
+      return null;
+    }
+    return redisClient.getClient();
+  } catch (error) {
+    logger.debug('API key cache unavailable', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+async function getApiKeyFromCache(apiKey: string): Promise<ApiKeyRow | null> {
+  try {
+    const client = await getRedisCacheClient();
+    if (!client) {
+      return null;
+    }
+
+    const cached = await client.get(getApiKeyCacheKey(apiKey));
+    if (!cached) {
+      return null;
+    }
+
+    return JSON.parse(cached) as ApiKeyRow;
+  } catch (error) {
+    logger.debug('API key cache read failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+async function storeApiKeyInCache(apiKey: string, keyRecord: ApiKeyRow): Promise<void> {
+  try {
+    const client = await getRedisCacheClient();
+    if (!client) {
+      return;
+    }
+
+    await client.setex(
+      getApiKeyCacheKey(apiKey),
+      API_KEY_CACHE_TTL_SECONDS,
+      JSON.stringify(keyRecord),
+    );
+  } catch (error) {
+    logger.debug('API key cache write failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export async function invalidateApiKeyCache(apiKey: string): Promise<void> {
+  try {
+    const client = await getRedisCacheClient();
+    if (!client) {
+      return;
+    }
+
+    await client.del(getApiKeyCacheKey(apiKey));
+  } catch (error) {
+    logger.debug('API key cache invalidation failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 /**
  * Validates API key from Authorization header.
@@ -38,26 +124,31 @@ export async function validateApiKey(
       });
     }
 
-    const result = await query(
-      `SELECT id, name, description, is_active, expires_at
-       FROM api_keys
-       WHERE key = $1`,
-      [apiKey]
-    );
+    let keyRecord = await getApiKeyFromCache(apiKey);
 
-    if (result.rows.length === 0) {
-      logger.warn('Invalid API key attempted', {
-        keyPrefix: apiKey.substring(0, 8),
-        ip: request.ip,
-        path: request.url
-      });
-      return reply.status(401).send({
-        error: 'Unauthorized',
-        message: 'Invalid API key'
-      });
+    if (!keyRecord) {
+      const result = await query(
+        `SELECT id, name, description, is_active, expires_at
+         FROM api_keys
+         WHERE key = $1`,
+        [apiKey]
+      );
+
+      if (result.rows.length === 0) {
+        logger.warn('Invalid API key attempted', {
+          keyPrefix: apiKey.substring(0, 8),
+          ip: request.ip,
+          path: request.url
+        });
+        return reply.status(401).send({
+          error: 'Unauthorized',
+          message: 'Invalid API key'
+        });
+      }
+
+      keyRecord = result.rows[0] as ApiKeyRow;
+      await storeApiKeyInCache(apiKey, keyRecord);
     }
-
-    const keyRecord = result.rows[0];
 
     if (!keyRecord.is_active) {
       logger.warn('Inactive API key attempted', {
@@ -97,7 +188,7 @@ export async function validateApiKey(
     request.apiKey = {
       id: keyRecord.id,
       name: keyRecord.name,
-      description: keyRecord.description
+      description: keyRecord.description ?? ''
     };
 
     logger.debug('API key validated', { keyId: keyRecord.id, keyName: keyRecord.name, path: request.url });
