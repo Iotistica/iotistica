@@ -31,6 +31,9 @@ export const OPCUASecurityPolicySchema = z.enum([
 ]);
 export type OPCUASecurityPolicy = z.infer<typeof OPCUASecurityPolicySchema>;
 
+export const OPCUACertificateTrustModeSchema = z.enum(['strict', 'trust-on-first-use']);
+export type OPCUACertificateTrustMode = z.infer<typeof OPCUACertificateTrustModeSchema>;
+
 /**
  * OPC-UA Connection Configuration
  * Stored in the 'connection' JSONB field in the sensors table
@@ -50,6 +53,12 @@ export const OPCUAConnectionSchema = z.object({
   
   /** Security policy */
   securityPolicy: OPCUASecurityPolicySchema.default('None'),
+
+  /** How unknown server certificates are handled */
+  certificateTrustMode: OPCUACertificateTrustModeSchema.default('strict'),
+
+  /** Optional pinned SHA-1 thumbprint for the expected server certificate */
+  expectedServerThumbprint: z.string().trim().toLowerCase().regex(/^[a-f0-9]{40}$/).optional(),
   
   /** Connection timeout in milliseconds */
   connectionTimeout: z.number().int().positive().default(10000),

@@ -55,6 +55,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { createHash } from 'crypto';
 // @ts-ignore - Optional dependency: node-opcua-client may not be installed
 import {
   OPCUAClient,
@@ -78,6 +79,7 @@ import {
   OPCUADeviceConfig,
   OPCUAConnection,
   OPCUADataPoint,
+  OPCUACertificateTrustMode,
   OPCUASecurityMode,
   OPCUASecurityPolicy,
 } from './types.js';
@@ -165,6 +167,67 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     const match = nodeId.match(/^(ns=\d+;s=)(.+)\/[^/]+$/);
     if (!match) return null;
     return `${match[1]}${match[2]}`;
+  }
+
+  private normalizeThumbprint(thumbprint: string): string {
+    return thumbprint.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+  }
+
+  private calculateCertificateThumbprint(certificate: Buffer): string {
+    return createHash('sha1').update(certificate).digest('hex');
+  }
+
+  private async createCertificateManager(trustMode: OPCUACertificateTrustMode): Promise<any> {
+    const { getDefaultCertificateManager } = await import('node-opcua-certificate-manager');
+    const certificateManager = getDefaultCertificateManager('PKI');
+    certificateManager.automaticallyAcceptUnknownCertificate = trustMode === 'trust-on-first-use';
+    return certificateManager;
+  }
+
+  private async createClientOptions(connection: OPCUAConnection): Promise<Record<string, unknown>> {
+    return {
+      applicationName: 'Iotistic Sensor Agent',
+      applicationUri: 'urn:iotistic:sensor-agent',
+      connectionStrategy: {
+        initialDelay: 1000,
+        maxRetry: 3,
+        maxDelay: connection.connectionTimeout || 10000,
+      },
+      securityMode: this.convertSecurityMode(connection.securityMode),
+      securityPolicy: this.convertSecurityPolicy(connection.securityPolicy),
+      endpointMustExist: false,
+      keepSessionAlive: true,
+      requestedSessionTimeout: connection.sessionTimeout || 60000,
+      clientCertificateManager: await this.createCertificateManager(
+        connection.certificateTrustMode || 'strict'
+      ),
+    };
+  }
+
+  private assertExpectedServerThumbprint(
+    expectedThumbprint: string | undefined,
+    certificate: Buffer | undefined,
+    deviceName: string,
+    endpointUrl: string
+  ): void {
+    if (!expectedThumbprint) {
+      return;
+    }
+
+    if (!certificate) {
+      throw new Error(
+        `Device ${deviceName}: expected server certificate thumbprint is configured but endpoint ${endpointUrl} did not provide a certificate`
+      );
+    }
+
+    const actualThumbprint = this.calculateCertificateThumbprint(certificate);
+    const normalizedExpected = this.normalizeThumbprint(expectedThumbprint);
+
+    if (actualThumbprint !== normalizedExpected) {
+      throw new Error(
+        `Device ${deviceName}: server certificate thumbprint mismatch for ${endpointUrl}. Expected ${normalizedExpected}, got ${actualThumbprint}`
+      );
+    }
   }
 
   private buildStableNodeDeviceId(device: OPCUADeviceConfig, dataPoint: OPCUADataPoint): string {
@@ -890,6 +953,15 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
         `Device ${device.name}: username provided without password`
       );
     }
+
+    if (connection.expectedServerThumbprint) {
+      const normalizedThumbprint = this.normalizeThumbprint(connection.expectedServerThumbprint);
+      if (normalizedThumbprint.length !== 40) {
+        throw new Error(
+          `Device ${device.name}: expectedServerThumbprint must be a 40-character SHA-1 thumbprint`
+        );
+      }
+    }
   }
 
   /**
@@ -904,16 +976,14 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
   private async discoverAndSelectEndpoint(
     baseUrl: string,
     desiredSecurityMode: MessageSecurityMode,
-    desiredSecurityPolicy: SecurityPolicy
+    desiredSecurityPolicy: SecurityPolicy,
+    connection: OPCUAConnection,
+    deviceName: string
   ): Promise<any | null> {
     try {
       // Discover all available endpoints
       // Discover endpoints using getEndpoints (OPC-UA standard method)
-      const discoveryClient = OPCUAClient.create({
-        applicationName: 'Iotistic Sensor Agent',
-        applicationUri: 'urn:iotistic:sensor-agent',
-        endpointMustExist : false
-      });
+      const discoveryClient = OPCUAClient.create(await this.createClientOptions(connection));
       await discoveryClient.connect(baseUrl);
       const allEndpoints = await discoveryClient.getEndpoints();
       await discoveryClient.disconnect();
@@ -949,6 +1019,13 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       
       // Select best endpoint (prefer exact match, then first available)
       const bestEndpoint = matchingEndpoints[0];
+
+      this.assertExpectedServerThumbprint(
+        connection.expectedServerThumbprint,
+        bestEndpoint.serverCertificate,
+        deviceName,
+        bestEndpoint.endpointUrl || baseUrl
+      );
       
       this.logger.debug('Selected endpoint', {
         url: bestEndpoint.endpointUrl,
@@ -1008,25 +1085,14 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     const discoveredEndpoint = await this.discoverAndSelectEndpoint(
       connection.endpointUrl,
       desiredSecurityMode,
-      desiredSecurityPolicy
+      desiredSecurityPolicy,
+      connection,
+      device.name
     );
 
     // Step 2: Create OPC-UA client with endpoint requirements
     // Use static applicationUri to avoid certificate regeneration when hostname changes
-    const client = OPCUAClient.create({
-      applicationName: 'Iotistic Sensor Agent',
-      applicationUri: 'urn:iotistic:sensor-agent',
-      connectionStrategy: {
-        initialDelay: 1000,
-        maxRetry: 3,
-        maxDelay: connection.connectionTimeout || 10000,
-      },
-      securityMode: this.convertSecurityMode(connection.securityMode),
-      securityPolicy: this.convertSecurityPolicy(connection.securityPolicy),
-      endpointMustExist: false,
-      keepSessionAlive: true,
-      requestedSessionTimeout: connection.sessionTimeout || 60000,
-    });
+    const client = OPCUAClient.create(await this.createClientOptions(connection));
 
     try {
       // Step 3: Connect to server (use discovered endpoint if available)
@@ -1037,6 +1103,12 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       });
       
       await client.connect(connectUrl);
+      this.assertExpectedServerThumbprint(
+        connection.expectedServerThumbprint,
+        discoveredEndpoint?.serverCertificate || (client as any).serverCertificate,
+        device.name,
+        connectUrl
+      );
       this.logger.debug(`Connected to ${connectUrl}`);
 
       // Step 4: Create session with optional authentication

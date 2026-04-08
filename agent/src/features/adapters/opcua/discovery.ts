@@ -6,6 +6,7 @@
  */
 
 import type { AgentLogger } from '../../../logging/agent-logger';
+import { createHash } from 'crypto';
 import { LogComponents } from '../../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice } from '../base.discovery';
 import { generateOPCUAFingerprint } from '../fingerprint';
@@ -18,6 +19,86 @@ export interface OPCUADiscoveryOptions {
 
 export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
   private configManager?: ConfigManager;
+
+	private scoreSecurityMode(securityMode: number | string | undefined): number {
+		const mode = typeof securityMode === 'string' ? securityMode : String(securityMode ?? '0');
+		switch (mode) {
+			case '3':
+			case 'SignAndEncrypt':
+				return 3;
+			case '2':
+			case 'Sign':
+				return 2;
+			default:
+				return 1;
+		}
+	}
+
+	private scoreSecurityPolicy(securityPolicyUri: string | undefined): number {
+		switch (securityPolicyUri) {
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss':
+				return 6;
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Aes128_Sha256_RsaOaep':
+				return 5;
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256':
+				return 4;
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Basic256':
+				return 3;
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15':
+				return 2;
+			default:
+				return 1;
+		}
+	}
+
+	private mapSecurityMode(securityMode: number | string | undefined): 'None' | 'Sign' | 'SignAndEncrypt' {
+		const mode = typeof securityMode === 'string' ? securityMode : String(securityMode ?? '0');
+		switch (mode) {
+			case '2':
+			case 'Sign':
+				return 'Sign';
+			case '3':
+			case 'SignAndEncrypt':
+				return 'SignAndEncrypt';
+			default:
+				return 'None';
+		}
+	}
+
+	private mapSecurityPolicy(securityPolicyUri: string | undefined): 'None' | 'Basic128Rsa15' | 'Basic256' | 'Basic256Sha256' | 'Aes128_Sha256_RsaOaep' | 'Aes256_Sha256_RsaPss' {
+		switch (securityPolicyUri) {
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15':
+				return 'Basic128Rsa15';
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Basic256':
+				return 'Basic256';
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256':
+				return 'Basic256Sha256';
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Aes128_Sha256_RsaOaep':
+				return 'Aes128_Sha256_RsaOaep';
+			case 'http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss':
+				return 'Aes256_Sha256_RsaPss';
+			default:
+				return 'None';
+		}
+	}
+
+	private selectPreferredEndpoint(endpoints: any[]): any | undefined {
+		return endpoints
+			.filter((endpoint: any) => endpoint.transportProfileUri?.includes('http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary'))
+			.sort((left: any, right: any) => {
+				const leftScore = (this.scoreSecurityMode(left.securityMode) * 10) + this.scoreSecurityPolicy(left.securityPolicyUri);
+				const rightScore = (this.scoreSecurityMode(right.securityMode) * 10) + this.scoreSecurityPolicy(right.securityPolicyUri);
+				return rightScore - leftScore;
+			})[0];
+	}
+
+	private calculateThumbprint(certificate: Buffer | undefined): string | undefined {
+		if (!certificate) {
+			return undefined;
+		}
+
+		return createHash('sha1').update(certificate).digest('hex');
+	}
 
   constructor(logger?: AgentLogger, configManager?: ConfigManager) {
     super('opcua', logger);
@@ -67,11 +148,16 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 
 			try {
 				const { OPCUAClient } = await import('node-opcua-client');
+				const { getDefaultCertificateManager } = await import('node-opcua-certificate-manager');
+				const certificateManager = getDefaultCertificateManager('PKI');
+				certificateManager.automaticallyAcceptUnknownCertificate =
+					endpoint.connection?.certificateTrustMode === 'trust-on-first-use';
 
 				const client = OPCUAClient.create({
 					applicationName: 'Iotistic Sensor Agent',
 					applicationUri: 'urn:iotistic:sensor-agent',
 					endpointMustExist : false,
+					clientCertificateManager: certificateManager,
 					connectionStrategy: {
 						maxRetry: 1,
 						initialDelay: 100,
@@ -243,17 +329,17 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 				await client.disconnect();
 
 				if (endpoints.length > 0) {
-					const endpoint = endpoints[0];
+					const preferredEndpoint = this.selectPreferredEndpoint(endpoints) || endpoints[0];
 					
 					// Extract ApplicationUri from endpoint (most stable OPC-UA identifier)
-					const applicationUri = endpoint.server?.applicationUri || `urn:${new URL(url).hostname}:unknown`;
+					const applicationUri = preferredEndpoint.server?.applicationUri || `urn:${new URL(url).hostname}:unknown`;
 					
 					// Generate cryptographic fingerprint
 					const fingerprint = generateOPCUAFingerprint(applicationUri);
 					
-					const certThumbprint = endpoint.serverCertificate 
-						? endpoint.serverCertificate.toString('hex').substring(0, 16)
-						: 'nocert';
+					const certThumbprint = this.calculateThumbprint(preferredEndpoint.serverCertificate);
+					const selectedSecurityMode = this.mapSecurityMode(preferredEndpoint.securityMode);
+					const selectedSecurityPolicy = this.mapSecurityPolicy(preferredEndpoint.securityPolicyUri);
 
 					discovered.push({
 						name: `opcua_${new URL(url).hostname}_${new URL(url).port}`,
@@ -261,8 +347,10 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 						fingerprint,
 						connection: {
 							endpointUrl: url,
-							securityMode: 'None',
-							securityPolicy: 'None'
+							securityMode: selectedSecurityMode,
+							securityPolicy: selectedSecurityPolicy,
+							certificateTrustMode: 'strict',
+							...(certThumbprint ? { expectedServerThumbprint: certThumbprint } : {})
 						},
 						dataPoints: dataPoints.length > 0 ? dataPoints : [{
 							nodeId: 'ns=2;s=MyVariable',
@@ -276,6 +364,8 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 							applicationUri,
 							availableEndpoints: endpoints.length,
 							serverCertificateThumbprint: certThumbprint,
+							selectedSecurityMode,
+							selectedSecurityPolicy,
 							discoveryMethod: 'endpoint_discovery'
 						}
 					});

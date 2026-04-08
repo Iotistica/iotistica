@@ -59,7 +59,9 @@ export interface ModbusConnection {
 export interface OPCUAConnection {
   endpointUrl: string;
   securityMode: 'None' | 'Sign' | 'SignAndEncrypt';
-  securityPolicy: 'None' | 'Basic128Rsa15' | 'Basic256' | 'Basic256Sha256';
+  securityPolicy: 'None' | 'Basic128Rsa15' | 'Basic256' | 'Basic256Sha256' | 'Aes128_Sha256_RsaOaep' | 'Aes256_Sha256_RsaPss';
+  certificateTrustMode?: 'strict' | 'trust-on-first-use';
+  expectedServerThumbprint?: string;
   username?: string;
   password?: string;
   connectionTimeout?: number;

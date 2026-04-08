@@ -145,6 +145,8 @@ export type OPCUASecurityPolicy =
   | 'Aes128_Sha256_RsaOaep'
   | 'Aes256_Sha256_RsaPss';
 
+export type OPCUACertificateTrustMode = 'strict' | 'trust-on-first-use';
+
 /**
  * OPC-UA data types
  */
@@ -173,6 +175,8 @@ export interface OPCUAConnection {
   password?: string;
   securityMode: OPCUASecurityMode;
   securityPolicy: OPCUASecurityPolicy;
+  certificateTrustMode: OPCUACertificateTrustMode;
+  expectedServerThumbprint?: string;
   connectionTimeout: number;
   sessionTimeout: number;
   keepAliveInterval: number;
@@ -273,6 +277,7 @@ export function getDefaultConnection(protocol: 'modbus' | 'opcua'): ModbusConnec
       endpointUrl: 'opc.tcp://10.0.0.60:4840',
       securityMode: 'None',
       securityPolicy: 'None',
+      certificateTrustMode: 'strict',
       connectionTimeout: 10000,
       sessionTimeout: 60000,
       keepAliveInterval: 5000,

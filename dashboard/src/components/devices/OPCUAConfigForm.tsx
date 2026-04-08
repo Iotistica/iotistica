@@ -8,21 +8,26 @@
 import React, { useEffect } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import type { OPCUADeviceConfig } from '@/schemas/sensor-schemas';
+import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface OPCUAConfigFormProps {
   value?: OPCUADeviceConfig;
   onChange?: (config: OPCUADeviceConfig) => void;
   onValidationChange?: (isValid: boolean) => void;
+  certificateMetadata?: Record<string, unknown>;
+  workflowHint?: string;
 }
 
 export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
   value,
   onChange,
   onValidationChange,
+  certificateMetadata,
+  workflowHint,
 }) => {
   const {
     register,
@@ -31,6 +36,7 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
     formState: { errors },
     getValues,
     reset,
+    setValue,
   } = useForm<OPCUADeviceConfig>({
     mode: 'onChange',
     defaultValues: value || {
@@ -42,6 +48,7 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
         endpointUrl: 'opc.tcp://10.0.0.60:4840',
         securityMode: 'None',
         securityPolicy: 'None',
+        certificateTrustMode: 'strict',
         connectionTimeout: 10000,
         sessionTimeout: 60000,
         keepAliveInterval: 5000,
@@ -85,6 +92,45 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
   }, [watch, onChange, getValues]);
 
   const securityMode = watch('connection.securityMode');
+  const certificateTrustMode = watch('connection.certificateTrustMode');
+  const expectedServerThumbprint = watch('connection.expectedServerThumbprint');
+
+  const normalizeThumbprint = (thumbprint?: string) =>
+    thumbprint?.replace(/[^a-fA-F0-9]/g, '').toLowerCase() || '';
+
+  const discoveredThumbprint = normalizeThumbprint(
+    typeof certificateMetadata?.serverCertificateThumbprint === 'string'
+      ? certificateMetadata.serverCertificateThumbprint
+      : undefined
+  );
+  const approvedThumbprint = normalizeThumbprint(expectedServerThumbprint);
+  const selectedSecurityMode = typeof certificateMetadata?.selectedSecurityMode === 'string'
+    ? certificateMetadata.selectedSecurityMode
+    : undefined;
+  const selectedSecurityPolicy = typeof certificateMetadata?.selectedSecurityPolicy === 'string'
+    ? certificateMetadata.selectedSecurityPolicy
+    : undefined;
+  const certificateStatus = !approvedThumbprint
+    ? 'unpinned'
+    : approvedThumbprint === discoveredThumbprint && discoveredThumbprint
+      ? 'matched'
+      : discoveredThumbprint && approvedThumbprint !== discoveredThumbprint
+        ? 'mismatch'
+        : 'pinned';
+
+  const applyStrictThumbprint = (thumbprint: string) => {
+    setValue('connection.certificateTrustMode', 'strict', { shouldDirty: true, shouldValidate: true });
+    setValue('connection.expectedServerThumbprint', thumbprint, { shouldDirty: true, shouldValidate: true });
+  };
+
+  const clearThumbprint = () => {
+    setValue('connection.expectedServerThumbprint', undefined, { shouldDirty: true, shouldValidate: true });
+  };
+
+  const setTrustOnFirstUse = () => {
+    setValue('connection.certificateTrustMode', 'trust-on-first-use', { shouldDirty: true, shouldValidate: true });
+    setValue('connection.expectedServerThumbprint', undefined, { shouldDirty: true, shouldValidate: true });
+  };
 
   return (
     <div className="space-y-6">
@@ -172,6 +218,117 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
               )}
             />
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="certificateTrustMode">Certificate Trust</Label>
+            <Controller
+              name="connection.certificateTrustMode"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger id="certificateTrustMode">
+                    <SelectValue placeholder="Select certificate trust mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="strict">Strict</SelectItem>
+                    <SelectItem value="trust-on-first-use">Trust On First Use</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            <p className="text-xs text-muted-foreground">
+              Strict rejects unknown server certificates. Trust On First Use auto-enrolls the first certificate presented by the server.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
+          <div className="space-y-1">
+            <h4 className="text-sm font-semibold">Certificate Workflow</h4>
+            <p className="text-xs text-muted-foreground">
+              Approve or rotate the server certificate without editing the raw connection JSON.
+            </p>
+            {workflowHint && (
+              <p className="text-xs text-muted-foreground">{workflowHint}</p>
+            )}
+          </div>
+
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
+            <div className="space-y-1">
+              <Label>Approved Certificate</Label>
+              <p className="break-all font-mono text-xs text-muted-foreground">
+                {approvedThumbprint || 'No certificate pin configured'}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <Label>Discovered Certificate</Label>
+              <p className="break-all font-mono text-xs text-muted-foreground">
+                {discoveredThumbprint || 'No discovered certificate metadata yet'}
+              </p>
+            </div>
+          </div>
+
+          {(selectedSecurityMode || selectedSecurityPolicy) && (
+            <p className="text-xs text-muted-foreground">
+              Discovered endpoint security:
+              {` ${selectedSecurityMode || 'Unknown mode'} / ${selectedSecurityPolicy || 'Unknown policy'}`}
+            </p>
+          )}
+
+          {certificateStatus === 'mismatch' && (
+            <Alert>
+              <AlertDescription>
+                The discovered OPC UA certificate differs from the currently approved pin. Use Rotate to approve the new certificate before deploying.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {certificateStatus === 'matched' && (
+            <Alert>
+              <AlertDescription>
+                The currently approved certificate matches the latest discovered certificate metadata.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            {discoveredThumbprint && approvedThumbprint !== discoveredThumbprint && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => applyStrictThumbprint(discoveredThumbprint)}
+              >
+                {approvedThumbprint ? 'Rotate To Discovered Certificate' : 'Approve Discovered Certificate'}
+              </Button>
+            )}
+            {certificateTrustMode !== 'trust-on-first-use' && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={setTrustOnFirstUse}
+              >
+                Switch To Trust On First Use
+              </Button>
+            )}
+            {certificateTrustMode !== 'strict' && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setValue('connection.certificateTrustMode', 'strict', { shouldDirty: true, shouldValidate: true })}
+              >
+                Enforce Strict Trust
+              </Button>
+            )}
+            {approvedThumbprint && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={clearThumbprint}
+              >
+                Clear Certificate Pin
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Credentials (if security enabled) */}
@@ -196,6 +353,25 @@ export const OPCUAConfigForm: React.FC<OPCUAConfigFormProps> = ({
                 placeholder="Optional"
                 autoComplete="current-password"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="expectedServerThumbprint">Expected Server Thumbprint</Label>
+              <Input
+                id="expectedServerThumbprint"
+                {...register('connection.expectedServerThumbprint')}
+                placeholder="40-char SHA-1 thumbprint"
+                autoCapitalize="none"
+                autoCorrect="off"
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional certificate pin. Recommended with Strict trust mode for fixed PLC or gateway endpoints.
+              </p>
+              {certificateTrustMode === 'trust-on-first-use' && (
+                <p className="text-xs text-muted-foreground">
+                  When Trust On First Use is enabled, the first unknown certificate will be trusted and stored locally.
+                </p>
+              )}
             </div>
           </div>
         )}

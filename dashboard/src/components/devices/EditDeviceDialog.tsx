@@ -116,7 +116,10 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
           protocol: 'opcua',
           enabled: device.enabled ?? true,
           pollInterval: device.pollInterval || 1000,
-          connection: device.connection,
+          connection: {
+            certificateTrustMode: 'strict',
+            ...device.connection,
+          },
           dataPoints: device.dataPoints || [],
         };
 
@@ -367,6 +370,8 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
                   value={opcuaConfig || undefined}
                   onChange={setOpcuaConfig}
                   onValidationChange={setOpcuaFormValid}
+                  certificateMetadata={device.metadata}
+                  workflowHint="Use approve or rotate actions here, then save the device to stage the change for draft or deploy."
                 />
 
                 {/* OPC-UA Data Points Table - Commented out to reduce confusion, users should work with profiles only

@@ -67,6 +67,7 @@ interface Sensor {
   connected?: boolean;
   connection?: Record<string, any>;
   dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
+  metadata?: Record<string, any>;
   pollInterval?: number | null; // Poll interval in milliseconds
   // Deployment tracking fields
   deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'draft' | 'pending_deletion' | 'deleted';
@@ -353,6 +354,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           connected: isConnected,
           connection: d.connection, // Full connection configuration
           dataPoints: d.dataPoints || d.data_points || [], // Data points configuration
+          metadata: d.metadata || {},
           pollInterval: d.pollInterval, // Poll interval
           // Virtual device fields (populated from metadata.sidecar)
           isVirtual: d.metadata?.sidecar === true,
@@ -417,6 +419,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             connected: false,
             connection: s.connection, // Include connection config
             dataPoints: s.dataPoints || s.data_points, // Include data points (camelCase/snake_case)
+            metadata: s.metadata || {},
             pollInterval: s.pollInterval,
             deploymentStatus: s.deploymentStatus || 'draft',
             lastDeployedAt: null,

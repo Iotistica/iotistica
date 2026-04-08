@@ -446,7 +446,7 @@ services:
             - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-1
             - MQTT_DEVICE_UUID=a6c87211-7e40-4229-8632-d238daf58296
-            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/nRGjWUzZSA6P0TCmPV7V1A
+            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/cUYIFBI3TleEyr75pxDgVA/d/2oLIGavBQwOORA3HSuuLqQ
             - MQTT_METRIC_NAMES=temperature,humidity
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
@@ -474,7 +474,7 @@ services:
             - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-2
             - MQTT_DEVICE_UUID=253bd0b3-61e0-4109-a490-29f91ddbf381
-            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/ke8v2rFzQsug0U5dSxzfRQ
+            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/cUYIFBI3TleEyr75pxDgVA/d/AMxqzEP_TF6eJcU9c3pW7A
             - MQTT_METRIC_NAMES=pressure,vibration,temperature2
             - MQTT_METRIC_UNITS=temperature2:C
             - MQTT_METRIC_BASES=temperature2:26
