@@ -67,9 +67,8 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
 
     // MQTT jobs handler
     try {
-      const { getJobsHandler } = await import('../mqtt/jobs-handler');
-      const handler = getJobsHandler();
-      await handler.stop();
+      const { stopJobsHandler } = await import('../mqtt/handlers');
+      await stopJobsHandler();
       logger.info('MQTT Jobs Handler stopped');
     } catch { /* ignore */ }
 

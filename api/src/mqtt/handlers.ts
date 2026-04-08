@@ -4,14 +4,58 @@
  * Processes incoming MQTT messages and queues them to Redis Streams
  */
 
-import { query } from '../db/connection';
-import type { DeviceDataMessage, MetricsData, StateMessage } from './manager';
+import { pool, query } from '../db/connection';
+import type MqttManager from './manager';
+import type { DeviceDataMessage, StateMessage } from './manager';
 import { processAgentStateReport } from '../services/agent/state';
 import { redisDeviceQueue } from '../services/ingestion';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
+import { EventPublisher } from '../services/event-sourcing';
 import { getTenantId } from '../redis/tenant-keys';
-import { mqttDevicePattern } from './topics';
+import { mqttDevicePattern, mqttDeviceTopic } from './topics';
 import logger from '../utils/logger';
+
+type JobStatusDetails = {
+  reason?: string;
+  stdout?: string;
+  stderr?: string;
+  progress?: number;
+  [key: string]: unknown;
+};
+
+type JobUpdatePayload = {
+  deviceUuid: string;
+  jobId: string;
+  status: string;
+  statusDetails?: JobStatusDetails;
+  expectedVersion?: number;
+  executionNumber?: number;
+  clientToken?: string;
+};
+
+type AgentJobStatusRow = {
+  status?: string;
+  queued_at?: string | Date | null;
+  started_at?: string | Date | null;
+};
+
+type QueuedJobRow = {
+  id: string;
+  job_document: unknown;
+  created_at: string | Date;
+};
+
+const jobsEventPublisher = new EventPublisher('mqtt-jobs-handler');
+let jobsMqttManager: MqttManager | null = null;
+
+export function setJobsMqttManager(manager: MqttManager | null): void {
+  jobsMqttManager = manager;
+}
+
+export async function stopJobsHandler(): Promise<void> {
+  logger.info('MQTT jobs handler stopped');
+  jobsMqttManager = null;
+}
 
 /**
  * Handle incoming endpoint data
@@ -370,11 +414,286 @@ export async function handleAnomalyEvent(event: AnomalyEvent): Promise<void> {
  */
 export async function handleJobMessage(data: { topic: string; payload: Buffer }): Promise<void> {
   try {
-    const { getJobsHandler } = await import('./jobs-handler');
-    const handler = getJobsHandler();
-    await handler.processMessage(data.topic, data.payload);
+    const message = JSON.parse(data.payload.toString()) as Record<string, unknown>;
+
+    if (data.topic.endsWith('/update')) {
+      await handleJobUpdateMessage(data.topic, message);
+      return;
+    }
+
+    if (data.topic.endsWith('/start-next')) {
+      await handleStartNextRequest(data.topic);
+    }
   } catch (error) {
     logger.error('Failed to handle job message:', error);
     throw error;
   }
+}
+
+export async function publishJobNotification(deviceUuid: string, jobId: string, jobDocument: unknown): Promise<void> {
+  if (!jobsMqttManager) {
+    throw new Error('MQTT manager not initialized');
+  }
+
+  const tenantId = getTenantId();
+  const topic = mqttDeviceTopic(tenantId, deviceUuid, 'jobs', 'notify');
+  const payload = JSON.stringify({
+    execution: {
+      jobId,
+      jobDocument,
+      queuedAt: Date.now(),
+      lastUpdatedAt: Date.now(),
+      versionNumber: 1,
+      executionNumber: 1,
+      status: 'QUEUED',
+    },
+    timestamp: Date.now(),
+  });
+
+  await jobsMqttManager.publish(topic, payload, 1);
+  logger.info(`Published job notification to ${topic}`, { jobId });
+}
+
+async function handleJobUpdateMessage(topic: string, message: Record<string, unknown>): Promise<void> {
+  const parts = topic.split('/');
+  const deviceUuid = parts[2];
+  const jobId = parts[4];
+  const statusDetails = isRecord(message.statusDetails) ? (message.statusDetails as JobStatusDetails) : undefined;
+
+  logger.info(`Received job update for ${jobId} from device ${deviceUuid}`, {
+    status: message.status,
+    hasStdout: !!statusDetails?.stdout,
+    hasStderr: !!statusDetails?.stderr,
+  });
+
+  await handleJobUpdate({
+    deviceUuid,
+    jobId,
+    status: typeof message.status === 'string' ? message.status : 'UNKNOWN',
+    statusDetails,
+    expectedVersion: typeof message.expectedVersion === 'number' ? message.expectedVersion : undefined,
+    executionNumber: typeof message.executionNumber === 'number' ? message.executionNumber : undefined,
+    clientToken: typeof message.clientToken === 'string' ? message.clientToken : undefined,
+  });
+}
+
+async function handleStartNextRequest(topic: string): Promise<void> {
+  const parts = topic.split('/');
+  const deviceUuid = parts[2];
+
+  logger.info(`Received start-next request from device ${deviceUuid}`);
+
+  const result = await pool.query<QueuedJobRow>(
+    `SELECT id, job_document, created_at 
+     FROM jobs 
+     WHERE agent_uuid = $1 AND status = 'QUEUED' 
+     ORDER BY created_at ASC 
+     LIMIT 1`,
+    [deviceUuid]
+  );
+
+  await publishStartNextResponse(deviceUuid, result.rows[0] ?? null);
+}
+
+async function publishStartNextResponse(deviceUuid: string, job: QueuedJobRow | null): Promise<void> {
+  if (!jobsMqttManager) {
+    throw new Error('MQTT manager not initialized');
+  }
+
+  const tenantId = getTenantId();
+  const topicSuffix = job ? 'accepted' : 'rejected';
+  const topic = mqttDeviceTopic(tenantId, deviceUuid, 'jobs', 'start-next', topicSuffix);
+  const payload = job
+    ? {
+        execution: {
+          jobId: job.id,
+          jobDocument: job.job_document,
+          queuedAt: new Date(job.created_at).getTime(),
+          lastUpdatedAt: Date.now(),
+          versionNumber: 1,
+          executionNumber: 1,
+          status: 'IN_PROGRESS',
+        },
+        timestamp: Date.now(),
+      }
+    : {
+        timestamp: Date.now(),
+        clientToken: null,
+      };
+
+  await jobsMqttManager.publish(topic, JSON.stringify(payload), 1);
+  logger.info(`Published start-next response to ${topic}`);
+}
+
+async function handleJobUpdate(update: JobUpdatePayload): Promise<void> {
+  logger.info({ update }, '[JobsHandler] Raw update object');
+
+  const { deviceUuid, jobId, status, statusDetails } = update;
+
+  logger.debug({
+    deviceUuid,
+    status,
+    hasDetails: !!statusDetails,
+    jobIdType: typeof jobId,
+    jobIdValue: jobId,
+  }, `[JobsHandler] Processing update for job ${jobId}`);
+
+  try {
+    const existing = await pool.query<AgentJobStatusRow>(
+      'SELECT * FROM agent_job_status WHERE job_id = $1 AND agent_uuid = $2',
+      [jobId, deviceUuid]
+    );
+
+    const now = new Date();
+    const stdout = typeof statusDetails?.stdout === 'string' ? statusDetails.stdout : null;
+    const stderr = typeof statusDetails?.stderr === 'string' ? statusDetails.stderr : null;
+    const reason = typeof statusDetails?.reason === 'string' ? statusDetails.reason : null;
+
+    if (existing.rows.length > 0) {
+      let updateQuery = `
+        UPDATE agent_job_status 
+        SET status = $1, 
+            updated_at = $2,
+            reason = COALESCE($3, reason)
+      `;
+      const params: Array<string | Date | null> = [status, now, reason];
+      let paramIndex = 4;
+
+      if (stdout) {
+        updateQuery += `, stdout = $${paramIndex}`;
+        params.push(stdout);
+        paramIndex++;
+      }
+
+      if (stderr) {
+        updateQuery += `, stderr = $${paramIndex}`;
+        params.push(stderr);
+        paramIndex++;
+      }
+
+      if (status === 'IN_PROGRESS' && !existing.rows[0].started_at) {
+        updateQuery += `, started_at = $${paramIndex}`;
+        params.push(now);
+        paramIndex++;
+      }
+
+      if (['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'CANCELED'].includes(status)) {
+        updateQuery += `, completed_at = $${paramIndex}`;
+        params.push(now);
+        paramIndex++;
+      }
+
+      updateQuery += ` WHERE job_id = $${paramIndex} AND agent_uuid = $${paramIndex + 1}`;
+      params.push(jobId, deviceUuid);
+
+      await pool.query(updateQuery, params);
+
+      logger.info(`[JobsHandler] Updated job ${jobId} status to ${status}`);
+      await publishJobEvent(deviceUuid, jobId, status, existing.rows[0], statusDetails);
+      return;
+    }
+
+    logger.warn(`[JobsHandler] Job status record not found, creating new one for ${jobId}`);
+
+    await pool.query(
+      `INSERT INTO agent_job_status 
+       (job_id, agent_uuid, status, queued_at, started_at, completed_at, stdout, stderr, reason, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        jobId,
+        deviceUuid,
+        status,
+        now,
+        status === 'IN_PROGRESS' ? now : null,
+        ['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'CANCELED'].includes(status) ? now : null,
+        stdout,
+        stderr,
+        reason,
+        now,
+      ]
+    );
+
+    logger.info(`[JobsHandler] Created job status record for ${jobId}`);
+  } catch (error) {
+    logger.error(`[JobsHandler] Failed to update job ${jobId}:`, error);
+  }
+}
+
+async function publishJobEvent(
+  deviceUuid: string,
+  jobId: string,
+  status: string,
+  previousRecord: AgentJobStatusRow,
+  statusDetails?: JobStatusDetails
+): Promise<void> {
+  const eventMap: Record<string, string> = {
+    IN_PROGRESS: 'job.started',
+    SUCCEEDED: 'job.completed',
+    FAILED: 'job.failed',
+    TIMED_OUT: 'job.timeout',
+    CANCELED: 'job.cancelled',
+  };
+
+  let eventType = eventMap[status];
+
+  if (status === 'IN_PROGRESS' && statusDetails?.progress !== undefined && previousRecord?.status === 'IN_PROGRESS') {
+    eventType = 'job.progress';
+  }
+
+  if (!eventType) {
+    return;
+  }
+
+  const eventData: Record<string, unknown> = {
+    job_id: jobId,
+    status,
+    previous_status: previousRecord?.status,
+  };
+
+  if (eventType === 'job.started') {
+    eventData.started_at = new Date().toISOString();
+    eventData.queued_at = previousRecord?.queued_at;
+  } else if (['job.completed', 'job.failed', 'job.timeout', 'job.cancelled'].includes(eventType)) {
+    eventData.completed_at = new Date().toISOString();
+    eventData.started_at = previousRecord?.started_at;
+    eventData.queued_at = previousRecord?.queued_at;
+
+    if (previousRecord?.started_at) {
+      const duration = Date.now() - new Date(previousRecord.started_at).getTime();
+      eventData.duration_ms = duration;
+    }
+  }
+
+  if (statusDetails) {
+    if (statusDetails.reason) eventData.reason = statusDetails.reason;
+    if (statusDetails.progress !== undefined) eventData.progress = statusDetails.progress;
+    if (eventType === 'job.failed' && statusDetails.stderr) {
+      eventData.error_output = statusDetails.stderr.substring(0, 500);
+    }
+  }
+
+  const severity = eventType === 'job.failed' ? 'error' : eventType === 'job.timeout' ? 'warning' : 'info';
+  const impact = eventType === 'job.failed' ? 'medium' : 'low';
+
+  await jobsEventPublisher.publish(
+    eventType,
+    'agent',
+    deviceUuid,
+    eventData,
+    {
+      metadata: {
+        job_status_details: statusDetails
+      },
+      severity,
+      impact,
+      actor: {
+        type: 'device',
+        id: deviceUuid
+      }
+    }
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

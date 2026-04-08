@@ -10,7 +10,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import poolWrapper from '../db/connection';
 import deviceAuth from '../middleware/agent-auth';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { getJobsHandler } from '../mqtt/jobs-handler';
+import { publishJobNotification } from '../mqtt/handlers';
 import { EventPublisher } from '../services/event-sourcing';
 import { logger } from '../utils/logger';
 
@@ -110,7 +110,6 @@ function parsePaginationValue(value: string | number | undefined, fallback: numb
 }
 
 const pool = poolWrapper.pool;
-const jobsHandler = getJobsHandler();
 const eventPublisher = new EventPublisher('device-jobs-api');
 
 async function updateJobExecutionStats(jobId: string): Promise<void> {
@@ -469,7 +468,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
 
       try {
         for (const deviceUuid of deviceUuids) {
-          await jobsHandler.publishJobNotification(deviceUuid, jobId, finalJobDocument);
+          await publishJobNotification(deviceUuid, jobId, finalJobDocument);
         }
         logger.info(`Sent MQTT notifications to ${deviceUuids.length} agents`);
       } catch (mqttError) {

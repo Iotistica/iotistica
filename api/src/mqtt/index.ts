@@ -11,7 +11,8 @@ import {
   handleAgentState,
   handleAgentStatus,
   handleAnomalyEvent,
-  handleJobMessage
+  handleJobMessage,
+  setJobsMqttManager
 } from './handlers';
 import { getDefaultBrokerConfig, buildBrokerUrl } from '../utils/mqtt-broker-config';
 import { getTenantId } from '../redis/tenant-keys';
@@ -187,15 +188,8 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       }
     });
 
-    // Initialize jobs handler
-    try {
-      const { getJobsHandler } = await import('./jobs-handler');
-      const handler = getJobsHandler();
-      handler.setMqttManager(mqttManager);
-      logger.info('MQTT Jobs Handler initialized');
-    } catch (error) {
-      logger.warn('Failed to initialize MQTT Jobs Handler', { error });
-    }
+    setJobsMqttManager(mqttManager);
+    logger.info('MQTT jobs handler initialized');
 
     // Subscribe to all device topics
     // Use '*' wildcard for all agents, or specific UUIDs for targeted subscriptions
