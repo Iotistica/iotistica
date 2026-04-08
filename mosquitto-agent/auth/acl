@@ -3,6 +3,3 @@
 
 user admin
 topic readwrite #
-
-user mqtt-user-5
-topic write i/84c49f7b9cb5462c886c02b7ce3003aa/a/GadMRxuNQzmmKewi2KHcDw/d/v80XUbEuQSSjiveZqyQ4cA/#
