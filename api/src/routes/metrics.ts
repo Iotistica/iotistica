@@ -10,21 +10,54 @@
  * - POST /api/v1/metrics/refresh    - Refresh a materialized view (admin only)
  */
 
-import express from 'express';
 import { z } from 'zod';
 import { jwtAuth } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
 import {
+
   getAgents,
   getCatalog,
   getLatestReadings,
   getTimeseries,
   refreshViews,
-} from '../services/metrics.service';
-import type { TimeRange, Aggregation, RefreshView } from '../services/metrics.service';
+} from '../services/agent/metrics.service';
+import type { TimeRange, Aggregation, RefreshView } from '../services/agent/metrics.service';
 import { redisDeviceQueue } from '../services/ingestion/redis-device-queue';
+import type { FastifyPluginAsync } from 'fastify'
 
-export const router = express.Router();
+const plugin: FastifyPluginAsync = async (fastify) => {
+
+interface CatalogQuerystring {
+  deviceUuid?: string;
+  protocol?: string;
+  agentUuid?: string;
+  metricName?: string;
+}
+
+interface AgentsQuerystring {
+  protocol?: string;
+  agentUuid?: string;
+}
+
+interface LatestQuerystring {
+  deviceUuid?: string;
+  metricName?: string;
+  agentUuid?: string;
+}
+
+interface TimeseriesQuerystring {
+  deviceUuid?: string;
+  metricName?: string;
+  timeRange?: string;
+  aggregation?: string;
+  agentUuid?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+interface RefreshQuerystring {
+  view?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Validation schemas
@@ -41,8 +74,8 @@ const optionalDateTimeSchema = z.string().refine((value) => !Number.isNaN(Date.p
 // ---------------------------------------------------------------------------
 // GET /catalog  — metric catalog with statistics
 // ---------------------------------------------------------------------------
-router.get('/catalog', jwtAuth, async (req, res) => {
-  const requestId = (req as any).id || 'unknown';
+fastify.get<{ Querystring: CatalogQuerystring }>('/catalog', { preHandler: [jwtAuth] }, async (req, reply) => {
+  const requestId = req.id || 'unknown';
   try {
     const validatedDeviceUuid = uuidSchema.parse(req.query.deviceUuid);
     const validatedProtocol   = protocolSchema.parse(req.query.protocol);
@@ -55,43 +88,51 @@ router.get('/catalog', jwtAuth, async (req, res) => {
       agentUuid:  validatedAgentUuid,
       metricName: validatedMetricName,
     });
-    res.json({ count: metrics.length, metrics });
-  } catch (error: any) {
+    return reply.send({ count: metrics.length, metrics });
+  } catch (error: unknown) {
     if (error instanceof z.ZodError) {
       logger.warn('Invalid catalog parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid parameters', requestId });
+      return reply.status(400).send({ error: 'Invalid parameters', requestId });
     }
-    logger.error('Error getting metric catalog', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error getting metric catalog', {
+      requestId,
+      userId: req.user?.id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
 // ---------------------------------------------------------------------------
 // GET /agents  — list all endpoint devices
 // ---------------------------------------------------------------------------
-router.get('/agents', jwtAuth, async (req, res) => {
-  const requestId = (req as any).id || 'unknown';
+fastify.get<{ Querystring: AgentsQuerystring }>('/agents', { preHandler: [jwtAuth] }, async (req, reply) => {
+  const requestId = req.id || 'unknown';
   try {
     const validatedProtocol  = protocolSchema.parse(req.query.protocol);
     const validatedAgentUuid = uuidSchema.parse(req.query.agentUuid);
 
     const agents = await getAgents({ protocol: validatedProtocol, agentUuid: validatedAgentUuid });
-    res.json({ count: agents.length, agents });
-  } catch (error: any) {
+    return reply.send({ count: agents.length, agents });
+  } catch (error: unknown) {
     if (error instanceof z.ZodError) {
       logger.warn('Invalid agents parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid parameters', requestId });
+      return reply.status(400).send({ error: 'Invalid parameters', requestId });
     }
-    logger.error('Error getting endpoint agents', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error getting endpoint agents', {
+      requestId,
+      userId: req.user?.id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
 // ---------------------------------------------------------------------------
 // GET /latest  — current readings for a device
 // ---------------------------------------------------------------------------
-router.get('/latest', jwtAuth, async (req, res) => {
-  const requestId = (req as any).id || 'unknown';
+fastify.get<{ Querystring: LatestQuerystring }>('/latest', { preHandler: [jwtAuth] }, async (req, reply) => {
+  const requestId = req.id || 'unknown';
   try {
     const validatedDeviceUuid = requiredUuidSchema.parse(req.query.deviceUuid);
     const validatedMetricName = req.query.metricName ? metricNameSchema.parse(req.query.metricName) : undefined;
@@ -102,36 +143,43 @@ router.get('/latest', jwtAuth, async (req, res) => {
       metricName: validatedMetricName,
       agentUuid:  validatedAgentUuid,
     });
-    res.json({ count: readings.length, readings });
-  } catch (error: any) {
+    return reply.send({ count: readings.length, readings });
+  } catch (error: unknown) {
     if (error instanceof z.ZodError) {
       logger.warn('Invalid latest readings parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid parameters', requestId });
+      return reply.status(400).send({ error: 'Invalid parameters', requestId });
     }
-    logger.error('Error getting latest readings', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error getting latest readings', {
+      requestId,
+      userId: req.user?.id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
 // ---------------------------------------------------------------------------
 // GET /ingestion-health  — live pipeline health for chart freshness awareness
 // ---------------------------------------------------------------------------
-router.get('/ingestion-health', jwtAuth, async (req, res) => {
-  const requestId = (req as any).id || 'unknown';
+fastify.get('/ingestion-health', { preHandler: [jwtAuth] }, async (req, reply) => {
+  const requestId = req.id || 'unknown';
   try {
     const health = await redisDeviceQueue.getIngestionHealth();
-    res.json(health);
-  } catch (error: any) {
-    logger.error('Error getting ingestion health', { requestId, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    return reply.send(health);
+  } catch (error: unknown) {
+    logger.error('Error getting ingestion health', {
+      requestId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
 // ---------------------------------------------------------------------------
 // GET /timeseries  — time-bucketed aggregates for a metric
 // ---------------------------------------------------------------------------
-router.get('/timeseries', jwtAuth, async (req, res) => {
-  const requestId = (req as any).id || 'unknown';
+fastify.get<{ Querystring: TimeseriesQuerystring }>('/timeseries', { preHandler: [jwtAuth] }, async (req, reply) => {
+  const requestId = req.id || 'unknown';
   try {
     const validatedDeviceUuid  = requiredUuidSchema.parse(req.query.deviceUuid);
     const validatedMetricName  = metricNameSchema.parse(req.query.metricName);
@@ -142,7 +190,7 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
     const validatedEndTime     = optionalDateTimeSchema.parse(req.query.endTime);
 
     if (validatedStartTime && validatedEndTime && new Date(validatedEndTime) <= new Date(validatedStartTime)) {
-      return res.status(400).json({ error: 'endTime must be greater than startTime', requestId });
+      return reply.status(400).send({ error: 'endTime must be greater than startTime', requestId });
     }
 
     const result = await getTimeseries({
@@ -154,35 +202,39 @@ router.get('/timeseries', jwtAuth, async (req, res) => {
       startTime:   validatedStartTime ? new Date(validatedStartTime) : undefined,
       endTime:     validatedEndTime ? new Date(validatedEndTime) : undefined,
     });
-    res.json(result);
-  } catch (error: any) {
+    return reply.send(result);
+  } catch (error: unknown) {
     if (error instanceof z.ZodError) {
       logger.warn('Invalid timeseries parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid parameters', requestId });
+      return reply.status(400).send({ error: 'Invalid parameters', requestId });
     }
-    logger.error('Error getting time-series data', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error getting time-series data', {
+      requestId,
+      userId: req.user?.id,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
 // ---------------------------------------------------------------------------
 // POST /refresh  — refresh a materialized view (admin only)
 // ---------------------------------------------------------------------------
-router.post('/refresh', jwtAuth, async (req, res) => {
-  const requestId = (req as any).id || 'unknown';
-  const userId    = (req as any).user?.id;
-  const userRole  = (req as any).user?.role;
+fastify.post<{ Querystring: RefreshQuerystring }>('/refresh', { preHandler: [jwtAuth] }, async (req, reply) => {
+  const requestId = req.id || 'unknown';
+  const userId    = req.user?.id;
+  const userRole  = req.user?.role;
   try {
     if (userRole !== 'admin') {
       logger.warn('Unauthorized view refresh attempt', { requestId, userId, userRole });
-      return res.status(403).json({ error: 'Admin authorization required', requestId });
+      return reply.status(403).send({ error: 'Admin authorization required', requestId });
     }
 
     const validatedView = viewSchema.parse(req.query.view) as RefreshView;
     logger.info('Accepted metric view refresh request', { requestId, userId, view: validatedView });
 
     const result = await refreshViews(validatedView);
-    res.status(202).json({
+    return reply.status(202).send({
       message: result.alreadyInProgress
         ? `Refresh for ${validatedView} view(s) is already in progress or cooling down`
         : `Accepted refresh for ${validatedView} view(s)`,
@@ -190,12 +242,19 @@ router.post('/refresh', jwtAuth, async (req, res) => {
       status: result.alreadyInProgress ? 'already_in_progress' : 'accepted',
       view: validatedView,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof z.ZodError) {
       logger.warn('Invalid refresh parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid parameters', requestId });
+      return reply.status(400).send({ error: 'Invalid parameters', requestId });
     }
-    logger.error('Error refreshing views', { requestId, userId, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error refreshing views', {
+      requestId,
+      userId,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
+};
+
+export default plugin;

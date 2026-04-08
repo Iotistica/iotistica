@@ -1,43 +1,19 @@
-/**
- * Device UUID Immutability Middleware
- * 
- * Quick check to prevent re-registration attempts for already-registered agents.
- * Fails fast before hitting the provisioning service layer.
- * 
- * Usage:
- *   router.post('/device/register', checkUuidImmutability, async (req, res) => { ... })
- */
-
-import { Request, Response, NextFunction } from 'express';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import { AgentModel } from '../db/models';
 import logger from '../utils/logger';
 
-/**
- * Middleware to check if device UUID is already registered
- * Prevents re-provisioning with same UUID
- * 
- * Quick fail-fast check before service layer processing
- */
 export async function checkUuidImmutability(
-  req: Request,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  reply: FastifyReply
 ): Promise<void> {
   try {
-    const { uuid } = req.body;
+    const { uuid } = request.body as any;
+    if (!uuid) return;
 
-    // Skip if no UUID provided (will be caught by service validation)
-    if (!uuid) {
-      return next();
-    }
-
-    // Check if device exists and is already registered
     const existingDevice = await AgentModel.getByUuid(uuid);
-
     if (existingDevice && existingDevice.provisioning_state === 'registered') {
       logger.warn(`Re-provisioning attempt for registered device: ${uuid.substring(0, 8)}...`);
-      
-      res.status(409).json({
+      return reply.status(409).send({
         error: 'Device already registered',
         message: 'Device already registered with this UUID. Factory reset to re-provision.',
         details: {
@@ -46,44 +22,27 @@ export async function checkUuidImmutability(
           provisioned_at: existingDevice.provisioned_at
         }
       });
-      return;
     }
-
-    // UUID is either new or not yet registered, proceed
-    next();
   } catch (error: any) {
     logger.error('Error checking UUID immutability:', error);
-    // Don't fail the request on middleware error - let service layer handle it
-    // This is just a fast-path optimization
-    next();
+    // Soft fail - let service layer handle it
   }
 }
 
-/**
- * Optional middleware for optional UUID immutability check
- * Doesn't fail if check errors - continues to service layer
- */
 export async function optionalUuidImmutabilityCheck(
-  req: Request,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  _reply: FastifyReply
 ): Promise<void> {
   try {
-    const { uuid } = req.body;
-    if (!uuid) return next();
+    const { uuid } = request.body as any;
+    if (!uuid) return;
 
     const existingDevice = await AgentModel.getByUuid(uuid);
     if (existingDevice?.provisioning_state === 'registered') {
-      res.status(409).json({
-        error: 'Device already registered',
-        message: 'Device already registered with this UUID. Factory reset to re-provision.'
-      });
-      return;
+      // Soft fail - log only, do not block (optional variant)
+      logger.debug('Optional UUID check: device already registered', { uuid: uuid.substring(0, 8) });
     }
-
-    next();
-  } catch (error) {
-    // Soft fail - proceed to service layer
-    next();
+  } catch {
+    // Soft fail
   }
 }

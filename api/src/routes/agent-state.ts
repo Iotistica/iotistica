@@ -19,7 +19,7 @@
  * - GET /api/v1/agents/:uuid/metrics - Get device metrics
  */
 
-import express from 'express';
+
 import crypto from 'crypto';
 import {
   AgentModel,
@@ -31,11 +31,20 @@ import {
 import { validateTargetStateConfigMiddleware } from '../services/provisioning/target-state-config.validator';
 import { EventPublisher, objectsAreEqual } from '../services/event-sourcing';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/agent-auth';
-import { resolveAppsImages } from '../services/docker-registry';
-import { processAgentStateReport } from '../services/agent-state';
+import { processAgentStateReport, type AgentStateReport } from '../services/agent/state';
 import logger from '../utils/logger';
+import type { FastifyPluginAsync } from 'fastify'
 
-export const router = express.Router();
+type AgentUuidParams = {
+  uuid: string;
+};
+
+type TargetStateBody = {
+  apps?: unknown[] | Record<string | number, unknown>;
+  config?: unknown;
+};
+
+const plugin: FastifyPluginAsync = async (fastify) => {
 
 // Initialize event publisher for audit trail
 const eventPublisher = new EventPublisher();
@@ -269,7 +278,7 @@ function normalizeAnomalyMetricNames(config: any, deviceUuid: string): any {
  * 
  * Supports ETag caching - returns 304 if state hasn't changed
  */
-router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
+fastify.get<{ Params: AgentUuidParams }>('/device/:uuid/state', { preHandler: [deviceAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
     const ifNoneMatch = req.headers['if-none-match'];
@@ -280,7 +289,7 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
       logger.warn('Device not registered - rejecting state poll', {
         deviceUuid: uuid.substring(0, 8) + '...',
       });
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not registered',
         message: 'Please complete device registration before polling state'
       });
@@ -301,7 +310,7 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
       const etag = Buffer.from(JSON.stringify(emptyState))
         .toString('base64')
         .substring(0, 32);
-      return res.set('ETag', etag).json(emptyState);
+      return reply.header('ETag', etag).send(emptyState);
     }
 
     // Generate ETag
@@ -351,7 +360,7 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
       logger.debug('Changes pending deployment - returning 304 to block sync', { 
         deviceId: uuid.substring(0, 8) 
       });
-      return res.set('X-Content-Length', contentSize.toString()).status(304).end();
+      return reply.header('X-Content-Length', contentSize.toString()).status(304).send();
     }
 
     // Check if client has current version
@@ -359,7 +368,7 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
       logger.debug('ETags match - returning 304 Not Modified', { 
         deviceId: uuid.substring(0, 8) 
       });
-      return res.set('X-Content-Length', contentSize.toString()).status(304).end();
+      return reply.header('X-Content-Length', contentSize.toString()).status(304).send();
     }
     
     logger.debug('ETags differ - sending new state', { 
@@ -369,14 +378,14 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
     // Agent is fetching target state to apply pending changes
 
     // Return target state
-    res.set('ETag', etag).json(response);
+    return reply.header('ETag', etag).send(response);
   } catch (error: any) {
     logger.error('Error getting device state', { 
       error: error.message,
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to get device state',
       message: error.message
     });
@@ -387,7 +396,7 @@ router.get('/device/:uuid/state', deviceAuth, async (req, res) => {
  * Device reports current state
  * PATCH /api/v1/device/state
  */
-router.patch('/device/state', deviceAuthFromBody, async (req, res) => {
+fastify.patch<{ Body: AgentStateReport }>('/device/state', { preHandler: [deviceAuthFromBody] }, async (req, reply) => {
   try {
     const stateReport = req.body;
     
@@ -409,13 +418,13 @@ router.patch('/device/state', deviceAuthFromBody, async (req, res) => {
       userAgent: req.headers['user-agent']
     });
 
-    res.json({ status: 'ok' });
+    return reply.send({ status: 'ok' });
   } catch (error: any) {
     logger.error('Error processing state report', {
       error: error.message,
       stack: error.stack
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to process state report',
       message: error.message
     });
@@ -430,14 +439,14 @@ router.patch('/device/state', deviceAuthFromBody, async (req, res) => {
  * Get device target state
  * GET /api/v1/agents/:uuid/target-state
  */
-router.get('/agents/:uuid/target-state', deviceAuth, async (req, res) => {
+fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/target-state', { preHandler: [deviceAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
     const targetState = await DeviceTargetStateModel.get(uuid);
 
     // Agent is fetching target state to apply pending changes
 
-    res.json({
+    return reply.send({
       uuid,
       apps: targetState ? 
         (typeof targetState.apps === 'string' ? JSON.parse(targetState.apps as any) : targetState.apps) :
@@ -454,7 +463,7 @@ router.get('/agents/:uuid/target-state', deviceAuth, async (req, res) => {
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to get target state',
       message: error.message
     });
@@ -469,13 +478,13 @@ router.get('/agents/:uuid/target-state', deviceAuth, async (req, res) => {
  * - Array: [{ appId: 1, appName: "app1", ... }, ...]
  * - Object: { 1: { appId: 1, appName: "app1", ... }, ... }
  */
-router.post('/agents/:uuid/target-state', deviceAuth, validateTargetStateConfigMiddleware, async (req, res) => {
+fastify.post<{ Params: AgentUuidParams; Body: TargetStateBody }>('/agents/:uuid/target-state', { preHandler: [deviceAuth, validateTargetStateConfigMiddleware] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
     let { apps, config } = req.body;
 
     if (!apps || typeof apps !== 'object') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'Body must contain apps (array or object)'
       });
@@ -485,7 +494,7 @@ router.post('/agents/:uuid/target-state', deviceAuth, validateTargetStateConfigM
     try {
       apps = normalizeAppsFormat(apps);
     } catch (error: any) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid apps format',
         message: error.message
       });
@@ -494,20 +503,6 @@ router.post('/agents/:uuid/target-state', deviceAuth, validateTargetStateConfigM
     config = await applyPendingMqttAuth(config || {});
     config = sanitizeAnomalyExpectedRanges(config);
     config = normalizeAnomalyMetricNames(config, uuid);
-
-    // 🎯 RESOLVE IMAGE DIGESTS
-    // Convert all :latest and floating tags to @sha256:... digests
-    // This enables automatic updates when new images are pushed
-    logger.debug('Resolving image digests (POST)', { deviceId: uuid.substring(0, 8) });
-    try {
-      apps = await resolveAppsImages(apps);
-    } catch (error: any) {
-      logger.warn('Digest resolution failed, continuing with tag-based references (POST)', {
-        deviceId: uuid.substring(0, 8),
-        error: error.message
-      });
-      // Continue with original apps - digest resolution is best-effort
-    }
 
     // Get old state for diff
     const oldTargetState = await DeviceTargetStateModel.get(uuid);
@@ -539,7 +534,7 @@ router.post('/agents/:uuid/target-state', deviceAuth, validateTargetStateConfigM
       }
     );
 
-    res.json({
+    return reply.send({
       status: 'ok',
       message: 'Target state updated',
       uuid,
@@ -549,7 +544,7 @@ router.post('/agents/:uuid/target-state', deviceAuth, validateTargetStateConfigM
     });
   } catch (error: any) {
     logger.error('Error setting target state:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to set target state',
       message: error.message
     });
@@ -560,20 +555,21 @@ router.post('/agents/:uuid/target-state', deviceAuth, validateTargetStateConfigM
  * Convert apps array to Record<number, App> format
  * Supports both array input (clean API) and object input (backward compatibility)
  */
-function normalizeAppsFormat(apps: any): Record<number, any> {
+function normalizeAppsFormat(apps: unknown[] | Record<string | number, unknown>): Record<number, unknown> {
   // If already an object, return as-is
   if (!Array.isArray(apps)) {
-    return apps;
+    return apps as Record<number, unknown>;
   }
 
   // Convert array to object keyed by appId
-  return apps.reduce((acc, app) => {
-    if (!app.appId) {
+  return apps.reduce<Record<number, unknown>>((acc, app) => {
+    const appId = typeof app === 'object' && app !== null ? (app as { appId?: number }).appId : undefined;
+    if (typeof appId !== 'number' || !Number.isFinite(appId)) {
       throw new Error('Each app in array must have an appId field');
     }
-    acc[app.appId] = app;
+    acc[appId] = app;
     return acc;
-  }, {} as Record<number, any>);
+  }, {});
 }
 
 /**
@@ -584,13 +580,13 @@ function normalizeAppsFormat(apps: any): Record<number, any> {
  * - Array: [{ appId: 1, appName: "app1", ... }, ...]
  * - Object: { 1: { appId: 1, appName: "app1", ... }, ... }
  */
-router.put('/agents/:uuid/target-state', validateTargetStateConfigMiddleware, async (req, res) => {
+fastify.put<{ Params: AgentUuidParams; Body: TargetStateBody }>('/agents/:uuid/target-state', { preHandler: [validateTargetStateConfigMiddleware] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
     let { apps, config } = req.body;
 
     if (!apps || typeof apps !== 'object') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'Body must contain apps (array or object)'
       });
@@ -600,7 +596,7 @@ router.put('/agents/:uuid/target-state', validateTargetStateConfigMiddleware, as
     try {
       apps = normalizeAppsFormat(apps);
     } catch (error: any) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid apps format',
         message: error.message
       });
@@ -609,18 +605,6 @@ router.put('/agents/:uuid/target-state', validateTargetStateConfigMiddleware, as
     config = await applyPendingMqttAuth(config || {});
     config = sanitizeAnomalyExpectedRanges(config);
     config = normalizeAnomalyMetricNames(config, uuid);
-
-    // 🎯 RESOLVE IMAGE DIGESTS
-    // Convert all :latest and floating tags to @sha256:... digests
-    logger.debug('Resolving image digests (PUT)', { deviceId: uuid.substring(0, 8) });
-    try {
-      apps = await resolveAppsImages(apps);
-    } catch (error: any) {
-      logger.warn('Digest resolution failed, continuing with tag-based references (PUT)', {
-        deviceId: uuid.substring(0, 8),
-        error: error.message
-      });
-    }
 
     // Get old state for diff
     const oldTargetState = await DeviceTargetStateModel.get(uuid);
@@ -653,7 +637,7 @@ router.put('/agents/:uuid/target-state', validateTargetStateConfigMiddleware, as
       }
     );
 
-    res.json({
+    return reply.send({
       status: 'ok',
       message: 'Target state updated',
       uuid,
@@ -667,7 +651,7 @@ router.put('/agents/:uuid/target-state', validateTargetStateConfigMiddleware, as
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to set target state',
       message: error.message
     });
@@ -678,19 +662,19 @@ router.put('/agents/:uuid/target-state', validateTargetStateConfigMiddleware, as
  * Get device current state
  * GET /api/v1/agents/:uuid/current-state
  */
-router.get('/agents/:uuid/current-state', async (req, res) => {
+fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/current-state', async (req, reply) => {
   try {
     const { uuid } = req.params;
     const currentState = await DeviceCurrentStateModel.get(uuid);
 
     if (!currentState) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'No state reported yet',
         message: `Device ${uuid} has not reported its state yet`
       });
     }
 
-    res.json({
+    return reply.send({
       apps: typeof currentState.apps === 'string' ? JSON.parse(currentState.apps as any) : currentState.apps,
       config: typeof currentState.config === 'string' ? JSON.parse(currentState.config as any) : currentState.config,
       system_info: typeof currentState.system_info === 'string' ? JSON.parse(currentState.system_info as any) : currentState.system_info,
@@ -702,7 +686,7 @@ router.get('/agents/:uuid/current-state', async (req, res) => {
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to get current state',
       message: error.message
     });
@@ -713,7 +697,7 @@ router.get('/agents/:uuid/current-state', async (req, res) => {
  * Clear device target state
  * DELETE /api/v1/agents/:uuid/target-state
  */
-router.delete('/agents/:uuid/target-state', deviceAuth, async (req, res) => {
+fastify.delete<{ Params: AgentUuidParams }>('/agents/:uuid/target-state', { preHandler: [deviceAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
 
@@ -721,7 +705,7 @@ router.delete('/agents/:uuid/target-state', deviceAuth, async (req, res) => {
 
     logger.info('Cleared target state', { deviceId: uuid.substring(0, 8) });
 
-    res.json({
+    return reply.send({
       status: 'ok',
       message: 'Target state cleared',
     });
@@ -731,7 +715,7 @@ router.delete('/agents/:uuid/target-state', deviceAuth, async (req, res) => {
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to clear target state',
       message: error.message
     });
@@ -739,4 +723,6 @@ router.delete('/agents/:uuid/target-state', deviceAuth, async (req, res) => {
 });
 
 
-export default router;
+};
+
+export default plugin;

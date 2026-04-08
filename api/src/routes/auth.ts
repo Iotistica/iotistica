@@ -1,1082 +1,918 @@
-/**
+﻿/**
  * Authentication Routes
- * 
- * Handles user registration, login, logout, token refresh, and password management
+ *
+ * Handles user registration, login, logout, token refresh, and password management.
  */
-
-import express, { Request, Response } from 'express';
 import crypto from 'crypto';
-import * as authService from '../services/auth/auth.service';
+import type { FastifyPluginAsync } from 'fastify';
+import { fetch } from 'undici';
+import { query } from '../db/connection';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import rateLimit from 'express-rate-limit';
+import * as authService from '../services/auth/auth.service';
+import logger from '../utils/logger';
+import { hashPassword } from '../utils/secret-hashing';
 
-const router = express.Router();
+type IdParams = {
+  id: string;
+};
 
-// Rate limiting for auth endpoints
-const authRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 requests per window
-  message: {
-    error: 'Too Many Requests',
-    message: 'Too many authentication attempts. Please try again later.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false
-});
+type RegisterBody = {
+  username?: string;
+  email?: string;
+  password?: string;
+  fullName?: string;
+};
 
-const registerRateLimit = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 3, // 3 registrations per hour per IP
-  message: {
-    error: 'Too Many Requests',
-    message: 'Too many registration attempts. Please try again later.'
+type LoginBody = {
+  username?: string;
+  password?: string;
+};
+
+type BootstrapAdminBody = {
+  password?: string;
+  email?: string;
+};
+
+type RefreshBody = {
+  refreshToken?: string;
+};
+
+type LogoutBody = {
+  refreshToken?: string;
+};
+
+type ChangePasswordBody = {
+  currentPassword?: string;
+  newPassword?: string;
+};
+
+type ResetPasswordBody = {
+  token?: string;
+  customerId?: string;
+  password?: string;
+};
+
+type MqttUserCreateBody = {
+  username?: string;
+  password?: string;
+  is_superuser?: boolean;
+  is_active?: boolean;
+};
+
+type MqttUserUpdateBody = {
+  password?: string;
+  is_superuser?: boolean;
+  is_active?: boolean;
+};
+
+type MqttAclCreateBody = {
+  topic?: string;
+  access?: number;
+  priority?: number;
+};
+
+type MqttAclUpdateBody = {
+  topic?: string;
+  access?: number;
+  priority?: number;
+};
+
+type ApiKeyCreateBody = {
+  name?: string;
+  description?: string | null;
+  expires_at?: string | null;
+};
+
+type ValidateResetTokenResponse = {
+  data: {
+    username: string;
+  };
+};
+
+type MqttUserRow = {
+  id: number;
+  username: string;
+  is_superuser: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type MqttAclRow = {
+  id: number;
+  username: string;
+  topic: string;
+  access: number;
+  priority: number;
+  created_at: string;
+};
+
+type UsernameRow = {
+  username: string;
+};
+
+type ApiKeyRow = {
+  id: number;
+  name: string;
+  key: string;
+  description: string | null;
+  is_active: boolean;
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+};
+
+function getHeaderValue(header: string | string[] | undefined): string | undefined {
+  if (Array.isArray(header)) {
+    return header[0];
   }
-});
 
-/**
- * POST /auth/register
- * 
- * Register a new user account
- * 
- * Body:
- *   - username: string (required, min 3 chars)
- *   - email: string (required, valid email)
- *   - password: string (required, min 8 chars)
- *   - fullName: string (optional)
- * 
- * Returns: { accessToken, refreshToken, user }
- */
-router.post('/register', registerRateLimit, async (req: Request, res: Response) => {
-  try {
-    const { username, email, password, fullName } = req.body;
+  return header;
+}
 
-    if (!username || !email || !password) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Username, email, and password are required'
-      });
-      return;
-    }
+function isAccessValue(value: unknown): value is 1 | 2 | 3 {
+  return value === 1 || value === 2 || value === 3;
+}
 
-    const result = await authService.registerUser({
-      username,
-      email,
-      password,
-      fullName,
-      role: 'viewer' // Default role for self-registration
-    });
+const plugin: FastifyPluginAsync = async (fastify) => {
+  fastify.post<{ Body: RegisterBody }>('/register', async (req, reply) => {
+    try {
+      const { username, email, password, fullName } = req.body;
 
-    res.status(201).json({
-      message: 'User registered successfully',
-      data: result
-    });
-
-  } catch (error: any) {
-    console.error('Registration error:', error);
-    
-    if (error.message.includes('already exists') || 
-        error.message.includes('at least') ||
-        error.message.includes('required')) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: error.message
-      });
-      return;
-    }
-
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Registration failed'
-    });
-  }
-});
-
-/**
- * POST /auth/login
- * 
- * Authenticate user and receive JWT tokens
- * 
- * Body:
- *   - username: string (username or email)
- *   - password: string
- * 
- * Returns: { accessToken, refreshToken, user }
- */
-router.post('/login', authRateLimit, async (req: Request, res: Response) => {
-  try {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Username and password are required'
-      });
-      return;
-    }
-
-    // Extract client info - req.ip automatically populated from X-Forwarded-For via trust proxy
-    const ipAddress = req.ip || req.socket.remoteAddress;
-    const userAgent = req.headers['user-agent'];
-
-    const result = await authService.loginUser(
-      username,
-      password,
-      ipAddress,
-      userAgent
-    );
-
-    res.status(200).json({
-      message: 'Login successful',
-      data: result
-    });
-
-  } catch (error: any) {
-    console.error('Login error:', error);
-    
-    if (error.message.includes('Invalid') || 
-        error.message.includes('inactive')) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: error.message
-      });
-      return;
-    }
-
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Login failed'
-    });
-  }
-});
-
-/**
- * POST /auth/bootstrap-admin
- *
- * Bootstrap initial admin password for a newly deployed namespace.
- * Protected by a deployment token (x-bootstrap-token header).
- *
- * Headers:
- *   - x-bootstrap-token: string (required)
- *
- * Body:
- *   - password: string (required, min 12)
- *   - email: string (optional)
- */
-router.post('/bootstrap-admin', authRateLimit, async (req: Request, res: Response) => {
-  try {
-    const configuredToken = process.env.INITIAL_ADMIN_BOOTSTRAP_TOKEN;
-
-    if (!configuredToken) {
-      res.status(503).json({
-        error: 'Service Unavailable',
-        message: 'Bootstrap token is not configured on this instance'
-      });
-      return;
-    }
-
-    const requestToken = req.headers['x-bootstrap-token'];
-    if (!requestToken || requestToken !== configuredToken) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid bootstrap token'
-      });
-      return;
-    }
-
-    const { password, email } = req.body;
-
-    if (!password) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'password is required'
-      });
-      return;
-    }
-
-    await authService.bootstrapAdminPassword(password, email);
-
-    res.status(200).json({
-      message: 'Admin bootstrap password set successfully',
-      data: {
-        mustChangePassword: true
+      if (!username || !email || !password) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Username, email, and password are required',
+        });
       }
-    });
-  } catch (error: any) {
-    console.error('Bootstrap admin error:', error);
 
-    if (
-      error.message.includes('at least') ||
-      error.message.includes('required') ||
-      error.message.includes('not found') ||
-      error.message.includes('Valid email')
-    ) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: error.message
+      const result = await authService.registerUser({
+        username,
+        email,
+        password,
+        fullName,
+        role: 'viewer',
       });
-      return;
-    }
 
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Bootstrap admin failed'
-    });
-  }
-});
-
-/**
- * POST /auth/refresh
- * 
- * Refresh access token using refresh token
- * 
- * Body:
- *   - refreshToken: string
- * 
- * Returns: { accessToken }
- */
-router.post('/refresh', async (req: Request, res: Response) => {
-  try {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Refresh token is required'
+      reply.status(201).send({
+        message: 'User registered successfully',
+        data: result,
       });
-      return;
-    }
-
-    // req.ip automatically populated from X-Forwarded-For via trust proxy
-    const ipAddress = req.ip || req.socket.remoteAddress;
-
-    const result = await authService.refreshAccessToken(refreshToken, ipAddress);
-
-    res.status(200).json({
-      message: 'Token refreshed successfully',
-      data: result
-    });
-
-  } catch (error: any) {
-    console.error('Token refresh error:', error);
-    
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: error.message
-    });
-  }
-});
-
-/**
- * POST /auth/logout
- * 
- * Logout user (revoke refresh token)
- * Requires JWT authentication
- * 
- * Body:
- *   - refreshToken: string (optional - if not provided, revokes all tokens)
- * 
- * Returns: { message }
- */
-router.post('/logout', jwtAuth, async (req: Request, res: Response) => {
-  try {
-    const { refreshToken } = req.body;
-    const userId = req.user!.id;
-
-    await authService.logoutUser(userId, refreshToken);
-
-    res.status(200).json({
-      message: 'Logged out successfully'
-    });
-
-  } catch (error: any) {
-    console.error('Logout error:', error);
-    
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Logout failed'
-    });
-  }
-});
-
-/**
- * POST /auth/change-password
- * 
- * Change user password
- * Requires JWT authentication
- * 
- * Body:
- *   - currentPassword: string
- *   - newPassword: string
- * 
- * Returns: { message }
- */
-router.post('/change-password', jwtAuth, async (req: Request, res: Response) => {
-  try {
-    const { currentPassword, newPassword } = req.body;
-    const userId = req.user!.id;
-
-    if (!currentPassword || !newPassword) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Current password and new password are required'
-      });
-      return;
-    }
-
-    await authService.changePassword(userId, currentPassword, newPassword);
-
-    res.status(200).json({
-      message: 'Password changed successfully. Please login again with your new password.'
-    });
-
-  } catch (error: any) {
-    console.error('Password change error:', error);
-    
-    if (error.message.includes('incorrect') || 
-        error.message.includes('at least')) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: error.message
-      });
-      return;
-    }
-
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Password change failed'
-    });
-  }
-});
-
-/**
- * POST /auth/reset-password
- * 
- * Set initial admin password using reset token
- * No authentication required (uses token from email link)
- * 
- * Body:
- *   - token: string (reset token from email)
- *   - customerId: string (customer ID from provisioning)
- *   - password: string (new password, min 12 chars)
- * 
- * Returns: { message, data: { username } }
- */
-router.post('/reset-password', authRateLimit, async (req: Request, res: Response) => {
-  try {
-    const { token, customerId, password } = req.body;
-
-    if (!token || !customerId || !password) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Token, customerId, and password are required'
-      });
-      return;
-    }
-
-    if (password.length < 12) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Password must be at least 12 characters'
-      });
-      return;
-    }
-
-    const provisioningApiUrl = process.env.PROVISIONING_API_URL || 'http://localhost:3100';
-    const axios = (await import('axios')).default;
-
-    // Step 1: Validate token with provisioning service
-    let validationResponse;
-    try {
-      validationResponse = await axios.post(
-        `${provisioningApiUrl}/api/auth/validate-reset-token`,
-        { token, customerId }
-      );
     } catch (error: any) {
-      console.error('Token validation failed:', error.response?.data || error.message);
-      
-      const status = error.response?.status || 500;
-      const message = error.response?.data?.message || 'Token validation failed';
-      
-      res.status(status).json({
-        error: status === 400 ? 'Bad Request' : 'Internal Server Error',
-        message
-      });
-      return;
-    }
+      logger.error('Registration error', { error: error.message, stack: error.stack });
 
-    const { username } = validationResponse.data.data;
+      if (error.message.includes('already exists')
+        || error.message.includes('at least')
+        || error.message.includes('required')) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: error.message,
+        });
+      }
 
-    // Step 2: Set password in local users table
-    const ipAddress = req.ip || req.socket.remoteAddress;
-    await authService.setPasswordFromReset(username, password, ipAddress);
-
-    // Step 3: Mark token as used in provisioning service
-    try {
-      await axios.post(
-        `${provisioningApiUrl}/api/auth/mark-token-used`,
-        { token, customerId }
-      );
-    } catch (error: any) {
-      console.error('Failed to mark token as used:', error.response?.data || error.message);
-      // Continue - password already set, token invalidation is best-effort
-    }
-
-    res.status(200).json({
-      message: 'Initial password set successfully. You can now login.',
-      data: { username }
-    });
-
-  } catch (error: any) {
-    console.error('Set initial password error:', error);
-    
-    if (error.message.includes('at least') || 
-        error.message.includes('not found')) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: error.message
-      });
-      return;
-    }
-
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to set password'
-    });
-  }
-});
-
-/**
- * GET /auth/me
- * 
- * Get current authenticated user info with MQTT broker settings
- * Returns instance-level MQTT credentials (FlowFuse pattern)
- * Requires JWT authentication
- * 
- * Returns: { user (with brokerClient settings) }
- */
-router.get('/me', jwtAuth, async (req: Request, res: Response) => {
-  try {
-    // Get instance-level MQTT credentials from environment
-    // These are generated by mqtt-bootstrap service on first startup
-    const instanceId = process.env.NODERED_INSTANCE_ID || 'default';
-    const mqttBrokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883';
-    const mqttUsername = process.env.MQTT_USERNAME || `nodered_${instanceId}`;
-    const mqttPassword = process.env.MQTT_PASSWORD;
-    
-    if (!mqttPassword) {
-      // This should not happen - credentials should be generated on startup
-      res.status(500).json({
+      reply.status(500).send({
         error: 'Internal Server Error',
-        message: 'MQTT credentials not configured. Please check server configuration.'
+        message: 'Registration failed',
       });
-      return;
     }
-    
-    res.status(200).json({
-      data: {
-        user: {
-          ...req.user,
-          brokerClient: {
-            url: mqttBrokerUrl,
-            username: mqttUsername,
-            password: mqttPassword
-          }
-        }
+  });
+
+  fastify.post<{ Body: LoginBody }>('/login', async (req, reply) => {
+    try {
+      const { username, password } = req.body;
+
+      if (!username || !password) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Username and password are required',
+        });
       }
-    });
-  } catch (error: any) {
-    console.error('Get user error:', error);
-    
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to get user info'
-    });
-  }
-});
 
-// ============================================================================
-// MQTT USERS & ACL MANAGEMENT
-// ============================================================================
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const userAgent = getHeaderValue(req.headers['user-agent']);
 
-/**
- * GET /auth/mqtt-users
- * 
- * Get all MQTT users with their ACLs
- * Requires admin role
- * 
- * Returns: { users: [{ id, username, is_superuser, is_active, acls: [] }] }
- */
-router.get('/mqtt-users', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  try {
-    const { query } = await import('../db/connection');
-    
-    // Get all MQTT users
-    const usersResult = await query(
-      `SELECT id, username, is_superuser, is_active, created_at, updated_at 
-       FROM mqtt_users 
-       ORDER BY created_at DESC`
-    );
-    
-    // Get ACLs for each user
-    const users = await Promise.all(
-      usersResult.rows.map(async (user) => {
-        const aclsResult = await query(
-          `SELECT id, topic, access, priority, created_at 
-           FROM mqtt_acls 
-           WHERE username = $1 
+      const result = await authService.loginUser(username, password, ipAddress, userAgent);
+
+      reply.status(200).send({
+        message: 'Login successful',
+        data: result,
+      });
+    } catch (error: any) {
+      logger.error('Login error', { error: error.message, stack: error.stack });
+
+      if (error.message.includes('Invalid') || error.message.includes('inactive')) {
+        return reply.status(401).send({
+          error: 'Unauthorized',
+          message: error.message,
+        });
+      }
+
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Login failed',
+      });
+    }
+  });
+
+  fastify.post<{ Body: BootstrapAdminBody }>('/bootstrap-admin', async (req, reply) => {
+    try {
+      const configuredToken = process.env.INITIAL_ADMIN_BOOTSTRAP_TOKEN;
+      if (!configuredToken) {
+        return reply.status(503).send({
+          error: 'Service Unavailable',
+          message: 'Bootstrap token is not configured on this instance',
+        });
+      }
+
+      const requestToken = getHeaderValue(req.headers['x-bootstrap-token']);
+      if (!requestToken || requestToken !== configuredToken) {
+        return reply.status(401).send({
+          error: 'Unauthorized',
+          message: 'Invalid bootstrap token',
+        });
+      }
+
+      const { password, email } = req.body;
+      if (!password) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'password is required',
+        });
+      }
+
+      await authService.bootstrapAdminPassword(password, email);
+
+      reply.status(200).send({
+        message: 'Admin bootstrap password set successfully',
+        data: {
+          mustChangePassword: true,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Bootstrap admin error', { error: error.message, stack: error.stack });
+
+      if (error.message.includes('at least')
+        || error.message.includes('required')
+        || error.message.includes('not found')
+        || error.message.includes('Valid email')) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: error.message,
+        });
+      }
+
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Bootstrap admin failed',
+      });
+    }
+  });
+
+  fastify.post<{ Body: RefreshBody }>('/refresh', async (req, reply) => {
+    try {
+      const { refreshToken } = req.body;
+
+      if (!refreshToken) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Refresh token is required',
+        });
+      }
+
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const result = await authService.refreshAccessToken(refreshToken, ipAddress);
+
+      reply.status(200).send({
+        message: 'Token refreshed successfully',
+        data: result,
+      });
+    } catch (error: any) {
+      logger.error('Token refresh error', { error: error.message, stack: error.stack });
+
+      reply.status(401).send({
+        error: 'Unauthorized',
+        message: error.message,
+      });
+    }
+  });
+
+  fastify.post<{ Body: LogoutBody }>('/logout', { preHandler: [jwtAuth] }, async (req, reply) => {
+    try {
+      if (!req.user) {
+        return reply.status(401).send({
+          error: 'Unauthorized',
+          message: 'Authentication required',
+        });
+      }
+
+      const { refreshToken } = req.body;
+      await authService.logoutUser(req.user.id, refreshToken);
+
+      reply.status(200).send({
+        message: 'Logged out successfully',
+      });
+    } catch (error: any) {
+      logger.error('Logout error', { error: error.message, stack: error.stack });
+
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Logout failed',
+      });
+    }
+  });
+
+  fastify.post<{ Body: ChangePasswordBody }>('/change-password', { preHandler: [jwtAuth] }, async (req, reply) => {
+    try {
+      if (!req.user) {
+        return reply.status(401).send({
+          error: 'Unauthorized',
+          message: 'Authentication required',
+        });
+      }
+
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Current password and new password are required',
+        });
+      }
+
+      await authService.changePassword(req.user.id, currentPassword, newPassword);
+
+      reply.status(200).send({
+        message: 'Password changed successfully. Please login again with your new password.',
+      });
+    } catch (error: any) {
+      logger.error('Password change error', { error: error.message, stack: error.stack });
+
+      if (error.message.includes('incorrect') || error.message.includes('at least')) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: error.message,
+        });
+      }
+
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Password change failed',
+      });
+    }
+  });
+
+  fastify.post<{ Body: ResetPasswordBody }>('/reset-password', async (req, reply) => {
+    try {
+      const { token, customerId, password } = req.body;
+
+      if (!token || !customerId || !password) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Token, customerId, and password are required',
+        });
+      }
+
+      if (password.length < 12) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Password must be at least 12 characters',
+        });
+      }
+
+      const provisioningApiUrl = process.env.PROVISIONING_API_URL || 'http://localhost:3100';
+      let validationResponse: ValidateResetTokenResponse;
+
+      try {
+        const resp = await fetch(`${provisioningApiUrl}/api/auth/validate-reset-token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, customerId }),
+        });
+
+        if (!resp.ok) {
+          let errData: { message?: string } = {};
+          try {
+            errData = await resp.json() as { message?: string };
+          } catch {
+            errData = {};
+          }
+
+          const err = new Error(errData.message || 'Token validation failed') as Error & { status?: number };
+          err.status = resp.status;
+          throw err;
+        }
+
+        validationResponse = await resp.json() as ValidateResetTokenResponse;
+      } catch (error: any) {
+        logger.error('Token validation failed', { error: error.message, stack: error.stack });
+
+        const status = error.status || 500;
+        const message = error.message || 'Token validation failed';
+
+        return reply.status(status).send({
+          error: status === 400 ? 'Bad Request' : 'Internal Server Error',
+          message,
+        });
+      }
+
+      const { username } = validationResponse.data;
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      await authService.setPasswordFromReset(username, password, ipAddress);
+
+      try {
+        await fetch(`${provisioningApiUrl}/api/auth/mark-token-used`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, customerId }),
+        });
+      } catch (error: any) {
+        logger.error('Failed to mark token as used', { error: error.message, stack: error.stack });
+      }
+
+      reply.status(200).send({
+        message: 'Initial password set successfully. You can now login.',
+        data: { username },
+      });
+    } catch (error: any) {
+      logger.error('Set initial password error', { error: error.message, stack: error.stack });
+
+      if (error.message.includes('at least') || error.message.includes('not found')) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: error.message,
+        });
+      }
+
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to set password',
+      });
+    }
+  });
+
+  fastify.get('/me', { preHandler: [jwtAuth] }, async (req, reply) => {
+    try {
+      if (!req.user) {
+        return reply.status(401).send({
+          error: 'Unauthorized',
+          message: 'Authentication required',
+        });
+      }
+
+      const instanceId = process.env.NODERED_INSTANCE_ID || 'default';
+      const mqttBrokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://mosquitto:1883';
+      const mqttUsername = process.env.MQTT_USERNAME || `nodered_${instanceId}`;
+      const mqttPassword = process.env.MQTT_PASSWORD;
+
+      if (!mqttPassword) {
+        return reply.status(500).send({
+          error: 'Internal Server Error',
+          message: 'MQTT credentials not configured. Please check server configuration.',
+        });
+      }
+
+      reply.status(200).send({
+        data: {
+          user: {
+            ...req.user,
+            brokerClient: {
+              url: mqttBrokerUrl,
+              username: mqttUsername,
+              password: mqttPassword,
+            },
+          },
+        },
+      });
+    } catch (error: any) {
+      logger.error('Get user error', { error: error.message, stack: error.stack });
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to get user info',
+      });
+    }
+  });
+
+  fastify.get('/mqtt-users', { preHandler: [jwtAuth, requireRole('admin')] }, async (_req, reply) => {
+    try {
+      const usersResult = await query<MqttUserRow>(
+        `SELECT id, username, is_superuser, is_active, created_at, updated_at
+         FROM mqtt_users
+         ORDER BY created_at DESC`
+      );
+
+      const users = await Promise.all(usersResult.rows.map(async (user) => {
+        const aclsResult = await query<MqttAclRow>(
+          `SELECT id, topic, access, priority, created_at, username
+           FROM mqtt_acls
+           WHERE username = $1
            ORDER BY priority DESC, topic ASC`,
           [user.username]
         );
-        
+
         return {
           ...user,
-          acls: aclsResult.rows
+          acls: aclsResult.rows,
         };
-      })
-    );
-    
-    res.status(200).json({
-      success: true,
-      users
-    });
-  } catch (error: any) {
-    console.error('Get MQTT users error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to fetch MQTT users'
-    });
-  }
-});
+      }));
 
-/**
- * POST /auth/mqtt-users
- * 
- * Create a new MQTT user
- * Requires admin role
- * 
- * Body:
- *   - username: string (required)
- *   - password: string (required)
- *   - is_superuser: boolean (optional, default false)
- *   - is_active: boolean (optional, default true)
- * 
- * Returns: { user }
- */
-router.post('/mqtt-users', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  try {
-    const { username, password, is_superuser = false, is_active = true } = req.body;
-    
-    if (!username || !password) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Username and password are required'
+      reply.status(200).send({
+        success: true,
+        users,
       });
-      return;
-    }
-    
-    const { query } = await import('../db/connection');
-    const bcrypt = await import('bcrypt');
-    
-    // Hash password with bcrypt (mosquitto-go-auth compatible)
-    const passwordHash = await bcrypt.hash(password, 10);
-    
-    const result = await query(
-      `INSERT INTO mqtt_users (username, password_hash, is_superuser, is_active)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, username, is_superuser, is_active, created_at`,
-      [username, passwordHash, is_superuser, is_active]
-    );
-    
-    res.status(201).json({
-      success: true,
-      message: 'MQTT user created successfully',
-      user: result.rows[0]
-    });
-  } catch (error: any) {
-    console.error('Create MQTT user error:', error);
-    
-    if (error.message?.includes('duplicate') || error.code === '23505') {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Username already exists'
+    } catch (error: any) {
+      logger.error('Get MQTT users error', { error: error.message, stack: error.stack });
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to fetch MQTT users',
       });
-      return;
     }
-    
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to create MQTT user'
-    });
-  }
-});
+  });
 
-/**
- * PUT /auth/mqtt-users/:id
- * 
- * Update an MQTT user
- * Requires admin role
- * 
- * Body:
- *   - password: string (optional)
- *   - is_superuser: boolean (optional)
- *   - is_active: boolean (optional)
- * 
- * Returns: { user }
- */
-router.put('/mqtt-users/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { password, is_superuser, is_active } = req.body;
-    
-    const { query } = await import('../db/connection');
-    
-    const updates: string[] = [];
-    const values: any[] = [];
-    let paramIndex = 1;
-    
-    if (password) {
-      const bcrypt = await import('bcrypt');
-      const passwordHash = await bcrypt.hash(password, 10);
-      updates.push(`password_hash = $${paramIndex++}`);
-      values.push(passwordHash);
-    }
-    
-    if (is_superuser !== undefined) {
-      updates.push(`is_superuser = $${paramIndex++}`);
-      values.push(is_superuser);
-    }
-    
-    if (is_active !== undefined) {
-      updates.push(`is_active = $${paramIndex++}`);
-      values.push(is_active);
-    }
-    
-    if (updates.length === 0) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'No fields to update'
-      });
-      return;
-    }
-    
-    updates.push(`updated_at = CURRENT_TIMESTAMP`);
-    values.push(id);
-    
-    const result = await query(
-      `UPDATE mqtt_users 
-       SET ${updates.join(', ')}
-       WHERE id = $${paramIndex}
-       RETURNING id, username, is_superuser, is_active, updated_at`,
-      values
-    );
-    
-    if (result.rows.length === 0) {
-      res.status(404).json({
-        error: 'Not Found',
-        message: 'MQTT user not found'
-      });
-      return;
-    }
-    
-    res.status(200).json({
-      success: true,
-      message: 'MQTT user updated successfully',
-      user: result.rows[0]
-    });
-  } catch (error: any) {
-    console.error('Update MQTT user error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to update MQTT user'
-    });
-  }
-});
+  fastify.post<{ Body: MqttUserCreateBody }>('/mqtt-users', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
+    try {
+      const { username, password, is_superuser = false, is_active = true } = req.body;
 
-/**
- * DELETE /auth/mqtt-users/:id
- * 
- * Delete an MQTT user and their ACLs
- * Requires admin role
- * 
- * Returns: { message }
- */
-router.delete('/mqtt-users/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { query } = await import('../db/connection');
-    
-    // Get username before deleting
-    const userResult = await query(
-      'SELECT username FROM mqtt_users WHERE id = $1',
-      [id]
-    );
-    
-    if (userResult.rows.length === 0) {
-      res.status(404).json({
-        error: 'Not Found',
-        message: 'MQTT user not found'
-      });
-      return;
-    }
-    
-    const username = userResult.rows[0].username;
-    
-    // Delete ACLs first
-    await query('DELETE FROM mqtt_acls WHERE username = $1', [username]);
-    
-    // Delete user
-    await query('DELETE FROM mqtt_users WHERE id = $1', [id]);
-    
-    res.status(200).json({
-      success: true,
-      message: 'MQTT user deleted successfully'
-    });
-  } catch (error: any) {
-    console.error('Delete MQTT user error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to delete MQTT user'
-    });
-  }
-});
-
-/**
- * POST /auth/mqtt-users/:id/acls
- * 
- * Add an ACL rule to an MQTT user
- * Requires admin role
- * 
- * Body:
- *   - topic: string (required) - MQTT topic pattern (supports + and # wildcards)
- *   - access: number (required) - 1=read/subscribe, 2=write/publish, 3=both
- *   - priority: number (optional, default 0) - Higher priority rules checked first
- * 
- * Returns: { acl }
- */
-router.post('/mqtt-users/:id/acls', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { topic, access, priority = 0 } = req.body;
-    
-    if (!topic || access === undefined) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Topic and access are required'
-      });
-      return;
-    }
-    
-    if (![1, 2, 3].includes(access)) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Access must be 1 (read), 2 (write), or 3 (read+write)'
-      });
-      return;
-    }
-    
-    const { query } = await import('../db/connection');
-    
-    // Get username
-    const userResult = await query(
-      'SELECT username FROM mqtt_users WHERE id = $1',
-      [id]
-    );
-    
-    if (userResult.rows.length === 0) {
-      res.status(404).json({
-        error: 'Not Found',
-        message: 'MQTT user not found'
-      });
-      return;
-    }
-    
-    const username = userResult.rows[0].username;
-    
-    const result = await query(
-      `INSERT INTO mqtt_acls (username, topic, access, priority)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, username, topic, access, priority, created_at`,
-      [username, topic, access, priority]
-    );
-    
-    res.status(201).json({
-      success: true,
-      message: 'ACL rule created successfully',
-      acl: result.rows[0]
-    });
-  } catch (error: any) {
-    console.error('Create ACL error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to create ACL rule'
-    });
-  }
-});
-
-/**
- * PUT /auth/mqtt-acls/:id
- * 
- * Update an ACL rule
- * Requires admin role
- * 
- * Body:
- *   - topic: string (optional)
- *   - access: number (optional)
- *   - priority: number (optional)
- * 
- * Returns: { acl }
- */
-router.put('/mqtt-acls/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { topic, access, priority } = req.body;
-    
-    const { query } = await import('../db/connection');
-    
-    const updates: string[] = [];
-    const values: any[] = [];
-    let paramIndex = 1;
-    
-    if (topic) {
-      updates.push(`topic = $${paramIndex++}`);
-      values.push(topic);
-    }
-    
-    if (access !== undefined) {
-      if (![1, 2, 3].includes(access)) {
-        res.status(400).json({
+      if (!username || !password) {
+        return reply.status(400).send({
           error: 'Bad Request',
-          message: 'Access must be 1 (read), 2 (write), or 3 (read+write)'
+          message: 'Username and password are required',
         });
-        return;
       }
-      updates.push(`access = $${paramIndex++}`);
-      values.push(access);
-    }
-    
-    if (priority !== undefined) {
-      updates.push(`priority = $${paramIndex++}`);
-      values.push(priority);
-    }
-    
-    if (updates.length === 0) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'No fields to update'
+
+      const passwordHash = await hashPassword(password);
+      const result = await query<MqttUserRow>(
+        `INSERT INTO mqtt_users (username, password_hash, is_superuser, is_active)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, username, is_superuser, is_active, created_at, updated_at`,
+        [username, passwordHash, is_superuser, is_active]
+      );
+
+      reply.status(201).send({
+        success: true,
+        message: 'MQTT user created successfully',
+        user: result.rows[0],
       });
-      return;
-    }
-    
-    values.push(id);
-    
-    const result = await query(
-      `UPDATE mqtt_acls 
-       SET ${updates.join(', ')}
-       WHERE id = $${paramIndex}
-       RETURNING id, username, topic, access, priority`,
-      values
-    );
-    
-    if (result.rows.length === 0) {
-      res.status(404).json({
-        error: 'Not Found',
-        message: 'ACL rule not found'
-      });
-      return;
-    }
-    
-    res.status(200).json({
-      success: true,
-      message: 'ACL rule updated successfully',
-      acl: result.rows[0]
-    });
-  } catch (error: any) {
-    console.error('Update ACL error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to update ACL rule'
-    });
-  }
-});
+    } catch (error: any) {
+      logger.error('Create MQTT user error', { error: error.message, stack: error.stack, code: error.code });
 
-/**
- * DELETE /auth/mqtt-acls/:id
- * 
- * Delete an ACL rule
- * Requires admin role
- * 
- * Returns: { success: true }
- */
-router.delete('/mqtt-acls/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { query } = await import('../db/connection');
-    
-    const result = await query(
-      'DELETE FROM mqtt_acls WHERE id = $1 RETURNING id',
-      [id]
-    );
-    
-    if (result.rows.length === 0) {
-      res.status(404).json({
-        error: 'Not Found',
-        message: 'ACL rule not found'
-      });
-      return;
-    }
-    
-    res.status(200).json({
-      success: true,
-      message: 'ACL rule deleted successfully'
-    });
-  } catch (error: any) {
-    console.error('Delete ACL error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to delete ACL rule'
-    });
-  }
-});
-
-/**
- * GET /auth/api-keys
- *
- * List service API keys
- * Requires admin role
- */
-router.get('/api-keys', jwtAuth, requireRole('admin'), async (_req: Request, res: Response) => {
-  try {
-    const { query } = await import('../db/connection');
-
-    const result = await query(
-      `SELECT id, name, key, description, is_active, created_at, expires_at, last_used_at
-       FROM api_keys
-       ORDER BY created_at DESC`
-    );
-
-    const keys = result.rows.map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      key: row.key,
-      key_prefix: row.key ? row.key.substring(0, 8) : '',
-      description: row.description,
-      is_active: row.is_active,
-      created_at: row.created_at,
-      expires_at: row.expires_at,
-      last_used_at: row.last_used_at,
-    }));
-
-    res.status(200).json({ success: true, keys });
-  } catch (error: any) {
-    console.error('List API keys error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to fetch API keys'
-    });
-  }
-});
-
-/**
- * POST /auth/api-keys
- *
- * Create a new service API key
- * Requires admin role
- */
-router.post('/api-keys', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  try {
-    const { name, description = null, expires_at = null } = req.body;
-
-    if (!name || typeof name !== 'string' || !name.trim()) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Name is required'
-      });
-      return;
-    }
-
-    const key = crypto.randomBytes(32).toString('hex');
-    const { query } = await import('../db/connection');
-
-    const result = await query(
-      `INSERT INTO api_keys (name, key, description, is_active, expires_at)
-       VALUES ($1, $2, $3, true, $4)
-       RETURNING id, name, key, description, is_active, created_at, expires_at, last_used_at`,
-      [name.trim(), key, description, expires_at || null]
-    );
-
-    const created = result.rows[0];
-
-    res.status(201).json({
-      success: true,
-      message: 'API key created successfully',
-      key: {
-        id: created.id,
-        name: created.name,
-        key: created.key,
-        key_prefix: created.key.substring(0, 8),
-        description: created.description,
-        is_active: created.is_active,
-        created_at: created.created_at,
-        expires_at: created.expires_at,
-        last_used_at: created.last_used_at,
+      if (error.message?.includes('duplicate') || error.code === '23505') {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Username already exists',
+        });
       }
-    });
-  } catch (error: any) {
-    console.error('Create API key error:', error);
 
-    if (error.code === '23505') {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'API key name already exists'
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to create MQTT user',
       });
-      return;
     }
+  });
 
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to create API key'
-    });
-  }
-});
+  fastify.put<{ Params: IdParams; Body: MqttUserUpdateBody }>('/mqtt-users/:id', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
+    try {
+      const { id } = req.params;
+      const { password, is_superuser, is_active } = req.body;
 
-/**
- * DELETE /auth/api-keys/:id
- *
- * Revoke (deactivate) an API key
- * Requires admin role
- */
-router.delete('/api-keys/:id', jwtAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { query } = await import('../db/connection');
+      const updates: string[] = [];
+      const values: Array<string | boolean> = [];
+      let paramIndex = 1;
 
-    const result = await query(
-      `UPDATE api_keys
-       SET is_active = false
-       WHERE id = $1
-       RETURNING id`,
-      [id]
-    );
+      if (password) {
+        const passwordHash = await hashPassword(password);
+        updates.push(`password_hash = $${paramIndex++}`);
+        values.push(passwordHash);
+      }
 
-    if (result.rows.length === 0) {
-      res.status(404).json({
-        error: 'Not Found',
-        message: 'API key not found'
+      if (is_superuser !== undefined) {
+        updates.push(`is_superuser = $${paramIndex++}`);
+        values.push(is_superuser);
+      }
+
+      if (is_active !== undefined) {
+        updates.push(`is_active = $${paramIndex++}`);
+        values.push(is_active);
+      }
+
+      if (updates.length === 0) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'No fields to update',
+        });
+      }
+
+      updates.push('updated_at = CURRENT_TIMESTAMP');
+
+      const result = await query<MqttUserRow>(
+        `UPDATE mqtt_users
+         SET ${updates.join(', ')}
+         WHERE id = $${paramIndex}
+         RETURNING id, username, is_superuser, is_active, created_at, updated_at`,
+        [...values, id]
+      );
+
+      if (result.rows.length === 0) {
+        return reply.status(404).send({
+          error: 'Not Found',
+          message: 'MQTT user not found',
+        });
+      }
+
+      reply.status(200).send({
+        success: true,
+        message: 'MQTT user updated successfully',
+        user: result.rows[0],
       });
-      return;
+    } catch (error: any) {
+      logger.error('Update MQTT user error', { error: error.message, stack: error.stack });
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to update MQTT user',
+      });
     }
+  });
 
-    res.status(200).json({
-      success: true,
-      message: 'API key revoked successfully'
-    });
-  } catch (error: any) {
-    console.error('Revoke API key error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to revoke API key'
-    });
-  }
-});
+  fastify.delete<{ Params: IdParams }>('/mqtt-users/:id', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
+    try {
+      const { id } = req.params;
 
-export default router;
+      const userResult = await query<UsernameRow>('SELECT username FROM mqtt_users WHERE id = $1', [id]);
+      if (userResult.rows.length === 0) {
+        return reply.status(404).send({
+          error: 'Not Found',
+          message: 'MQTT user not found',
+        });
+      }
+
+      const username = userResult.rows[0].username;
+      await query('DELETE FROM mqtt_acls WHERE username = $1', [username]);
+      await query('DELETE FROM mqtt_users WHERE id = $1', [id]);
+
+      reply.status(200).send({
+        success: true,
+        message: 'MQTT user deleted successfully',
+      });
+    } catch (error: any) {
+      logger.error('Delete MQTT user error', { error: error.message, stack: error.stack });
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to delete MQTT user',
+      });
+    }
+  });
+
+  fastify.post<{ Params: IdParams; Body: MqttAclCreateBody }>('/mqtt-users/:id/acls', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
+    try {
+      const { id } = req.params;
+      const { topic, access, priority = 0 } = req.body;
+
+      if (!topic || access === undefined) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Topic and access are required',
+        });
+      }
+
+      if (!isAccessValue(access)) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Access must be 1 (read), 2 (write), or 3 (read+write)',
+        });
+      }
+
+      const userResult = await query<UsernameRow>('SELECT username FROM mqtt_users WHERE id = $1', [id]);
+      if (userResult.rows.length === 0) {
+        return reply.status(404).send({
+          error: 'Not Found',
+          message: 'MQTT user not found',
+        });
+      }
+
+      const username = userResult.rows[0].username;
+      const result = await query<MqttAclRow>(
+        `INSERT INTO mqtt_acls (username, topic, access, priority)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, username, topic, access, priority, created_at`,
+        [username, topic, access, priority]
+      );
+
+      reply.status(201).send({
+        success: true,
+        message: 'ACL rule created successfully',
+        acl: result.rows[0],
+      });
+    } catch (error: any) {
+      logger.error('Create ACL error', { error: error.message, stack: error.stack });
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to create ACL rule',
+      });
+    }
+  });
+
+  fastify.put<{ Params: IdParams; Body: MqttAclUpdateBody }>('/mqtt-acls/:id', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
+    try {
+      const { id } = req.params;
+      const { topic, access, priority } = req.body;
+
+      const updates: string[] = [];
+      const values: Array<string | number> = [];
+      let paramIndex = 1;
+
+      if (topic) {
+        updates.push(`topic = $${paramIndex++}`);
+        values.push(topic);
+      }
+
+      if (access !== undefined) {
+        if (!isAccessValue(access)) {
+          return reply.status(400).send({
+            error: 'Bad Request',
+            message: 'Access must be 1 (read), 2 (write), or 3 (read+write)',
+          });
+        }
+        updates.push(`access = $${paramIndex++}`);
+        values.push(access);
+      }
+
+      if (priority !== undefined) {
+        updates.push(`priority = $${paramIndex++}`);
+        values.push(priority);
+      }
+
+      if (updates.length === 0) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'No fields to update',
+        });
+      }
+
+      const result = await query<MqttAclRow>(
+        `UPDATE mqtt_acls
+         SET ${updates.join(', ')}
+         WHERE id = $${paramIndex}
+         RETURNING id, username, topic, access, priority, created_at`,
+        [...values, id]
+      );
+
+      if (result.rows.length === 0) {
+        return reply.status(404).send({
+          error: 'Not Found',
+          message: 'ACL rule not found',
+        });
+      }
+
+      reply.status(200).send({
+        success: true,
+        message: 'ACL rule updated successfully',
+        acl: result.rows[0],
+      });
+    } catch (error: any) {
+      logger.error('Update ACL error', { error: error.message, stack: error.stack });
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to update ACL rule',
+      });
+    }
+  });
+
+  fastify.delete<{ Params: IdParams }>('/mqtt-acls/:id', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
+    try {
+      const { id } = req.params;
+      const result = await query<{ id: number }>('DELETE FROM mqtt_acls WHERE id = $1 RETURNING id', [id]);
+
+      if (result.rows.length === 0) {
+        return reply.status(404).send({
+          error: 'Not Found',
+          message: 'ACL rule not found',
+        });
+      }
+
+      reply.status(200).send({
+        success: true,
+        message: 'ACL rule deleted successfully',
+      });
+    } catch (error: any) {
+      logger.error('Delete ACL error', { error: error.message, stack: error.stack });
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to delete ACL rule',
+      });
+    }
+  });
+
+  fastify.get('/api-keys', { preHandler: [jwtAuth, requireRole('admin')] }, async (_req, reply) => {
+    try {
+      const result = await query<ApiKeyRow>(
+        `SELECT id, name, key, description, is_active, created_at, expires_at, last_used_at
+         FROM api_keys
+         ORDER BY created_at DESC`
+      );
+
+      const keys = result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        key: row.key,
+        key_prefix: row.key ? row.key.substring(0, 8) : '',
+        description: row.description,
+        is_active: row.is_active,
+        created_at: row.created_at,
+        expires_at: row.expires_at,
+        last_used_at: row.last_used_at,
+      }));
+
+      reply.status(200).send({ success: true, keys });
+    } catch (error: any) {
+      logger.error('List API keys error', { error: error.message, stack: error.stack });
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to fetch API keys',
+      });
+    }
+  });
+
+  fastify.post<{ Body: ApiKeyCreateBody }>('/api-keys', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
+    try {
+      const { name, description = null, expires_at = null } = req.body;
+
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Name is required',
+        });
+      }
+
+      const key = crypto.randomBytes(32).toString('hex');
+      const result = await query<ApiKeyRow>(
+        `INSERT INTO api_keys (name, key, description, is_active, expires_at)
+         VALUES ($1, $2, $3, true, $4)
+         RETURNING id, name, key, description, is_active, created_at, expires_at, last_used_at`,
+        [name.trim(), key, description, expires_at || null]
+      );
+
+      const created = result.rows[0];
+
+      reply.status(201).send({
+        success: true,
+        message: 'API key created successfully',
+        key: {
+          id: created.id,
+          name: created.name,
+          key: created.key,
+          key_prefix: created.key.substring(0, 8),
+          description: created.description,
+          is_active: created.is_active,
+          created_at: created.created_at,
+          expires_at: created.expires_at,
+          last_used_at: created.last_used_at,
+        },
+      });
+    } catch (error: any) {
+      logger.error('Create API key error', { error: error.message, stack: error.stack, code: error.code });
+
+      if (error.code === '23505') {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'API key name already exists',
+        });
+      }
+
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to create API key',
+      });
+    }
+  });
+
+  fastify.delete<{ Params: IdParams }>('/api-keys/:id', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
+    try {
+      const { id } = req.params;
+      const result = await query<{ id: number }>(
+        `UPDATE api_keys
+         SET is_active = false
+         WHERE id = $1
+         RETURNING id`,
+        [id]
+      );
+
+      if (result.rows.length === 0) {
+        return reply.status(404).send({
+          error: 'Not Found',
+          message: 'API key not found',
+        });
+      }
+
+      reply.status(200).send({
+        success: true,
+        message: 'API key revoked successfully',
+      });
+    } catch (error: any) {
+      logger.error('Revoke API key error', { error: error.message, stack: error.stack });
+      reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to revoke API key',
+      });
+    }
+  });
+};
+
+export default plugin;

@@ -9,10 +9,10 @@
  * Follows FlowFuse pattern of instance-level MQTT credentials
  */
 
-import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
+import { hashPassword } from '../utils/secret-hashing';
 
 /**
  * Initialize MQTT admin user (superuser)
@@ -30,7 +30,7 @@ export async function initializeMqttAdmin() {
     logger.info('Initializing MQTT admin user...');
     
     // Hash password with bcrypt (same as K8s job did)
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
     // Create/update admin user (idempotent)
     await query(`
@@ -94,7 +94,7 @@ export async function initializeNodeRedMqttCredentials(): Promise<{ username: st
     password = crypto.randomBytes(24).toString('base64url');
     
     // Hash password with bcrypt
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
     // Create Node-RED MQTT user (superuser for full access)
     await query(`

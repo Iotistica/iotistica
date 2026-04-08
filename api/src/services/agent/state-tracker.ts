@@ -3,7 +3,7 @@
  * Industry best practices for tracking container orchestration state changes
  */
 
-import pool from '../db/connection';
+import pool from '../../db/connection';
 import crypto from 'crypto';
 
 export interface StateSnapshot {

@@ -5,11 +5,8 @@
  * in Express routes.
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Permission, Role, ROLE_PERMISSIONS, ROLES } from '../types/permissions';
-
-// Note: Request.user is already defined in jwt-auth.ts
-// We cast role to Role type where needed for type safety
 
 /**
  * Middleware to check if user has ALL required permissions (AND logic)
@@ -21,40 +18,24 @@ import { Permission, Role, ROLE_PERMISSIONS, ROLES } from '../types/permissions'
  * router.post('/users', hasPermission(PERMISSIONS.USER_WRITE), createUser);
  */
 export function hasPermission(...requiredPermissions: Permission[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Authentication required'
-      });
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'Authentication required' });
     }
-
-    // Check if user is active
-    if (!req.user.isActive) {
-      return res.status(403).json({
-        error: 'Forbidden',
-        message: 'Account is disabled'
-      });
+    if (!request.user.isActive) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Account is disabled' });
     }
-
-    const userPermissions = ROLE_PERMISSIONS[req.user.role as Role] || [];
-    
-    // Check if user has ALL required permissions
-    const missingPermissions = requiredPermissions.filter(
-      perm => !userPermissions.includes(perm)
-    );
-
+    const userPermissions = ROLE_PERMISSIONS[request.user.role as Role] || [];
+    const missingPermissions = requiredPermissions.filter(perm => !userPermissions.includes(perm));
     if (missingPermissions.length > 0) {
-      return res.status(403).json({ 
+      return reply.status(403).send({
         error: 'Forbidden',
         message: 'Insufficient permissions',
         required: requiredPermissions,
         missing: missingPermissions,
-        userRole: req.user.role
+        userRole: request.user.role
       });
     }
-
-    next();
   };
 }
 
@@ -68,38 +49,23 @@ export function hasPermission(...requiredPermissions: Permission[]) {
  * router.get('/data', hasAnyPermission(PERMISSIONS.DATA_READ, PERMISSIONS.DATA_EXPORT), getData);
  */
 export function hasAnyPermission(...requiredPermissions: Permission[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Authentication required'
-      });
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'Authentication required' });
     }
-
-    if (!req.user.isActive) {
-      return res.status(403).json({
-        error: 'Forbidden',
-        message: 'Account is disabled'
-      });
+    if (!request.user.isActive) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Account is disabled' });
     }
-
-    const userPermissions = ROLE_PERMISSIONS[req.user.role as Role] || [];
-    
-    // Check if user has ANY of the required permissions
-    const hasAny = requiredPermissions.some(perm => 
-      userPermissions.includes(perm)
-    );
-
+    const userPermissions = ROLE_PERMISSIONS[request.user.role as Role] || [];
+    const hasAny = requiredPermissions.some(perm => userPermissions.includes(perm));
     if (!hasAny) {
-      return res.status(403).json({ 
+      return reply.status(403).send({
         error: 'Forbidden',
         message: 'Insufficient permissions',
         required: 'At least one of: ' + requiredPermissions.join(', '),
-        userRole: req.user.role
+        userRole: request.user.role
       });
     }
-
-    next();
   };
 }
 
@@ -114,30 +80,20 @@ export function hasAnyPermission(...requiredPermissions: Permission[]) {
  * router.get('/admin', hasRole(ROLES.OWNER, ROLES.ADMIN), getAdminPanel);
  */
 export function hasRole(...allowedRoles: Role[]) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Authentication required'
-      });
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'Authentication required' });
     }
-
-    if (!req.user.isActive) {
-      return res.status(403).json({
-        error: 'Forbidden',
-        message: 'Account is disabled'
-      });
+    if (!request.user.isActive) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Account is disabled' });
     }
-
-    if (!allowedRoles.includes(req.user.role as Role)) {
-      return res.status(403).json({ 
+    if (!allowedRoles.includes(request.user.role as Role)) {
+      return reply.status(403).send({
         error: 'Forbidden',
         message: `Access restricted to: ${allowedRoles.join(', ')}`,
-        userRole: req.user.role
+        userRole: request.user.role
       });
     }
-
-    next();
   };
 }
 
@@ -179,7 +135,7 @@ export function isAdminOrOwner() {
  * }
  */
 export function checkUserPermissions(
-  user: Express.Request['user'],
+  user: FastifyRequest['user'],
   ...permissions: Permission[]
 ): boolean {
   if (!user || !user.isActive) return false;

@@ -5,7 +5,7 @@
  * Wildcard patterns (https://*.example.com) are supported but use sparingly.
  */
 
-import cors from 'cors';
+import type { FastifyCorsOptions } from '@fastify/cors';
 import logger from '../utils/logger';
 
 const allowedOrigins: string[] = process.env.CORS_ORIGINS
@@ -42,7 +42,7 @@ function wildcardToRegExp(pattern: string): RegExp {
   return new RegExp(`^${regexPattern}$`);
 }
 
-const corsOptions: cors.CorsOptions = {
+const corsOptions: FastifyCorsOptions = {
   origin: (origin, callback) => {
     // No origin header: server-to-server, mobile apps, curl, Postman
     if (!origin) {
@@ -63,7 +63,7 @@ const corsOptions: cors.CorsOptions = {
         origin,
         allowedOrigins: allowedOrigins.slice(0, 5),
       });
-      callback(new Error('Not allowed by CORS'));
+      callback(null, false);
     }
   },
 
@@ -81,7 +81,7 @@ const corsOptions: cors.CorsOptions = {
   maxAge: 86400,
 };
 
-/** Returns a configured CORS middleware instance. */
-export function createCors() {
-  return cors(corsOptions);
+/** Returns @fastify/cors option object. */
+export function createCorsOptions(): FastifyCorsOptions {
+  return corsOptions;
 }

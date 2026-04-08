@@ -3,7 +3,7 @@
  * API endpoints for managing device tags and querying agents by tags
  */
 
-import express from 'express';
+
 import { query } from '../db/connection';
 import logger from '../utils/logger';
 import {
@@ -11,43 +11,110 @@ import {
   BulkTagOperationRequest,
   DeviceQueryRequest,
   DeviceQueryResponse,
-  DeviceTagsResponse
+  DeviceTagsResponse,
+  TagDefinitionRequest,
+  TagDefinitionUpdateRequest,
 } from '../types/device-tags';
+import type { FastifyPluginAsync } from 'fastify'
+
+type AgentUuidParams = {
+  uuid: string;
+};
+
+type AgentTagParams = {
+  uuid: string;
+  key: string;
+};
+
+type KeyParams = {
+  key: string;
+};
+
+type ReplaceTagsBody = {
+  tags: Record<string, string>;
+};
+
+type AgentIdentityRow = {
+  uuid: string;
+  name?: string;
+};
+
+type AgentTagRow = {
+  key: string;
+  value: string;
+};
+
+type AgentQueryMatchRow = {
+  agent_uuid: string;
+};
+
+type AgentQueryRow = {
+  uuid: string;
+  name: string;
+  type: string;
+  is_online: boolean;
+  tags: Record<string, string> | null;
+};
+
+type TagDefinitionRow = {
+  id: number;
+  key: string;
+  description: string | null;
+  allowed_values: string[] | null;
+  is_required: boolean;
+  created_at: Date;
+  created_by: number | null;
+  updated_at: Date;
+};
+
+type CountRow = {
+  count: string;
+};
+
+type KeyCountRow = {
+  key: string;
+  device_count: string;
+};
+
+type ValueCountRow = {
+  value: string;
+  device_count: string;
+};
+
+const plugin: FastifyPluginAsync = async (fastify) => {
 
 const moduleLogger = logger.child({ module: 'device-tags' });
-
-export const router = express.Router();
 
 /**
  * GET /api/v1/agents/:uuid/tags
  * Get all tags for a device
  */
-router.get('/agents/:uuid/tags', async (req, res) => {
+fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/tags', async (req, reply) => {
   try {
     const { uuid } = req.params;
 
     // Verify device exists
-    const deviceResult = await query(
+    const deviceResult = await query<AgentIdentityRow>(
       'SELECT uuid, name FROM agents WHERE uuid = $1',
       [uuid]
     );
 
     if (deviceResult.rows.length === 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
     }
 
     // Get all tags for the device
-    const tagsResult = await query(
+    const tagsResult = await query<AgentTagRow>(
       'SELECT key, value, created_at, created_by, updated_at FROM agent_tags WHERE agent_uuid = $1 ORDER BY key',
       [uuid]
     );
 
     // Convert to key-value object
     const tags: Record<string, string> = {};
-    tagsResult.rows.forEach(row => {
+    tagsResult.rows.forEach((row) => {
       tags[row.key] = row.value;
     });
 
@@ -56,14 +123,14 @@ router.get('/agents/:uuid/tags', async (req, res) => {
       tags
     };
 
-    res.json(response);
+    return reply.send(response);
   } catch (error: any) {
     moduleLogger.error('Error fetching device tags', {
       error: error.message,
       stack: error.stack,
       deviceUuid: req.params.uuid
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to fetch device tags',
       message: error.message
     });
@@ -74,26 +141,26 @@ router.get('/agents/:uuid/tags', async (req, res) => {
  * POST /api/v1/agents/:uuid/tags
  * Add or update a single tag on a device
  */
-router.post('/agents/:uuid/tags', async (req, res) => {
+fastify.post<{ Params: AgentUuidParams; Body: TagOperationRequest }>('/agents/:uuid/tags', async (req, reply) => {
   try {
     const { uuid } = req.params;
-    const { key, value } = req.body as TagOperationRequest;
+    const { key, value } = req.body;
 
     if (!key || !value) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'Both key and value are required'
       });
     }
 
     // Verify device exists
-    const deviceResult = await query(
+    const deviceResult = await query<AgentIdentityRow>(
       'SELECT uuid FROM agents WHERE uuid = $1',
       [uuid]
     );
 
     if (deviceResult.rows.length === 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -114,7 +181,7 @@ router.post('/agents/:uuid/tags', async (req, res) => {
       value
     });
 
-    res.json({
+    return reply.send({
       success: true,
       message: 'Tag added/updated successfully',
       tag: { key, value }
@@ -126,7 +193,7 @@ router.post('/agents/:uuid/tags', async (req, res) => {
       deviceUuid: req.params.uuid,
       key: req.body.key
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to add/update tag',
       message: error.message
     });
@@ -137,26 +204,26 @@ router.post('/agents/:uuid/tags', async (req, res) => {
  * PUT /api/v1/agents/:uuid/tags
  * Replace all tags on a device (bulk update)
  */
-router.put('/agents/:uuid/tags', async (req, res) => {
+fastify.put<{ Params: AgentUuidParams; Body: ReplaceTagsBody }>('/agents/:uuid/tags', async (req, reply) => {
   try {
     const { uuid } = req.params;
-    const { tags } = req.body as { tags: Record<string, string> };
+    const { tags } = req.body;
 
     if (!tags || typeof tags !== 'object') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'Tags object is required'
       });
     }
 
     // Verify device exists
-    const deviceResult = await query(
+    const deviceResult = await query<AgentIdentityRow>(
       'SELECT uuid FROM agents WHERE uuid = $1',
       [uuid]
     );
 
     if (deviceResult.rows.length === 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -186,7 +253,7 @@ router.put('/agents/:uuid/tags', async (req, res) => {
         tagCount: tagEntries.length
       });
 
-      res.json({
+      return reply.send({
         success: true,
         message: 'Tags replaced successfully',
         tags
@@ -201,7 +268,7 @@ router.put('/agents/:uuid/tags', async (req, res) => {
       stack: error.stack,
       deviceUuid: req.params.uuid
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to replace tags',
       message: error.message
     });
@@ -212,17 +279,17 @@ router.put('/agents/:uuid/tags', async (req, res) => {
  * DELETE /api/v1/agents/:uuid/tags/:key
  * Delete a specific tag from a device
  */
-router.delete('/agents/:uuid/tags/:key', async (req, res) => {
+fastify.delete<{ Params: AgentTagParams }>('/agents/:uuid/tags/:key', async (req, reply) => {
   try {
     const { uuid, key } = req.params;
 
-    const result = await query(
+    const result = await query<{ key: string }>(
       'DELETE FROM agent_tags WHERE agent_uuid = $1 AND key = $2 RETURNING key',
       [uuid, key]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Tag not found',
         message: `Tag '${key}' not found on device ${uuid}`
       });
@@ -233,7 +300,7 @@ router.delete('/agents/:uuid/tags/:key', async (req, res) => {
       key
     });
 
-    res.json({
+    return reply.send({
       success: true,
       message: 'Tag deleted successfully',
       key
@@ -245,7 +312,7 @@ router.delete('/agents/:uuid/tags/:key', async (req, res) => {
       deviceUuid: req.params.uuid,
       key: req.params.key
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to delete tag',
       message: error.message
     });
@@ -256,24 +323,24 @@ router.delete('/agents/:uuid/tags/:key', async (req, res) => {
  * POST /api/v1/agents/query
  * Query agents by tag selectors
  */
-router.post('/agents/query', async (req, res) => {
+fastify.post<{ Body: DeviceQueryRequest }>('/agents/query', async (req, reply) => {
   try {
-    const { tagSelectors } = req.body as DeviceQueryRequest;
+    const { tagSelectors } = req.body;
 
     if (!tagSelectors || typeof tagSelectors !== 'object') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'tagSelectors object is required'
       });
     }
 
     // Use the database function to find agents
-    const result = await query(
+    const result = await query<AgentQueryMatchRow>(
       'SELECT * FROM find_agents_by_tags($1::jsonb)',
       [JSON.stringify(tagSelectors)]
     );
 
-    const deviceUuids = result.rows.map(row => row.agent_uuid);
+    const deviceUuids = result.rows.map((row) => row.agent_uuid);
 
     // If no agents found, return empty result
     if (deviceUuids.length === 0) {
@@ -281,11 +348,11 @@ router.post('/agents/query', async (req, res) => {
         count: 0,
         agents: []
       };
-      return res.json(response);
+      return reply.send(response);
     }
 
     // Fetch device details and their tags
-    const agentsResult = await query(
+    const agentsResult = await query<AgentQueryRow>(
       `SELECT d.uuid, d.name, d.type, d.is_online,
               jsonb_object_agg(dt.key, dt.value) FILTER (WHERE dt.key IS NOT NULL) as tags
        FROM agents d
@@ -295,7 +362,7 @@ router.post('/agents/query', async (req, res) => {
       [deviceUuids]
     );
 
-    const agents = agentsResult.rows.map(row => ({
+    const agents = agentsResult.rows.map((row) => ({
       uuid: row.uuid,
       deviceName: row.name,
       deviceType: row.type,
@@ -313,14 +380,14 @@ router.post('/agents/query', async (req, res) => {
       matchCount: agents.length
     });
 
-    res.json(response);
+    return reply.send(response);
   } catch (error: any) {
     moduleLogger.error('Error querying agents by tags', {
       error: error.message,
       stack: error.stack,
       tagSelectors: req.body.tagSelectors
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to query agents',
       message: error.message
     });
@@ -331,35 +398,35 @@ router.post('/agents/query', async (req, res) => {
  * POST /api/v1/agents/tags/bulk
  * Apply tags to multiple agents at once
  */
-router.post('/agents/tags/bulk', async (req, res) => {
+fastify.post<{ Body: BulkTagOperationRequest }>('/agents/tags/bulk', async (req, reply) => {
   try {
-    const { deviceUuids, tags } = req.body as BulkTagOperationRequest;
+    const { deviceUuids, tags } = req.body;
 
     if (!deviceUuids || !Array.isArray(deviceUuids) || deviceUuids.length === 0) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'deviceUuids array is required and must not be empty'
       });
     }
 
     if (!tags || typeof tags !== 'object' || Object.keys(tags).length === 0) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'tags object is required and must not be empty'
       });
     }
 
     // Verify all agents exist
-    const agentsResult = await query(
+    const agentsResult = await query<{ uuid: string }>(
       'SELECT uuid FROM agents WHERE uuid = ANY($1::uuid[])',
       [deviceUuids]
     );
 
-    const existingUuids = agentsResult.rows.map(row => row.uuid);
-    const missingUuids = deviceUuids.filter(uuid => !existingUuids.includes(uuid));
+    const existingUuids = agentsResult.rows.map((row) => row.uuid);
+    const missingUuids = deviceUuids.filter((uuid) => !existingUuids.includes(uuid));
 
     if (missingUuids.length > 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Devices not found',
         message: `The following device UUIDs were not found: ${missingUuids.join(', ')}`
       });
@@ -393,7 +460,7 @@ router.post('/agents/tags/bulk', async (req, res) => {
         totalTagsApplied
       });
 
-      res.json({
+      return reply.send({
         success: true,
         message: 'Tags applied to all agents successfully',
         agentsUpdated: existingUuids.length,
@@ -409,7 +476,7 @@ router.post('/agents/tags/bulk', async (req, res) => {
       error: error.message,
       stack: error.stack
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to apply bulk tags',
       message: error.message
     });
@@ -420,15 +487,15 @@ router.post('/agents/tags/bulk', async (req, res) => {
  * GET /api/v1/tags/definitions
  * Get all tag definitions
  */
-router.get('/tags/definitions', async (req, res) => {
+fastify.get('/tags/definitions', async (_req, reply) => {
   try {
-    const result = await query(
+    const result = await query<TagDefinitionRow>(
       `SELECT id, key, description, allowed_values, is_required, created_at, created_by, updated_at
        FROM tag_definitions
        ORDER BY key`
     );
 
-    const definitions = result.rows.map(row => ({
+    const definitions = result.rows.map((row) => ({
       id: row.id,
       key: row.key,
       description: row.description,
@@ -439,7 +506,7 @@ router.get('/tags/definitions', async (req, res) => {
       updatedAt: row.updated_at
     }));
 
-    res.json({
+    return reply.send({
       count: definitions.length,
       definitions
     });
@@ -448,7 +515,7 @@ router.get('/tags/definitions', async (req, res) => {
       error: error.message,
       stack: error.stack
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to fetch tag definitions',
       message: error.message
     });
@@ -459,13 +526,13 @@ router.get('/tags/definitions', async (req, res) => {
  * POST /api/v1/tags/definitions
  * Create a new tag definition
  */
-router.post('/tags/definitions', async (req, res) => {
+fastify.post<{ Body: TagDefinitionRequest }>('/tags/definitions', async (req, reply) => {
   try {
     const { key, description, allowedValues, isRequired } = req.body;
 
     // Validate required fields
     if (!key) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Missing required field: key'
       });
     }
@@ -473,13 +540,13 @@ router.post('/tags/definitions', async (req, res) => {
     // Validate key format
     const keyRegex = /^[a-z0-9][a-z0-9._-]*[a-z0-9]$/;
     if (!keyRegex.test(key)) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid tag key format',
         message: 'Key must be lowercase alphanumeric with dashes/underscores'
       });
     }
 
-    const result = await query(
+    const result = await query<TagDefinitionRow>(
       `INSERT INTO tag_definitions (key, description, allowed_values, is_required)
        VALUES ($1, $2, $3, $4)
        RETURNING id, key, description, allowed_values, is_required, created_at, updated_at`,
@@ -494,7 +561,7 @@ router.post('/tags/definitions', async (req, res) => {
       allowedValues
     });
 
-    res.status(201).json({
+    return reply.status(201).send({
       success: true,
       definition: {
         id: definition.id,
@@ -508,7 +575,7 @@ router.post('/tags/definitions', async (req, res) => {
     });
   } catch (error: any) {
     if (error.code === '23505') { // Unique violation
-      return res.status(409).json({
+      return reply.status(409).send({
         error: 'Tag definition already exists',
         message: `A tag definition with key '${req.body.key}' already exists`
       });
@@ -518,7 +585,7 @@ router.post('/tags/definitions', async (req, res) => {
       error: error.message,
       stack: error.stack
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to create tag definition',
       message: error.message
     });
@@ -529,12 +596,12 @@ router.post('/tags/definitions', async (req, res) => {
  * PUT /api/v1/tags/definitions/:key
  * Update an existing tag definition
  */
-router.put('/tags/definitions/:key', async (req, res) => {
+fastify.put<{ Params: KeyParams; Body: TagDefinitionUpdateRequest }>('/tags/definitions/:key', async (req, reply) => {
   try {
     const { key } = req.params;
     const { description, allowedValues, isRequired } = req.body;
 
-    const result = await query(
+    const result = await query<TagDefinitionRow>(
       `UPDATE tag_definitions
        SET description = COALESCE($2, description),
            allowed_values = COALESCE($3, allowed_values),
@@ -546,7 +613,7 @@ router.put('/tags/definitions/:key', async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Tag definition not found',
         message: `Tag definition with key '${key}' not found`
       });
@@ -559,7 +626,7 @@ router.put('/tags/definitions/:key', async (req, res) => {
       changes: { description, allowedValues, isRequired }
     });
 
-    res.json({
+    return reply.send({
       success: true,
       definition: {
         id: definition.id,
@@ -577,7 +644,7 @@ router.put('/tags/definitions/:key', async (req, res) => {
       stack: error.stack,
       key: req.params.key
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to update tag definition',
       message: error.message
     });
@@ -588,32 +655,32 @@ router.put('/tags/definitions/:key', async (req, res) => {
  * DELETE /api/v1/tags/definitions/:key
  * Delete a tag definition
  */
-router.delete('/tags/definitions/:key', async (req, res) => {
+fastify.delete<{ Params: KeyParams }>('/tags/definitions/:key', async (req, reply) => {
   try {
     const { key } = req.params;
 
     // Check if tag is in use
-    const usageCheck = await query(
+    const usageCheck = await query<CountRow>(
       'SELECT COUNT(*) as count FROM agent_tags WHERE key = $1',
       [key]
     );
 
-    const inUseCount = parseInt(usageCheck.rows[0].count);
+    const inUseCount = Number.parseInt(usageCheck.rows[0].count, 10);
     if (inUseCount > 0) {
-      return res.status(409).json({
+      return reply.status(409).send({
         error: 'Tag definition in use',
         message: `Cannot delete tag definition '${key}' as it is used by ${inUseCount} device(s)`,
         agentsAffected: inUseCount
       });
     }
 
-    const result = await query(
+    const result = await query<{ key: string }>(
       'DELETE FROM tag_definitions WHERE key = $1 RETURNING key',
       [key]
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Tag definition not found',
         message: `Tag definition with key '${key}' not found`
       });
@@ -623,7 +690,7 @@ router.delete('/tags/definitions/:key', async (req, res) => {
       key
     });
 
-    res.json({
+    return reply.send({
       success: true,
       message: 'Tag definition deleted successfully',
       key
@@ -634,7 +701,7 @@ router.delete('/tags/definitions/:key', async (req, res) => {
       stack: error.stack,
       key: req.params.key
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to delete tag definition',
       message: error.message
     });
@@ -645,21 +712,21 @@ router.delete('/tags/definitions/:key', async (req, res) => {
  * GET /api/v1/tags/keys
  * Get all unique tag keys in use
  */
-router.get('/tags/keys', async (req, res) => {
+fastify.get('/tags/keys', async (_req, reply) => {
   try {
-    const result = await query(
+    const result = await query<KeyCountRow>(
       `SELECT DISTINCT key, COUNT(*) as device_count
        FROM agent_tags
        GROUP BY key
        ORDER BY key`
     );
 
-    const keys = result.rows.map(row => ({
+    const keys = result.rows.map((row) => ({
       key: row.key,
-      deviceCount: parseInt(row.device_count)
+      deviceCount: Number.parseInt(row.device_count, 10)
     }));
 
-    res.json({
+    return reply.send({
       count: keys.length,
       keys
     });
@@ -668,7 +735,7 @@ router.get('/tags/keys', async (req, res) => {
       error: error.message,
       stack: error.stack
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to fetch tag keys',
       message: error.message
     });
@@ -679,11 +746,11 @@ router.get('/tags/keys', async (req, res) => {
  * GET /api/v1/tags/values/:key
  * Get all unique values for a specific tag key
  */
-router.get('/tags/values/:key', async (req, res) => {
+fastify.get<{ Params: KeyParams }>('/tags/values/:key', async (req, reply) => {
   try {
     const { key } = req.params;
 
-    const result = await query(
+    const result = await query<ValueCountRow>(
       `SELECT DISTINCT value, COUNT(*) as device_count
        FROM agent_tags
        WHERE key = $1
@@ -692,12 +759,12 @@ router.get('/tags/values/:key', async (req, res) => {
       [key]
     );
 
-    const values = result.rows.map(row => ({
+    const values = result.rows.map((row) => ({
       value: row.value,
-      deviceCount: parseInt(row.device_count)
+      deviceCount: Number.parseInt(row.device_count, 10)
     }));
 
-    res.json({
+    return reply.send({
       key,
       count: values.length,
       values
@@ -708,9 +775,12 @@ router.get('/tags/values/:key', async (req, res) => {
       stack: error.stack,
       key: req.params.key
     });
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to fetch tag values',
       message: error.message
     });
   }
 });
+};
+
+export default plugin;

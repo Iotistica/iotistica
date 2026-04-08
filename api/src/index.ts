@@ -2,7 +2,7 @@
  * Unified Iotistic API Server
  *
  * Entry point - deliberately thin. All setup is delegated to:
- *   server/   -> Express app wiring (security, middleware, routes, proxies, lifecycle)
+ *   server/   -> Fastify app wiring (security, middleware, routes, proxies, lifecycle)
  *   bootstrap/ -> Async service initialization (DB, config, license, Redis, MQTT)
  */
 
@@ -11,13 +11,33 @@ import { bootstrap } from './bootstrap';
 import { startServer } from './server/lifecycle';
 import logger from './utils/logger';
 
-const app = createApp();
+type NetworkError = NodeJS.ErrnoException & {
+  address?: string;
+  port?: number;
+};
 
-bootstrap()
-  .then(() => startServer(app))
-  .catch((error) => {
-    logger.error('Failed to start server', { error });
-    process.exit(1);
-  });
+async function main() {
+  const app = await createApp();
 
-export default app;
+  await bootstrap();
+  await startServer(app);
+}
+
+main().catch((error) => {
+  if (error instanceof Error) {
+    const networkError = error as NetworkError;
+    logger.error('Failed to start server', {
+      error: error.message,
+      stack: error.stack,
+      code: networkError.code,
+      errno: networkError.errno,
+      syscall: networkError.syscall,
+      address: networkError.address,
+      port: networkError.port,
+    });
+  } else {
+    logger.error('Failed to start server', { error: String(error) });
+  }
+  process.exit(1);
+});
+

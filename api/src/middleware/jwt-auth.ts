@@ -12,11 +12,11 @@
  *   });
  */
 
-import { Request, Response, NextFunction, RequestHandler } from 'express';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import jwt, { Secret } from 'jsonwebtoken';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
-import axios from 'axios';
+import { fetch } from 'undici';
 
 // JWT Configuration
 // CRITICAL: JWT_SECRET must be set in environment - no fallback to prevent security bypass
@@ -132,19 +132,24 @@ async function getAuth0JWKS(): Promise<any> {
 
   // Cache miss - fetch from Auth0
   try {
-    const response = await axios.get(`${AUTH0_ISSUER}.well-known/jwks.json`, {
-      timeout: 5000
+    const response = await fetch(`${AUTH0_ISSUER}.well-known/jwks.json`, {
+      signal: AbortSignal.timeout(5000)
     });
 
-    if (!response.data?.keys) {
+    if (!response.ok) {
+      throw new Error(`JWKS fetch failed with status ${response.status}`);
+    }
+
+    const data = await response.json() as any;
+    if (!data?.keys) {
       throw new Error('Invalid JWKS response: missing keys array');
     }
 
     // Store in Redis for future requests
-    await storeJwksInCache(response.data);
+    await storeJwksInCache(data);
     logger.info('JWKS fetched from Auth0 and cached');
 
-    return response.data;
+    return data;
   } catch (error: any) {
     logger.error('Failed to fetch JWKS from Auth0', { message: error.message });
     throw new Error(`Cannot fetch Auth0 JWKS: ${error.message}`);
@@ -256,15 +261,20 @@ async function validateAuth0OpaqueToken(token: string): Promise<{
 
   let data: any;
   try {
-    const response = await axios.get(userInfoUrl, {
+    const response = await fetch(userInfoUrl, {
       headers: {
         Authorization: `Bearer ${token}`
       },
-      timeout: 5000
+      signal: AbortSignal.timeout(5000)
     });
-    data = response.data;
+    if (!response.ok) {
+      let errBody: any = {};
+      try { errBody = await response.json(); } catch { /* ignore */ }
+      throw new Error(errBody.error || `HTTP ${response.status}`);
+    }
+    data = await response.json();
   } catch (error: any) {
-    throw new Error(`Opaque token validation failed: ${error.response?.data?.error || error.message}`);
+    throw new Error(`Opaque token validation failed: ${error.message}`);
   }
 
   if (!data || !data.sub) {
@@ -279,31 +289,7 @@ async function validateAuth0OpaqueToken(token: string): Promise<{
   };
 }
 
-// Extend Express Request to include user info
-declare global {
-  namespace Express {
-    interface Request {
-      user: {
-        // Legacy fields (HS256 local authentication)
-        id: number;
-        username: string;
-        email?: string;
-        role: string;
-        isActive: boolean;
-
-        // Shared field (both local and Auth0)
-        customerId?: string; // Multi-tenancy: customer ID for boundary enforcement
-      } | null;
-      id?: string; // Request ID for tracking and correlation
-
-      // Private middleware state – populated by jwtValidate, consumed by downstream middleware
-      _auth0Payload?: { sub: string; email: string; exp: number };
-      _legacyPayload?: JWTPayload;
-      _roleData?: { role: string; customer_status: string };
-      _dbUser?: { id: number; username: string; email: string; role: string; is_active: boolean };
-    }
-  }
-}
+// Type augmentations are in src/types/fastify.d.ts
 
 export interface JWTPayload {
   userId: number;
@@ -386,39 +372,32 @@ export function verifyToken(token: string): JWTPayload {
 }
 
 /**
- * Step 1: JWT Validation Middleware
+ * Step 1: JWT Validation preHandler
  *
  * Validates the JWT token from the Authorization header.
  * Handles both Auth0 RS256 and legacy HS256 tokens.
- * Attaches minimal user info to req.user (no DB calls, no tenant resolution).
- *
- * For Auth0 tokens:  req.user = { sub, email, exp }
- * For legacy tokens: req.user = { userId, username, email, type, auth0Sub?, customerId?, role? }
+ * Attaches minimal user info to request.user (no DB calls, no tenant resolution).
  *
  * Returns 401 if token is missing or invalid.
  */
 export async function jwtValidate(
-  req: Request,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  reply: FastifyReply
 ): Promise<void> {
   try {
-    const authHeader = req.headers.authorization;
+    const authHeader = request.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({
+      return reply.status(401).send({
         error: 'Unauthorized',
         message: 'JWT token required. Send in Authorization: Bearer <token> header.'
       });
-      return;
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const token = authHeader.substring(7);
 
-    // Decode header without verification to detect algorithm
     const decoded = jwt.decode(token, { complete: true });
     if (!decoded) {
-      // Fallback for Auth0 opaque/JWE access tokens.
       if (AUTH0_ENABLED) {
         logger.info('Token is not decodable JWT; trying Auth0 /userinfo fallback');
         let auth0Payload: { sub: string; email: string; exp: number };
@@ -427,36 +406,23 @@ export async function jwtValidate(
           logger.info('Opaque Auth0 token validated successfully', { sub: auth0Payload.sub });
         } catch (error: any) {
           logger.warn('Opaque token fallback failed', { message: error.message });
-          res.status(401).json({
+          return reply.status(401).send({
             error: 'Unauthorized',
             message: 'Invalid token format',
             details: error.message
           });
-          return;
         }
 
-        req.user = {
-          id: 0,
-          username: auth0Payload.sub,
-          email: auth0Payload.email,
-          role: '',
-          isActive: false
-        };
-        req._auth0Payload = auth0Payload;
-        next();
+        request.user = { id: 0, username: auth0Payload.sub, email: auth0Payload.email, role: '', isActive: false };
+        request._auth0Payload = auth0Payload;
         return;
       }
 
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid token format'
-      });
-      return;
+      return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid token format' });
     }
 
     const algorithm = decoded.header?.alg;
 
-    // Auth0 RS256 path
     if (algorithm === 'RS256' && AUTH0_ENABLED) {
       logger.info('Detected RS256 token, validating with Auth0 JWKS...');
       let auth0Payload: { sub: string; email: string; exp: number };
@@ -465,29 +431,14 @@ export async function jwtValidate(
         logger.info('Auth0 token validated successfully', { sub: auth0Payload.sub });
       } catch (error: any) {
         logger.warn('Auth0 token validation failed', { message: error.message });
-        res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Invalid Auth0 token',
-          details: error.message
-        });
-        return;
+        return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid Auth0 token', details: error.message });
       }
 
-      // Attach minimal Auth0 user info - mark as auth0 type via username placeholder
-      req.user = {
-        id: 0,
-        username: auth0Payload.sub,
-        email: auth0Payload.email,
-        role: '',       // filled by rbacLookup
-        isActive: false // filled by customerStatusCheck
-      };
-      // Store auth0-specific claims for downstream middleware
-      req._auth0Payload = auth0Payload;
-      next();
+      request.user = { id: 0, username: auth0Payload.sub, email: auth0Payload.email, role: '', isActive: false };
+      request._auth0Payload = auth0Payload;
       return;
     }
 
-    // Legacy HS256 path
     if (algorithm === 'HS256') {
       logger.info('Detected HS256 token, validating locally...');
       let payload: JWTPayload;
@@ -495,468 +446,273 @@ export async function jwtValidate(
         payload = verifyToken(token);
       } catch (error: any) {
         logger.warn('Legacy token verification failed', { message: error.message });
-        res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Invalid or expired token',
-          details: error.message
-        });
-        return;
+        return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid or expired token', details: error.message });
       }
 
       if (payload.type !== 'access') {
-        res.status(401).json({
-          error: 'Unauthorized',
-          message: 'Invalid token type. Use access token for API requests.'
-        });
-        return;
+        return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid token type. Use access token for API requests.' });
       }
 
-      // Store the full legacy payload for downstream middleware
-      req._legacyPayload = payload;
-
-      req.user = {
-        id: payload.userId,
-        username: payload.username,
-        email: payload.email,
-        role: payload.role || '',
-        isActive: false, // filled by customerStatusCheck
-        customerId: payload.customerId
-      };
-      next();
+      request._legacyPayload = payload;
+      request.user = { id: payload.userId, username: payload.username, email: payload.email, role: payload.role || '', isActive: false, customerId: payload.customerId };
       return;
     }
 
-    // Unknown algorithm
-    res.status(401).json({
-      error: 'Unauthorized',
-      message: `Unsupported token algorithm: ${algorithm}`
-    });
+    return reply.status(401).send({ error: 'Unauthorized', message: `Unsupported token algorithm: ${algorithm}` });
 
   } catch (error: any) {
-    logger.error('jwtValidate middleware encountered unexpected error', { error });
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Authentication failed'
-    });
+    logger.error('jwtValidate encountered unexpected error', { error });
+    return reply.status(500).send({ error: 'Internal Server Error', message: 'Authentication failed' });
   }
 }
 
 /**
- * Step 2: Tenant Resolution Middleware
- *
- * Reads hostname from req.hostname or X-Tenant-ID header and resolves the
- * tenant (customerId). Requires jwtValidate to have run first.
- *
- * For federated HS256 tokens (auth0Sub + customerId in payload) the tenant is
- * taken directly from the token and hostname resolution is skipped.
- *
- * Returns 400 if the tenant cannot be determined.
+ * Step 2: Tenant Resolution preHandler
  */
 export async function tenantResolve(
-  req: Request,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  reply: FastifyReply
 ): Promise<void> {
   try {
-    if (!req.user) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'jwtValidate middleware must run before tenantResolve'
-      });
-      return;
+    if (!request.user) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'jwtValidate must run before tenantResolve' });
     }
 
-    const legacyPayload: JWTPayload | undefined = req._legacyPayload;
+    const legacyPayload: JWTPayload | undefined = request._legacyPayload;
 
-    // Federated token: trust the customerId embedded in the payload
     if (legacyPayload && legacyPayload.auth0Sub && legacyPayload.customerId) {
       logger.info('Using tenant from federated token', { customerId: legacyPayload.customerId });
-      req.user.customerId = legacyPayload.customerId;
-      next();
+      request.user.customerId = legacyPayload.customerId;
       return;
     }
 
-    // Pure legacy local tokens don't require tenant resolution
     if (legacyPayload && !legacyPayload.auth0Sub) {
-      next();
       return;
     }
 
-    // Auth0 token: resolve tenant from hostname
     let customerId: string;
     try {
       const { getTenantIdFromHost } = await import('../services/auth/tenant-resolution.service');
-      customerId = getTenantIdFromHost(req.hostname);
+      customerId = getTenantIdFromHost(request.hostname);
       logger.info('Tenant resolved from hostname', { customerId });
     } catch (error: any) {
-      // Fallback for development: X-Tenant-ID header or DEVELOPMENT_TENANT_ID env var
-      const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
+      const headerTenantId = request.headers['x-tenant-id'] as string | undefined;
       const envTenantId = process.env.DEVELOPMENT_TENANT_ID;
 
       if (headerTenantId || envTenantId) {
         customerId = headerTenantId || envTenantId || 'customer-local';
-        logger.info('Using development fallback tenant', { customerId, hostname: req.hostname });
+        logger.info('Using development fallback tenant', { customerId, hostname: request.hostname });
       } else {
         logger.warn('Tenant resolution failed', { message: error.message });
-        res.status(400).json({
+        return reply.status(400).send({
           error: 'Bad Request',
           message: 'Cannot determine tenant from hostname. Set X-Tenant-ID header or DEVELOPMENT_TENANT_ID env var',
           details: error.message
         });
-        return;
       }
     }
 
-    req.user.customerId = customerId;
-    next();
+    request.user.customerId = customerId;
 
   } catch (error: any) {
-    logger.error('tenantResolve middleware encountered unexpected error', { error });
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Authentication failed'
-    });
+    logger.error('tenantResolve encountered unexpected error', { error });
+    return reply.status(500).send({ error: 'Internal Server Error', message: 'Authentication failed' });
   }
 }
 
 /**
- * Step 3: RBAC Lookup Middleware
- *
- * Fetches the user's role from the database or RBAC cache.
- * Requires jwtValidate (and tenantResolve for Auth0 users) to have run first.
- *
- * - Auth0 tokens: uses getRoleAndStatus from rbac-cache.service
- * - Legacy local tokens: fetches role from the users table
- * - Federated tokens: role is already in the token payload – lookup is skipped
- *
- * Returns 403 if the role cannot be determined.
+ * Step 3: RBAC Lookup preHandler
  */
 export async function rbacLookup(
-  req: Request,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  reply: FastifyReply
 ): Promise<void> {
   try {
-    if (!req.user) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'jwtValidate middleware must run before rbacLookup'
-      });
-      return;
+    if (!request.user) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'jwtValidate must run before rbacLookup' });
     }
 
-    const auth0Payload: { sub: string; email: string; exp: number } | undefined =
-      req._auth0Payload;
-    const legacyPayload: JWTPayload | undefined = req._legacyPayload;
+    const auth0Payload = request._auth0Payload;
+    const legacyPayload = request._legacyPayload;
 
-    // Federated token: role is embedded in the payload – skip lookup
     if (legacyPayload && legacyPayload.auth0Sub && legacyPayload.customerId) {
-      req.user.role = legacyPayload.role;
-      next();
+      request.user.role = legacyPayload.role;
       return;
     }
 
-    // Auth0 token: fetch role via RBAC cache service
     if (auth0Payload) {
-      const customerId = req.user.customerId;
+      const customerId = request.user.customerId;
       if (!customerId) {
-        res.status(400).json({
-          error: 'Bad Request',
-          message: 'Tenant not resolved. tenantResolve middleware must run before rbacLookup'
-        });
-        return;
+        return reply.status(400).send({ error: 'Bad Request', message: 'Tenant not resolved. tenantResolve must run before rbacLookup' });
       }
 
       let roleData: any;
       try {
         const { getRoleAndStatus } = await import('../services/auth/rbac-cache.service');
         roleData = await getRoleAndStatus(auth0Payload.sub, customerId, auth0Payload.exp);
-        console.log('[JWT-AUTH] Role fetched:', roleData.role, 'Status:', roleData.customer_status);
       } catch (error: any) {
-        console.warn('[JWT-AUTH] Role fetch failed:', error.message);
-        // Dev-mode fallback: if provisioning is unreachable and DEVELOPMENT_TENANT_ID is set,
-        // grant admin access rather than blocking all API calls.
         if (process.env.NODE_ENV !== 'production' && process.env.DEVELOPMENT_TENANT_ID) {
-          console.warn('[JWT-AUTH] Dev fallback: granting admin role (provisioning unreachable)');
           roleData = { role: 'admin', customer_status: 'active' };
         } else {
-          res.status(403).json({
-            error: 'Forbidden',
-            message: 'Cannot determine user role in tenant',
-            details: error.message
-          });
-          return;
+          return reply.status(403).send({ error: 'Forbidden', message: 'Cannot determine user role in tenant', details: error.message });
         }
       }
 
-      req.user.role = roleData.role;
-      // Store roleData for customerStatusCheck
-      req._roleData = roleData;
-      next();
+      request.user.role = roleData.role;
+      request._roleData = roleData;
       return;
     }
 
-    // Legacy local token: fetch role (and active status) from users table
     if (legacyPayload) {
       const result = await query(
-        `SELECT id, username, email, role, is_active, last_login_at
-         FROM users
-         WHERE id = $1`,
+        `SELECT id, username, email, role, is_active, last_login_at FROM users WHERE id = $1`,
         [legacyPayload.userId]
       );
 
       if (result.rows.length === 0) {
-        res.status(401).json({
-          error: 'Unauthorized',
-          message: 'User not found'
-        });
-        return;
+        return reply.status(401).send({ error: 'Unauthorized', message: 'User not found' });
       }
 
       const dbUser = result.rows[0];
-      req.user.role = dbUser.role;
-      // Store dbUser for customerStatusCheck
-      req._dbUser = dbUser;
-      next();
+      request.user.role = dbUser.role;
+      request._dbUser = dbUser;
       return;
     }
 
-    res.status(403).json({
-      error: 'Forbidden',
-      message: 'Cannot determine user role'
-    });
+    return reply.status(403).send({ error: 'Forbidden', message: 'Cannot determine user role' });
 
   } catch (error: any) {
-    console.error('[JWT-AUTH] rbacLookup unexpected error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Authentication failed'
-    });
+    logger.error('rbacLookup encountered unexpected error', { error });
+    return reply.status(500).send({ error: 'Internal Server Error', message: 'Authentication failed' });
   }
 }
 
 /**
- * Step 4: Customer Status Check Middleware
- *
- * Verifies that the authenticated user/customer is active (not suspended).
- * Requires rbacLookup to have run first.
- *
- * - Auth0: checks customer_status from roleData
- * - Legacy local: checks is_active from dbUser
- * - Federated: assumed active (already validated by provisioning)
- *
- * Attaches req.user.isActive and returns 403 if inactive/suspended.
+ * Step 4: Customer Status Check preHandler
  */
 export async function customerStatusCheck(
-  req: Request,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  reply: FastifyReply
 ): Promise<void> {
   try {
-    if (!req.user) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'jwtValidate middleware must run before customerStatusCheck'
-      });
-      return;
+    if (!request.user) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'jwtValidate must run before customerStatusCheck' });
     }
 
-    const auth0Payload: { sub: string; email: string; exp: number } | undefined =
-      req._auth0Payload;
-    const legacyPayload: JWTPayload | undefined = req._legacyPayload;
-    const roleData: any = req._roleData;
-    const dbUser: any = req._dbUser;
+    const auth0Payload = request._auth0Payload;
+    const legacyPayload = request._legacyPayload;
+    const roleData: any = request._roleData;
+    const dbUser: any = request._dbUser;
 
-    // Federated token: always active
     if (legacyPayload && legacyPayload.auth0Sub && legacyPayload.customerId) {
-      req.user.isActive = true;
-      console.log('[JWT-AUTH] Federated HS256 token authenticated:', legacyPayload.auth0Sub);
-      next();
+      request.user.isActive = true;
       return;
     }
 
-    // Auth0 token: check customer_status from roleData
     if (auth0Payload && roleData) {
       if (roleData.customer_status === 'suspended') {
-        res.status(403).json({
-          error: 'Forbidden',
-          message: 'Customer account is suspended'
-        });
-        return;
+        return reply.status(403).send({ error: 'Forbidden', message: 'Customer account is suspended' });
       }
-
-      req.user.isActive = roleData.customer_status === 'active';
-      console.log('[JWT-AUTH] Auth0 user authenticated:', auth0Payload.sub);
-      next();
+      request.user.isActive = roleData.customer_status === 'active';
       return;
     }
 
-    // Legacy local token: check is_active from dbUser
     if (dbUser) {
       if (!dbUser.is_active) {
-        res.status(403).json({
-          error: 'Forbidden',
-          message: 'User account is inactive. Contact administrator.'
-        });
-        return;
+        return reply.status(403).send({ error: 'Forbidden', message: 'User account is inactive. Contact administrator.' });
       }
-
-      req.user.id = dbUser.id;
-      req.user.username = dbUser.username;
-      req.user.email = dbUser.email;
-      req.user.role = dbUser.role;
-      req.user.isActive = dbUser.is_active;
-
-      console.log('[JWT-AUTH] Legacy user authenticated:', dbUser.username);
-      next();
+      request.user.id = dbUser.id;
+      request.user.username = dbUser.username;
+      request.user.email = dbUser.email;
+      request.user.role = dbUser.role;
+      request.user.isActive = dbUser.is_active;
       return;
     }
 
-    // Fallback: should not reach here in normal usage
-    res.status(403).json({
-      error: 'Forbidden',
-      message: 'Cannot verify user status'
-    });
+    return reply.status(403).send({ error: 'Forbidden', message: 'Cannot verify user status' });
 
   } catch (error: any) {
-    console.error('[JWT-AUTH] customerStatusCheck unexpected error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Authentication failed'
-    });
+    logger.error('customerStatusCheck encountered unexpected error', { error });
+    return reply.status(500).send({ error: 'Internal Server Error', message: 'Authentication failed' });
   }
 }
 
 /**
- * Compose multiple middleware functions into a single middleware.
- * Executes middleware in sequence, stopping if a middleware sends a response
- * (i.e. does not call its `next` callback).
+ * Run the full auth chain: validate → resolve tenant → rbac → status check.
+ * Stops as soon as any step sends a response (reply.sent === true).
  */
-export function composeMiddleware(...middlewares: RequestHandler[]): RequestHandler {
-  return (req, res, next) => {
-    let currentIndex = 0;
-    const executeNext = () => {
-      if (currentIndex >= middlewares.length) return next();
-      middlewares[currentIndex++](req, res, executeNext);
-    };
-    executeNext();
-  };
+export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  await jwtValidate(request, reply);
+  if (reply.sent) return;
+  await tenantResolve(request, reply);
+  if (reply.sent) return;
+  await rbacLookup(request, reply);
+  if (reply.sent) return;
+  await customerStatusCheck(request, reply);
 }
 
-/**
- * Composed Authentication Middleware
- *
- * Chains jwtValidate → tenantResolve → rbacLookup → customerStatusCheck in sequence.
- * Equivalent to the previous monolithic jwtAuth implementation.
- */
-export const requireAuth = composeMiddleware(
-  jwtValidate,
-  tenantResolve,
-  rbacLookup,
-  customerStatusCheck
-);
-
-/**
- * JWT Authentication Middleware
- *
- * Alias for requireAuth. Kept for backward compatibility.
- *
- * Supports two authentication modes:
- * 1. Auth0 (RS256): Extract sub, resolve tenant, fetch role from provisioning
- * 2. Legacy (HS256): Fetch user from local users table
- *
- * Expects: Authorization: Bearer <token> header
- * Sets: req.user with authenticated user information
- */
+/** Alias kept for backward compatibility. */
 export const jwtAuth = requireAuth;
 
 /**
- * Role-based authorization middleware
- * Use after jwtAuth middleware
- * 
+ * Role-based authorization preHandler factory.
+ * Must be used after jwtAuth.
+ *
  * Example:
- *   router.delete('/users/:id', jwtAuth, requireRole('admin'), handler)
+ *   fastify.get('/admin', { preHandler: [jwtAuth, requireRole('admin')] }, handler)
  */
 export function requireRole(...allowedRoles: string[]) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    if (!req.user) {
-      res.status(500).json({
-        error: 'Internal Server Error',
-        message: 'jwtAuth middleware must be applied before requireRole'
-      });
-      return;
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      return reply.status(500).send({ error: 'Internal Server Error', message: 'jwtAuth must run before requireRole' });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
-      res.status(403).json({
+    if (!allowedRoles.includes(request.user.role)) {
+      return reply.status(403).send({
         error: 'Forbidden',
         message: `Insufficient permissions. Required role: ${allowedRoles.join(' or ')}`
       });
-      return;
     }
-
-    next();
   };
 }
 
 /**
- * Optional Authentication Middleware
+ * Optional Authentication preHandler.
  *
- * Supports both Auth0 and legacy tokens.
- * Sets req.user if valid token present, otherwise req.user = null
- * Always proceeds to next handler (never rejects)
- *
- * Reuses jwtValidate → tenantResolve → rbacLookup → customerStatusCheck via
- * composeMiddleware. Any error response that those steps would send is
- * intercepted: instead of being sent to the client, req.user is set to null
- * and the request continues normally.
+ * Sets request.user if a valid token is provided; otherwise sets user to null.
+ * Never rejects the request.
  */
-export async function optionalAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
+export async function optionalAuth(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
+  if (!request.headers.authorization?.startsWith('Bearer ')) {
+    request.user = null;
+    return;
+  }
+
   try {
-    // No token provided - continue without auth
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      req.user = null;
-      next();
-      return;
-    }
-
-    // Intercept any error responses the auth chain attempts to send.
-    // Instead of sending an error response, set req.user = null and continue.
-    const originalJson = res.json.bind(res);
-    let intercepted = false;
-
-    res.json = function (body: any) {
-      if (!intercepted && !res.headersSent && res.statusCode >= 400) {
-        intercepted = true;
-        res.json = originalJson;
-        res.statusCode = 200;
-        console.debug('[OPTIONAL-AUTH] Token invalid, continuing unauthenticated');
-        req.user = null;
-        next();
-        return res;
+    let errorSent = false;
+    const mockReply = new Proxy(_reply, {
+      get(target, prop) {
+        if (prop === 'send') return () => { errorSent = true; return target; };
+        if (prop === 'status') return () => mockReply;
+        if (prop === 'code') return () => mockReply;
+        return (target as any)[prop];
       }
-      return originalJson(body);
-    } as any;
+    }) as FastifyReply;
 
-    composeMiddleware(
-      jwtValidate,
-      tenantResolve,
-      rbacLookup,
-      customerStatusCheck
-    )(req, res, () => {
-      res.json = originalJson;
-      next();
-    });
+    await jwtValidate(request, mockReply);
+    if (errorSent) { request.user = null; return; }
 
-  } catch (error: any) {
-    console.debug('[OPTIONAL-AUTH] Error during optional authentication:', error.message);
-    req.user = null;
-    next();
+    await tenantResolve(request, mockReply);
+    if (errorSent) { request.user = null; return; }
+
+    await rbacLookup(request, mockReply);
+    if (errorSent) { request.user = null; return; }
+
+    await customerStatusCheck(request, mockReply);
+    if (errorSent) { request.user = null; }
+
+  } catch {
+    request.user = null;
   }
 }
 

@@ -12,9 +12,9 @@
 
 import mqtt from 'mqtt';
 import { EventEmitter } from 'events';
-import msgpack from 'msgpack-lite';
+import msgpack from 'msgpackr';
 import zlib from 'zlib';
-import pLimit from 'p-limit';
+import { pLimit } from '../lib/p-limit';
 import logger, { logOperation } from '../utils/logger';
 import { isDuplicateMessage } from '../utils/mqtt-deduplication';
 import { CloudDictionaryManager } from './dictionary';

@@ -3,16 +3,20 @@
  * Handles validation, creation, and lifecycle of fleet provisioning keys
  */
 
-import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { query } from '../db/connection';
 import { logAuditEvent, AuditEventType, AuditSeverity } from './audit-logger';
-
-const BCRYPT_ROUNDS = 10;
+import {
+  hashLegacySha256,
+  hashMachineSecret,
+  hashMachineSecretDigest,
+  verifyMachineSecret,
+} from './secret-hashing';
 
 export interface ProvisioningKey {
   id: string;
   key_hash: string;
+  key_hash_fast?: string;
   fleet_uuid: string; // UUID reference to fleets table
   description?: string;
   max_agents: number;
@@ -40,15 +44,16 @@ export async function validateProvisioningKey(
 ): Promise<ProvisioningKeyValidationResult> {
   try {
     // Fast lookup using SHA-256 hash (O(1) instead of O(N) bcrypt comparisons)
-    const fastHash = crypto.createHash('sha256').update(key).digest('hex');
+    const fastHash = hashMachineSecretDigest(key, 'provisioning-key');
+    const legacyFastHash = hashLegacySha256(key);
     
     const result = await query<ProvisioningKey>(
       `SELECT * FROM provisioning_keys 
-       WHERE key_hash_fast = $1
+       WHERE key_hash_fast IN ($1, $2)
        AND is_active = true 
        AND expires_at > NOW()
        LIMIT 1`,
-      [fastHash]
+      [fastHash, legacyFastHash]
     );
 
     if (result.rows.length === 0) {
@@ -63,9 +68,9 @@ export async function validateProvisioningKey(
 
     // Verify with bcrypt (only 1 comparison now instead of N)
     const record = result.rows[0];
-    const matches = await bcrypt.compare(key, record.key_hash);
+    const verification = await verifyMachineSecret(key, record.key_hash, 'provisioning-key');
     
-    if (!matches) {
+    if (!verification.valid) {
       // SHA-256 collision or tampered key - extremely rare
       await logAuditEvent({
         eventType: AuditEventType.PROVISIONING_KEY_INVALID,
@@ -74,6 +79,17 @@ export async function validateProvisioningKey(
         details: { reason: 'Bcrypt verification failed after fast hash match' }
       });
       return { valid: false, error: 'Invalid provisioning key' };
+    }
+
+    if (verification.upgradedHash || record.key_hash_fast !== fastHash) {
+      await query(
+        `UPDATE provisioning_keys
+         SET key_hash = $1, key_hash_fast = $2
+         WHERE id = $3`,
+        [verification.upgradedHash ?? record.key_hash, fastHash, record.id],
+      );
+      record.key_hash = verification.upgradedHash ?? record.key_hash;
+      record.key_hash_fast = fastHash;
     }
 
     // Check agent limit
@@ -174,8 +190,8 @@ export async function createProvisioningKey(
 ): Promise<{ id: string; key: string }> {
   // Generate a secure random key
   const key = crypto.randomBytes(32).toString('hex');
-  const keyHash = await bcrypt.hash(key, BCRYPT_ROUNDS);
-  const keyHashFast = crypto.createHash('sha256').update(key).digest('hex');
+  const keyHash = hashMachineSecret(key, 'provisioning-key');
+  const keyHashFast = hashMachineSecretDigest(key, 'provisioning-key');
   
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + expiresInDays);

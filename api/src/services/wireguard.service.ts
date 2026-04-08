@@ -1,4 +1,4 @@
-import fetch from 'node-fetch';
+import { fetch } from 'undici';
 import logger from '../utils/logger';
 
 interface WireGuardPeerResponse {
@@ -134,7 +134,7 @@ export class WireGuardService {
         throw new Error(`Failed to fetch QR code: ${response.statusText}`);
       }
 
-      const buffer = await response.buffer();
+      const buffer = Buffer.from(await response.arrayBuffer());
       return buffer;
     } catch (error: any) {
       logger.error(`Failed to fetch QR code:`, error);
@@ -152,7 +152,7 @@ export class WireGuardService {
 
     try {
       const response = await fetch(`${this.wgServerUrl}/health`, {
-        timeout: 5000 as any
+        signal: AbortSignal.timeout(5000)
       });
       return response.ok;
     } catch (error) {

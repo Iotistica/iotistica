@@ -11,17 +11,17 @@
  * - Redis pub/sub (Phase 1)
  */
 
-import { query } from '../db/connection';
+import { query } from '../../db/connection';
 import {
   AgentModel,
   DeviceCurrentStateModel,
   DeviceMetricsModel,
-} from '../db/models';
-import { EventPublisher, objectsAreEqual } from './event-sourcing';
-import EventSourcingConfig from '../events/event-sourcing';
-import { deviceSensorSync, syncAgentDevices } from './agent-devices';
-import { getTenantId } from '../redis/tenant-keys';
-import logger from '../utils/logger';
+} from '../../db/models';
+import { EventPublisher, objectsAreEqual } from '../event-sourcing';
+import EventSourcingConfig from '../../events/event-sourcing';
+import { deviceSensorSync, syncAgentDevices } from './devices';
+import { getTenantId } from '../../redis/tenant-keys';
+import logger from '../../utils/logger';
 
 const eventPublisher = new EventPublisher();
 
@@ -124,7 +124,7 @@ export async function processAgentStateReport(
       // Trigger cleanup (non-blocking, idempotent)
       (async () => {
         try {
-          const { virtualAgentDeployer } = await import('./provisioning/virtual-agent-deployer');
+          const { virtualAgentDeployer } = await import('../provisioning/virtual-agent-deployer');
           await virtualAgentDeployer.cleanupProvisioningKey(uuid);
         } catch (error) {
           // Cleanup is idempotent - Secret might already be deleted, which is fine
@@ -240,7 +240,7 @@ export async function processAgentStateReport(
     ) {
       // Import Redis client once for both operations
       try {
-        const { redisClient } = await import('../redis/client');
+        const { redisClient } = await import('../../redis/client');
         const tenantId = getTenantId();
         
         const metrics = {

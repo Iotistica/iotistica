@@ -17,14 +17,147 @@
  * - GET /api/v1/agents/:uuid/protocol-adapters/:protocol/:deviceName/history - Protocol adapter history
  */
 
-import express from 'express';
+
 import { query } from '../db/connection';
-import { deviceSensorSync, prepareEndpointForCreate } from '../services/agent-devices';
+import { deviceSensorSync, prepareEndpointForCreate, type EndpointDeviceConfig } from '../services/agent/devices';
 import { logger } from '../utils/logger';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { VirtualDeviceManager } from '../services/provisioning/virtual-device-manager';
+import { VirtualDeviceManager, type VirtualDeviceConfig } from '../services/provisioning/virtual-device-manager';
+import type { FastifyPluginAsync } from 'fastify'
 
-export const router = express.Router();
+type AgentUuidParams = {
+  uuid: string;
+};
+
+type AgentDeviceParams = {
+  uuid: string;
+  name: string;
+};
+
+type AgentDeviceHistoryParams = {
+  uuid: string;
+  protocol: string;
+  deviceName: string;
+};
+
+type VirtualDeviceParams = {
+  uuid: string;
+  virtualDeviceUuid: string;
+};
+
+type DevicesQuerystring = {
+  protocol?: string;
+};
+
+type ValidateOnlyQuerystring = {
+  validateOnly?: string;
+};
+
+type HardDeleteQuerystring = {
+  hard?: string;
+};
+
+type DeviceHealthQuerystring = {
+  protocolType?: string;
+};
+
+type DeviceHistoryQuerystring = {
+  hours?: string;
+};
+
+type EndpointConfig = {
+  name?: string;
+  uuid?: string;
+  protocol?: string;
+  enabled?: boolean;
+  connection?: Record<string, unknown>;
+  dataPoints?: unknown[];
+  pollInterval?: number;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+type VirtualDeviceCreateBody = {
+  name?: string;
+  protocol?: string;
+  profile?: string;
+  image?: string;
+  slaveCount?: number;
+};
+
+type ReportedDeviceRow = {
+  uuid: string;
+  agent_uuid: string;
+  endpoint_uuid: string | null;
+  name: string;
+  protocol: string;
+  identifier: string | null;
+  enabled: boolean;
+  last_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type DeviceHealthRow = {
+  name: string;
+  protocol: string;
+  enabled: boolean;
+  poll_interval: number | null;
+  connection: Record<string, unknown> | null;
+  data_points: unknown[] | null;
+  metadata: Record<string, unknown> | null;
+  updated_at: string;
+  synced_to_config: boolean;
+  health_status: string | null;
+  health_connected: boolean | null;
+  health_last_poll: string | null;
+  health_error_count: number | null;
+  health_last_error: string | null;
+  health_updated_at: string | null;
+  last_telemetry_at: string | null;
+  location: string | null;
+};
+
+const endpointProtocols = ['modbus', 'can', 'opcua', 'mqtt', 'snmp'] as const;
+const virtualDeviceProtocols = ['modbus', 'opcua'] as const;
+
+function isEndpointProtocol(value: unknown): value is EndpointDeviceConfig['protocol'] {
+  return typeof value === 'string' && endpointProtocols.includes(value as EndpointDeviceConfig['protocol']);
+}
+
+function isVirtualDeviceProtocol(value: unknown): value is VirtualDeviceConfig['protocol'] {
+  return typeof value === 'string' && virtualDeviceProtocols.includes(value as VirtualDeviceConfig['protocol']);
+}
+
+function toEndpointDeviceConfig(config: EndpointConfig): EndpointDeviceConfig {
+  return {
+    ...config,
+    name: config.name as string,
+    protocol: config.protocol as EndpointDeviceConfig['protocol'],
+    enabled: config.enabled ?? true,
+    connection: config.connection as EndpointDeviceConfig['connection'],
+    dataPoints: (config.dataPoints ?? []) as EndpointDeviceConfig['dataPoints'],
+  };
+}
+
+function toEndpointDeviceUpdate(config: EndpointConfig): Partial<EndpointDeviceConfig> {
+  const { protocol, dataPoints, ...rest } = config;
+  const updates: Partial<EndpointDeviceConfig> = {
+    ...rest,
+  };
+
+  if (protocol !== undefined) {
+    updates.protocol = protocol as EndpointDeviceConfig['protocol'];
+  }
+
+  if (dataPoints !== undefined) {
+    updates.dataPoints = dataPoints as EndpointDeviceConfig['dataPoints'];
+  }
+
+  return updates;
+}
+
+const plugin: FastifyPluginAsync = async (fastify) => {
 
 // Initialize virtual device manager
 const virtualDeviceManager = new VirtualDeviceManager();
@@ -35,7 +168,8 @@ const virtualDeviceManager = new VirtualDeviceManager();
  * 
  * Reads from endpoints table (faster, allows filtering/sorting)
  */
-router.get('/agents/:uuid/devices', jwtAuth, async (req, res) => {
+
+fastify.get<{ Params: AgentUuidParams; Querystring: DevicesQuerystring }>('/agents/:uuid/devices', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
     const { protocol } = req.query; // Optional filter by protocol
@@ -45,14 +179,14 @@ router.get('/agents/:uuid/devices', jwtAuth, async (req, res) => {
       protocol as string | undefined
     );
 
-    res.json({
+    return reply.send({
       devices: sensors,
       agents: sensors, // Keep "agents" for backward compatibility
       count: sensors.length
     });
   } catch (error: any) {
     logger.error('Error getting devices:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to get devices',
       message: error.message
     });
@@ -63,11 +197,12 @@ router.get('/agents/:uuid/devices', jwtAuth, async (req, res) => {
  * List agent-reported physical/logical devices for an agent.
  * GET /api/v1/agents/:uuid/reported-devices
  */
-router.get('/agents/:uuid/reported-devices', jwtAuth, async (req, res) => {
+
+fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/reported-devices', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
 
-    const result = await query(
+    const result = await query<ReportedDeviceRow>(
       `SELECT
          uuid,
          agent_uuid,
@@ -85,14 +220,14 @@ router.get('/agents/:uuid/reported-devices', jwtAuth, async (req, res) => {
       [uuid]
     );
 
-    res.json({
+    return reply.send({
       agent_uuid: uuid,
       count: result.rows.length,
       devices: result.rows,
     });
   } catch (error: any) {
     logger.error('Error getting agent devices:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to get agent devices',
       message: error.message,
     });
@@ -107,7 +242,8 @@ router.get('/agents/:uuid/reported-devices', jwtAuth, async (req, res) => {
  * - validateOnly=true: Only validate config, don't persist (for draft mode)
  * - validateOnly=false (default): Validate and persist using dual-write
  */
-router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
+
+fastify.post<{ Params: AgentUuidParams; Querystring: ValidateOnlyQuerystring; Body: EndpointConfig }>('/agents/:uuid/devices', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
     const sensorConfig = req.body;
@@ -116,7 +252,7 @@ router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
 
     // Basic validation
     if (!sensorConfig.name) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Validation failed',
         message: 'Device name is required'
       });
@@ -124,14 +260,21 @@ router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
 
     if (!sensorConfig.protocol) {
       logger.error('Protocol missing in request:', sensorConfig);
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Validation failed',
         message: 'Protocol is required'
       });
     }
 
+    if (!isEndpointProtocol(sensorConfig.protocol)) {
+      return reply.status(400).send({
+        error: 'Validation failed',
+        message: `Protocol must be one of: ${endpointProtocols.join(', ')}`
+      });
+    }
+
     if (!sensorConfig.connection) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Validation failed',
         message: 'Connection configuration is required'
       });
@@ -141,20 +284,22 @@ router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
     // Other protocols (e.g., Modbus) require at least one data point
     if (!['opcua', 'mqtt'].includes(sensorConfig.protocol)) {
       if (!sensorConfig.dataPoints || sensorConfig.dataPoints.length === 0) {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Validation failed',
           message: 'At least one data point is required'
         });
       }
     }
 
+    const endpointConfig = toEndpointDeviceConfig(sensorConfig);
+
     // If validation-only mode, return validated config without persisting
     if (validateOnly) {
-      const preparedSensorConfig = prepareEndpointForCreate(uuid, sensorConfig);
+      const preparedSensorConfig = prepareEndpointForCreate(uuid, endpointConfig);
 
       // Normalize the sensor config
       // For OPC UA: omit dataPoints if empty (auto-discovery will populate)
-      const validatedSensor: any = {
+      const validatedSensor: EndpointConfig = {
         name: preparedSensorConfig.name,
         uuid: preparedSensorConfig.uuid,
         protocol: preparedSensorConfig.protocol,
@@ -162,7 +307,7 @@ router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
         connection: preparedSensorConfig.connection,
         metadata: {
           createdAt: new Date().toISOString(),
-          createdBy: (req as any).user?.username || (req as any).user?.email || 'dashboard'
+          createdBy: req.user?.username || req.user?.email || 'dashboard'
         }
       };
 
@@ -177,7 +322,7 @@ router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
 
       logger.info('Returning validated sensor (not persisting):', validatedSensor.name);
       
-      return res.status(200).json({
+      return reply.status(200).send({
         status: 'ok',
         message: 'Sensor validated successfully. Add to pending state.',
         sensor: validatedSensor,
@@ -188,11 +333,11 @@ router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
     // Standard path: Add sensor using sync service (handles dual-write)
     const result = await deviceSensorSync.addEndpoint(
       uuid,
-      sensorConfig,
-      (req as any).user?.username || (req as any).user?.email || 'dashboard'
+      endpointConfig,
+      req.user?.username || req.user?.email || 'dashboard'
     );
 
-    res.status(201).json({
+    return reply.status(201).send({
       status: 'ok',
       message: 'Device added. Click Sync to deploy.',
       device: result.sensor, // Keep "device" for backward compatibility
@@ -202,20 +347,20 @@ router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
     logger.error('Error adding device:', error);
     
     if (error.message?.includes('already exists')) {
-      return res.status(409).json({
+      return reply.status(409).send({
         error: 'Duplicate device',
         message: error.message
       });
     }
     
     if (error.message?.includes('not found')) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: error.message
       });
     }
     
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to add device',
       message: error.message
     });
@@ -230,7 +375,8 @@ router.post('/agents/:uuid/devices', jwtAuth, async (req, res) => {
  * - validateOnly=true: Only validate updates, don't persist (for draft mode)
  * - validateOnly=false (default): Validate and persist using dual-write
  */
-router.put('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
+
+fastify.put<{ Params: AgentDeviceParams; Querystring: ValidateOnlyQuerystring; Body: EndpointConfig }>('/agents/:uuid/devices/:name', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid, name } = req.params;
     const updates = req.body;
@@ -242,16 +388,23 @@ router.put('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
     if (validateOnly) {
       // Basic validation on updates
       if (updates.protocol && typeof updates.protocol !== 'string') {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Validation failed',
           message: 'Protocol must be a string'
+        });
+      }
+
+      if (updates.protocol !== undefined && !isEndpointProtocol(updates.protocol)) {
+        return reply.status(400).send({
+          error: 'Validation failed',
+          message: `Protocol must be one of: ${endpointProtocols.join(', ')}`
         });
       }
 
       // OPC UA uses auto-discovery, dataPoints can be empty
       // Other protocols require at least one data point
       if (updates.dataPoints && !Array.isArray(updates.dataPoints)) {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Validation failed',
           message: 'Data points must be an array'
         });
@@ -259,13 +412,13 @@ router.put('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
       
       // Only enforce non-empty dataPoints for protocols that require explicit point maps
       if (updates.protocol && !['opcua', 'mqtt'].includes(updates.protocol) && updates.dataPoints && updates.dataPoints.length === 0) {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Validation failed',
           message: 'Data points must be a non-empty array'
         });
       }
 
-      return res.status(200).json({
+      return reply.status(200).send({
         status: 'ok',
         message: 'Updates validated successfully. Add to pending state.',
         updates: updates,
@@ -273,15 +426,17 @@ router.put('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
       });
     }
 
+    const endpointUpdates = toEndpointDeviceUpdate(updates);
+
     // Update sensor using sync service (handles dual-write)
     const result = await deviceSensorSync.updateEndpoint(
       uuid,
       name,
-      updates,
-      (req as any).user?.username || (req as any).user?.email || 'dashboard'
+      endpointUpdates,
+      req.user?.username || req.user?.email || 'dashboard'
     );
 
-    res.json({
+    return reply.send({
       status: 'ok',
       message: 'Device updated',
       device: result.sensor, // Keep "device" for backward compatibility
@@ -291,13 +446,13 @@ router.put('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
     logger.error('Error updating device:', error);
     
     if (error.message?.includes('not found')) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: error.message
       });
     }
     
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to update device',
       message: error.message
     });
@@ -312,17 +467,18 @@ router.put('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
  * - hard=true: Hard delete immediately (remove from target state config + endpoints)
  * - hard=false (default): Soft delete (mark pending_deletion, wait for agent reconciliation)
  */
-router.delete('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
+
+fastify.delete<{ Params: AgentDeviceParams; Querystring: HardDeleteQuerystring }>('/agents/:uuid/devices/:name', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid, name } = req.params;
     const hardDelete = req.query.hard === 'true';
 
-    const actor = (req as any).user?.username || (req as any).user?.email || 'dashboard';
+    const actor = req.user?.username || req.user?.email || 'dashboard';
     const result = hardDelete
       ? await deviceSensorSync.hardDeleteEndpoint(uuid, name, actor)
       : await deviceSensorSync.deleteEndpoint(uuid, name, actor);
 
-    res.json({
+    return reply.send({
       status: 'ok',
       mode: hardDelete ? 'hard' : 'soft',
       message: hardDelete
@@ -334,13 +490,13 @@ router.delete('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
     logger.error('Error deleting device:', error);
     
     if (error.message?.includes('not found')) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: error.message
       });
     }
     
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to delete device',
       message: error.message
     });
@@ -356,20 +512,21 @@ router.delete('/agents/:uuid/devices/:name', jwtAuth, async (req, res) => {
  * Shows Configured Endpoints with protocol breakdown
  * GET /api/v1/agents/:uuid/device-health
  */
-router.get('/agents/:uuid/device-health', jwtAuth, async (req, res) => {
+
+fastify.get<{ Params: AgentUuidParams; Querystring: DeviceHealthQuerystring }>('/agents/:uuid/device-health', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
     const { protocolType } = req.query;
 
     let whereClause = 'agent_uuid = $1';
-    const params: any[] = [uuid];
+    const params: string[] = [uuid];
 
     if (protocolType) {
       whereClause += ' AND protocol = $2';
       params.push(protocolType);
     }
 
-    const result = await query(
+    const result = await query<DeviceHealthRow>(
       `SELECT 
         ds.name,
         ds.protocol,
@@ -394,7 +551,7 @@ router.get('/agents/:uuid/device-health', jwtAuth, async (req, res) => {
       params
     );
 
-    const agents = result.rows.map((row: any) => ({
+    const agents = result.rows.map((row) => ({
       name: row.name,
       protocol: row.protocol,
       status: row.health_status || (row.enabled ? 'configured' : 'disabled'),
@@ -415,15 +572,15 @@ router.get('/agents/:uuid/device-health', jwtAuth, async (req, res) => {
 
     const summary = {
       total: agents.length,
-      enabled: agents.filter((d: any) => d.enabled).length,
-      disabled: agents.filter((d: any) => !d.enabled).length,
-      byProtocol: result.rows.reduce((acc: any, row: any) => {
+      enabled: agents.filter((device) => device.enabled).length,
+      disabled: agents.filter((device) => !device.enabled).length,
+      byProtocol: result.rows.reduce<Record<string, number>>((acc, row) => {
         acc[row.protocol] = (acc[row.protocol] || 0) + 1;
         return acc;
       }, {})
     };
 
-    res.json({
+    return reply.send({
       deviceUuid: uuid,
       summary,
       devices: agents,
@@ -431,7 +588,7 @@ router.get('/agents/:uuid/device-health', jwtAuth, async (req, res) => {
     });
   } catch (error: any) {
     logger.error('Error fetching device sensors:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to fetch device sensors',
       message: error.message
     });
@@ -443,10 +600,11 @@ router.get('/agents/:uuid/device-health', jwtAuth, async (req, res) => {
  * GET /api/v1/agents/:uuid/protocol-adapters/:protocol/:deviceName/history
  * Query params: ?hours=24 (default)
  */
-router.get('/agents/:uuid/protocol-adapters/:protocol/:deviceName/history', jwtAuth, async (req, res) => {
+
+fastify.get<{ Params: AgentDeviceHistoryParams; Querystring: DeviceHistoryQuerystring }>('/agents/:uuid/protocol-adapters/:protocol/:deviceName/history', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid, protocol, deviceName } = req.params;
-    const hours = parseInt(req.query.hours as string) || 24;
+    const hours = Number.parseInt(req.query.hours ?? '', 10) || 24;
 
     const result = await query(
       `SELECT 
@@ -467,7 +625,7 @@ router.get('/agents/:uuid/protocol-adapters/:protocol/:deviceName/history', jwtA
       [uuid, protocol, deviceName, hours]
     );
 
-    res.json({
+    return reply.send({
       agent_uuid: uuid,
       protocol_type: protocol,
       device_name: deviceName,
@@ -477,338 +635,12 @@ router.get('/agents/:uuid/protocol-adapters/:protocol/:deviceName/history', jwtA
     });
   } catch (error: any) {
     logger.error('Error fetching protocol adapter history:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to fetch protocol adapter history',
       message: error.message
     });
   }
 });
-
-// ============================================================================
-// Legacy/Commented Code (Kept for Reference)
-// ============================================================================
-
-/**
- * Get sensor-publish configuration
- * GET /api/v1/agents/:uuid/sensor-config
- */
-// router.get('/agents/:uuid/sensor-config', async (req, res) => {
-//   try {
-//     const { uuid } = req.params;
-    
-//     // Get current target state
-//     const targetState = await DeviceTargetStateModel.get(uuid);
-    
-//     if (!targetState) {
-//       return res.json({
-//         sensors: []
-//       });
-//     }
-
-//     // Parse config to get sensors
-//     const config = typeof targetState.config === 'string' 
-//       ? JSON.parse(targetState.config) 
-//       : targetState.config || {};
-
-//     res.json({
-//       sensors: config.sensors || []
-//     });
-//   } catch (error: any) {
-//     console.error('Error getting sensor config:', error);
-//     res.status(500).json({
-//       error: 'Failed to get sensor configuration',
-//       message: error.message
-//     });
-//   }
-// });
-
-/**
- * Add sensor to sensor-publish configuration
- * POST /api/v1/agents/:uuid/sensor-config
- */
-// router.post('/agents/:uuid/sensor-config', async (req, res) => {
-//   try {
-//     const { uuid } = req.params;
-//     const sensorConfig = req.body;
-
-//     // Validate required fields
-//     if (!sensorConfig.name || !sensorConfig.protocolType || !sensorConfig.platform) {
-//       return res.status(400).json({
-//         error: 'Invalid sensor configuration',
-//         message: 'Required fields: name, protocolType, platform'
-//       });
-//     }
-
-//     // Auto-generate socket/pipe path based on platform and sensor name
-//     const addr = sensorConfig.platform === 'windows'
-//       ? `\\\\.\\pipe\\${sensorConfig.name}`
-//       : `/tmp/${sensorConfig.name}.sock`;
-
-//     // Auto-generate MQTT topic based on protocol type and sensor name
-//     const mqttTopic = `${sensorConfig.protocolType}/${sensorConfig.name}`;
-//     const mqttHeartbeatTopic = `${mqttTopic}/heartbeat`;
-
-//     // Build complete sensor configuration
-//     const completeSensorConfig = {
-//       name: sensorConfig.name,
-//       protocolType: sensorConfig.protocolType,
-//       enabled: sensorConfig.enabled !== undefined ? sensorConfig.enabled : true,
-//       addr,
-//       eomDelimiter: sensorConfig.eomDelimiter || '\\n',
-//       mqttTopic,
-//       mqttHeartbeatTopic,
-//       bufferCapacity: sensorConfig.bufferCapacity || 8192,
-//       publishInterval: sensorConfig.publishInterval || 30000,
-//       bufferTimeMs: sensorConfig.bufferTimeMs || 5000,
-//       bufferSize: sensorConfig.bufferSize || 10,
-//       addrPollSec: sensorConfig.addrPollSec || 10,
-//       heartbeatTimeSec: sensorConfig.heartbeatTimeSec || 300,
-//     };
-
-//     // Get current target state
-//     const currentState = await DeviceTargetStateModel.get(uuid);
-    
-//     // Get current config or initialize empty
-//     const config = currentState && currentState.config
-//       ? (typeof currentState.config === 'string' 
-//           ? JSON.parse(currentState.config) 
-//           : currentState.config)
-//       : {};
-
-//     // Initialize sensors array if it doesn't exist
-//     if (!config.sensors) {
-//       config.sensors = [];
-//     }
-
-//     // Check if sensor with same name already exists
-//     const existingIndex = config.sensors.findIndex((s: any) => s.name === completeSensorConfig.name);
-//     if (existingIndex !== -1) {
-//       return res.status(400).json({
-//         error: 'Sensor already exists',
-//         message: `A sensor with name "${completeSensorConfig.name}" already exists`
-//       });
-//     }
-
-//     // Add new sensor to config
-//     config.sensors.push(completeSensorConfig);
-
-//     // Get current apps or initialize empty
-//     const apps = currentState && currentState.apps
-//       ? (typeof currentState.apps === 'string' 
-//           ? JSON.parse(currentState.apps) 
-//           : currentState.apps)
-//       : {};
-
-//     // Update target state with new sensor config
-//     const targetState = await DeviceTargetStateModel.set(uuid, apps, config);
-
-//     console.log(`📡 Added sensor "${completeSensorConfig.name}" to device ${uuid.substring(0, 8)}...`);
-//     console.log(`   Socket/Pipe: ${completeSensorConfig.addr}`);
-//     console.log(`   MQTT Topic: ${completeSensorConfig.mqttTopic}`);
-
-//     // Publish event
-//     await eventPublisher.publish(
-//       'sensor_config.added',
-//       'device',
-//       uuid,
-//       {
-//         sensor: completeSensorConfig,
-//         version: targetState.version
-//       },
-//       {
-//         metadata: {
-//           ip_address: req.ip,
-//           user_agent: req.headers['user-agent'],
-//           endpoint: '/agents/:uuid/sensor-config'
-//         }
-//       }
-//     );
-
-//     res.json({
-//       status: 'ok',
-//       message: 'Sensor configuration added',
-//       sensor: completeSensorConfig,
-//       version: targetState.version
-//     });
-//   } catch (error: any) {
-//     console.error('Error adding sensor config:', error);
-//     res.status(500).json({
-//       error: 'Failed to add sensor configuration',
-//       message: error.message
-//     });
-//   }
-// });
-
-/**
- * Update sensor configuration
- * PUT /api/v1/agents/:uuid/sensor-config/:sensorName
- */
-// router.put('/agents/:uuid/sensor-config/:sensorName', async (req, res) => {
-//   try {
-//     const { uuid, sensorName } = req.params;
-//     const updatedConfig = req.body;
-
-//     // Get current target state
-//     const currentState = await DeviceTargetStateModel.get(uuid);
-    
-//     if (!currentState || !currentState.config) {
-//       return res.status(404).json({
-//         error: 'Sensor not found',
-//         message: `No sensor configuration found for "${sensorName}"`
-//       });
-//     }
-
-//     const config = typeof currentState.config === 'string' 
-//       ? JSON.parse(currentState.config) 
-//       : currentState.config;
-
-//     if (!config.sensors) {
-//       return res.status(404).json({
-//         error: 'Sensor not found',
-//         message: `No sensor configuration found for "${sensorName}"`
-//       });
-//     }
-
-//     // Find sensor by name
-//     const sensorIndex = config.sensors.findIndex((s: any) => s.name === sensorName);
-//     if (sensorIndex === -1) {
-//       return res.status(404).json({
-//         error: 'Sensor not found',
-//         message: `Sensor "${sensorName}" not found`
-//       });
-//     }
-
-//     // Update sensor config
-//     config.sensors[sensorIndex] = { ...config.sensors[sensorIndex], ...updatedConfig };
-
-//     // Get current apps
-//     const apps = typeof currentState.apps === 'string' 
-//       ? JSON.parse(currentState.apps) 
-//       : currentState.apps || {};
-
-//     // Update target state
-//     const targetState = await DeviceTargetStateModel.set(uuid, apps, config);
-
-//     console.log(`📡 Updated sensor "${sensorName}" on device ${uuid.substring(0, 8)}...`);
-
-//     // Publish event
-//     await eventPublisher.publish(
-//       'sensor_config.updated',
-//       'device',
-//       uuid,
-//       {
-//         sensor_name: sensorName,
-//         sensor: config.sensors[sensorIndex],
-//         version: targetState.version
-//       },
-//       {
-//         metadata: {
-//           ip_address: req.ip,
-//           user_agent: req.headers['user-agent'],
-//           endpoint: '/agents/:uuid/sensor-config/:sensorName'
-//         }
-//       }
-//     );
-
-//     res.json({
-//       status: 'ok',
-//       message: 'Sensor configuration updated',
-//       sensor: config.sensors[sensorIndex],
-//       version: targetState.version
-//     });
-//   } catch (error: any) {
-//     console.error('Error updating sensor config:', error);
-//     res.status(500).json({
-//       error: 'Failed to update sensor configuration',
-//       message: error.message
-//     });
-//   }
-// });
-
-// /**
-//  * Delete sensor configuration
-//  * DELETE /api/v1/agents/:uuid/sensor-config/:sensorName
-//  */
-// router.delete('/agents/:uuid/sensor-config/:sensorName', async (req, res) => {
-//   try {
-//     const { uuid, sensorName } = req.params;
-
-//     // Get current target state
-//     const currentState = await DeviceTargetStateModel.get(uuid);
-    
-//     if (!currentState || !currentState.config) {
-//       return res.status(404).json({
-//         error: 'Sensor not found',
-//         message: `No sensor configuration found for "${sensorName}"`
-//       });
-//     }
-
-//     const config = typeof currentState.config === 'string' 
-//       ? JSON.parse(currentState.config) 
-//       : currentState.config;
-
-//     if (!config.sensors) {
-//       return res.status(404).json({
-//         error: 'Sensor not found',
-//         message: `No sensor configuration found for "${sensorName}"`
-//       });
-//     }
-
-//     // Find sensor by name
-//     const sensorIndex = config.sensors.findIndex((s: any) => s.name === sensorName);
-//     if (sensorIndex === -1) {
-//       return res.status(404).json({
-//         error: 'Sensor not found',
-//         message: `Sensor "${sensorName}" not found`
-//       });
-//     }
-
-//     // Remove sensor from config
-//     const removedSensor = config.sensors.splice(sensorIndex, 1)[0];
-
-//     // Get current apps
-//     const apps = typeof currentState.apps === 'string' 
-//       ? JSON.parse(currentState.apps) 
-//       : currentState.apps || {};
-
-//     // Update target state
-//     const targetState = await DeviceTargetStateModel.set(uuid, apps, config);
-
-//     console.log(`🗑️  Removed sensor "${sensorName}" from device ${uuid.substring(0, 8)}...`);
-
-//     // Publish event
-//     await eventPublisher.publish(
-//       'sensor_config.deleted',
-//       'device',
-//       uuid,
-//       {
-//         sensor_name: sensorName,
-//         sensor: removedSensor,
-//         version: targetState.version
-//       },
-//       {
-//         metadata: {
-//           ip_address: req.ip,
-//           user_agent: req.headers['user-agent'],
-//           endpoint: '/agents/:uuid/sensor-config/:sensorName'
-//         }
-//       }
-//     );
-
-//     res.json({
-//       status: 'ok',
-//       message: 'Sensor configuration deleted',
-//       sensor: removedSensor,
-//       version: targetState.version
-//     });
-//   } catch (error: any) {
-//     console.error('Error deleting sensor config:', error);
-//     res.status(500).json({
-//       error: 'Failed to delete sensor configuration',
-//       message: error.message
-//     });
-//   }
-// });
 
 
 // =============================================================================
@@ -835,35 +667,45 @@ router.get('/agents/:uuid/protocol-adapters/:protocol/:deviceName/history', jwtA
  * 4. If parent is physical agent, agent will reconcile sidecar on next state sync
  * 5. Agent connects to virtual device at localhost:port like a normal physical device
  */
-router.post('/agents/:uuid/virtual-agents', jwtAuth, async (req, res) => {
+
+fastify.post<{ Params: AgentUuidParams; Body: VirtualDeviceCreateBody }>('/agents/:uuid/virtual-agents', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
     const { name, protocol, profile, image, slaveCount } = req.body;
 
     // Validation
     if (!name || !protocol || !profile) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Validation failed',
         message: 'name, protocol, and profile are required'
       });
     }
 
     if (!['modbus', 'opcua'].includes(protocol)) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Validation failed',
         message: 'protocol must be either "modbus" or "opcua"'
       });
     }
 
-    // Create virtual device
-    const virtualDevice = await virtualDeviceManager.createVirtualDevice({
+    if (!isVirtualDeviceProtocol(protocol)) {
+      return reply.status(400).send({
+        error: 'Validation failed',
+        message: 'protocol must be either "modbus" or "opcua"'
+      });
+    }
+
+    const virtualDeviceConfig: VirtualDeviceConfig = {
       deviceUuid: uuid,
       name,
       protocol,
       profile,
       image,
       slaveCount
-    });
+    };
+
+    // Create virtual device
+    const virtualDevice = await virtualDeviceManager.createVirtualDevice(virtualDeviceConfig);
 
     logger.info('Virtual device created via API', {
       deviceUuid: uuid,
@@ -873,7 +715,7 @@ router.post('/agents/:uuid/virtual-agents', jwtAuth, async (req, res) => {
       port: virtualDevice.connection.port
     });
 
-    res.status(201).json({
+    return reply.status(201).send({
       status: 'ok',
       message: 'Virtual device created. Agent will auto-configure connection.',
       virtualDevice: {
@@ -889,13 +731,13 @@ router.post('/agents/:uuid/virtual-agents', jwtAuth, async (req, res) => {
     logger.error('Error creating virtual device:', error);
     
     if (error.message?.includes('not found')) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: error.message
       });
     }
 
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to create virtual device',
       message: error.message
     });
@@ -908,13 +750,14 @@ router.post('/agents/:uuid/virtual-agents', jwtAuth, async (req, res) => {
  * 
  * Returns all virtual device sidecars configured for the agent
  */
-router.get('/agents/:uuid/virtual-agents', jwtAuth, async (req, res) => {
+
+fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/virtual-agents', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
 
     const virtualDevices = await virtualDeviceManager.getVirtualDevices(uuid);
 
-    res.json({
+    return reply.send({
       virtualDevices: virtualDevices.map(vd => ({
         uuid: vd.uuid,
         name: vd.name,
@@ -928,7 +771,7 @@ router.get('/agents/:uuid/virtual-agents', jwtAuth, async (req, res) => {
     });
   } catch (error: any) {
     logger.error('Error listing virtual agents:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to list virtual agents',
       message: error.message
     });
@@ -944,7 +787,8 @@ router.get('/agents/:uuid/virtual-agents', jwtAuth, async (req, res) => {
  * 2. If parent is K8s virtual agent, patches Deployment to remove sidecar
  * 3. If parent is physical agent, agent will remove sidecar on next state sync
  */
-router.delete('/agents/:uuid/virtual-agents/:virtualDeviceUuid',jwtAuth, async (req, res) => {
+
+fastify.delete<{ Params: VirtualDeviceParams }>('/agents/:uuid/virtual-agents/:virtualDeviceUuid', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid, virtualDeviceUuid } = req.params;
 
@@ -955,15 +799,18 @@ router.delete('/agents/:uuid/virtual-agents/:virtualDeviceUuid',jwtAuth, async (
       virtualDeviceUuid
     });
 
-    res.json({
+    return reply.send({
       status: 'ok',
       message: 'Virtual device deleted'
     });
   } catch (error: any) {
     logger.error('Error deleting virtual device:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to delete virtual device',
       message: error.message
     });
   }
 });
+};
+
+export default plugin;

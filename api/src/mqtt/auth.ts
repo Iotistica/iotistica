@@ -1,294 +1,237 @@
-import { Router, Request, Response } from 'express';
-import bcrypt from 'bcrypt';
+import type { FastifyPluginAsync } from 'fastify';
 import { pool } from '../db/connection';
 import logger from '../utils/logger';
+import { verifyPassword } from '../utils/secret-hashing';
 
-// Create child logger with Mosquitto Auth context
-const authLogger = logger.child({ module: 'MosquittoAuth' });
-
-const router = Router();
-
-/**
- * Mosquitto HTTP Authentication Backend
- * 
- * This router provides HTTP endpoints for Mosquitto MQTT broker authentication
- * using the mosquitto-go-auth plugin's HTTP backend.
- * 
- * Endpoints:
- * - POST /user: Username/password authentication
- * - POST /superuser: Superuser privilege check
- * - POST /acl: Topic access control list check
- * 
- * All endpoints return:
- * - 200 OK: Access granted
- * - 403 Forbidden: Access denied
- * - 500 Internal Server Error: Server error
- */
-
-/**
- * Helper function to match MQTT topics with wildcard patterns
- * 
- * MQTT wildcards:
- * - + : Single-level wildcard (matches exactly one level)
- * - # : Multi-level wildcard (matches zero or more levels, must be last)
- * 
- * 
- * @param topic - The actual MQTT topic to check
- * @param pattern - The pattern with wildcards to match against
- * @returns true if topic matches pattern, false otherwise
- */
-function topicMatches(topic: string, pattern: string): boolean {
-  // Exact match
-  if (topic === pattern) {
-    return true;
-  }
-
-  // Convert MQTT wildcard pattern to regex
-  // + matches exactly one level (no forward slashes)
-  // # matches zero or more levels (including forward slashes)
-  const regexPattern = pattern
-    .replace(/\+/g, '[^/]+')        // + becomes [^/]+ (one or more non-slash chars)
-    .replace(/#/g, '.*')             // # becomes .* (zero or more of any char)
-    .replace(/\//g, '\\/');          // Escape forward slashes
-
-  const regex = new RegExp(`^${regexPattern}$`);
-  return regex.test(topic);
+interface MosquittoAuthBody {
+  username?: string;
+  password?: string;
+  topic?: string;
+  acc?: number | string;
+  action?: string;
 }
 
-/**
- * POST /user
- * 
- * Authenticate username and password
- * 
- * Request body (JSON or form-encoded):
- * {
- *   "username": "string",
- *   "password": "string"
- * }
- * 
- * Response:
- * - 200 OK: Authentication successful
- * - 403 Forbidden: Invalid credentials or inactive user
- * - 500 Internal Server Error: Database error
- */
-router.post('/user', async (req: Request, res: Response) => {
-  // Support both JSON body and query parameters (for EMQX compatibility)
-  const username = req.body?.username || req.query?.username as string;
-  const password = req.body?.password || req.query?.password as string;
+interface MosquittoAuthQuerystring {
+  username?: string;
+  password?: string;
+  topic?: string;
+  acc?: number | string;
+  action?: string;
+}
 
-  // Log raw request for debugging
-  authLogger.info('User authentication request received', {
-    hasBody: !!req.body,
-    bodyKeys: req.body ? Object.keys(req.body) : [],
-    hasQuery: Object.keys(req.query).length > 0,
-    queryKeys: Object.keys(req.query),
-    contentType: req.get('content-type'),
-    username
+interface MqttUserRow {
+  password_hash: string;
+  is_active: boolean;
+}
+
+interface MqttSuperuserRow {
+  is_superuser: boolean;
+}
+
+interface MqttAclRow {
+  topic: string;
+  access: number;
+}
+
+const plugin: FastifyPluginAsync = async (fastify) => {
+  const authLogger = logger.child({ module: 'MosquittoAuth' });
+
+  function getRequestValue(
+    body: MosquittoAuthBody | undefined,
+    query: MosquittoAuthQuerystring,
+    key: keyof MosquittoAuthBody,
+  ): string | number | undefined {
+    return body?.[key] ?? query[key];
+  }
+
+  function topicMatches(topic: string, pattern: string): boolean {
+    if (topic === pattern) {
+      return true;
+    }
+
+    const regexPattern = pattern
+      .replace(/\+/g, '[^/]+')
+      .replace(/#/g, '.*')
+      .replace(/\//g, '\\/');
+
+    return new RegExp(`^${regexPattern}$`).test(topic);
+  }
+
+  fastify.post<{ Body: MosquittoAuthBody; Querystring: MosquittoAuthQuerystring }>('/user', async (req, reply) => {
+    const username = getRequestValue(req.body, req.query, 'username');
+    const password = getRequestValue(req.body, req.query, 'password');
+
+    authLogger.info('User authentication request received', {
+      hasBody: !!req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : [],
+      hasQuery: Object.keys(req.query).length > 0,
+      queryKeys: Object.keys(req.query),
+      contentType: req.headers['content-type'],
+      username,
+    });
+
+    if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
+      authLogger.info('Missing credentials in request');
+      return reply.status(403).send({ result: 'deny', error: 'Missing credentials' });
+    }
+
+    try {
+      const result = await pool.query<MqttUserRow>(
+        'SELECT password_hash, is_active FROM mqtt_users WHERE username = $1',
+        [username],
+      );
+
+      if (result.rows.length === 0) {
+        authLogger.info('User not found', { username });
+        return reply.status(403).send({ result: 'deny', error: 'User not found' });
+      }
+
+      const user = result.rows[0];
+      if (!user.is_active) {
+        authLogger.info('User inactive', { username });
+        return reply.status(403).send({ result: 'deny', error: 'User inactive' });
+      }
+
+      const passwordVerification = await verifyPassword(password, user.password_hash);
+      if (!passwordVerification.valid) {
+        authLogger.info('Invalid password for user', { username });
+        return reply.status(403).send({ result: 'deny', error: 'Invalid password' });
+      }
+
+      if (passwordVerification.upgradedHash) {
+        await pool.query(
+          'UPDATE mqtt_users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE username = $2',
+          [passwordVerification.upgradedHash, username],
+        );
+      }
+
+      authLogger.info('User authenticated successfully', { username });
+      return reply.status(200).send({ result: 'allow', is_superuser: false });
+    } catch (error) {
+      authLogger.error('Database error during user authentication', {
+        username,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return reply.status(500).send({ result: 'deny', error: 'Internal server error' });
+    }
   });
 
-  if (!username || !password) {
-    authLogger.info('Missing credentials in request');
-    return res.status(403).json({ result: 'deny', error: 'Missing credentials' });
-  }
+  fastify.post<{ Body: MosquittoAuthBody }>('/superuser', async (req, reply) => {
+    const { username } = req.body;
 
-  authLogger.info('User authentication attempt', { username });
-
-  try {
-    // Query user from database
-    const result = await pool.query(
-      'SELECT password_hash, is_active FROM mqtt_users WHERE username = $1',
-      [username]
-    );
-
-    if (result.rows.length === 0) {
-      authLogger.info('User not found', { username });
-      return res.status(403).json({ result: 'deny', error: 'User not found' });
+    if (!username) {
+      authLogger.info('Missing username for superuser check');
+      return reply.status(403).send({ result: 'deny', error: 'Missing username' });
     }
 
-    const user = result.rows[0];
+    try {
+      const result = await pool.query<MqttSuperuserRow>(
+        'SELECT is_superuser FROM mqtt_users WHERE username = $1 AND is_active = true',
+        [username],
+      );
 
-    // Check if user is active
-    if (!user.is_active) {
-      authLogger.info('User inactive', { username });
-      return res.status(403).json({ result: 'deny', error: 'User inactive' });
+      if (result.rows.length === 0) {
+        authLogger.info('User not found or inactive', { username });
+        return reply.status(403).send({ result: 'deny', error: 'User not found or inactive' });
+      }
+
+      return result.rows[0].is_superuser
+        ? reply.status(200).send({ result: 'allow', is_superuser: true })
+        : reply.status(403).send({ result: 'deny', error: 'Not a superuser' });
+    } catch (error) {
+      authLogger.error('Database error during superuser check', {
+        username,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return reply.status(500).send({ result: 'deny', error: 'Internal server error' });
     }
-
-    // Verify password using bcrypt
-    const passwordMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!passwordMatch) {
-      authLogger.info('Invalid password for user', { username });
-      return res.status(403).json({ result: 'deny', error: 'Invalid password' });
-    }
-
-    authLogger.info('User authenticated successfully', { username });
-    return res.status(200).json({ result: 'allow', is_superuser: false });
-
-  } catch (error) {
-    authLogger.error('Database error during user authentication', { username, error: error instanceof Error ? error.message : String(error) });
-    return res.status(500).json({ result: 'deny', error: 'Internal server error' });
-  }
-});
-
-/**
- * POST /superuser
- * 
- * Check if user has superuser privileges
- * Superusers bypass all ACL checks and have full access
- * 
- * Request body:
- * {
- *   "username": "string"
- * }
- * 
- * Response:
- * - 200 OK: User is a superuser
- * - 403 Forbidden: User is not a superuser or not found
- * - 500 Internal Server Error: Database error
- */
-router.post('/superuser', async (req: Request, res: Response) => {
-  const { username } = req.body;
-
-  if (!username) {
-    authLogger.info('Missing username for superuser check');
-    return res.status(403).json({ result: 'deny', error: 'Missing username' });
-  }
-
-
-  try {
-    // Query superuser status
-    const result = await pool.query(
-      'SELECT is_superuser FROM mqtt_users WHERE username = $1 AND is_active = true',
-      [username]
-    );
-
-    if (result.rows.length === 0) {
-      authLogger.info('User not found or inactive', { username });
-      return res.status(403).json({ result: 'deny', error: 'User not found or inactive' });
-    }
-
-    const isSuperuser = result.rows[0].is_superuser;
-
-    if (isSuperuser) {
-      return res.status(200).json({ result: 'allow', is_superuser: true });
-    } else {
-      return res.status(403).json({ result: 'deny', error: 'Not a superuser' });
-    }
-
-  } catch (error) {
-    authLogger.error('Database error during superuser check', { username, error: error instanceof Error ? error.message : String(error) });
-    return res.status(500).json({ result: 'deny', error: 'Internal server error' });
-  }
-});
-
-/**
- * POST /acl
- * 
- * Check if user has access to a specific topic
- * 
- * Request body (JSON or form-encoded):
- * {
- *   "username": "string",
- *   "topic": "string",
- *   "acc": number  // 1=read, 2=write
- * }
- * 
- * Response:
- * - 200 OK: Access granted
- * - 403 Forbidden: Access denied
- * - 500 Internal Server Error: Database error
- * 
- * Access codes:
- * - 1: Read access (subscribe)
- * - 2: Write access (publish)
- * 
- * ACL rules support MQTT wildcards in the topic pattern
- */
-router.post('/acl', async (req: Request, res: Response) => {
-  // Support both JSON body and query parameters (for EMQX compatibility)
-  const username = req.body?.username || req.query?.username as string;
-  const topic = req.body?.topic || req.query?.topic as string;
-  const acc = req.body?.acc || req.query?.acc;
-  const action = req.body?.action || req.query?.action as string | undefined;
-
-  // Log raw request for debugging
-  authLogger.debug('ACL request received', {
-    hasBody: !!req.body,
-    bodyKeys: req.body ? Object.keys(req.body) : [],
-    hasQuery: Object.keys(req.query).length > 0,
-    queryKeys: Object.keys(req.query),
-    contentType: req.get('content-type'),
-    username,
-    topic,
-    acc,
-    action
   });
 
-  if (!username || !topic || (acc === undefined && !action)) {
-    authLogger.debug('Missing ACL parameters');
-    return res.status(403).json({ result: 'deny', error: 'Missing parameters' });
-  }
+  fastify.post<{ Body: MosquittoAuthBody; Querystring: MosquittoAuthQuerystring }>('/acl', async (req, reply) => {
+    const username = getRequestValue(req.body, req.query, 'username');
+    const topic = getRequestValue(req.body, req.query, 'topic');
+    const acc = getRequestValue(req.body, req.query, 'acc');
+    const action = getRequestValue(req.body, req.query, 'action');
 
-  const resolvedAcc = acc !== undefined
-    ? acc
-    : action === 'publish'
-      ? 2
-      : 1;
-  const accessType = resolvedAcc === 1 || resolvedAcc === '1'
-    ? 'READ'
-    : resolvedAcc === 2 || resolvedAcc === '2'
-      ? 'WRITE'
-      : `UNKNOWN(${resolvedAcc})`;
-  authLogger.debug('ACL check', { username, topic, accessType });
+    authLogger.debug('ACL request received', {
+      hasBody: !!req.body,
+      bodyKeys: req.body ? Object.keys(req.body) : [],
+      hasQuery: Object.keys(req.query).length > 0,
+      queryKeys: Object.keys(req.query),
+      contentType: req.headers['content-type'],
+      username,
+      topic,
+      acc,
+      action,
+    });
 
-  try {
-    // First check if user is a superuser (superusers have full access)
-    const superuserResult = await pool.query(
-      'SELECT is_superuser FROM mqtt_users WHERE username = $1 AND is_active = true',
-      [username]
-    );
-
-    if (superuserResult.rows.length > 0 && superuserResult.rows[0].is_superuser) {
-      authLogger.info('User is superuser, access GRANTED', { username, topic });
-      return res.status(200).json({ result: 'allow' });
+    if (typeof username !== 'string' || typeof topic !== 'string' || (acc === undefined && typeof action !== 'string')) {
+      authLogger.debug('Missing ACL parameters');
+      return reply.status(403).send({ result: 'deny', error: 'Missing parameters' });
     }
 
-    // Check ACL rules for this user
-    const aclResult = await pool.query(
-      'SELECT topic, access FROM mqtt_acls WHERE username = $1',
-      [username]
-    );
+    const resolvedAcc = acc !== undefined
+      ? typeof acc === 'string' ? parseInt(acc, 10) : acc
+      : action === 'publish'
+        ? 2
+        : 1;
 
-    if (aclResult.rows.length === 0) {
-      authLogger.info('No ACL rules found for user, access DENIED', { username, topic });
-      return res.status(403).json({ result: 'deny', error: 'No ACL rules found' });
-    }
+    authLogger.debug('ACL check', {
+      username,
+      topic,
+      accessType: resolvedAcc === 1 ? 'READ' : resolvedAcc === 2 ? 'WRITE' : `UNKNOWN(${resolvedAcc})`,
+    });
 
-    // Check each ACL rule to find a match
-    for (const rule of aclResult.rows) {
-      if (topicMatches(topic, rule.topic)) {
-        // Check if the access level includes the requested access
-        // access is a bitwise field: 1=read, 2=write, 3=both
+    try {
+      const superuserResult = await pool.query<MqttSuperuserRow>(
+        'SELECT is_superuser FROM mqtt_users WHERE username = $1 AND is_active = true',
+        [username],
+      );
+
+      if (superuserResult.rows.length > 0 && superuserResult.rows[0].is_superuser) {
+        authLogger.info('User is superuser, access GRANTED', { username, topic });
+        return reply.status(200).send({ result: 'allow' });
+      }
+
+      const aclResult = await pool.query<MqttAclRow>(
+        'SELECT topic, access FROM mqtt_acls WHERE username = $1',
+        [username],
+      );
+
+      if (aclResult.rows.length === 0) {
+        authLogger.info('No ACL rules found for user, access DENIED', { username, topic });
+        return reply.status(403).send({ result: 'deny', error: 'No ACL rules found' });
+      }
+
+      for (const rule of aclResult.rows) {
+        if (!topicMatches(topic, rule.topic)) {
+          continue;
+        }
+
         const hasAccess = (rule.access & resolvedAcc) === resolvedAcc;
-
         if (hasAccess) {
           authLogger.debug('ACL matched pattern, access GRANTED', { username, topic, pattern: rule.topic });
-          return res.status(200).json({ result: 'allow' });
-        } else {
-          authLogger.info('ACL matched pattern but insufficient access level, access DENIED', { username, topic, pattern: rule.topic });
-          // Continue checking other rules
+          return reply.status(200).send({ result: 'allow' });
         }
+
+        authLogger.info('ACL matched pattern but insufficient access level, access DENIED', {
+          username,
+          topic,
+          pattern: rule.topic,
+        });
       }
+
+      authLogger.info('No matching ACL rule for topic, access DENIED', { username, topic });
+      return reply.status(403).send({ result: 'deny', error: 'Access denied' });
+    } catch (error) {
+      authLogger.error('Database error during ACL check', {
+        username,
+        topic,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return reply.status(500).send({ result: 'deny', error: 'Internal server error' });
     }
+  });
+};
 
-    // No matching rule found or all matched rules had insufficient access
-    authLogger.info('No matching ACL rule for topic, access DENIED', { username, topic });
-    return res.status(403).json({ result: 'deny', error: 'Access denied' });
-
-  } catch (error) {
-    authLogger.error('Database error during ACL check', { username, topic, error: error instanceof Error ? error.message : String(error) });
-    return res.status(500).json({ result: 'deny', error: 'Internal server error' });
-  }
-});
-
-export default router;
+export default plugin;

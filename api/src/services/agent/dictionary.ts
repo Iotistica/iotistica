@@ -5,7 +5,7 @@
  * Works alongside Redis cache (Redis = fast lookup, PostgreSQL = durable storage).
  */
 
-import { query } from '../db/connection';
+import { query } from '../../db/connection';
 import { createHash } from 'crypto';
 
 export interface DictionaryEntry {

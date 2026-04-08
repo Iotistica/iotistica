@@ -4,43 +4,44 @@
  * Handles CRUD operations for dashboard users with role-based permissions
  */
 
-import { Router, Request, Response } from 'express';
-import bcrypt from 'bcrypt';
-import rateLimit from 'express-rate-limit';
 import { query } from '../db/connection';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { PERMISSIONS, ROLES, UserWithPermissions } from '../types/permissions';
+import { ROLE_PERMISSIONS, ROLES, type Role, UserWithPermissions } from '../types/permissions';
 import { logger } from '../utils/logger';
+import type { FastifyPluginAsync } from 'fastify'
+import { hashPassword } from '../utils/secret-hashing';
 
-const router = Router();
+interface UserIdParams {
+  id: string;
+}
 
-// SECURITY: Rate limit for user creation (expensive operation, prevents spam)
-const createUserRateLimit = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10, // Max 10 user creations per hour per IP
-  message: 'Too many user creation attempts, please try again later',
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => {
-    logger.warn('[SECURITY] User creation rate limit exceeded', {
-      ip: req.ip,
-      userAgent: req.headers['user-agent']
-    });
-    res.status(429).json({
-      error: 'Too many requests',
-      message: 'Too many user creation attempts. Please try again later.'
-    });
-  }
-});
+interface CreateUserBody {
+  username?: string;
+  email?: string;
+  password?: string;
+  role?: Role;
+}
+
+interface UpdateUserBody {
+  email?: string;
+  role?: Role;
+  isActive?: boolean;
+}
+
+interface ExistingUserRow {
+  id: number;
+  role: Role;
+}
+
+const plugin: FastifyPluginAsync = async (fastify) => {
+
+
 
 /**
  * GET /api/v1/users
  * List all users (requires admin role)
  */
-router.get('/', 
-  jwtAuth,
-  requireRole('admin'),
-  async (req: Request, res: Response) => {
+fastify.get('/', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
     try {
       const result = await query<UserWithPermissions>(`
         SELECT 
@@ -55,10 +56,10 @@ router.get('/',
         ORDER BY created_at DESC
       `);
 
-      res.json(result.rows);
+      return reply.send(result.rows);
     } catch (error) {
       logger.error('List users error:', error);
-      res.status(500).json({ 
+      return reply.status(500).send({ 
         error: 'Internal server error',
         requestId: req.id || 'unknown'
       });
@@ -70,10 +71,7 @@ router.get('/',
  * GET /api/v1/users/:id
  * Get single user details (requires admin role)
  */
-router.get('/:id',
-  jwtAuth,
-  requireRole('admin'),
-  async (req: Request, res: Response) => {
+fastify.get<{ Params: UserIdParams }>('/:id', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
     try {
       const { id } = req.params;
 
@@ -91,13 +89,13 @@ router.get('/:id',
       `, [id]);
 
       if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'User not found' });
+        return reply.status(404).send({ error: 'User not found' });
       }
 
-      res.json(result.rows[0]);
+      return reply.send(result.rows[0]);
     } catch (error) {
       logger.error('Get user error:', error);
-      res.status(500).json({ 
+      return reply.status(500).send({ 
         error: 'Internal server error',
         requestId: req.id || 'unknown'
       });
@@ -110,17 +108,21 @@ router.get('/:id',
  * Create new user (requires admin role)
  * SECURITY: Rate limited to prevent abuse
  */
-router.post('/',
-  jwtAuth,
-  requireRole('admin'),
-  createUserRateLimit,
-  async (req: Request, res: Response) => {
+fastify.post<{ Body: CreateUserBody }>('/', {
+  preHandler: [jwtAuth, requireRole('admin')],
+  config: {
+    rateLimit: {
+      max: 5,
+      timeWindow: '15 minutes'
+    }
+  }
+}, async (req, reply) => {
     try {
       const { username, email, password, role = ROLES.VIEWER } = req.body;
 
       // Validation
       if (!username || !email || !password) {
-        return res.status(400).json({ 
+        return reply.status(400).send({ 
           error: 'Missing required fields',
           required: ['username', 'email', 'password']
         });
@@ -128,14 +130,14 @@ router.post('/',
 
       // Only owner can create other owners
       if (role === ROLES.OWNER && req.user?.role !== ROLES.OWNER) {
-        return res.status(403).json({
+        return reply.status(403).send({
           error: 'Forbidden',
           message: 'Only owners can create other owners'
         });
       }
 
       // Hash password
-      const passwordHash = await bcrypt.hash(password, 10);
+      const passwordHash = await hashPassword(password);
 
       // Create user
       const result = await query<UserWithPermissions>(`
@@ -150,21 +152,21 @@ router.post('/',
           created_at as "createdAt"
       `, [username, email, passwordHash, role]);
 
-      res.status(201).json(result.rows[0]);
-    } catch (error: any) {
+      return reply.status(201).send(result.rows[0]);
+    } catch (error: unknown) {
       logger.error('Create user error:', error);
       
       // Handle unique constraint violations
-      if (error.code === '23505') {
-        if (error.constraint === 'users_username_key') {
-          return res.status(409).json({ error: 'Username already exists' });
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+        if ('constraint' in error && error.constraint === 'users_username_key') {
+          return reply.status(409).send({ error: 'Username already exists' });
         }
-        if (error.constraint === 'users_email_key') {
-          return res.status(409).json({ error: 'Email already exists' });
+        if ('constraint' in error && error.constraint === 'users_email_key') {
+          return reply.status(409).send({ error: 'Email already exists' });
         }
       }
 
-      res.status(500).json({ 
+      return reply.status(500).send({ 
         error: 'Internal server error',
         requestId: req.id || 'unknown'
       });
@@ -176,25 +178,22 @@ router.post('/',
  * PUT /api/v1/users/:id
  * Update user (requires admin role)
  */
-router.put('/:id',
-  jwtAuth,
-  requireRole('admin'),
-  async (req: Request, res: Response) => {
+fastify.put<{ Params: UserIdParams; Body: UpdateUserBody }>('/:id', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
     try {
       const { id } = req.params;
       const { email, role, isActive } = req.body;
 
       // Get existing user
-      const existing = await query(`SELECT * FROM users WHERE id = $1`, [id]);
+      const existing = await query<ExistingUserRow>(`SELECT id, role FROM users WHERE id = $1`, [id]);
       if (existing.rows.length === 0) {
-        return res.status(404).json({ error: 'User not found' });
+        return reply.status(404).send({ error: 'User not found' });
       }
 
       const existingUser = existing.rows[0];
 
       // Prevent modifying owner role unless you're an owner
       if (existingUser.role === ROLES.OWNER && req.user?.role !== ROLES.OWNER) {
-        return res.status(403).json({
+        return reply.status(403).send({
           error: 'Forbidden',
           message: 'Only owners can modify other owners'
         });
@@ -202,7 +201,7 @@ router.put('/:id',
 
       // Prevent setting role to owner unless you're an owner
       if (role === ROLES.OWNER && req.user?.role !== ROLES.OWNER) {
-        return res.status(403).json({
+        return reply.status(403).send({
           error: 'Forbidden',
           message: 'Only owners can promote users to owner'
         });
@@ -210,7 +209,7 @@ router.put('/:id',
 
       // Build update query
       const updates: string[] = [];
-      const values: any[] = [];
+      const values: Array<string | boolean> = [];
       let paramCount = 1;
 
       if (email !== undefined) {
@@ -229,7 +228,7 @@ router.put('/:id',
       }
 
       if (updates.length === 0) {
-        return res.status(400).json({ error: 'No fields to update' });
+        return reply.status(400).send({ error: 'No fields to update' });
       }
 
       updates.push(`updated_at = NOW()`);
@@ -249,19 +248,19 @@ router.put('/:id',
           last_login_at as "lastLoginAt"
       `, values);
 
-      res.json(result.rows[0]);
-    } catch (error: any) {
+      return reply.send(result.rows[0]);
+    } catch (error: unknown) {
       logger.error('Update user error:', error);
 
-      if (error.code === '23505') {
-        if (error.constraint === 'users_email_key') {
-          return res.status(409).json({ error: 'Email already exists' });
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+        if ('constraint' in error && error.constraint === 'users_email_key') {
+          return reply.status(409).send({ error: 'Email already exists' });
         }
       }
 
-      res.status(500).json({ 
+      return reply.status(500).send({ 
         error: 'Failed to update user',
-        message: error.message
+        message: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   }
@@ -271,24 +270,21 @@ router.put('/:id',
  * DELETE /api/v1/users/:id
  * Delete user (requires admin role)
  */
-router.delete('/:id',
-  jwtAuth,
-  requireRole('admin'),
-  async (req: Request, res: Response) => {
+fastify.delete<{ Params: UserIdParams }>('/:id', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
     try {
       const { id } = req.params;
 
       // Get existing user
-      const existing = await query(`SELECT * FROM users WHERE id = $1`, [id]);
+      const existing = await query<ExistingUserRow>(`SELECT id, role FROM users WHERE id = $1`, [id]);
       if (existing.rows.length === 0) {
-        return res.status(404).json({ error: 'User not found' });
+        return reply.status(404).send({ error: 'User not found' });
       }
 
       const existingUser = existing.rows[0];
 
       // Prevent deleting owner unless you're an owner
       if (existingUser.role === ROLES.OWNER && req.user?.role !== ROLES.OWNER) {
-        return res.status(403).json({
+        return reply.status(403).send({
           error: 'Forbidden',
           message: 'Only owners can delete other owners'
         });
@@ -296,7 +292,7 @@ router.delete('/:id',
 
       // Prevent deleting yourself
       if (parseInt(id) === req.user?.id) {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Bad Request',
           message: 'Cannot delete your own account'
         });
@@ -305,10 +301,10 @@ router.delete('/:id',
       // Delete user (CASCADE will handle refresh_tokens and user_sessions)
       await query(`DELETE FROM users WHERE id = $1`, [id]);
 
-      res.status(204).send();
+      return reply.status(204).send();
     } catch (error) {
       logger.error('Delete user error:', error);
-      res.status(500).json({ 
+      return reply.status(500).send({ 
         error: 'Failed to delete user',
         message: error instanceof Error ? error.message : 'Unknown error'
       });
@@ -320,17 +316,14 @@ router.delete('/:id',
  * GET /api/v1/users/me/permissions
  * Get current user's permissions
  */
-router.get('/me/permissions',
-  jwtAuth,
-  async (req: Request, res: Response) => {
+fastify.get('/me/permissions', { preHandler: [jwtAuth] }, async (req, reply) => {
     if (!req.user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return reply.status(401).send({ error: 'Unauthorized' });
     }
 
-    const { ROLE_PERMISSIONS } = await import('../types/permissions');
-    const permissions = ROLE_PERMISSIONS[req.user.role as any] || [];
+    const permissions = ROLE_PERMISSIONS[req.user.role as Role] ?? [];
 
-    res.json({
+    return reply.send({
       user: req.user,
       permissions,
       role: req.user.role
@@ -338,4 +331,6 @@ router.get('/me/permissions',
   }
 );
 
-export default router;
+};
+
+export default plugin;

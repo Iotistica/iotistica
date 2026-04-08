@@ -1,14 +1,12 @@
-/**
+﻿/**
  * Device State Management Routes
  * Handles device target state, current state, and state reporting
- * 
- * Separated from cloud.ts for better organization
- * 
+ *
  * Device-Side Endpoints (used by agents themselves):
  * - GET  /api/v1/device/:uuid/state - Device polls for target state (ETag cached)
  * - POST /api/v1/device/:uuid/logs - Device uploads logs
  * - PATCH /api/v1/device/state - Device reports current state + metrics
- * 
+ *
  * Management API Endpoints (used by dashboard/admin):
  * - GET /api/v1/agents/:uuid/target-state - Get device target state
  * - POST /api/v1/agents/:uuid/target-state - Set device target state
@@ -19,20 +17,41 @@
  * - GET /api/v1/agents/:uuid/metrics - Get device metrics
  */
 
-import express from 'express';
+import type { FastifyPluginAsync } from 'fastify';
 import { query } from '../db/connection';
 import {
   AgentModel,
   DeviceLogsModel,
 } from '../db/models';
 import { logger } from '../utils/logger';
-import deviceAuth, { deviceAuthFromBody } from '../middleware/agent-auth';
+import deviceAuth from '../middleware/agent-auth';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { redisLogQueue } from '../services/ingestion/redis-log-queue';
 import { redisDeviceQueue } from '../services/ingestion';
 
+type AgentUuidParams = {
+  uuid: string;
+};
 
-export const router = express.Router();
+type LogsQuerystring = {
+  service?: string;
+  limit?: string | number;
+  offset?: string | number;
+  from?: string;
+  to?: string;
+};
+
+type DroppedLogSummary = {
+  totalCount?: number;
+  [key: string]: unknown;
+};
+
+type DroppedSummariesBody = {
+  summaries?: DroppedLogSummary[];
+  reportedAt?: string;
+};
+
+type RawLogBody = Buffer | string | Record<string, unknown> | unknown[] | null;
 
 let lastIdempotencyOomLogAt = 0;
 
@@ -48,10 +67,63 @@ function logIdempotencyOom(context: string, meta: Record<string, unknown>): void
   logger.warn(`Redis OOM during ${context} - log batch idempotency degraded`, meta);
 }
 
-/**
- * Check if batch ID has been processed before (idempotency)
- * Uses Redis with 24-hour TTL
- */
+function parsePaginationValue(value: string | number | undefined, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
+
+function getSingleHeaderValue(header: string | string[] | undefined): string | undefined {
+  if (Array.isArray(header)) {
+    return header[0];
+  }
+
+  return header;
+}
+
+function normalizeRawBody(body: RawLogBody): Buffer {
+  if (Buffer.isBuffer(body)) {
+    return body;
+  }
+
+  if (typeof body === 'string') {
+    return Buffer.from(body);
+  }
+
+  if (body == null) {
+    return Buffer.alloc(0);
+  }
+
+  return Buffer.from(JSON.stringify(body));
+}
+
+function resolveContentEncoding(body: RawLogBody, headerValue: string | undefined): string {
+  if (!headerValue) {
+    return 'identity';
+  }
+
+  // Brotli is already decompressed by Fastify middleware before route parsing.
+  if (headerValue === 'br') {
+    return 'identity';
+  }
+
+  // If the body is no longer raw bytes, treat it as already decoded.
+  if (!Buffer.isBuffer(body)) {
+    return 'identity';
+  }
+
+  return headerValue;
+}
+
 async function checkBatchIdempotency(deviceUuid: string, batchId: string): Promise<boolean> {
   try {
     const { redisClient } = await import('../redis/client');
@@ -69,13 +141,10 @@ async function checkBatchIdempotency(deviceUuid: string, batchId: string): Promi
     } else {
       logger.warn('Failed to check batch idempotency (Redis unavailable)', { error });
     }
-    return false; // Fail open (allow duplicate if Redis down)
+    return false;
   }
 }
 
-/**
- * Store batch ID for duplicate detection (24-hour TTL)
- */
 async function storeBatchId(deviceUuid: string, batchId: string): Promise<void> {
   try {
     const { redisClient } = await import('../redis/client');
@@ -85,8 +154,8 @@ async function storeBatchId(deviceUuid: string, batchId: string): Promise<void> 
       return;
     }
     const key = `batch:${deviceUuid}:${batchId}`;
-    const TTL = 24 * 60 * 60; // 24 hours
-    await client.setex(key, TTL, Date.now().toString());
+    const ttlSeconds = 24 * 60 * 60;
+    await client.setex(key, ttlSeconds, Date.now().toString());
     logger.debug('Stored batch ID for idempotency', { deviceUuid: deviceUuid.substring(0, 8), batchId });
   } catch (error) {
     if (isRedisOomError(error)) {
@@ -94,320 +163,219 @@ async function storeBatchId(deviceUuid: string, batchId: string): Promise<void> 
     } else {
       logger.warn('Failed to store batch ID (Redis unavailable)', { error });
     }
-    // Don't fail request if Redis unavailable
   }
 }
 
+const plugin: FastifyPluginAsync = async (fastify) => {
+  fastify.post<{ Params: AgentUuidParams; Body: RawLogBody }>('/device/:uuid/logs', {
+    preHandler: [deviceAuth],
+    bodyLimit: 10 * 1024 * 1024,
+  }, async (req, reply) => {
+    logger.debug('POST /device/:uuid/logs endpoint hit (raw mode)', { uuid: req.params.uuid });
 
+    try {
+      const { uuid } = req.params;
+      const batchId = getSingleHeaderValue(req.headers['x-batch-id']);
+      const batchAttempt = Number.parseInt(getSingleHeaderValue(req.headers['x-batch-attempt']) || '1', 10);
 
-/**
- * Brotli handling middleware (must run BEFORE express.raw())
- * Express body-parser rejects Brotli encoding by default.
- * We don't decompress here (that would block the event loop).
- * Instead, we preserve the original encoding and strip the header so Express accepts it as binary,
- * then the worker will decompress it asynchronously.
- */
-const brotliHandlingMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const contentEncoding = req.headers['content-encoding'];
-  
-  if (contentEncoding === 'br') {
-    // Save original encoding so route handler can use it
-    (req as any).originalContentEncoding = 'br';
-    // Strip content-encoding header so Express doesn't reject Brotli
-    // The body stays compressed - worker will decompress it asynchronously
-    delete req.headers['content-encoding'];
-    logger.debug('Stripped Brotli content-encoding header (worker will decompress)', {
-      path: req.path,
-      uuid: req.params.uuid
-    });
-  } else if (contentEncoding === 'gzip' || contentEncoding === 'deflate') {
-    // Express will auto-decompress these, save the original encoding
-    (req as any).originalContentEncoding = contentEncoding;
-  } else {
-    (req as any).originalContentEncoding = 'identity';
-  }
-  
-  next();
-};
+      if (batchId) {
+        const isDuplicate = await checkBatchIdempotency(uuid, batchId);
+        if (isDuplicate) {
+          logger.info('Duplicate batch detected, skipping', {
+            uuid: uuid.substring(0, 8),
+            batchId,
+            attempt: batchAttempt
+          });
+          return reply.status(200).send({
+            batchId,
+            accepted: true,
+            duplicate: true
+          });
+        }
+      }
 
-/**
- * Device uploads logs with ACK-based durability
- * POST /api/v1/device/:uuid/logs
- * 
- * OPTIMIZATION: Accepts RAW compressed body (Brotli/gzip) and queues directly to Redis.
- * CPU-intensive decompression + JSON parsing happens in worker process to avoid
- * event loop blocking in the main API server.
- * 
- * Accepts both JSON array and NDJSON (newline-delimited JSON) formats (after decompression)
- * 
- * Headers:
- * - Content-Encoding: br, gzip, deflate, or identity
- * - Content-Type: application/x-ndjson or application/json
- * - X-Batch-Id: Unique batch identifier for idempotency
- * - X-Batch-Attempt: Retry attempt number (optional)
- * 
- * Response:
- * - { batchId: string, accepted: boolean, queued: true } - ACK confirmation (202 Accepted)
- */
-router.post('/device/:uuid/logs', 
-  deviceAuth,
-  brotliHandlingMiddleware, // Strip Brotli header (worker will decompress)
-  express.raw({ 
-    type: '*/*', // Accept any content type (worker will validate)
-    limit: '10mb' // COMPRESSED size limit (protects against decompression bombs)
-  }),
-  async (req, res) => {
-  logger.debug('POST /device/:uuid/logs endpoint hit (raw mode)', { uuid: req.params.uuid });
-  try {
-    const { uuid } = req.params;
-    
-    // Extract batch metadata for idempotency
-    const batchId = req.headers['x-batch-id'] as string | undefined;
-    const batchAttempt = parseInt(req.headers['x-batch-attempt'] as string || '1');
-
-    // Idempotency check (deduplicate retries)
-    if (batchId) {
-      const isDuplicate = await checkBatchIdempotency(uuid, batchId);
-      if (isDuplicate) {
-        logger.info('Duplicate batch detected, skipping', { 
-          uuid: uuid.substring(0, 8), 
-          batchId,
-          attempt: batchAttempt
+      const device = await AgentModel.getOrCreate(uuid);
+      if (!device) {
+        logger.warn('Log upload from unregistered device - rejecting', {
+          deviceUuid: `${uuid.substring(0, 8)}...`,
         });
-        return res.status(200).json({ 
-          batchId, 
-          accepted: true,
-          duplicate: true
+        return reply.status(404).send({
+          error: 'Device not registered',
+          message: 'Please complete device registration before uploading logs'
         });
       }
-    }
-    
-    // Ensure device exists (lightweight check, don't auto-create)
-    const device = await AgentModel.getOrCreate(uuid);
-    if (!device) {
-      logger.warn('Log upload from unregistered device - rejecting', {
-        deviceUuid: uuid.substring(0, 8) + '...',
-      });
-      return res.status(404).json({
-        error: 'Device not registered',
-        message: 'Please complete device registration before uploading logs'
-      });
-    }
-    
-    // CRITICAL: Express body-parser auto-decompresses gzip/deflate BEFORE our handler runs
-    // If original encoding was gzip/deflate, the body is now decompressed (raw JSON)
-    // Store as 'identity' encoding to prevent worker from trying to decompress again
-    let finalEncoding = (req as any).originalContentEncoding || 'identity';
-    if (finalEncoding === 'gzip' || finalEncoding === 'deflate') {
-      // Body-parser already decompressed this - treat as identity
-      logger.debug('Body-parser pre-decompressed', {
-        uuid: uuid.substring(0, 8),
-        originalEncoding: finalEncoding
-      });
-      finalEncoding = 'identity';
-    }
-    
-    const contentType = req.headers['content-type'] || 'application/x-ndjson';
-    const finalPayload = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
-    
-    logger.info('Queueing log payload', {
-      uuid: uuid.substring(0, 8),
-      batchId,
-      encoding: finalEncoding,
-      compressedBytes: finalPayload.length
-    });
-    
-    // Fire-and-forget: Don't await Redis write - return 202 immediately
-    // This prevents slow Redis network I/O from blocking the response (saves ~3 seconds)
-    redisLogQueue.addCompressed({
-      deviceUuid: uuid,
-      batchId: batchId || `auto-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      compressedPayload: finalPayload,
-      contentEncoding: finalEncoding,
-      contentType
-    }).catch(err => {
-      logger.error('Failed to queue logs to Redis (async)', {
+
+      const contentEncodingHeader = getSingleHeaderValue(req.headers['content-encoding']);
+      const finalEncoding = resolveContentEncoding(req.body, contentEncodingHeader);
+      const contentType = getSingleHeaderValue(req.headers['content-type']) || 'application/x-ndjson';
+      const finalPayload = normalizeRawBody(req.body);
+
+      logger.info('Queueing log payload', {
         uuid: uuid.substring(0, 8),
         batchId,
-        error: err.message
+        encoding: finalEncoding,
+        compressedBytes: finalPayload.length
       });
-    });
-    
-    // Store batch ID for idempotency (24-hour TTL)
-    if (batchId) {
-      await storeBatchId(uuid, batchId);
+
+      redisLogQueue.addCompressed({
+        deviceUuid: uuid,
+        batchId: batchId || `auto-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        compressedPayload: finalPayload,
+        contentEncoding: finalEncoding,
+        contentType
+      }).catch((err: Error) => {
+        logger.error('Failed to queue logs to Redis (async)', {
+          uuid: uuid.substring(0, 8),
+          batchId,
+          error: err.message
+        });
+      });
+
+      if (batchId) {
+        await storeBatchId(uuid, batchId);
+      }
+
+      return reply.status(202).send({
+        batchId: batchId || 'auto-generated',
+        accepted: true,
+        queued: true
+      });
+    } catch (error: any) {
+      logger.error('Error queueing logs', {
+        error: error.message,
+        stack: error.stack,
+        uuid: req.params.uuid?.substring(0, 8),
+        bodySize: normalizeRawBody(req.body).length
+      });
+      return reply.status(500).send({
+        error: 'Failed to queue logs',
+        message: error.message
+      });
     }
-    
-    // Return ACK immediately (202 Accepted - queued for async processing)
-    // Worker will decompress, parse, validate, and insert to database
-    return res.status(202).json({ 
-      batchId: batchId || 'auto-generated',
-      accepted: true,
-      queued: true // Indicates async processing
-    });
-  } catch (error: any) {
-    logger.error('Error queueing logs', { 
-      error: error.message,
-      stack: error.stack,
-      uuid: req.params.uuid?.substring(0, 8),
-      bodySize: Buffer.isBuffer(req.body) ? req.body.length : 0
-    });
-    res.status(500).json({
-      error: 'Failed to queue logs',
-      message: error.message
-    });
-  }
-});
+  });
 
+  fastify.post<{ Params: AgentUuidParams; Body: DroppedSummariesBody }>('/device/:uuid/logs/dropped-summaries', {
+    preHandler: [deviceAuth],
+  }, async (req, reply) => {
+    try {
+      const { uuid } = req.params;
+      const { summaries, reportedAt } = req.body;
 
-/**
- * Device reports dropped log summaries (connection loss tracking)
- * POST /api/v1/device/:uuid/logs/dropped-summaries
- * 
- * Allows agents to report which logs were dropped during connection outages
- * This helps with troubleshooting and understanding data loss
- */
-router.post('/device/:uuid/logs/dropped-summaries', deviceAuth, express.json(), async (req, res) => {
-  try {
-    const { uuid } = req.params;
-    const { summaries, reportedAt } = req.body;
+      logger.info('Received dropped log summaries', {
+        uuid: uuid.substring(0, 8),
+        reportedAt,
+        summaryCount: summaries?.length || 0,
+        totalDropped: summaries?.reduce((sum, summary) => sum + (summary.totalCount || 0), 0) || 0
+      });
 
-    logger.info('Received dropped log summaries', {
-      uuid: uuid.substring(0, 8),
-      summaryCount: summaries?.length || 0,
-      totalDropped: summaries?.reduce((sum: number, s: any) => sum + (s.totalCount || 0), 0) || 0
-    });
-
-    // TODO: Store summaries in database for analysis
-    // For now, just log them and acknowledge receipt
-    // Could be stored in a separate dropped_logs_summary table
-
-    res.json({ 
-      status: 'ok', 
-      received: summaries?.length || 0,
-      message: 'Summaries received and logged'
-    });
-  } catch (error: any) {
-    logger.error('Error processing dropped log summaries', { error: error.message });
-    res.status(500).json({
-      error: 'Failed to process dropped log summaries',
-      message: error.message
-    });
-  }
-});
-
-
-/**
- * Get device logs
- * GET /api/v1/agents/:uuid/logs
- */
-router.get('/agents/:uuid/logs', jwtAuth, async (req, res) => {
-  try {
-    const { uuid } = req.params;
-    const serviceName = req.query.service as string | undefined;
-    const limit = parseInt(req.query.limit as string) || 1000;
-    const offset = parseInt(req.query.offset as string) || 0;
-    const from = req.query.from as string | undefined;
-    const to = req.query.to as string | undefined;
-
-    // Build filter options
-    const filterOptions: any = {
-      serviceName,
-      limit,
-      offset,
-    };
-
-    // Add date range filtering
-    if (from) {
-      filterOptions.since = new Date(from);
+      return reply.send({
+        status: 'ok',
+        received: summaries?.length || 0,
+        message: 'Summaries received and logged'
+      });
+    } catch (error: any) {
+      logger.error('Error processing dropped log summaries', { error: error.message });
+      return reply.status(500).send({
+        error: 'Failed to process dropped log summaries',
+        message: error.message
+      });
     }
-    
-    // Note: DeviceLogsModel doesn't have 'until' param, so we'll filter by 'since'
-    // and rely on limit. For proper date range, we'd need to add 'until' support.
+  });
 
-    const logs = await DeviceLogsModel.get(uuid, filterOptions);
-    
-    // If 'to' is provided, filter results in memory (temporary solution)
-    let filteredLogs = logs;
-    if (to) {
-      const toDate = new Date(to);
-      toDate.setHours(23, 59, 59, 999); // End of day
-      filteredLogs = logs.filter(log => new Date(log.timestamp) <= toDate);
+  fastify.get<{ Params: AgentUuidParams; Querystring: LogsQuerystring }>('/agents/:uuid/logs', { preHandler: [jwtAuth] }, async (req, reply) => {
+    try {
+      const { uuid } = req.params;
+      const serviceName = req.query.service;
+      const limit = parsePaginationValue(req.query.limit, 1000);
+      const offset = parsePaginationValue(req.query.offset, 0);
+      const from = req.query.from;
+      const to = req.query.to;
+
+      const filterOptions: {
+        serviceName?: string;
+        limit: number;
+        offset: number;
+        since?: Date;
+      } = {
+        serviceName,
+        limit,
+        offset,
+      };
+
+      if (from) {
+        filterOptions.since = new Date(from);
+      }
+
+      const logs = await DeviceLogsModel.get(uuid, filterOptions);
+
+      let filteredLogs = logs;
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        filteredLogs = logs.filter((log) => new Date(log.timestamp) <= toDate);
+      }
+
+      return reply.send({
+        count: filteredLogs.length,
+        logs: filteredLogs,
+      });
+    } catch (error: any) {
+      logger.error('Error getting logs', { error: error.message });
+      return reply.status(500).send({
+        error: 'Failed to get logs',
+        message: error.message
+      });
     }
+  });
 
-    res.json({
-      count: filteredLogs.length,
-      logs: filteredLogs,
-    });
-  } catch (error: any) {
-    logger.error('Error getting logs', { error: error.message });
-    res.status(500).json({
-      error: 'Failed to get logs',
-      message: error.message
-    });
-  }
-});
+  fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/logs/services', { preHandler: [jwtAuth] }, async (req, reply) => {
+    try {
+      const { uuid } = req.params;
 
-/**
- * Get list of services with logs for a device
- * GET /api/v1/agents/:uuid/logs/services
- */
-router.get('/agents/:uuid/logs/services', jwtAuth, async (req, res) => {
-  try {
-    const { uuid } = req.params;
-    
-    const result = await query(
-      'SELECT DISTINCT service_name FROM agent_logs WHERE agent_uuid = $1 ORDER BY service_name ASC',
-      [uuid]
-    );
-    
-    const services = result.rows.map(row => row.service_name);
-    
-    res.json({
-      services,
-    });
-  } catch (error: any) {
-    logger.error('Error getting log services', { error: error.message });
-    res.status(500).json({
-      error: 'Failed to get log services',
-      message: error.message
-    });
-  }
-});
+      const result = await query<{ service_name: string }>(
+        'SELECT DISTINCT service_name FROM agent_logs WHERE agent_uuid = $1 ORDER BY service_name ASC',
+        [uuid]
+      );
 
-/**
- * Get Redis Stream queue statistics
- * GET /api/v1/admin/log-queue/stats
- */
-router.get('/admin/log-queue/stats', jwtAuth, requireRole('admin'), async (req, res) => {
-  try {
-    const stats = await redisLogQueue.getStats();
-    res.json(stats);
-  } catch (error: any) {
-    logger.error('Error getting log queue stats', { error: error.message });
-    res.status(500).json({
-      error: 'Failed to get log queue stats',
-      message: error.message
-    });
-  }
-});
+      const services = result.rows.map((row) => row.service_name);
 
-/**
- * Get Redis Stream device queue statistics
- * GET /api/v1/admin/ingestion/stats
- */
-router.get('/admin/ingestion/stats', jwtAuth, requireRole('admin'), async (req, res) => {
-  try {
-    const stats = await redisDeviceQueue.getStats();
-    res.json(stats);
-  } catch (error: any) {
-    logger.error('Error getting device queue stats', { error: error.message });
-    res.status(500).json({
-      error: 'Failed to get device queue stats',
-      message: error.message
-    });
-  }
-});
+      return reply.send({
+        services,
+      });
+    } catch (error: any) {
+      logger.error('Error getting log services', { error: error.message });
+      return reply.status(500).send({
+        error: 'Failed to get log services',
+        message: error.message
+      });
+    }
+  });
 
+  fastify.get('/admin/log-queue/stats', { preHandler: [jwtAuth, requireRole('admin')] }, async (_req, reply) => {
+    try {
+      const stats = await redisLogQueue.getStats();
+      return reply.send(stats);
+    } catch (error: any) {
+      logger.error('Error getting log queue stats', { error: error.message });
+      return reply.status(500).send({
+        error: 'Failed to get log queue stats',
+        message: error.message
+      });
+    }
+  });
 
-export default router;
+  fastify.get('/admin/ingestion/stats', { preHandler: [jwtAuth, requireRole('admin')] }, async (_req, reply) => {
+    try {
+      const stats = await redisDeviceQueue.getStats();
+      return reply.send(stats);
+    } catch (error: any) {
+      logger.error('Error getting device queue stats', { error: error.message });
+      return reply.status(500).send({
+        error: 'Failed to get device queue stats',
+        message: error.message
+      });
+    }
+  });
+};
+
+export default plugin;

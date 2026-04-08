@@ -10,7 +10,6 @@
  */
 
 import crypto from 'crypto';
-import bcrypt from 'bcrypt';
 import { query } from '../../db/connection';
 import {
   AgentModel,
@@ -46,6 +45,11 @@ import { virtualAgentDeployer } from './virtual-agent-deployer';
 import { getTenantId } from '../../redis/tenant-keys';
 import { encodeIfUuid } from '../../mqtt/codec';
 import { mqttDeviceTopic } from '../../mqtt/topics';
+import {
+  hashMachineSecret,
+  hashPassword,
+  verifyMachineSecret,
+} from '../../utils/secret-hashing';
 
 
 // Initialize event publisher for audit trail
@@ -199,7 +203,7 @@ export class ProvisioningService {
       });
 
       // 2. Hash device API key
-      const hashedApiKey = await bcrypt.hash(agentApiKey, 10);
+      const hashedApiKey = hashMachineSecret(agentApiKey, 'device-api-key');
 
       // 3. Determine namespace: use fleet namespace if provided, otherwise use default
       let targetNamespace = (data as any).namespace || process.env.VIRTUAL_AGENT_NAMESPACE || 'virtual-agents';
@@ -413,20 +417,31 @@ export class ProvisioningService {
         throw new Error('Provisioning key not found for virtual agent');
       }
       
-      const keyMatches = await bcrypt.compare(provisioningApiKey, existingKeyRecord.rows[0].key_hash);
-      if (!keyMatches) {
+      const provisioningKeyVerification = await verifyMachineSecret(
+        provisioningApiKey,
+        existingKeyRecord.rows[0].key_hash,
+        'provisioning-key',
+      );
+      if (!provisioningKeyVerification.valid) {
         await logProvisioningAttempt(ipAddress!, uuid, existingDevice.provisioned_by_key_id, false, 'Provisioning key mismatch', userAgent);
         throw new Error('Provisioning key does not match device record');
+      }
+
+      if (provisioningKeyVerification.upgradedHash) {
+        await query(
+          'UPDATE provisioning_keys SET key_hash = $1 WHERE id = $2',
+          [provisioningKeyVerification.upgradedHash, existingKeyRecord.rows[0].id],
+        );
       }
       
       const keyRecord = existingKeyRecord.rows[0];
       
       // Generate credentials
-      const [hashedApiKey, mqttCredentials, vpnCredentials] = await Promise.all([
-        bcrypt.hash(agentApiKey, 10),
+      const [mqttCredentials, vpnCredentials] = await Promise.all([
         this.generateMqttCredentials(uuid),
         this.generateVpnCredentials(uuid, existingDevice.name, ipAddress)
       ]);
+      const hashedApiKey = hashMachineSecret(agentApiKey, 'device-api-key');
       
       // Update ONLY registration fields - preserve dashboard-created name, type, fleet, etc.
       const deviceData: Partial<Agent> = {
@@ -499,10 +514,21 @@ export class ProvisioningService {
           throw new Error('Existing provisioning key not found');
         }
         
-        const keyMatches = await bcrypt.compare(provisioningApiKey, existingKeyRecord.rows[0].key_hash);
-        if (!keyMatches) {
+        const provisioningKeyVerification = await verifyMachineSecret(
+          provisioningApiKey,
+          existingKeyRecord.rows[0].key_hash,
+          'provisioning-key',
+        );
+        if (!provisioningKeyVerification.valid) {
           await logProvisioningAttempt(ipAddress!, uuid, existingDevice.provisioned_by_key_id, false, 'Provisioning key mismatch', userAgent);
           throw new Error('Provisioning key does not match device record');
+        }
+
+        if (provisioningKeyVerification.upgradedHash) {
+          await query(
+            'UPDATE provisioning_keys SET key_hash = $1 WHERE id = $2',
+            [provisioningKeyVerification.upgradedHash, existingKeyRecord.rows[0].id],
+          );
         }
         
         var keyRecord = existingKeyRecord.rows[0];
@@ -564,7 +590,7 @@ export class ProvisioningService {
       mqttCredentials,
       vpnCredentials
     ] = await Promise.all([
-      bcrypt.hash(agentApiKey, 10),
+      Promise.resolve(hashMachineSecret(agentApiKey, 'device-api-key')),
       this.generateMqttCredentials(uuid),
       this.generateVpnCredentials(uuid, agentName, ipAddress)
     ]);
@@ -696,7 +722,7 @@ export class ProvisioningService {
   private async generateMqttCredentials(agentUuid: string): Promise<{ username: string; password: string }> {
     const username = `agent_${agentUuid}`;
     const password = crypto.randomBytes(16).toString('base64');
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await hashPassword(password);
 
     // Create MQTT user and ACLs, rotating password on re-provision
     const tenantId = getTenantId();

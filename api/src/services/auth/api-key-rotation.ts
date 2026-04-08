@@ -12,10 +12,10 @@
  */
 
 import crypto from 'crypto';
-import bcrypt from 'bcrypt';
 import { query } from '../../db/connection';
 import { getMqttManager } from '../../mqtt';
 import logger from '../../utils/logger';
+import { hashMachineSecret } from '../../utils/secret-hashing';
 
 export interface KeyRotationConfig {
   rotationDays: number;          // Days before expiry to rotate
@@ -73,7 +73,7 @@ export async function rotateDeviceApiKey(
 
   // Generate new API key
   const newApiKey = generateApiKey();
-  const newKeyHash = await bcrypt.hash(newApiKey, 10);
+  const newKeyHash = hashMachineSecret(newApiKey, 'device-api-key');
 
   // Calculate expiry dates
   const rotationDays = device.api_key_rotation_days || cfg.rotationDays;
@@ -288,7 +288,7 @@ export async function emergencyRevokeApiKey(
 
   // Generate new key immediately
   const newApiKey = generateApiKey();
-  const newKeyHash = await bcrypt.hash(newApiKey, 10);
+  const newKeyHash = hashMachineSecret(newApiKey, 'device-api-key');
 
   // Update device with new key (0 grace period)
   await query(

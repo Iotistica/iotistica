@@ -1,15 +1,25 @@
-import express from 'express';
+﻿
 import { jwtAuth } from '../middleware/jwt-auth';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
 import { generateDashboardSuggestions, getStrategy } from '../services/ai/dashboard-suggestions.service';
+import type { FastifyPluginAsync } from 'fastify'
 
-const router = express.Router();
+const plugin: FastifyPluginAsync = async (fastify) => {
 
 type FeedbackEventType = 'suggestion_shown' | 'suggestion_accepted' | 'widget_removed';
 type FeedbackChartType = 'line' | 'bar' | 'gauge' | 'stat';
 type FeedbackBin = 'top' | 'main' | 'side' | 'bottom';
 type FeedbackSource = 'rules' | 'llm' | 'hybrid';
+
+type AiCardsQuerystring = {
+  strategy?: string;
+};
+
+type DashboardAiFeedbackBody = {
+  events?: unknown[];
+  event?: unknown;
+};
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -41,110 +51,123 @@ function isFeedbackSource(value: unknown): value is FeedbackSource {
   return value === 'rules' || value === 'llm' || value === 'hybrid';
 }
 
-function sanitizeFeedbackEvent(input: any): DashboardAiFeedbackEvent | null {
+function sanitizeFeedbackEvent(input: unknown): DashboardAiFeedbackEvent | null {
   if (!input || typeof input !== 'object') {
     return null;
   }
 
-  if (!isFeedbackEventType(input.eventType)) {
+  const candidate = input as {
+    eventType?: unknown;
+    suggestionId?: unknown;
+    suggestionSignature?: unknown;
+    deviceId?: unknown;
+    metric?: unknown;
+    chart?: unknown;
+    bin?: unknown;
+    source?: unknown;
+    metadata?: unknown;
+  };
+
+  if (!isFeedbackEventType(candidate.eventType)) {
     return null;
   }
 
-  const suggestionSignature = typeof input.suggestionSignature === 'string' ? input.suggestionSignature.trim() : '';
-  const metric = typeof input.metric === 'string' ? input.metric.trim() : '';
+  const suggestionSignature = typeof candidate.suggestionSignature === 'string' ? candidate.suggestionSignature.trim() : '';
+  const metric = typeof candidate.metric === 'string' ? candidate.metric.trim() : '';
   if (!suggestionSignature || !metric) {
     return null;
   }
 
-  if (!isFeedbackChartType(input.chart) || !isFeedbackBin(input.bin)) {
+  if (!isFeedbackChartType(candidate.chart) || !isFeedbackBin(candidate.bin)) {
     return null;
   }
 
-  const suggestionId = typeof input.suggestionId === 'string' && input.suggestionId.trim().length > 0
-    ? input.suggestionId.trim()
+  const suggestionId = typeof candidate.suggestionId === 'string' && candidate.suggestionId.trim().length > 0
+    ? candidate.suggestionId.trim()
     : undefined;
 
-  const deviceId = typeof input.deviceId === 'string' && input.deviceId.trim().length > 0
-    ? input.deviceId.trim()
+  const deviceId = typeof candidate.deviceId === 'string' && candidate.deviceId.trim().length > 0
+    ? candidate.deviceId.trim()
     : undefined;
 
   if (deviceId && !UUID_REGEX.test(deviceId)) {
     return null;
   }
 
-  const source = isFeedbackSource(input.source) ? input.source : 'rules';
-  const metadata = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
-    ? input.metadata
+  const source = isFeedbackSource(candidate.source) ? candidate.source : 'rules';
+  const metadata = candidate.metadata && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata)
+    ? candidate.metadata as Record<string, unknown>
     : {};
 
   return {
-    eventType: input.eventType,
+    eventType: candidate.eventType,
     suggestionId,
     suggestionSignature,
     deviceId,
     metric,
-    chart: input.chart,
-    bin: input.bin,
+    chart: candidate.chart,
+    bin: candidate.bin,
     source,
     metadata,
   };
 }
 
-router.get('/ai-cards', jwtAuth, async (req, res) => {
-  const requestId = (req as any).id || 'unknown';
-  const strategy = getStrategy(req.query?.strategy);
+fastify.get<{ Querystring: AiCardsQuerystring }>('/ai-cards', { preHandler: [jwtAuth] }, async (req, reply) => {
+  const requestId = req.id || 'unknown';
+  const strategy = getStrategy(req.query.strategy);
 
   try {
     const result = await generateDashboardSuggestions({
       strategy,
       requestId,
-      userId: (req as any).user?.id,
-      customerId: (req as any).user?.customerId,
+      userId: req.user?.id,
+      customerId: req.user?.customerId,
     });
 
-    res.json(result);
+    reply.send(result);
   } catch (error: any) {
     logger.error('Failed to generate AI dashboard cards', {
       requestId,
-      userId: (req as any).user?.id,
+      userId: req.user?.id,
       error: error?.message || 'Unknown error',
     });
 
-    res.status(500).json({ error: 'Failed to generate AI dashboard cards', requestId });
+    reply.status(500).send({ error: 'Failed to generate AI dashboard cards', requestId });
   }
 });
 
-router.post('/ai-feedback', jwtAuth, async (req, res) => {
-  const requestId = (req as any).id || 'unknown';
-  const userId = (req as any).user?.id;
-  const customerId = (req as any).user?.customerId || null;
+fastify.post<{ Body: DashboardAiFeedbackBody | unknown[] }>('/ai-feedback', { preHandler: [jwtAuth] }, async (req, reply) => {
+  const requestId = req.id || 'unknown';
+  const userId = req.user?.id;
+  const customerId = req.user?.customerId || null;
+  const body = req.body;
 
   logger.info('Dashboard AI feedback request received', {
     requestId,
     userId,
     customerId,
-    hasEventsArray: Array.isArray(req.body?.events),
-    hasSingleEvent: !!req.body?.event,
-    bodyType: Array.isArray(req.body) ? 'array' : typeof req.body,
-    rawEventCount: Array.isArray(req.body?.events)
-      ? req.body.events.length
-      : req.body?.event
+    hasEventsArray: !Array.isArray(body) && !!body && typeof body === 'object' && Array.isArray(body.events),
+    hasSingleEvent: !Array.isArray(body) && !!body && typeof body === 'object' && 'event' in body && !!body.event,
+    bodyType: Array.isArray(body) ? 'array' : typeof body,
+    rawEventCount: !Array.isArray(body) && !!body && typeof body === 'object' && Array.isArray(body.events)
+      ? body.events.length
+      : !Array.isArray(body) && !!body && typeof body === 'object' && 'event' in body && body.event
         ? 1
-        : Array.isArray(req.body)
-          ? req.body.length
+        : Array.isArray(body)
+          ? body.length
           : 0,
   });
 
-  const inputEvents = Array.isArray(req.body?.events)
-    ? req.body.events
-    : req.body?.event
-      ? [req.body.event]
-      : Array.isArray(req.body)
-        ? req.body
+  const inputEvents = !Array.isArray(body) && !!body && typeof body === 'object' && Array.isArray(body.events)
+    ? body.events
+    : !Array.isArray(body) && !!body && typeof body === 'object' && 'event' in body && body.event
+      ? [body.event]
+      : Array.isArray(body)
+        ? body
         : [];
 
   if (inputEvents.length === 0) {
-    return res.status(400).json({ error: 'No feedback events provided', requestId });
+    return reply.status(400).send({ error: 'No feedback events provided', requestId });
   }
 
   const events = inputEvents
@@ -163,7 +186,7 @@ router.post('/ai-feedback', jwtAuth, async (req, res) => {
   });
 
   if (events.length === 0) {
-    return res.status(400).json({ error: 'No valid feedback events provided', requestId });
+    return reply.status(400).send({ error: 'No valid feedback events provided', requestId });
   }
 
   try {
@@ -206,7 +229,7 @@ router.post('/ai-feedback', jwtAuth, async (req, res) => {
       persistedEventTypes: events.map((event) => event.eventType),
     });
 
-    res.status(202).json({ accepted: events.length, requestId });
+    reply.status(202).send({ accepted: events.length, requestId });
   } catch (error: any) {
     logger.error('Failed to persist dashboard AI feedback events', {
       requestId,
@@ -216,8 +239,10 @@ router.post('/ai-feedback', jwtAuth, async (req, res) => {
       error: error?.message || 'Unknown error',
     });
 
-    res.status(500).json({ error: 'Failed to persist feedback events', requestId });
+    reply.status(500).send({ error: 'Failed to persist feedback events', requestId });
   }
 });
 
-export default router;
+};
+
+export default plugin;

@@ -1,20 +1,84 @@
-/**
+﻿/**
  * Anomaly Alerts API Routes
  *
  * Endpoints for querying and managing anomaly alerts
  * from the edge AI anomaly detection system.
  */
-
-import { Router } from 'express';
+import type { FastifyPluginAsync } from 'fastify';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
 import { jwtAuth } from '../middleware/jwt-auth';
 
-const router = Router();
+type AnomalyAlertsQuerystring = {
+  severity?: string;
+  startTime?: string | number;
+  endTime?: string | number;
+  limit?: string | number;
+  offset?: string | number;
+};
+
+type AlertIdParams = {
+  alertId: string;
+};
+
+type AlertRow = {
+  alert_id: string;
+  incident_id: string | null;
+  severity: string;
+  device_name: string;
+  agent_uuid: string | null;
+  metric: string;
+  affected_agents: string[] | null;
+  max_anomaly_score: string | number;
+  message: string;
+  channels: Record<string, unknown> | null;
+  created_at: string;
+};
+
+type CountRow = {
+  total: string | number;
+};
+
+type IncidentRow = {
+  incident_id: string;
+  fingerprint: string;
+  device_name: string;
+  device_type: string;
+  metric: string;
+  severity: string;
+  affected_agents: string[] | null;
+  first_seen: string;
+  last_seen: string;
+  max_anomaly_score: string | number;
+  max_confidence: string | number;
+  event_count: string | number;
+  status: string;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  resolution_notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function parseNumericQuery(value: string | number | undefined, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
+
+const plugin: FastifyPluginAsync = async (fastify) => {
 
 // Apply JWT auth only to /anomaly-alerts routes (path-specific to avoid intercepting other routes)
-router.use('/anomaly-alerts', jwtAuth);
-
+fastify.addHook('preHandler', jwtAuth);
 /**
  * GET /api/v1/anomaly-alerts
  *
@@ -27,21 +91,22 @@ router.use('/anomaly-alerts', jwtAuth);
  * - limit: Max results (default 100)
  * - offset: Pagination offset (default 0)
  */
-router.get('/anomaly-alerts', async (req, res) => {
+
+fastify.get<{ Querystring: AnomalyAlertsQuerystring }>('/anomaly-alerts', async (req, reply) => {
   try {
     const { severity, startTime, endTime, limit = 100, offset = 0 } = req.query;
 
     const filters = {
-      severity: severity as string | undefined,
-      startTime: startTime ? parseInt(startTime as string) : undefined,
-      endTime: endTime ? parseInt(endTime as string) : undefined,
-      limit: Math.min(parseInt(limit as string) || 100, 500), // Cap at 500
-      offset: parseInt(offset as string) || 0,
+      severity,
+      startTime: startTime !== undefined ? parseNumericQuery(startTime, 0) : undefined,
+      endTime: endTime !== undefined ? parseNumericQuery(endTime, 0) : undefined,
+      limit: Math.min(parseNumericQuery(limit, 100), 500),
+      offset: parseNumericQuery(offset, 0),
     };
 
     // Build WHERE clause
     let whereConditions: string[] = ['1=1'];
-    const queryParams: any[] = [];
+    const queryParams: Array<string | number> = [];
 
     if (filters.severity) {
       whereConditions.push(`aa.severity = $${queryParams.length + 1}`);
@@ -65,8 +130,8 @@ router.get('/anomaly-alerts', async (req, res) => {
       SELECT COUNT(*) as total FROM anomaly_alerts aa
       WHERE ${whereClause}
     `;
-    const countResult = await query(countQuery, queryParams);
-    const total = parseInt(countResult.rows[0]?.total || 0);
+    const countResult = await query<CountRow>(countQuery, queryParams);
+    const total = Number.parseInt(String(countResult.rows[0]?.total ?? 0), 10);
 
     // Get alerts with pagination
     const alertsQuery = `
@@ -90,12 +155,12 @@ router.get('/anomaly-alerts', async (req, res) => {
     queryParams.push(filters.limit);
     queryParams.push(filters.offset);
 
-    const alertsResult = await query(alertsQuery, queryParams);
+    const alertsResult = await query<AlertRow>(alertsQuery, queryParams);
     const alerts = alertsResult.rows;
 
-    res.json({
+    reply.send({
       success: true,
-      alerts: alerts.map((alert: any) => ({
+      alerts: alerts.map((alert) => ({
         alert_id: alert.alert_id,
         incident_id: alert.incident_id,
         severity: alert.severity,
@@ -103,7 +168,7 @@ router.get('/anomaly-alerts', async (req, res) => {
         agent_uuid: alert.agent_uuid || null,
         metric: alert.metric,
         affected_agents: alert.affected_agents || [],
-        max_anomaly_score: parseFloat(alert.max_anomaly_score),
+        max_anomaly_score: Number.parseFloat(String(alert.max_anomaly_score)),
         message: alert.message,
         channels: alert.channels || {},
         created_at: alert.created_at,
@@ -113,7 +178,7 @@ router.get('/anomaly-alerts', async (req, res) => {
     });
   } catch (error) {
     logger.error('Failed to get anomaly alerts', error);
-    res.status(500).json({
+    reply.status(500).send({
       success: false,
       error: 'Failed to retrieve anomaly alerts',
     });
@@ -125,7 +190,8 @@ router.get('/anomaly-alerts', async (req, res) => {
  *
  * Get single alert with incident context
  */
-router.get('/anomaly-alerts/:alertId', async (req, res) => {
+
+fastify.get<{ Params: AlertIdParams }>('/anomaly-alerts/:alertId', async (req, reply) => {
   try {
     const { alertId } = req.params;
 
@@ -147,11 +213,11 @@ router.get('/anomaly-alerts/:alertId', async (req, res) => {
       WHERE alert_id = $1
     `;
 
-    const alertResult = await query(alertQuery, [alertId]);
+    const alertResult = await query<AlertRow>(alertQuery, [alertId]);
     const alert = alertResult.rows[0];
 
     if (!alert) {
-      return res.status(404).json({
+      return reply.status(404).send({
         success: false,
         error: 'Alert not found',
       });
@@ -185,7 +251,7 @@ router.get('/anomaly-alerts/:alertId', async (req, res) => {
         WHERE incident_id = $1
       `;
 
-      const incidentResult = await query(incidentQuery, [alert.incident_id]);
+      const incidentResult = await query<IncidentRow>(incidentQuery, [alert.incident_id]);
       if (incidentResult.rows.length > 0) {
         const inc = incidentResult.rows[0];
         incident = {
@@ -198,9 +264,9 @@ router.get('/anomaly-alerts/:alertId', async (req, res) => {
           affected_agents: inc.affected_agents || [],
           first_seen: inc.first_seen,
           last_seen: inc.last_seen,
-          max_anomaly_score: parseFloat(inc.max_anomaly_score),
-          max_confidence: parseFloat(inc.max_confidence),
-          event_count: parseInt(inc.event_count),
+          max_anomaly_score: Number.parseFloat(String(inc.max_anomaly_score)),
+          max_confidence: Number.parseFloat(String(inc.max_confidence)),
+          event_count: Number.parseInt(String(inc.event_count), 10),
           status: inc.status,
           acknowledged_at: inc.acknowledged_at,
           acknowledged_by: inc.acknowledged_by,
@@ -211,7 +277,7 @@ router.get('/anomaly-alerts/:alertId', async (req, res) => {
       }
     }
 
-    res.json({
+    reply.send({
       success: true,
       alert: {
         alert_id: alert.alert_id,
@@ -221,7 +287,7 @@ router.get('/anomaly-alerts/:alertId', async (req, res) => {
         agent_uuid: alert.agent_uuid || null,
         metric: alert.metric,
         affected_agents: alert.affected_agents || [],
-        max_anomaly_score: parseFloat(alert.max_anomaly_score),
+        max_anomaly_score: Number.parseFloat(String(alert.max_anomaly_score)),
         message: alert.message,
         channels: alert.channels || {},
         created_at: alert.created_at,
@@ -230,11 +296,13 @@ router.get('/anomaly-alerts/:alertId', async (req, res) => {
     });
   } catch (error) {
     logger.error('Failed to get alert details', error);
-    res.status(500).json({
+    reply.status(500).send({
       success: false,
       error: 'Failed to retrieve alert details',
     });
   }
 });
 
-export default router;
+};
+
+export default plugin;

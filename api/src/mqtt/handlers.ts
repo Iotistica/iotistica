@@ -6,7 +6,7 @@
 
 import { query } from '../db/connection';
 import type { DeviceDataMessage, MetricsData, StateMessage } from './manager';
-import { processAgentStateReport } from '../services/agent-state';
+import { processAgentStateReport } from '../services/agent/state';
 import { redisDeviceQueue } from '../services/ingestion';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
 import { getTenantId } from '../redis/tenant-keys';

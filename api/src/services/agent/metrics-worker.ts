@@ -19,10 +19,10 @@
  * - Reduction: ~90% fewer database transactions
  */
 
-import { DeviceMetricsModel } from '../db/models';
-import { redisClient } from '../redis/client';
-import { metricsStreamScanPattern, uuidFromMetricsStreamKey, getTenantId } from '../redis/tenant-keys';
-import logger from '../utils/logger';
+import { DeviceMetricsModel } from '../../db/models';
+import { redisClient } from '../../redis/client';
+import { metricsStreamScanPattern, uuidFromMetricsStreamKey, getTenantId } from '../../redis/tenant-keys';
+import logger from '../../utils/logger';
 
 export class MetricsBatchWorker {
   private isRunning: boolean = false;

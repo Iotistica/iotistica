@@ -9,7 +9,7 @@ import Redis from 'ioredis';
 import logger from '../utils/logger';
 import { redisClient } from '../redis/client';
 import { redisFactory } from '../redis/client-factory';
-import { startMetricsBatchWorker } from '../workers/metrics-batch-worker';
+import { startMetricsBatchWorker } from '../services/agent/metrics-worker';
 import { redisLogQueue } from '../services/ingestion/redis-log-queue';
 import { redisDeviceQueue } from '../services/ingestion';
 

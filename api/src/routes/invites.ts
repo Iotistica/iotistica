@@ -13,19 +13,62 @@
  *   POST   /invites/accept       - Accept an invite              (jwtValidate only)
  */
 
-import { Router, Request, Response } from 'express';
-import axios from 'axios';
-import rateLimit from 'express-rate-limit';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { fetch } from 'undici';
+
 import {
+  generateAccessToken,
+  generateRefreshToken,
   jwtAuth,
   jwtValidate,
   requireRole,
-  generateAccessToken,
-  generateRefreshToken,
 } from '../middleware/jwt-auth';
 import { logger } from '../utils/logger';
 
-const router = Router();
+interface InviteCreateBody {
+  email?: string;
+  role?: string;
+}
+
+interface InviteIdParams {
+  id: string;
+}
+
+interface InviteAcceptBody {
+  token?: string;
+}
+
+interface InviteRecord {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  expires_at?: string;
+  created_at?: string;
+  token?: string;
+  companyName?: string;
+}
+
+interface AcceptedInviteResult {
+  customerId: string;
+  role: string;
+}
+
+interface ProvisioningEnvelope<T> {
+  data: T;
+}
+
+interface ResponseErrorData {
+  error?: string;
+  inviteId?: string;
+}
+
+type HttpError = Error & {
+  response?: {
+    status?: number;
+    data?: ResponseErrorData;
+  };
+};
 
 const PROVISIONING_BASE_URL = process.env.PROVISIONING_API_URL
   || `http://localhost:${process.env.PROVISIONING_PORT || '3100'}`;
@@ -48,34 +91,69 @@ function buildServiceUrl(baseUrl: string, path: string, query?: Record<string, s
   return url.toString();
 }
 
-// Rate limit for invite creation (prevent spam)
-const inviteRateLimit = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
+const inviteRateLimit = {
   max: 20,
-  message: 'Too many invitations sent. Please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+  timeWindow: 60 * 60 * 1000,
+  keyGenerator: (request: FastifyRequest) => `invite:${request.user?.id ?? request.ip}`,
+  errorResponseBuilder: () => ({
+    error: 'Too many requests',
+    message: 'Too many invitations sent. Please try again later.',
+  }),
+};
 
-// Rate limit for accept endpoint (protect against token brute-force)
-const acceptRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+const acceptRateLimit = {
   max: 10,
-  message: 'Too many accept attempts. Please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+  timeWindow: 15 * 60 * 1000,
+  keyGenerator: (request: FastifyRequest) => `invite-accept:${request.ip}`,
+  errorResponseBuilder: () => ({
+    error: 'Too many requests',
+    message: 'Too many accept attempts. Please try again later.',
+  }),
+};
 
-function internalHeaders() {
+function internalHeaders(): Record<string, string> {
   return {
     'X-Internal-Token': INTERNAL_AUTH_TOKEN,
     'Content-Type': 'application/json',
   };
 }
 
-function isProvisioningConnectionError(error: any): boolean {
-  const connectionCodes = new Set(['ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN', 'ETIMEDOUT']);
-  return !error?.response && connectionCodes.has(error?.code);
+function isProvisioningConnectionError(error: unknown): boolean {
+  const maybeError = error as HttpError | undefined;
+  return !maybeError?.response;
+}
+
+async function fetchJson<T>(
+  method: string,
+  url: string,
+  options: { body?: unknown; headers?: Record<string, string>; timeout?: number } = {}
+): Promise<{ data: T }> {
+  const { body, headers = {}, timeout = 10000 } = options;
+  const response = await fetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(timeout),
+  });
+
+  if (!response.ok) {
+    let responseData: ResponseErrorData | null = null;
+    try {
+      responseData = await response.json() as ResponseErrorData;
+    } catch {
+      responseData = null;
+    }
+
+    const errorMessage = responseData?.error || `HTTP ${response.status}`;
+    const error = new Error(errorMessage) as HttpError;
+    error.response = {
+      status: response.status,
+      data: responseData ?? undefined,
+    };
+    throw error;
+  }
+
+  return { data: await response.json() as T };
 }
 
 function isAuth0Subject(value?: string): boolean {
@@ -92,7 +170,7 @@ function toTitleCaseFromEmail(email: string): string {
   return words.join(' ') || 'A team member';
 }
 
-function getFriendlyInviterName(req: Request): string {
+function getFriendlyInviterName(req: FastifyRequest): string {
   const username = req.user?.username;
   const legacyPreferred = req._legacyPayload?.username;
 
@@ -112,55 +190,50 @@ function getFriendlyInviterName(req: Request): string {
   return 'A team member';
 }
 
-// ---------------------------------------------------------------------------
-// POST /invites
-// Create invite + send email
-// ---------------------------------------------------------------------------
-router.post('/invites',
-  jwtAuth,
-  requireRole('admin'),
-  inviteRateLimit,
-  async (req: Request, res: Response) => {
+const plugin: FastifyPluginAsync = async (fastify) => {
+  fastify.post<{ Body: InviteCreateBody }>('/invites', {
+    preHandler: [jwtAuth, requireRole('admin')],
+    config: { rateLimit: inviteRateLimit },
+  }, async (req, reply) => {
     try {
       const { email, role } = req.body;
       const customerId = req.user?.customerId;
       const auth0Sub = req._auth0Payload?.sub || req._legacyPayload?.auth0Sub;
 
       if (!customerId) {
-        return res.status(400).json({ error: 'Cannot determine tenant from token' });
+        return reply.status(400).send({ error: 'Cannot determine tenant from token' });
       }
 
       if (!email || !role) {
-        return res.status(400).json({ error: 'Missing required fields: email, role' });
+        return reply.status(400).send({ error: 'Missing required fields: email, role' });
       }
 
-      // Only owners can invite owners
       if (role === 'owner' && req.user?.role !== 'owner') {
-        return res.status(403).json({ error: 'Only owners can invite other owners' });
+        return reply.status(403).send({ error: 'Only owners can invite other owners' });
       }
 
       const inviterName = getFriendlyInviterName(req);
 
-      // 1. Create invite in provisioning
-      const provResponse = await axios.post(
+      const provResponse = await fetchJson<ProvisioningEnvelope<InviteRecord>>(
+        'POST',
         buildServiceUrl(PROVISIONING_BASE_URL, '/api/internal/invites'),
         {
-          customerId,
-          email,
-          role,
-          invitedByAuth0Sub: auth0Sub || 'unknown',
-          inviterName,
-        },
-        { headers: internalHeaders(), timeout: 10000 }
+          body: {
+            customerId,
+            email,
+            role,
+            invitedByAuth0Sub: auth0Sub || 'unknown',
+            inviterName,
+          },
+          headers: internalHeaders(),
+        }
       );
 
       const { data: invite } = provResponse.data;
       const inviteUrl = `${BASE_URL}/invite/accept?token=${invite.token}`;
 
-      // 2. Send invite email via PostOffice
-      await axios.post(
-        buildServiceUrl(POSTOFFICE_BASE_URL, '/api/email/send'),
-        {
+      await fetchJson('POST', buildServiceUrl(POSTOFFICE_BASE_URL, '/api/email/send'), {
+        body: {
           user: { email, name: email },
           templateName: 'InviteUser',
           context: {
@@ -170,12 +243,10 @@ router.post('/invites',
             role,
           },
         },
-        { timeout: 10000 }
-      ).catch((emailErr) => {
-        // Email failure is non-fatal — log it but don't block the API response
+      }).catch((emailError: unknown) => {
         logger.warn('[invites] Failed to send invite email', {
           email,
-          error: emailErr.message,
+          error: emailError instanceof Error ? emailError.message : 'Unknown error',
           inviteId: invite.id,
         });
       });
@@ -188,7 +259,7 @@ router.post('/invites',
         invitedBy: auth0Sub,
       });
 
-      res.status(201).json({
+      return reply.status(201).send({
         message: `Invitation sent to ${email}`,
         invite: {
           id: invite.id,
@@ -199,118 +270,107 @@ router.post('/invites',
           created_at: invite.created_at,
         },
       });
-    } catch (error: any) {
-      if (error.response?.status === 401) {
+    } catch (error: unknown) {
+      const responseError = error as HttpError;
+      if (responseError.response?.status === 401) {
         logger.error('[invites] Provisioning rejected create invite internal auth', {
-          error: error.response.data?.error || error.message,
+          error: responseError.response.data?.error || responseError.message,
         });
-        return res.status(502).json({
+        return reply.status(502).send({
           error: 'Invitation service authentication failed. Check INTERNAL_AUTH_TOKEN configuration.',
         });
       }
-      if (error.response?.status === 403) {
+      if (responseError.response?.status === 403) {
         logger.error('[invites] Provisioning forbidden during create invite', {
-          error: error.response.data?.error || error.message,
+          error: responseError.response.data?.error || responseError.message,
         });
-        return res.status(502).json({
-          error: error.response.data?.error || 'Invitation service rejected the request.',
-        });
-      }
-      if (error.response?.status === 409) {
-        return res.status(409).json({
-          error: error.response.data?.error || 'A pending invitation already exists for this email',
-          inviteId: error.response.data?.inviteId,
+        return reply.status(502).send({
+          error: responseError.response.data?.error || 'Invitation service rejected the request.',
         });
       }
-      if (isProvisioningConnectionError(error)) {
+      if (responseError.response?.status === 409) {
+        return reply.status(409).send({
+          error: responseError.response.data?.error || 'A pending invitation already exists for this email',
+          inviteId: responseError.response.data?.inviteId,
+        });
+      }
+      if (isProvisioningConnectionError(responseError)) {
         logger.error('[invites] Provisioning unavailable during create invite', {
-          error: error.message,
+          error: responseError.message,
           provisioningUrl: PROVISIONING_BASE_URL,
         });
-        return res.status(503).json({
+        return reply.status(503).send({
           error: 'Invitation service is temporarily unavailable. Please try again shortly.',
         });
       }
-      logger.error('[invites] Create invite error:', { error: error.message });
-      res.status(500).json({ error: 'Failed to create invitation' });
+      logger.error('[invites] Create invite error:', { error: responseError.message });
+      return reply.status(500).send({ error: 'Failed to create invitation' });
     }
-  }
-);
+  });
 
-// ---------------------------------------------------------------------------
-// GET /invites
-// List invites for the current tenant
-// ---------------------------------------------------------------------------
-router.get('/invites',
-  jwtAuth,
-  requireRole('admin'),
-  async (req: Request, res: Response) => {
+  fastify.get('/invites', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
     try {
       const customerId = req.user?.customerId;
       if (!customerId) {
-        return res.status(400).json({ error: 'Cannot determine tenant from token' });
+        return reply.status(400).send({ error: 'Cannot determine tenant from token' });
       }
 
-      const provResponse = await axios.get(
+      const provResponse = await fetchJson<unknown>(
+        'GET',
         buildServiceUrl(PROVISIONING_BASE_URL, '/api/internal/invites', { customerId }),
-        { headers: internalHeaders(), timeout: 10000 }
+        { headers: internalHeaders() }
       );
 
-      res.json(provResponse.data);
-    } catch (error: any) {
-      if (error.response?.status === 401) {
+      return reply.send(provResponse.data);
+    } catch (error: unknown) {
+      const responseError = error as HttpError;
+      if (responseError.response?.status === 401) {
         logger.error('[invites] Provisioning rejected list invites internal auth', {
-          error: error.response.data?.error || error.message,
+          error: responseError.response.data?.error || responseError.message,
         });
-        return res.status(502).json({
+        return reply.status(502).send({
           error: 'Invitation service authentication failed. Check INTERNAL_AUTH_TOKEN configuration.',
         });
       }
-      if (isProvisioningConnectionError(error)) {
+      if (isProvisioningConnectionError(responseError)) {
         logger.warn('[invites] Provisioning unavailable during list invites, returning empty list', {
-          error: error.message,
+          error: responseError.message,
           provisioningUrl: PROVISIONING_BASE_URL,
         });
-        return res.json({ data: [] });
+        return reply.send({ data: [] });
       }
-      logger.error('[invites] List invites error:', { error: error.message });
-      res.status(500).json({ error: 'Failed to list invitations' });
+      logger.error('[invites] List invites error:', { error: responseError.message });
+      return reply.status(500).send({ error: 'Failed to list invitations' });
     }
-  }
-);
+  });
 
-// ---------------------------------------------------------------------------
-// POST /invites/:id/resend
-// Regenerate token + resend email
-// ---------------------------------------------------------------------------
-router.post('/invites/:id/resend',
-  jwtAuth,
-  requireRole('admin'),
-  inviteRateLimit,
-  async (req: Request, res: Response) => {
+  fastify.post<{ Params: InviteIdParams }>('/invites/:id/resend', {
+    preHandler: [jwtAuth, requireRole('admin')],
+    config: { rateLimit: inviteRateLimit },
+  }, async (req, reply) => {
     try {
       const { id } = req.params;
       const customerId = req.user?.customerId;
       const inviterName = getFriendlyInviterName(req);
 
       if (!customerId) {
-        return res.status(400).json({ error: 'Cannot determine tenant from token' });
+        return reply.status(400).send({ error: 'Cannot determine tenant from token' });
       }
 
-      // 1. Regenerate token in provisioning
-      const provResponse = await axios.post(
+      const provResponse = await fetchJson<ProvisioningEnvelope<InviteRecord>>(
+        'POST',
         buildServiceUrl(PROVISIONING_BASE_URL, `/api/internal/invites/${id}/resend`),
-        { customerId },
-        { headers: internalHeaders(), timeout: 10000 }
+        {
+          body: { customerId },
+          headers: internalHeaders(),
+        }
       );
 
       const { data: invite } = provResponse.data;
       const inviteUrl = `${BASE_URL}/invite/accept?token=${invite.token}`;
 
-      // 2. Resend email
-      await axios.post(
-        buildServiceUrl(POSTOFFICE_BASE_URL, '/api/email/send'),
-        {
+      await fetchJson('POST', buildServiceUrl(POSTOFFICE_BASE_URL, '/api/email/send'), {
+        body: {
           user: { email: invite.email, name: invite.email },
           templateName: 'InviteUser',
           context: {
@@ -320,130 +380,119 @@ router.post('/invites/:id/resend',
             role: invite.role,
           },
         },
-        { timeout: 10000 }
-      ).catch((emailErr) => {
+      }).catch((emailError: unknown) => {
         logger.warn('[invites] Failed to resend invite email', {
           email: invite.email,
-          error: emailErr.message,
+          error: emailError instanceof Error ? emailError.message : 'Unknown error',
         });
       });
 
-      res.json({ message: `Invitation resent to ${invite.email}` });
-    } catch (error: any) {
-      if (error.response?.status === 401) {
+      return reply.send({ message: `Invitation resent to ${invite.email}` });
+    } catch (error: unknown) {
+      const responseError = error as HttpError;
+      if (responseError.response?.status === 401) {
         logger.error('[invites] Provisioning rejected resend invite internal auth', {
-          error: error.response.data?.error || error.message,
+          error: responseError.response.data?.error || responseError.message,
         });
-        return res.status(502).json({
+        return reply.status(502).send({
           error: 'Invitation service authentication failed. Check INTERNAL_AUTH_TOKEN configuration.',
         });
       }
-      if (error.response?.status === 404) {
-        return res.status(404).json({ error: 'Pending invite not found' });
+      if (responseError.response?.status === 404) {
+        return reply.status(404).send({ error: 'Pending invite not found' });
       }
-      if (isProvisioningConnectionError(error)) {
+      if (isProvisioningConnectionError(responseError)) {
         logger.error('[invites] Provisioning unavailable during resend invite', {
-          error: error.message,
+          error: responseError.message,
           provisioningUrl: PROVISIONING_BASE_URL,
         });
-        return res.status(503).json({
+        return reply.status(503).send({
           error: 'Invitation service is temporarily unavailable. Please try again shortly.',
         });
       }
-      logger.error('[invites] Resend invite error:', { error: error.message });
-      res.status(500).json({ error: 'Failed to resend invitation' });
+      logger.error('[invites] Resend invite error:', { error: responseError.message });
+      return reply.status(500).send({ error: 'Failed to resend invitation' });
     }
-  }
-);
+  });
 
-// ---------------------------------------------------------------------------
-// DELETE /invites/:id
-// Revoke a pending invite
-// ---------------------------------------------------------------------------
-router.delete('/invites/:id',
-  jwtAuth,
-  requireRole('admin'),
-  async (req: Request, res: Response) => {
+  fastify.delete<{ Params: InviteIdParams }>('/invites/:id', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
     try {
       const { id } = req.params;
       const customerId = req.user?.customerId;
 
       if (!customerId) {
-        return res.status(400).json({ error: 'Cannot determine tenant from token' });
+        return reply.status(400).send({ error: 'Cannot determine tenant from token' });
       }
 
-      await axios.post(
+      await fetchJson(
+        'POST',
         buildServiceUrl(PROVISIONING_BASE_URL, `/api/internal/invites/${id}/revoke`),
-        { customerId },
-        { headers: internalHeaders(), timeout: 10000 }
+        {
+          body: { customerId },
+          headers: internalHeaders(),
+        }
       );
 
-      res.status(204).send();
-    } catch (error: any) {
-      if (error.response?.status === 401) {
+      return reply.status(204).send();
+    } catch (error: unknown) {
+      const responseError = error as HttpError;
+      if (responseError.response?.status === 401) {
         logger.error('[invites] Provisioning rejected revoke invite internal auth', {
-          error: error.response.data?.error || error.message,
+          error: responseError.response.data?.error || responseError.message,
         });
-        return res.status(502).json({
+        return reply.status(502).send({
           error: 'Invitation service authentication failed. Check INTERNAL_AUTH_TOKEN configuration.',
         });
       }
-      if (error.response?.status === 404) {
-        return res.status(404).json({ error: 'Invite not found or already resolved' });
+      if (responseError.response?.status === 404) {
+        return reply.status(404).send({ error: 'Invite not found or already resolved' });
       }
-      if (isProvisioningConnectionError(error)) {
+      if (isProvisioningConnectionError(responseError)) {
         logger.error('[invites] Provisioning unavailable during revoke invite', {
-          error: error.message,
+          error: responseError.message,
           provisioningUrl: PROVISIONING_BASE_URL,
         });
-        return res.status(503).json({
+        return reply.status(503).send({
           error: 'Invitation service is temporarily unavailable. Please try again shortly.',
         });
       }
-      logger.error('[invites] Revoke invite error:', { error: error.message });
-      res.status(500).json({ error: 'Failed to revoke invitation' });
+      logger.error('[invites] Revoke invite error:', { error: responseError.message });
+      return reply.status(500).send({ error: 'Failed to revoke invitation' });
     }
-  }
-);
+  });
 
-// ---------------------------------------------------------------------------
-// POST /invites/accept
-// Accept an invite — requires Auth0 JWT (jwtValidate only, no tenant membership)
-// Returns a new HS256 federated JWT pair for the accepted tenant
-// ---------------------------------------------------------------------------
-router.post('/invites/accept',
-  acceptRateLimit,
-  jwtValidate,
-  async (req: Request, res: Response) => {
+  fastify.post<{ Body: InviteAcceptBody }>('/invites/accept', {
+    preHandler: [jwtValidate],
+    config: { rateLimit: acceptRateLimit },
+  }, async (req, reply) => {
     try {
       const { token } = req.body;
 
       if (!token) {
-        return res.status(400).json({ error: 'Missing required field: token' });
+        return reply.status(400).send({ error: 'Missing required field: token' });
       }
 
-      // Extract auth0Sub from the validated JWT (Auth0 RS256 or HS256 federated)
       const auth0Sub = req._auth0Payload?.sub || req._legacyPayload?.auth0Sub;
-
       const email = req._auth0Payload?.email || req._legacyPayload?.email || req.user?.email;
 
       if (!auth0Sub) {
-        return res.status(401).json({
+        return reply.status(401).send({
           error: 'Cannot determine identity. Please log in with Auth0 before accepting an invitation.',
         });
       }
 
-      // Call provisioning to accept the invite
-      const provResponse = await axios.post(
+      const provResponse = await fetchJson<ProvisioningEnvelope<AcceptedInviteResult>>(
+        'POST',
         buildServiceUrl(PROVISIONING_BASE_URL, `/api/internal/invites/${encodeURIComponent(token)}/accept`),
-        { auth0Sub, email },
-        { headers: internalHeaders(), timeout: 10000 }
+        {
+          body: { auth0Sub, email },
+          headers: internalHeaders(),
+        }
       );
 
       const { data } = provResponse.data;
       const { customerId, role } = data;
 
-      // Issue federated JWT pair for the newly joined tenant
       const accessToken = generateAccessToken({
         id: 0,
         username: auth0Sub,
@@ -464,7 +513,7 @@ router.post('/invites/accept',
 
       logger.info('[invites] Invite accepted', { auth0Sub, customerId, role });
 
-      res.json({
+      return reply.send({
         message: 'Invitation accepted successfully',
         accessToken,
         refreshToken,
@@ -475,40 +524,41 @@ router.post('/invites/accept',
           customerId,
         },
       });
-    } catch (error: any) {
-      if (error.response?.status === 401) {
+    } catch (error: unknown) {
+      const responseError = error as HttpError;
+      if (responseError.response?.status === 401) {
         logger.error('[invites] Provisioning rejected accept invite internal auth', {
-          error: error.response.data?.error || error.message,
+          error: responseError.response.data?.error || responseError.message,
         });
-        return res.status(502).json({
+        return reply.status(502).send({
           error: 'Invitation service authentication failed. Check INTERNAL_AUTH_TOKEN configuration.',
         });
       }
-      if (error.response?.status === 404) {
-        return res.status(404).json({ error: 'Invalid or expired invitation link' });
+      if (responseError.response?.status === 404) {
+        return reply.status(404).send({ error: 'Invalid or expired invitation link' });
       }
-      if (error.response?.status === 409) {
-        return res.status(409).json({ error: error.response.data?.error || 'Invitation already used' });
+      if (responseError.response?.status === 409) {
+        return reply.status(409).send({ error: responseError.response.data?.error || 'Invitation already used' });
       }
-      if (error.response?.status === 410) {
-        return res.status(410).json({ error: 'Invitation has expired. Please request a new one.' });
+      if (responseError.response?.status === 410) {
+        return reply.status(410).send({ error: 'Invitation has expired. Please request a new one.' });
       }
-      if (error.response?.status === 403) {
-        return res.status(403).json({ error: error.response.data?.error || 'Invitation not valid for this account' });
+      if (responseError.response?.status === 403) {
+        return reply.status(403).send({ error: responseError.response.data?.error || 'Invitation not valid for this account' });
       }
-      if (isProvisioningConnectionError(error)) {
+      if (isProvisioningConnectionError(responseError)) {
         logger.error('[invites] Provisioning unavailable during accept invite', {
-          error: error.message,
+          error: responseError.message,
           provisioningUrl: PROVISIONING_BASE_URL,
         });
-        return res.status(503).json({
+        return reply.status(503).send({
           error: 'Invitation service is temporarily unavailable. Please try again shortly.',
         });
       }
-      logger.error('[invites] Accept invite error:', { error: error.message });
-      res.status(500).json({ error: 'Failed to accept invitation' });
+      logger.error('[invites] Accept invite error:', { error: responseError.message });
+      return reply.status(500).send({ error: 'Failed to accept invitation' });
     }
-  }
-);
+  });
+};
 
-export default router;
+export default plugin;

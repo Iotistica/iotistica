@@ -10,10 +10,10 @@
  *   });
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import { query } from '../db/connection';
-import bcrypt from 'bcrypt';
 import logger from '../utils/logger';
+import { verifyMachineSecret } from '../utils/secret-hashing';
 
 interface CachedDeviceAuth {
   id: number;
@@ -123,64 +123,45 @@ export async function invalidateDeviceAuthCache(deviceUuid: string): Promise<voi
   }
 }
 
-// Extend Express Request to include device info
-declare global {
-  namespace Express {
-    interface Request {
-      device?: {
-        id: number;
-        uuid: string;
-        deviceName: string;
-        deviceType: string;
-        isActive: boolean;
-        fleetUuid?: string;
-      };
-    }
-  }
-}
+// Type augmentations are in src/types/fastify.d.ts
 
 /**
- * Device Authentication Middleware
- * 
+ * Device Authentication preHandler
+ *
  * Expects: X-Device-API-Key header or Authorization: Bearer <apiKey>
- * Sets: req.device with authenticated device information
+ * Sets: request.device with authenticated device information
  */
 export async function deviceAuth(
-  req: Request,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  reply: FastifyReply
 ): Promise<void> {
   const startTime = Date.now();
   let cacheHit = false;
-  
+
   try {
-    // Extract API key from header (support both formats)
-    const apiKey = 
-      req.headers['x-device-api-key'] as string ||
-      req.headers.authorization?.replace('Bearer ', '');
+    const apiKey =
+      request.headers['x-device-api-key'] as string ||
+      request.headers.authorization?.replace('Bearer ', '');
 
     if (!apiKey) {
-      res.status(401).json({
+      return reply.status(401).send({
         error: 'Unauthorized',
         message: 'Device API key required. Send in X-Device-API-Key header or Authorization: Bearer header.'
       });
-      return;
     }
 
-    // Extract device UUID from URL params (most endpoints have :uuid)
-    const deviceUuid = req.params.uuid;
+    const deviceUuid = (request.params as any).uuid;
 
     if (!deviceUuid) {
-      res.status(400).json({
+      return reply.status(400).send({
         error: 'Bad Request',
         message: 'Device UUID required in URL path'
       });
-      return;
     }
 
     // Try cache first
     let device = await getFromCache(deviceUuid);
-    let cacheHit = !!device;
+    cacheHit = !!device;
 
     // Cache miss - fetch from database
     if (!device) {
@@ -192,46 +173,47 @@ export async function deviceAuth(
       );
 
       if (result.rows.length === 0) {
-        res.status(404).json({
+        return reply.status(404).send({
           error: 'Not Found',
           message: 'Device not found'
         });
-        return;
       }
 
       device = result.rows[0];
-      
-      // Store in cache for future requests
+
       await storeInCache(device);
     }
 
-    // Check if device is active
     if (!device.is_active) {
-      res.status(403).json({
+      return reply.status(403).send({
         error: 'Forbidden',
         message: 'Device is inactive. Contact administrator.'
       });
-      return;
     }
 
-    // Check if device has completed registration (has API key hash)
     if (!device.device_api_key_hash) {
-      res.status(403).json({
+      return reply.status(403).send({
         error: 'Forbidden',
         message: 'Device registration incomplete. Please complete device registration first.'
       });
-      return;
     }
 
-    const isValidKey = await bcrypt.compare(apiKey, device.device_api_key_hash);
-    
+    const keyVerification = await verifyMachineSecret(apiKey, device.device_api_key_hash, 'device-api-key');
 
-    if (!isValidKey) {
-      res.status(401).json({
+    if (!keyVerification.valid) {
+      return reply.status(401).send({
         error: 'Unauthorized',
         message: 'Invalid device API key'
       });
-      return;
+    }
+
+    if (keyVerification.upgradedHash) {
+      await query(
+        'UPDATE agents SET device_api_key_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE uuid = $2',
+        [keyVerification.upgradedHash, deviceUuid],
+      );
+      device.device_api_key_hash = keyVerification.upgradedHash;
+      await storeInCache(device);
     }
 
     // Update last_seen timestamp (optional - can impact performance)
@@ -241,8 +223,7 @@ export async function deviceAuth(
     //   [deviceUuid]
     // );
 
-    // Attach device info to request
-    req.device = {
+    request.device = {
       id: device.id,
       uuid: device.uuid,
       deviceName: device.device_name,
@@ -252,8 +233,7 @@ export async function deviceAuth(
     };
 
     const duration = Date.now() - startTime;
-    
-    // Log slow auth (cache should be <5ms, DB fallback ~50-200ms)
+
     if (duration > 100 || !cacheHit) {
       logger.debug('Device authenticated', {
         deviceUuid,
@@ -261,66 +241,54 @@ export async function deviceAuth(
         cacheHit,
       });
     }
-
-    // Proceed to route handler
-    next();
+    // Fastify proceeds to route handler automatically
 
   } catch (error: any) {
     const duration = Date.now() - startTime;
-    
-    logger.error('Device authentication error', { 
-      deviceUuid: req.params.uuid,
+
+    logger.error('Device authentication error', {
+      deviceUuid: (request.params as any).uuid,
       duration: duration + 'ms',
-      error: error.message, 
-      stack: error.stack 
+      error: error.message,
+      stack: error.stack
     });
-    
-    // Only send error response if headers haven't been sent yet
-    if (!res.headersSent) {
-      res.status(500).json({
+
+    if (!reply.sent) {
+      reply.status(500).send({
         error: 'Internal Server Error',
         message: 'Authentication failed'
       });
     }
-    // Don't re-throw - let the request fail gracefully without crashing
   }
 }
 
 /**
- * Optional: Device authentication for endpoints without :uuid in path
- * Extracts UUID from request body instead
+ * Optional: Device authentication for endpoints without :uuid in path.
+ * Extracts UUID from request body instead.
  */
 export async function deviceAuthFromBody(
-  req: Request,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  reply: FastifyReply
 ): Promise<void> {
   try {
-    const apiKey = 
-      req.headers['x-device-api-key'] as string ||
-      req.headers.authorization?.replace('Bearer ', '');
+    const apiKey =
+      request.headers['x-device-api-key'] as string ||
+      request.headers.authorization?.replace('Bearer ', '');
 
     if (!apiKey) {
-      res.status(401).json({
+      return reply.status(401).send({
         error: 'Unauthorized',
         message: 'Device API key required'
       });
-      return;
     }
 
-    // Extract device UUID from body
-    // Support multiple formats:
-    // 1. Direct field: { uuid: "..." } or { deviceUuid: "..." }
-    // 2. State report format: { "[uuid]": { apps, config, ... } }
-    let deviceUuid = req.body.uuid || req.body.deviceUuid;
-    
+    const body = request.body as any;
+    let deviceUuid = body?.uuid || body?.deviceUuid;
+
     if (!deviceUuid) {
-      // Try to extract from state report format (keys are UUIDs)
-      const keys = Object.keys(req.body);
-      
+      const keys = Object.keys(body || {});
       if (keys.length === 1) {
         const key = keys[0];
-        // Match UUID format: 8-4-4-4-12 hex characters
         if (key.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
           deviceUuid = key;
           logger.info('Extracted UUID from state report key', { deviceUuid });
@@ -329,15 +297,13 @@ export async function deviceAuthFromBody(
     }
 
     if (!deviceUuid) {
-      logger.error(' Failed to extract UUID from body:', JSON.stringify(req.body, null, 2));
-      res.status(400).json({
+      logger.error('Failed to extract UUID from body:', JSON.stringify(body, null, 2));
+      return reply.status(400).send({
         error: 'Bad Request',
         message: 'Device UUID required in request body (as uuid/deviceUuid field or as state report key)'
       });
-      return;
     }
 
-    // Rest of logic is same as deviceAuth
     const result = await query(
       `SELECT id, uuid, name AS device_name, type AS device_type, is_active, device_api_key_hash, fleet_uuid
        FROM agents
@@ -346,43 +312,36 @@ export async function deviceAuthFromBody(
     );
 
     if (result.rows.length === 0) {
-      res.status(404).json({
-        error: 'Not Found',
-        message: 'Device not found'
-      });
-      return;
+      return reply.status(404).send({ error: 'Not Found', message: 'Device not found' });
     }
 
     const device = result.rows[0];
 
     if (!device.is_active) {
-      res.status(403).json({
-        error: 'Forbidden',
-        message: 'Device is inactive'
-      });
-      return;
+      return reply.status(403).send({ error: 'Forbidden', message: 'Device is inactive' });
     }
 
-    // Check if device has completed registration (has API key hash)
     if (!device.device_api_key_hash) {
-      res.status(403).json({
+      return reply.status(403).send({
         error: 'Forbidden',
         message: 'Device registration incomplete. Please complete device registration first.'
       });
-      return;
     }
 
-    const isValidKey = await bcrypt.compare(apiKey, device.device_api_key_hash);
+    const keyVerification = await verifyMachineSecret(apiKey, device.device_api_key_hash, 'device-api-key');
 
-    if (!isValidKey) {
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Invalid device API key'
-      });
-      return;
+    if (!keyVerification.valid) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid device API key' });
     }
 
-    req.device = {
+    if (keyVerification.upgradedHash) {
+      await query(
+        'UPDATE agents SET device_api_key_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE uuid = $2',
+        [keyVerification.upgradedHash, deviceUuid],
+      );
+    }
+
+    request.device = {
       id: device.id,
       uuid: device.uuid,
       deviceName: device.device_name,
@@ -391,59 +350,47 @@ export async function deviceAuthFromBody(
       fleetUuid: device.fleet_uuid
     };
 
-    next();
-
   } catch (error: any) {
     logger.error('Device authentication error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Authentication failed'
-    });
+    if (!reply.sent) {
+      reply.status(500).send({ error: 'Internal Server Error', message: 'Authentication failed' });
+    }
   }
 }
 
 /**
- * Optional: Rate limiting by device
- * Can be combined with deviceAuth middleware
+ * Optional: Per-device rate limiting preHandler factory.
+ * Use @fastify/rate-limit in most cases — this is for special per-device logic.
  */
 export function deviceRateLimit(maxRequests: number, windowMs: number) {
   const requestCounts = new Map<string, { count: number; resetTime: number }>();
 
-  return (req: Request, res: Response, next: NextFunction): void => {
-    if (!req.device) {
-      res.status(500).json({
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.device) {
+      return reply.status(500).send({
         error: 'Internal Server Error',
-        message: 'deviceAuth middleware must be applied before deviceRateLimit'
+        message: 'deviceAuth preHandler must run before deviceRateLimit'
       });
-      return;
     }
 
-    const deviceUuid = req.device.uuid;
+    const deviceUuid = request.device.uuid;
     const now = Date.now();
-
     const record = requestCounts.get(deviceUuid);
 
     if (!record || now > record.resetTime) {
-      // New window
-      requestCounts.set(deviceUuid, {
-        count: 1,
-        resetTime: now + windowMs
-      });
-      next();
+      requestCounts.set(deviceUuid, { count: 1, resetTime: now + windowMs });
       return;
     }
 
     if (record.count >= maxRequests) {
-      res.status(429).json({
+      return reply.status(429).send({
         error: 'Too Many Requests',
         message: `Rate limit exceeded. Max ${maxRequests} requests per ${windowMs / 1000}s`,
         retryAfter: Math.ceil((record.resetTime - now) / 1000)
       });
-      return;
     }
 
     record.count++;
-    next();
   };
 }
 

@@ -1,5 +1,5 @@
 import { logger } from '../../utils/logger';
-import { ReadingsService, ReadingInsert } from '../readings.service';
+import { ReadingsService, ReadingInsert } from './readings.service';
 import { query } from '../../db/connection';
 import { DeviceDataEntry } from './types';
 import { detectProtocol, expandMessages } from './readings-normalizer';

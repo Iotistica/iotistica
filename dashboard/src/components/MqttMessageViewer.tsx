@@ -73,8 +73,9 @@ export function MqttMessageViewer({ selectedTopic, selectedMessage }: MqttMessag
     
     try {
       const accessToken = localStorage.getItem('accessToken');
+      const query = new URLSearchParams({ topic: selectedTopic });
       const response = await fetch(
-        buildApiUrl(`/api/v1/mqtt/topics/${encodeURIComponent(selectedTopic)}/schema`),
+        buildApiUrl(`/api/v1/mqtt/topics/schema?${query.toString()}`),
         {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -109,8 +110,9 @@ export function MqttMessageViewer({ selectedTopic, selectedMessage }: MqttMessag
     
     try {
       const accessToken = localStorage.getItem('accessToken');
+      const query = new URLSearchParams({ topic: selectedTopic });
       const response = await fetch(
-        buildApiUrl(`/api/v1/mqtt/topics/${encodeURIComponent(selectedTopic)}/acls`),
+        buildApiUrl(`/api/v1/mqtt/topics/acls?${query.toString()}`),
         {
           headers: {
             'Authorization': `Bearer ${accessToken}`,

@@ -3,8 +3,7 @@
  * SECURITY: Rate limited to prevent API abuse on expensive AI operations
  */
 
-import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
+
 import { processAIChat } from '../services/ai/chat.service';
 import { logger } from '../utils/logger';
 import { jwtAuth } from '../middleware/jwt-auth';
@@ -17,37 +16,47 @@ import {
   generateDeviceSuggestions,
   buildDeviceAssistantResponse,
 } from '../services/ai/device-suggestions.service';
+import type { FastifyPluginAsync } from 'fastify'
 
-const router = Router();
+type AssistantMode = 'dashboard' | 'device';
+
+type ConversationMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+type DeviceView =
+  | 'metrics'
+  | 'logs'
+  | 'endpoints'
+  | 'devices'
+  | 'config'
+  | 'settings'
+  | 'jobs'
+  | 'applications';
+
+type AIChatBody = {
+  deviceUuid?: string;
+  message?: string;
+  conversationHistory?: ConversationMessage[];
+  mode?: AssistantMode;
+  strategy?: string;
+  deviceView?: string;
+  deviceName?: string;
+};
+
+const plugin: FastifyPluginAsync = async (fastify) => {
 
 // Apply JWT auth only to /ai/* routes (path-specific to avoid intercepting other routes)
-router.use('/ai', jwtAuth);
+fastify.addHook('preHandler', jwtAuth);
 
-// SECURITY: Rate limit for AI chat (expensive operation)
-const aiChatRateLimit = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 50, // Max 50 chat requests per hour per IP
-  message: 'Too many AI chat requests',
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => {
-    logger.warn('[SECURITY] AI chat rate limit exceeded', {
-      ip: req.ip,
-      userAgent: req.headers['user-agent']
-    });
-    res.status(429).json({
-      error: 'Too many requests',
-      message: 'Too many AI chat requests. Please try again later.'
-    });
-  }
-});
 
 /**
  * POST /api/v1/ai/chat
  * Send a message to the AI assistant
  * SECURITY: Rate limited endpoint
  */
-router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
+fastify.post<{ Body: AIChatBody }>('/ai/chat', async (req, reply) => {
   try {
     const { deviceUuid, message, conversationHistory, mode, strategy, deviceView, deviceName } = req.body;
     const normalizedMessage = typeof message === 'string' ? message.toLowerCase() : '';
@@ -58,7 +67,7 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
         ? 'dashboard'
         : 'device';
 
-    console.log('[AI Chat] Request received:', {
+    logger.info('[AI Chat] Request received', {
       mode: assistantMode,
       deviceUuid,
       deviceView,
@@ -69,12 +78,12 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
     });
 
     if (!message || (assistantMode === 'device' && !deviceUuid)) {
-      console.error('[AI Chat] Missing required fields:', {
+      logger.warn('[AI Chat] Missing required fields', {
         mode: assistantMode,
         deviceUuid: !!deviceUuid,
         message: !!message,
       });
-      return res.status(400).json({
+      return reply.status(400).send({
         error: assistantMode === 'device'
           ? 'Missing required fields: deviceUuid, message'
           : 'Missing required fields: message',
@@ -85,13 +94,13 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
       const result = await generateDashboardSuggestions({
         strategy: getStrategy(strategy ?? 'hybrid'),
         requestId: req.id || 'unknown',
-        userId: (req as any).user?.id,
-        customerId: (req as any).user?.customerId,
+        userId: req.user?.id,
+        customerId: req.user?.customerId,
         userPrompt: message,
       });
 
       const response = buildDashboardAssistantSummary(result.cards);
-      return res.json({
+      return reply.send({
         response,
         dashboardSuggestions: result.cards,
         source: result.source,
@@ -102,8 +111,8 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
 
     // Device mode - generate context-aware suggestions
     const normalizedView = (deviceView || 'metrics').toLowerCase();
-    const validViews = ['metrics', 'logs', 'endpoints', 'devices', 'config', 'settings', 'jobs', 'applications'];
-    const safeView = (validViews.includes(normalizedView) ? normalizedView : 'metrics') as any;
+    const validViews: DeviceView[] = ['metrics', 'logs', 'endpoints', 'devices', 'config', 'settings', 'jobs', 'applications'];
+    const safeView: DeviceView = validViews.includes(normalizedView as DeviceView) ? (normalizedView as DeviceView) : 'metrics';
     
     const deviceSuggestionsResult = await generateDeviceSuggestions({
       context: {
@@ -113,7 +122,7 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
         userPrompt: message,
       },
       requestId: req.id || 'unknown',
-      userId: (req as any).user?.id,
+      userId: req.user?.id !== undefined ? String(req.user.id) : undefined,
     });
 
     const deviceResponse = buildDeviceAssistantResponse(deviceSuggestionsResult);
@@ -122,16 +131,16 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
     const conversationalResponse = await processAIChat({
       deviceUuid,
       message,
-      conversationHistory: conversationHistory || [],
+      conversationHistory: conversationHistory ?? [],
     }).catch(() => deviceResponse); // Fallback to device response if AI service fails
 
-    console.log('[AI Chat] Device suggestions generated successfully:', {
+    logger.info('[AI Chat] Device suggestions generated successfully', {
       deviceUuid,
       view: safeView,
       suggestionCount: deviceSuggestionsResult.suggestions.length,
     });
 
-    res.json({
+    reply.send({
       response: deviceResponse,
       deviceSuggestions: deviceSuggestionsResult.suggestions,
       viewContext: deviceSuggestionsResult.viewContext,
@@ -139,18 +148,20 @@ router.post('/ai/chat', aiChatRateLimit, async (req, res) => {
       conversationalResponse,
     });
   } catch (error: any) {
-    console.error('[AI Chat] Error occurred:', {
+    logger.error('[AI Chat] Error occurred', {
       message: error.message,
       stack: error.stack,
       provider: process.env.AI_PROVIDER || 'ollama',
       hasOpenAiKey: !!process.env.OPENAI_API_KEY,
       openAiModel: process.env.OPENAI_MODEL,
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Internal server error',
       requestId: req.id || 'unknown'
     });
   }
 });
 
-export default router;
+};
+
+export default plugin;

@@ -1,4 +1,4 @@
-import fetch from 'node-fetch';
+import { fetch } from 'undici';
 import logger from '../utils/logger';
 
 interface TailscaleAuthKey {

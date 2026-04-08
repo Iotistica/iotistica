@@ -4,53 +4,40 @@
  * Used for internal service-to-service communication (e.g., Node-RED storage)
  */
 
-import { Request, Response, NextFunction } from 'express';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
 
-export interface ApiKeyRequest extends Request {
-  apiKey?: {
-    id: number;
-    name: string;
-    description: string;
-  };
-}
-
 /**
- * Middleware to validate API key from Authorization header
+ * Validates API key from Authorization header.
  * Expects: Authorization: Bearer <api-key>
- * 
+ *
  * Usage:
- *   router.get('/protected', validateApiKey, async (req, res) => { ... })
+ *   fastify.get('/protected', { preHandler: [validateApiKey] }, handler)
  */
 export async function validateApiKey(
-  req: ApiKeyRequest,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  reply: FastifyReply
 ): Promise<void> {
   try {
-    // Extract API key from Authorization header
-    const authHeader = req.headers.authorization;
-    
+    const authHeader = request.headers.authorization;
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({
+      return reply.status(401).send({
         error: 'Unauthorized',
         message: 'API key required. Use Authorization: Bearer <api-key>'
       });
-      return;
     }
 
-    const apiKey = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const apiKey = authHeader.substring(7);
 
     if (!apiKey || apiKey.length < 32) {
-      res.status(401).json({
+      return reply.status(401).send({
         error: 'Unauthorized',
         message: 'Invalid API key format'
       });
-      return;
     }
 
-    // Look up API key in database
     const result = await query(
       `SELECT id, name, description, is_active, expires_at
        FROM api_keys
@@ -61,35 +48,29 @@ export async function validateApiKey(
     if (result.rows.length === 0) {
       logger.warn('Invalid API key attempted', {
         keyPrefix: apiKey.substring(0, 8),
-        ip: req.ip,
-        path: req.path
+        ip: request.ip,
+        path: request.url
       });
-      
-      res.status(401).json({
+      return reply.status(401).send({
         error: 'Unauthorized',
         message: 'Invalid API key'
       });
-      return;
     }
 
     const keyRecord = result.rows[0];
 
-    // Check if key is active
     if (!keyRecord.is_active) {
       logger.warn('Inactive API key attempted', {
         keyId: keyRecord.id,
         keyName: keyRecord.name,
-        ip: req.ip
+        ip: request.ip
       });
-      
-      res.status(401).json({
+      return reply.status(401).send({
         error: 'Unauthorized',
         message: 'API key is inactive'
       });
-      return;
     }
 
-    // Check if key is expired
     if (keyRecord.expires_at) {
       const expiresAt = new Date(keyRecord.expires_at);
       if (expiresAt < new Date()) {
@@ -98,47 +79,32 @@ export async function validateApiKey(
           keyName: keyRecord.name,
           expiresAt: keyRecord.expires_at
         });
-        
-        res.status(401).json({
+        return reply.status(401).send({
           error: 'Unauthorized',
           message: 'API key has expired'
         });
-        return;
       }
     }
 
-    // Update last_used_at (async, don't wait)
+    // Fire-and-forget last_used_at update
     query(
       `UPDATE api_keys SET last_used_at = NOW() WHERE id = $1`,
       [keyRecord.id]
     ).catch(err => {
-      logger.error('Failed to update API key last_used_at', {
-        error: err.message,
-        keyId: keyRecord.id
-      });
+      logger.error('Failed to update API key last_used_at', { error: err.message, keyId: keyRecord.id });
     });
 
-    // Attach API key info to request
-    req.apiKey = {
+    request.apiKey = {
       id: keyRecord.id,
       name: keyRecord.name,
       description: keyRecord.description
     };
 
-    logger.debug('API key validated', {
-      keyId: keyRecord.id,
-      keyName: keyRecord.name,
-      path: req.path
-    });
+    logger.debug('API key validated', { keyId: keyRecord.id, keyName: keyRecord.name, path: request.url });
 
-    next();
   } catch (error: any) {
-    logger.error('API key validation error', {
-      error: error.message,
-      stack: error.stack
-    });
-    
-    res.status(500).json({
+    logger.error('API key validation error', { error: error.message, stack: error.stack });
+    return reply.status(500).send({
       error: 'Internal Server Error',
       message: 'Failed to validate API key'
     });
@@ -146,22 +112,13 @@ export async function validateApiKey(
 }
 
 /**
- * Optional middleware - validates API key if present, otherwise continues
- * Useful for endpoints that support both authenticated and unauthenticated access
+ * Optional API key validation — proceeds without authentication if no key is provided.
  */
 export async function optionalApiKey(
-  req: ApiKeyRequest,
-  res: Response,
-  next: NextFunction
+  request: FastifyRequest,
+  reply: FastifyReply
 ): Promise<void> {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    // No API key provided, continue without authentication
-    next();
-    return;
-  }
-
-  // API key provided, validate it
-  await validateApiKey(req, res, next);
+  const authHeader = request.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return;
+  await validateApiKey(request, reply);
 }

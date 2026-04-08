@@ -2,43 +2,91 @@
  * API Gateway proxy middleware: MQTT Monitor + Postoffice services.
  */
 
-import express from 'express';
-import { createProxyMiddleware, RequestHandler } from 'http-proxy-middleware';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import { fetch } from 'undici';
 import logger from '../utils/logger';
 import jwtAuth from '../middleware/jwt-auth';
 import { API_BASE } from './routes';
 
-function proxyErrorHandler(serviceName: string) {
-  return (err: Error, req: express.Request, res: express.Response) => {
-    logger.error(`${serviceName} proxy error`, { error: err.message });
-    if (!(res as any).headersSent) {
-      (res as express.Response)
-        .status(502)
-        .json({ success: false, error: `${serviceName} service unavailable` });
-    }
+const HOP_BY_HOP = new Set([
+  'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+  'te', 'trailers', 'transfer-encoding', 'upgrade',
+]);
+
+/**
+ * Build a lightweight reverse-proxy plugin using undici.
+ * Strips the mountPath prefix, forwards all headers except hop-by-hop,
+ * and streams the upstream response body back to the client.
+ */
+function createServiceProxy(
+  serviceName: string,
+  targetBase: string,
+  mountPath: string,
+): FastifyPluginAsync {
+  return async function serviceProxy(fastify) {
+    fastify.all('*', async (request, reply) => {
+      // Rewrite path: strip mount prefix, preserve remaining path + query
+      const suffix = request.url.startsWith(mountPath)
+        ? request.url.slice(mountPath.length) || '/'
+        : request.url;
+      const upstreamUrl = targetBase.replace(/\/$/, '') + suffix;
+
+      // Forward request headers, excluding hop-by-hop
+      const forwardHeaders: Record<string, string> = {};
+      for (const [key, value] of Object.entries(request.headers)) {
+        if (!HOP_BY_HOP.has(key.toLowerCase()) && typeof value === 'string') {
+          forwardHeaders[key] = value;
+        }
+      }
+
+      const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
+      const body: string | undefined = hasBody ? JSON.stringify(request.body) : undefined;
+
+      try {
+        const upstream = await fetch(upstreamUrl, {
+          method: request.method,
+          headers: forwardHeaders,
+          body: body as any,
+          signal: AbortSignal.timeout(30000),
+        } as any);
+
+        // Forward response headers, excluding hop-by-hop
+        upstream.headers.forEach((value, key) => {
+          if (!HOP_BY_HOP.has(key.toLowerCase())) {
+            reply.header(key, value);
+          }
+        });
+
+        reply.status(upstream.status);
+        const buf = Buffer.from(await upstream.arrayBuffer());
+        return reply.send(buf);
+      } catch (err: any) {
+        logger.error(`${serviceName} proxy error`, { error: err.message, url: upstreamUrl });
+        return reply.status(502).send({ success: false, error: `${serviceName} service unavailable` });
+      }
+    });
   };
 }
 
-function createServiceProxy(serviceName: string, target: string): RequestHandler {
-  return createProxyMiddleware({
-    target,
-    changeOrigin: true,
-    on: { error: proxyErrorHandler(serviceName) as any },
-    logger,
-  });
-}
-
-export function mountProxies(app: express.Application): void {
+export async function mountProxies(fastify: FastifyInstance): Promise<void> {
   const MQTT_MONITOR_URL = process.env.MQTT_MONITOR_URL || 'http://mqtt-monitor:3500';
-  app.use(
-    `${API_BASE}/mqtt-monitor`,
-    jwtAuth,
-    createServiceProxy('MQTT Monitor', `${MQTT_MONITOR_URL}/api/v1`),
-  );
+  const mqttMountPath = `${API_BASE}/mqtt-monitor`;
+  await fastify.register(async function mqttMonitorProxy(f) {
+    f.addHook('preHandler', jwtAuth);
+    await f.register(createServiceProxy('MQTT Monitor', `${MQTT_MONITOR_URL}/api/v1`, mqttMountPath));
+  }, { prefix: mqttMountPath });
 
   const POSTOFFICE_URL = process.env.POSTOFFICE_URL || 'http://postoffice:3300';
-  app.use(
-    `${API_BASE}/postoffice`,
-    createServiceProxy('Postoffice', `${POSTOFFICE_URL}/api/v1`),
+  const postofficeMountPath = `${API_BASE}/postoffice`;
+  await fastify.register(
+    createServiceProxy('Postoffice', `${POSTOFFICE_URL}/api/v1`, postofficeMountPath),
+    { prefix: postofficeMountPath },
   );
 }
+
+
+/**
+ * Build a lightweight reverse-proxy handler using undici.
+ * Strips the mountPath prefix, forwards all headers except hop-by-hop,
+ * and streams the upstream response body back to the client.
+ */

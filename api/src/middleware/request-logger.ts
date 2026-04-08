@@ -1,41 +1,43 @@
 /**
- * Winston request logging middleware.
+ * Winston request logging — Fastify onRequest + onResponse hooks.
  *
- * - Debug-logs every incoming request (method + path + query + IP)
- * - On response finish: skips 200s to reduce noise; logs 4xx as warn, 5xx as error
+ * - Debug-logs every incoming request (method + url + query + IP)
+ * - On response: skips 200s to reduce noise; logs 4xx as warn, 5xx as error
  * - MQTT auth paths (/superuser, /acl) are logged at debug level regardless of status
  */
 
-import type { Request, Response, NextFunction } from 'express';
+import type { FastifyInstance } from 'fastify';
 import logger from '../utils/logger';
 
 const MQTT_AUTH_PATHS = new Set(['/superuser', '/acl']);
 
-export function requestLogger(req: Request, res: Response, next: NextFunction): void {
-  const startTime = Date.now();
-
-  logger.debug(`${req.method} ${req.path}`, {
-    method: req.method,
-    path: req.path,
-    query: req.query,
-    ip: req.ip,
+export function registerRequestLogger(fastify: FastifyInstance): void {
+  fastify.addHook('onRequest', (request, _reply, done) => {
+    logger.debug(`${request.method} ${request.url}`, {
+      method: request.method,
+      url: request.url,
+      query: request.query,
+      ip: request.ip,
+    });
+    done();
   });
 
-  res.on('finish', () => {
-    const duration = Date.now() - startTime;
-    if (res.statusCode === 200) return;
+  fastify.addHook('onResponse', (request, reply, done) => {
+    if (reply.statusCode === 200) return done();
+
+    const duration = reply.elapsedTime?.toFixed(0) ?? '?';
+    const path = request.url.split('?')[0];
 
     const logLevel =
-      res.statusCode >= 500
+      reply.statusCode >= 500
         ? 'error'
-        : res.statusCode >= 400
+        : reply.statusCode >= 400
           ? 'warn'
-          : MQTT_AUTH_PATHS.has(req.path)
+          : MQTT_AUTH_PATHS.has(path)
             ? 'debug'
             : 'info';
 
-    logger[logLevel](`${res.statusCode} ${req.method} ${req.path} - ${duration}ms`);
+    logger[logLevel](`${reply.statusCode} ${request.method} ${path} - ${duration}ms`);
+    done();
   });
-
-  next();
 }

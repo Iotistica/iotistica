@@ -15,7 +15,8 @@
 import https from 'https';
 import fs from 'fs';
 import crypto from 'crypto';
-import type { Application } from 'express';
+import http from 'http';
+import type { FastifyInstance } from 'fastify';
 import logger from '../utils/logger';
 import { detectIngressArchitecture } from './ingress';
 
@@ -33,7 +34,15 @@ interface TlsConfig {
   isProduction: boolean;
 }
 
-function createTlsServer(app: Application, cfg: TlsConfig): https.Server | null {
+type NetworkError = NodeJS.ErrnoException & {
+  address?: string;
+  port?: number;
+};
+
+function createTlsServer(
+  handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
+  cfg: TlsConfig
+): https.Server | null {
   // Smart defaults: prod enforces cert validation, dev allows self-signed
   const rejectUnauthorized = cfg.rejectUnauthorized !== undefined
     ? cfg.rejectUnauthorized
@@ -85,7 +94,7 @@ function createTlsServer(app: Application, cfg: TlsConfig): https.Server | null 
     honorCipherOrder: true,
   };
 
-  const server = https.createServer(httpsOptions, app);
+  const server = https.createServer(httpsOptions, handler);
 
   server.listen(cfg.port, () => {
     logger.info('='.repeat(80));
@@ -108,7 +117,7 @@ function createTlsServer(app: Application, cfg: TlsConfig): https.Server | null 
 // ---------------------------------------------------------------------------
 
 export async function startHttpsServer(
-  app: Application,
+  fastify: FastifyInstance,
 ): Promise<https.Server | null> {
   const HTTPS_ENABLED = process.env.HTTPS_ENABLED === 'true';
   const HTTPS_PORT = parseInt(process.env.HTTPS_PORT || '3443', 10);
@@ -137,7 +146,7 @@ export async function startHttpsServer(
         ? process.env.HTTPS_REJECT_UNAUTHORIZED === 'true'
         : undefined;
 
-      return createTlsServer(app, {
+      return createTlsServer(fastify.routing.bind(fastify), {
         port: HTTPS_PORT,
         certPath: process.env.HTTPS_CERT_PATH || './certs/tls.crt',
         keyPath: process.env.HTTPS_KEY_PATH || './certs/tls.key',
@@ -147,7 +156,20 @@ export async function startHttpsServer(
         rejectUnauthorized,
       });
     } catch (error) {
-      logger.warn('Failed to start HTTPS server', { error });
+      if (error instanceof Error) {
+        const networkError = error as NetworkError;
+        logger.warn('Failed to start HTTPS server', {
+          error: error.message,
+          stack: error.stack,
+          port: HTTPS_PORT,
+          code: networkError.code,
+          errno: networkError.errno,
+          syscall: networkError.syscall,
+          address: networkError.address,
+        });
+      } else {
+        logger.warn('Failed to start HTTPS server', { error: String(error), port: HTTPS_PORT });
+      }
       return null;
     }
   }

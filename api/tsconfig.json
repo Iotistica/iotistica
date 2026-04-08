@@ -17,8 +17,7 @@
     "sourceMap": true,
     "noImplicitAny": false,
     "strictNullChecks": false,
-    "incremental": true,
-    "ignoreDeprecations": "6.0"
+    "incremental": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]

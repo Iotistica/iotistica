@@ -1,137 +1,104 @@
 /**
- * Rate Limiting Middleware
- * 
- * Implements multi-tier rate limiting strategy optimized for IoT backends:
- * 1. IP-based rate limiting (unauthenticated routes)
- * 2. Token-based rate limiting (device API keys, JWT tokens)
- * 3. Per-device rate limiting (prevents one misbehaving device from blocking others)
+ * Rate Limiting — @fastify/rate-limit configurations.
+ *
+ * Multi-tier strategy optimised for IoT backends:
+ * 1. IP-based limiting (unauthenticated/auth routes)
+ * 2. Token-based limiting (device API key or JWT user ID)
+ *
+ * These option objects are passed to fastify.register(rateLimit, opts) inside
+ * scoped Fastify plugins in server/routes.ts.
  */
 
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import type { Request, Response } from 'express';
+import type { FastifyRequest } from 'fastify';
+import type { RateLimitOptions } from '@fastify/rate-limit';
 import logger from '../utils/logger';
 
-/**
- * Rate limit key generator for token-based limiting
- * Uses device API key or JWT user ID instead of IP address
- * This prevents one misbehaving device from blocking others on the same IP/NAT
- */
-function tokenBasedKeyGenerator(req: Request): string {
-  // Priority 1: Device API key (X-Device-API-Key header)
-  const deviceApiKey = req.headers['x-device-api-key'] as string;
-  if (deviceApiKey) {
-    return `device:${deviceApiKey}`;
-  }
-  
-  // Priority 2: JWT user ID (from JWT middleware)
-  const userId = (req as any).user?.id;
-  if (userId) {
-    return `user:${userId}`;
-  }
-  
-  // Fallback: IP address (for unauthenticated requests)
-  // Use ipKeyGenerator helper for IPv6 compatibility
-  return `ip:${ipKeyGenerator(req.ip || '')}`;
+/** Token-based key generator: device key → user ID → IP fallback */
+function tokenKeyGenerator(request: FastifyRequest): string {
+  const deviceApiKey = request.headers['x-device-api-key'] as string;
+  if (deviceApiKey) return `device:${deviceApiKey}`;
+
+  const userId = request.user?.id;
+  if (userId) return `user:${userId}`;
+
+  return `ip:${request.ip}`;
+}
+
+function ipKeyGenerator(request: FastifyRequest): string {
+  return `ip:${request.ip}`;
+}
+
+function onRateLimitExceeded(request: FastifyRequest, _key: string): void {
+  logger.warn('Rate limit exceeded', {
+    ip: request.ip,
+    url: request.url,
+    method: request.method,
+    userAgent: request.headers['user-agent'],
+  });
 }
 
 /**
- * Rate limit handler - logs violations for security monitoring
+ * Global API rate limit: 300 req/min per device/user.
+ * Applied to all /api/v* routes.
  */
-function rateLimitHandler(req: Request, res: Response) {
-  const key = tokenBasedKeyGenerator(req);
-  
-  logger.warn('Rate limit exceeded', {
-    key,
-    ip: req.ip,
-    path: req.path,
-    method: req.method,
-    userAgent: req.headers['user-agent']
-  });
-  
-  res.status(429).json({
+export const globalRateLimitOptions: RateLimitOptions = {
+  max: 300,
+  timeWindow: 60_000,
+  keyGenerator: tokenKeyGenerator,
+  onExceeded: onRateLimitExceeded,
+  skipOnError: false,
+  errorResponseBuilder: (_request, context) => ({
     error: 'Too many requests',
     message: 'Rate limit exceeded. Please try again later.',
-    retryAfter: res.getHeader('Retry-After')
-  });
-}
+    retryAfter: context.after,
+  }),
+};
 
 /**
- * Global API rate limiter (token-based)
- * Applied to all /api/* routes
- * 
- * Limits: 300 requests per minute per device/user
- * For IoT: One misbehaving device doesn't block others
+ * Auth rate limit: 10 req/min per IP (brute-force protection).
+ * Only failed attempts count (skipSuccessfulRequests equivalent via hook).
  */
-export const globalApiRateLimit = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 300, // 300 requests per minute
-  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
-  legacyHeaders: false, // Disable `X-RateLimit-*` headers
-  keyGenerator: tokenBasedKeyGenerator,
-  handler: rateLimitHandler,
-  skip: (req) => {
-    // Skip rate limiting for health checks and metrics
-    return req.path === '/health' || req.path === '/metrics';
-  }
-});
+export const authRateLimitOptions: RateLimitOptions = {
+  max: 10,
+  timeWindow: 60_000,
+  keyGenerator: ipKeyGenerator,
+  onExceeded: onRateLimitExceeded,
+  skipOnError: false,
+  errorResponseBuilder: (_request, context) => ({
+    error: 'Too many requests',
+    message: 'Too many authentication attempts. Please wait before retrying.',
+    retryAfter: context.after,
+  }),
+};
 
 /**
- * Strict rate limiter for authentication endpoints
- * Prevents brute-force attacks on login/signup
- * 
- * Limits: 10 requests per minute per IP
+ * Device data rate limit: 1000 req/min (supports 16 Hz sensor data).
  */
-export const authRateLimit = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 requests per minute
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => `auth:${ipKeyGenerator(req.ip || '')}`, // Always use IP for auth endpoints, IPv6-safe
-  handler: rateLimitHandler,
-  skipSuccessfulRequests: true // Only count failed auth attempts
-});
+export const deviceDataRateLimitOptions: RateLimitOptions = {
+  max: 1000,
+  timeWindow: 60_000,
+  keyGenerator: tokenKeyGenerator,
+  onExceeded: onRateLimitExceeded,
+  skipOnError: false,
+  errorResponseBuilder: (_request, context) => ({
+    error: 'Too many requests',
+    message: 'Device data rate limit exceeded.',
+    retryAfter: context.after,
+  }),
+};
 
 /**
- * Device data ingestion rate limiter
- * Higher limits for high-frequency sensor data
- * 
- * Limits: 1000 requests per minute per device
+ * Admin/control-plane rate limit: 100 req/min per user.
  */
-export const deviceDataRateLimit = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 1000, // 1000 requests per minute (supports 16 Hz sensor data)
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: tokenBasedKeyGenerator,
-  handler: rateLimitHandler
-});
-
-/**
- * Admin/control plane rate limiter
- * Moderate limits for management operations
- * 
- * Limits: 100 requests per minute per user
- */
-export const adminRateLimit = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 100, // 100 requests per minute
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: tokenBasedKeyGenerator,
-  handler: rateLimitHandler
-});
-
-/**
- * Public/unauthenticated rate limiter
- * Strictest limits for public endpoints
- * 
- * Limits: 50 requests per minute per IP
- */
-export const publicRateLimit = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 50, // 50 requests per minute
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => `public:${ipKeyGenerator(req.ip || '')}`, // IP-based for public routes, IPv6-safe
-  handler: rateLimitHandler
-});
+export const adminRateLimitOptions: RateLimitOptions = {
+  max: 100,
+  timeWindow: 60_000,
+  keyGenerator: tokenKeyGenerator,
+  onExceeded: onRateLimitExceeded,
+  skipOnError: false,
+  errorResponseBuilder: (_request, context) => ({
+    error: 'Too many requests',
+    message: 'Admin rate limit exceeded.',
+    retryAfter: context.after,
+  }),
+};

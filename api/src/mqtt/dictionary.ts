@@ -9,9 +9,9 @@
  * - Supports both indexed arrays (messages[0]) and opaque arrays (messages[])
  */
 
-import msgpack from 'msgpack-lite';
+import msgpack from 'msgpackr';
 import { createHash } from 'crypto';
-import { DeviceDictionaryService } from '../services/agent-dictionary.service';
+import { DeviceDictionaryService } from '../services/agent/dictionary';
 import { mqttDeviceTopic as deviceTopic } from './topics';
 import { getTenantId } from '../redis/tenant-keys';
 

@@ -9,9 +9,9 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { PoolClient } from 'pg';
 import { from as copyFrom } from 'pg-copy-streams';
-import { getClient, query } from '../db/connection';
-import { getRedisClient } from '../redis/client-factory';
-import logger from '../utils/logger';
+import { getClient, query } from '../../db/connection';
+import { getRedisClient } from '../../redis/client-factory';
+import logger from '../../utils/logger';
 
 export interface Reading {
   time: Date;

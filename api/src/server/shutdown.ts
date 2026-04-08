@@ -5,16 +5,15 @@
  *   WebSocket → workers → Redis → MQTT → HTTP servers → DB pool
  */
 
-import http from 'http';
 import https from 'https';
+import type { FastifyInstance } from 'fastify';
 import logger from '../utils/logger';
 import { websocketManager } from '../services/websocket/manager';
 import { shutdownMqtt } from '../mqtt';
 import { close } from '../db/connection';
-import { stopTrafficFlushService } from '../services/traffic-flush.service';
 
 export interface ShutdownContext {
-  server: http.Server;
+  fastify: FastifyInstance;
   httpsServer: https.Server | null;
 }
 
@@ -45,7 +44,7 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
 
     // Metrics batch worker
     try {
-      const { stopMetricsBatchWorker } = await import('../workers/metrics-batch-worker');
+      const { stopMetricsBatchWorker } = await import('../services/agent/metrics-worker');
       await stopMetricsBatchWorker();
     } catch { /* ignore */ }
 
@@ -74,12 +73,6 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
       logger.info('MQTT Jobs Handler stopped');
     } catch { /* ignore */ }
 
-    // Traffic flush (final DB write)
-    try {
-      await stopTrafficFlushService();
-      logger.info('Traffic flush service stopped');
-    } catch { /* ignore */ }
-
     // Redis log queue (final batch)
     try {
       const { redisLogQueue } = await import('../services/ingestion/redis-log-queue');
@@ -106,10 +99,9 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
       logger.error('Error closing database connection', { error });
     }
 
-    ctx.server.close(() => {
-      logger.info('Server closed');
-      clearTimeout(forceClose);
-      process.exit(0);
-    });
+    await ctx.fastify.close();
+    logger.info('Server closed');
+    clearTimeout(forceClose);
+    process.exit(0);
   };
 }

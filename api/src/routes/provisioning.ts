@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Agent Provisioning and Authentication Routes
  * Handles two-phase agent authentication and provisioning key management
  * 
@@ -12,47 +12,81 @@
  * - POST /api/v1/device/register - Register new agent (phase 1: provisioning key)
  * - POST /api/v1/device/:uuid/key-exchange - Exchange keys (phase 2: agent key verification)
  */
-
-import express from 'express';
-import bcrypt from 'bcrypt';
 import crypto from 'crypto';
-import rateLimit from 'express-rate-limit';
 import { query } from '../db/connection';
 import {
   AgentModel,
-  DeviceTargetStateModel,
 } from '../db/models';
 import {
-  validateProvisioningKey,
-  incrementProvisioningKeyUsage,
+
   createProvisioningKey,
   revokeProvisioningKey,
   listProvisioningKeys
 } from '../utils/provisioning-keys';
-import { wireGuardService } from '../services/wireguard.service';
 import {
   logAuditEvent,
-  logProvisioningAttempt,
-  checkProvisioningRateLimit,
+
   AuditEventType,
   AuditSeverity
 } from '../utils/audit-logger';
 import { EventPublisher } from '../services/event-sourcing';
-import {
-  getBrokerConfigForDevice,
-  buildBrokerUrl,
-  formatBrokerConfigForClient
-} from '../utils/mqtt-broker-config';
-import { getVpnConfigForDevice, formatVpnConfigForDevice } from '../utils/vpn-config';
-import { SystemConfigModel } from '../db/models';
-import { generateDefaultTargetState } from '../services/provisioning/default-target-state-generator.js';
+import { LicenseValidator } from '../services/auth/license-validator';
 import { provisioningService } from '../services/provisioning/provisioning.service';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
-export const router = express.Router();
+import type { FastifyPluginAsync } from 'fastify'
 
+const plugin: FastifyPluginAsync = async (fastify) => {
 // Initialize event publisher for audit trail
 const eventPublisher = new EventPublisher();
+
+interface CreateProvisioningKeyBody {
+  fleetUuid?: string;
+  maxDevices?: number;
+  expiresInDays?: number;
+  description?: string;
+}
+
+interface ListProvisioningKeysQuerystring {
+  fleetUuid?: string;
+}
+
+interface ProvisioningKeyParams {
+  keyId: string;
+}
+
+interface RevokeProvisioningKeyBody {
+  reason?: string;
+}
+
+interface GenerateProvisioningKeyBody {
+  fleetUuid?: string;
+  newKey?: boolean;
+  previousKeyId?: string;
+  deploymentType?: string;
+  metadata?: Record<string, unknown>;
+  simulatorConfig?: unknown;
+}
+
+interface DeviceUuidParams {
+  uuid: string;
+}
+
+interface RegisterDeviceBody {
+  uuid?: string;
+  deviceName?: string;
+  deviceType?: string;
+  deviceApiKey?: string;
+  devicePublicKey?: string;
+  macAddress?: string;
+  osVersion?: string;
+  agentVersion?: string;
+}
+
+interface KeyExchangeBody {
+  deviceApiKey?: string;
+  signature?: string;
+}
 
 // ============================================================================
 // Rate Limiting Middleware
@@ -73,40 +107,6 @@ const eventPublisher = new EventPublisher();
  * 
  * Both work together: middleware catches spam, database check catches attacks
  */
-const provisioningLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'development' ? 1000 : 100, // Higher for fleet deployments
-  message: 'Too many provisioning attempts from this IP, please try again later',
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: async (req, res) => {
-    await logAuditEvent({
-      eventType: AuditEventType.RATE_LIMIT_EXCEEDED,
-      ipAddress: req.ip,
-      userAgent: req.headers['user-agent'],
-      severity: AuditSeverity.WARNING,
-      details: { endpoint: '/device/register', type: 'middleware' }
-    });
-    res.status(429).json({
-      error: 'Too many requests',
-      message: 'Too many provisioning attempts from this IP, please try again later'
-    });
-  }
-});
-
-// Rate limit for key exchange - environment-aware for fleet deployments
-const keyExchangeLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: process.env.NODE_ENV === 'development' ? 1000 : 50, // Higher limit for fleet provisioning
-  message: 'Too many key exchange attempts, please try again later'
-});
-
-// Rate limit for challenge issuance - prevents enumeration and DoS via DB/memory pressure
-const challengeLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  max: process.env.NODE_ENV === 'development' ? 1000 : 30,
-  message: 'Too many challenge requests, please try again later'
-});
 
 // ============================================================================
 // Provisioning Key Management Endpoints
@@ -124,36 +124,35 @@ const challengeLimiter = rateLimit({
  * 
  * Auth: Requires admin authentication (basic implementation for now)
  */
-router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res) => {
+fastify.post<{ Body: CreateProvisioningKeyBody }>('/provisioning-keys', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
   try {
     const { fleetUuid, maxDevices = 100, expiresInDays = 365, description } = req.body;
 
     // Basic validation
     if (!fleetUuid || typeof fleetUuid !== 'string') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'fleetUuid (fleet UUID) is required and must be a string'
       });
     }
 
     if (maxDevices && (typeof maxDevices !== 'number' || maxDevices < 1 || maxDevices > 10000)) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'maxDevices must be a number between 1 and 10000'
       });
     }
 
     if (expiresInDays && (typeof expiresInDays !== 'number' || expiresInDays < 1 || expiresInDays > 3650)) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'expiresInDays must be a number between 1 and 3650 (10 years)'
       });
     }
 
     // Check license agent limit before creating provisioning key
-    const licenseValidator = (req as any).licenseValidator;
-    if (licenseValidator) {
-      const license = licenseValidator.getLicense();
+    const license = LicenseValidator.getInstance().getLicense();
+    if (license) {
       const maxDevicesAllowed = license.features.maxDevices;
       
       // Count current active agents
@@ -173,7 +172,7 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
           }
         });
 
-        return res.status(403).json({
+        return reply.status(403).send({
           error: 'Agent limit exceeded',
           message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} agents. You currently have ${currentDeviceCount} active agents. Please upgrade your plan to add more agents.`,
           details: {
@@ -196,7 +195,7 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
     );
     
     if (fleetResult.rows.length === 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Fleet not found',
         message: `Fleet with identifier '${fleetUuid}' does not exist. Create the fleet first.`
       });
@@ -218,7 +217,7 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
 
     logger.info(`Provisioning key created: ${id}`);
 
-    res.status(201).json({
+    return reply.status(201).send({
       id,
       key, // WARNING: Only returned once!
       fleetUuid,
@@ -227,11 +226,11 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
       description,
       warning: 'Store this key securely - it cannot be retrieved again!'
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Error creating provisioning key:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to create provisioning key',
-      message: error.message
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -242,12 +241,12 @@ router.post('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res
  * 
  * Returns key metadata (NOT the actual keys)
  */
-router.get('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res) => {
+fastify.get<{ Querystring: ListProvisioningKeysQuerystring }>('/provisioning-keys', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
   try {
     const { fleetUuid } = req.query;
 
     if (!fleetUuid || typeof fleetUuid !== 'string') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'fleetUuid (fleet UUID) query parameter is required'
       });
@@ -262,7 +261,7 @@ router.get('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res)
     );
     
     if (fleetResult.rows.length === 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Fleet not found',
         message: `Fleet with identifier '${fleetUuid}' does not exist.`
       });
@@ -286,15 +285,15 @@ router.get('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res)
       // key_hash is intentionally excluded for security
     }));
 
-    res.json({
+    return reply.send({
       count: sanitizedKeys.length,
       keys: sanitizedKeys
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Error listing provisioning keys:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to list provisioning keys',
-      message: error.message
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -306,13 +305,13 @@ router.get('/provisioning-keys', jwtAuth, requireRole('admin'), async (req, res)
  * Body:
  * - reason: Reason for revocation (optional)
  */
-router.delete('/provisioning-keys/:keyId', jwtAuth, requireRole('admin'), async (req, res) => {
+fastify.delete<{ Params: ProvisioningKeyParams; Body: RevokeProvisioningKeyBody }>('/provisioning-keys/:keyId', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
   try {
     const { keyId } = req.params;
     const { reason } = req.body;
 
     if (!keyId) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'keyId is required'
       });
@@ -324,17 +323,17 @@ router.delete('/provisioning-keys/:keyId', jwtAuth, requireRole('admin'), async 
 
     logger.info(`Provisioning key revoked: ${keyId}`);
 
-    res.json({
+    return reply.send({
       status: 'ok',
       message: 'Provisioning key revoked',
       keyId,
       reason
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Error revoking provisioning key:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to revoke provisioning key',
-      message: error.message
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -364,7 +363,7 @@ router.delete('/provisioning-keys/:keyId', jwtAuth, requireRole('admin'), async 
  * - deploymentType: Echo back deployment type (if provided)
  * - simulatorConfig: Echo back simulator config (if provided)
  */
-router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async (req, res) => {
+fastify.post<{ Body: GenerateProvisioningKeyBody }>('/provisioning-keys/generate', { preHandler: [jwtAuth, requireRole('admin')] }, async (req, reply) => {
   try {
     const { 
       fleetUuid, 
@@ -376,7 +375,7 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
     } = req.body;
 
     if (!fleetUuid || typeof fleetUuid !== 'string') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'fleetUuid (fleet UUID) is required and must be a string'
       });
@@ -387,23 +386,22 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
       try {
         logger.info(`Invalidating previous provisioning key: ${previousKeyId}`);
         await revokeProvisioningKey(previousKeyId, 'Regenerated by user');
-      } catch (revokeError: any) {
-        logger.warn(`Could not revoke previous key ${previousKeyId}:`, revokeError.message);
+      } catch (revokeError: unknown) {
+        logger.warn(`Could not revoke previous key ${previousKeyId}:`, revokeError instanceof Error ? revokeError.message : 'Unknown error');
         // Continue anyway - user wants a new key
       }
     }
 
     // Check license agent limit
-    const licenseValidator = (req as any).licenseValidator;
-    if (licenseValidator) {
-      const license = licenseValidator.getLicense();
+    const license = LicenseValidator.getInstance().getLicense();
+    if (license) {
       const maxDevicesAllowed = license.features.maxDevices;
       
       const deviceCountResult = await query('SELECT COUNT(*) as count FROM agents WHERE is_active = true');
       const currentDeviceCount = parseInt(deviceCountResult.rows[0].count);
       
       if (currentDeviceCount >= maxDevicesAllowed) {
-        return res.status(403).json({
+        return reply.status(403).send({
           error: 'Agent limit exceeded',
           message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} agents. Please upgrade to add more.`,
           details: {
@@ -422,7 +420,7 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
     );
     
     if (fleetResult.rows.length === 0) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Fleet not found',
         message: `Fleet with identifier '${fleetUuid}' does not exist. Create the fleet first.`
       });
@@ -457,10 +455,10 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
           ]
         );
         logger.info(`Stored simulator config for provisioning key ${id}`, { deploymentType, simulatorConfig });
-      } catch (metadataError: any) {
+      } catch (metadataError: unknown) {
         // Non-fatal error - columns may not exist yet or other DB issue
         // Provisioning key generation still succeeds
-        logger.warn(`Failed to store provisioning metadata for key ${id} (columns may not exist):`, metadataError.message);
+        logger.warn(`Failed to store provisioning metadata for key ${id} (columns may not exist):`, metadataError instanceof Error ? metadataError.message : 'Unknown error');
       }
     }
 
@@ -469,7 +467,7 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
 
     logger.info(`Single-agent provisioning key generated: ${id}`, { deploymentType });
 
-    const response: any = {
+    const response: Record<string, unknown> = {
       id,
       key,
       expiresAt: expiresAt.toISOString(),
@@ -484,12 +482,12 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
       response.simulatorConfig = simulatorConfig;
     }
 
-    res.status(201).json(response);
-  } catch (error: any) {
+    return reply.status(201).send(response);
+  } catch (error: unknown) {
     logger.error('Error generating provisioning key:', error);
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Failed to generate provisioning key',
-      message: error.message
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -512,7 +510,7 @@ router.post('/provisioning-keys/generate', jwtAuth, requireRole('admin'), async 
  * - Short-lived challenge (5 minutes)
  * - Replay protection via expiration
  */
-router.post('/device/:uuid/challenge', challengeLimiter, async (req, res) => {
+fastify.post<{ Params: DeviceUuidParams }>('/device/:uuid/challenge', async (req, reply) => {
   const { uuid } = req.params;
   const ipAddress = req.ip;
   const userAgent = req.headers['user-agent'];
@@ -530,7 +528,7 @@ router.post('/device/:uuid/challenge', challengeLimiter, async (req, res) => {
         severity: AuditSeverity.WARNING,
         details: { reason: 'Agent not found', endpoint: 'challenge' }
       });
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Agent not found',
         message: `Agent ${uuid} not registered`
       });
@@ -543,7 +541,7 @@ router.post('/device/:uuid/challenge', challengeLimiter, async (req, res) => {
     // Reject if an active challenge already exists to prevent race-condition overwrites.
     // A client that signed a challenge that was overwritten would get a false failure.
     if (agent.last_challenge && agent.last_challenge_expires_at && new Date(agent.last_challenge_expires_at) > new Date()) {
-      return res.status(409).json({
+      return reply.status(409).send({
         error: 'Challenge already issued',
         message: 'An active challenge already exists for this agent. Wait for it to expire or complete key exchange first.',
         expiresAt: new Date(agent.last_challenge_expires_at).toISOString()
@@ -580,11 +578,11 @@ router.post('/device/:uuid/challenge', challengeLimiter, async (req, res) => {
       }
     });
 
-    res.json({
+    return reply.send({
       challenge,
       expiresAt: expiresAt.toISOString()
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Error issuing PoP challenge:', error);
     
     await logAuditEvent({
@@ -593,12 +591,12 @@ router.post('/device/:uuid/challenge', challengeLimiter, async (req, res) => {
       ipAddress,
       userAgent,
       severity: AuditSeverity.ERROR,
-      details: { error: error.message, endpoint: 'challenge' }
+      details: { error: error instanceof Error ? error.message : 'Unknown error', endpoint: 'challenge' }
     });
 
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Challenge issuance failed',
-      message: error.message
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
@@ -620,7 +618,7 @@ router.post('/device/:uuid/challenge', challengeLimiter, async (req, res) => {
  * - Comprehensive audit logging
  * - Event sourcing for agent lifecycle
  */
-router.post('/device/register', provisioningLimiter, async (req, res) => {
+fastify.post<{ Body: RegisterDeviceBody }>('/device/register', async (req, reply) => {
   const ipAddress = req.ip;
   const userAgent = req.headers['user-agent'];
 
@@ -638,7 +636,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
         severity: AuditSeverity.WARNING,
         details: { reason: 'Missing required fields', uuid: uuid?.substring(0, 8) }
       });
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Missing required fields',
         message: 'uuid, deviceName, deviceType, and deviceApiKey are required'
       });
@@ -667,7 +665,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
           severity: AuditSeverity.WARNING,
           details: { reason: 'Invalid public key format (must be PEM)', uuid: uuid?.substring(0, 8) }
         });
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Invalid public key format',
           message: 'devicePublicKey must be in PEM format'
         });
@@ -687,7 +685,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
         severity: AuditSeverity.WARNING,
         details: { reason: 'Missing provisioning API key' }
       });
-      return res.status(401).json({
+      return reply.status(401).send({
         error: 'Unauthorized',
         message: 'Provisioning key required in x-provisioning-key header'
       });
@@ -695,9 +693,8 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
 
     // Enforce license agent limit at registration time (not just at key creation).
     // A key created before a plan downgrade must still be blocked here.
-    const registrationLicenseValidator = (req as any).licenseValidator;
-    if (registrationLicenseValidator) {
-      const license = registrationLicenseValidator.getLicense();
+    const license = LicenseValidator.getInstance().getLicense();
+    if (license) {
       const maxDevicesAllowed = license.features.maxDevices;
       const deviceCountResult = await query('SELECT COUNT(*) as count FROM agents WHERE is_active = true');
       const currentDeviceCount = parseInt(deviceCountResult.rows[0].count);
@@ -715,7 +712,7 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
             plan: license.plan
           }
         });
-        return res.status(403).json({
+        return reply.status(403).send({
           error: 'Agent limit exceeded',
           message: `Your ${license.plan} plan allows a maximum of ${maxDevicesAllowed} agents. You currently have ${currentDeviceCount} active agents. Please upgrade your plan to add more agents.`,
           details: { currentDevices: currentDeviceCount, maxDevices: maxDevicesAllowed, plan: license.plan }
@@ -741,24 +738,26 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
     );
 
     logger.info('Agent registered successfully:', response.id);
-    res.status(200).json(response);
+    return reply.status(200).send(response);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Error registering agent:', error);
     
     // Determine appropriate status code
     let statusCode = 500;
-    if (error.message.includes('already registered')) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    if (errorMessage.includes('already registered')) {
       statusCode = 409;
-    } else if (error.message.includes('Invalid provisioning key') || error.message.includes('expired') || error.message.includes('limit exceeded')) {
+    } else if (errorMessage.includes('Invalid provisioning key') || errorMessage.includes('expired') || errorMessage.includes('limit exceeded')) {
       statusCode = 401;
-    } else if (error.message.includes('Rate limit exceeded')) {
+    } else if (errorMessage.includes('Rate limit exceeded')) {
       statusCode = 429;
     }
 
-    res.status(statusCode).json({
+    return reply.status(statusCode).send({
       error: 'Failed to register agent',
-      message: error.message
+      message: errorMessage
     });
   }
 });
@@ -768,31 +767,25 @@ router.post('/device/register', provisioningLimiter, async (req, res) => {
  * POST /api/v1/device/:uuid/key-exchange
  * 
  * Phase 2b of two-phase authentication:
- * - Verifies proof-of-possession signature (preferred)
- * - Falls back to deviceApiKey bcrypt verification (legacy)
+ * - Verifies proof-of-possession signature
  * - Rate limited (50 attempts per hour)
  * - Logs all authentication events
  * 
  * Security Features:
  * - Asymmetric PoP with Ed25519/P-256 signatures
  * - Challenge expiration and replay protection
- * - Fallback to bcrypt for backward compatibility
  * - Rate limiting to prevent brute force attacks
  * - Comprehensive audit logging
  * - No sensitive information in error messages
  */
-router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) => {
+fastify.post<{ Params: DeviceUuidParams; Body: KeyExchangeBody }>('/device/:uuid/key-exchange', async (req, reply) => {
   const ipAddress = req.ip;
   const userAgent = req.headers['user-agent'];
 
   try {
     const { uuid } = req.params;
-    const { deviceApiKey, signature } = req.body;
+    const { signature } = req.body;
     const authKey = (req.headers['x-device-key'] as string) ?? undefined;
-
-    // PoP mode: requires signature (deviceApiKey not needed)
-    // Bcrypt fallback: requires deviceApiKey
-    const isPopMode = !!signature;
     
     if (!authKey) {
       await logAuditEvent({
@@ -803,24 +796,24 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         severity: AuditSeverity.WARNING,
         details: { reason: 'Missing x-device-key header' }
       });
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Missing credentials',
         message: 'x-device-key header required'
       });
     }
 
-    if (!isPopMode && !deviceApiKey) {
+    if (!signature) {
       await logAuditEvent({
         eventType: AuditEventType.KEY_EXCHANGE_FAILED,
         agentUuid: uuid,
         ipAddress,
         userAgent,
         severity: AuditSeverity.WARNING,
-        details: { reason: 'Missing deviceApiKey for bcrypt fallback' }
+        details: { reason: 'Missing signature for proof-of-possession verification' }
       });
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Missing credentials',
-        message: 'deviceApiKey required in body for bcrypt authentication'
+        message: 'signature required in body for proof-of-possession authentication'
       });
     }
 
@@ -841,7 +834,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
         severity: AuditSeverity.WARNING,
         details: { reason: 'Agent not found' }
       });
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Agent not found',
         message: `Agent ${uuid} not registered`
       });
@@ -869,7 +862,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           severity: AuditSeverity.WARNING,
           details: { reason: 'No challenge found - call /challenge first' }
         });
-        return res.status(401).json({
+        return reply.status(401).send({
           error: 'No challenge found',
           message: 'Request a challenge from /device/:uuid/challenge first'
         });
@@ -884,7 +877,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           severity: AuditSeverity.WARNING,
           details: { reason: 'Challenge expired' }
         });
-        return res.status(401).json({
+        return reply.status(401).send({
           error: 'Challenge expired',
           message: 'Challenge has expired - request a new one'
         });
@@ -925,7 +918,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
             details: { reason: `Disallowed key algorithm: ${keyType}. Only Ed25519 and ECDSA P-256 allowed.` }
           });
           
-          return res.status(401).json({
+          return reply.status(401).send({
             error: 'Invalid key algorithm',
             message: 'Device public key must use Ed25519 or ECDSA P-256'
           });
@@ -949,7 +942,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
               details: { reason: `ECDSA key must use P-256 curve, got ${keyDetails?.namedCurve}` }
             });
             
-            return res.status(401).json({
+            return reply.status(401).send({
               error: 'Invalid key curve',
               message: 'ECDSA key must use P-256 curve'
             });
@@ -983,7 +976,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
             severity: AuditSeverity.WARNING,
             details: { reason: 'Invalid signature - proof of possession failed' }
           });
-          return res.status(401).json({
+          return reply.status(401).send({
             error: 'Proof of possession failed',
             message: 'Invalid signature'
           });
@@ -1027,7 +1020,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           }
         });
 
-        return res.json({
+        return reply.send({
           status: 'ok',
           message: 'Proof of possession verified',
           device: {
@@ -1036,7 +1029,7 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
             deviceName: agent.name,
           }
         });
-      } catch (verifyError: any) {
+      } catch (verifyError: unknown) {
         logger.error('Signature verification error:', verifyError);
         
         await logAuditEvent({
@@ -1045,91 +1038,34 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
           ipAddress,
           userAgent,
           severity: AuditSeverity.ERROR,
-          details: { reason: 'Signature verification failed', error: verifyError.message }
+          details: { reason: 'Signature verification failed', error: verifyError instanceof Error ? verifyError.message : 'Unknown error' }
         });
 
-        return res.status(401).json({
+        return reply.status(401).send({
           error: 'Signature verification failed',
           message: 'Invalid signature format or corrupted public key'
         });
       }
     }
 
-    // ========================================================================
-    // FALLBACK: Legacy bcrypt verification (for backward compatibility)
-    // ========================================================================
-    logger.warn('⚠️ Using LEGACY bcrypt verification (not PoP)', {
-      agentUuid: uuid.substring(0, 8) + '...',
-      agentName: agent.name,
-      hasPublicKey: !!agent.device_public_key,
-      hasSignature: !!signature,
-      reason: !agent.device_public_key ? 'agent has no public key (not PoP-enabled)' : !signature ? 'no signature provided' : 'unknown',
-      recommendation: 'Update agent to send devicePublicKey during registration for PoP authentication'
-    });
-    
-    if (!agent.device_api_key_hash) {
-      await logAuditEvent({
-        eventType: AuditEventType.KEY_EXCHANGE_FAILED,
-        agentUuid: uuid,
-        ipAddress,
-        userAgent,
-        severity: AuditSeverity.ERROR,
-        details: { reason: 'No API key hash stored for agent' }
-      });
-      return res.status(500).json({
-        error: 'Configuration error',
-        message: 'Device API key not configured'
-      });
-    }
-
-    const keyMatches = await bcrypt.compare(deviceApiKey, agent.device_api_key_hash);
-    
-    if (!keyMatches) {
-      await logAuditEvent({
-        eventType: AuditEventType.AUTHENTICATION_FAILED,
-        agentUuid: uuid,
-        ipAddress,
-        userAgent,
-        severity: AuditSeverity.WARNING,
-        details: { reason: 'Invalid device API key' }
-      });
-      return res.status(401).json({
-        error: 'Authentication failed',
-        message: 'Invalid device API key'
-      });
-    }
-
-    logger.info('Legacy key exchange successful (bcrypt)', {
-      agentUuid: uuid.substring(0, 8) + '...',
-      agentName: agent.name
-    });
-    
-    // Record authentication method for fleet-level policy enforcement
-    // This allows future enforcement of PoP-only policies for high-security fleets
-    await AgentModel.recordAuthMethod(uuid, 'bcrypt');
-
     await logAuditEvent({
-      eventType: AuditEventType.KEY_EXCHANGE_SUCCESS,
+      eventType: AuditEventType.KEY_EXCHANGE_FAILED,
       agentUuid: uuid,
       ipAddress,
       userAgent,
-      severity: AuditSeverity.INFO,
-      details: { 
-        agentName: agent.name,
-        authMethod: 'bcrypt-fallback'
-      }
+      severity: AuditSeverity.WARNING,
+      details: {
+        reason: !agent.device_public_key
+          ? 'Device has no registered public key'
+          : 'Proof-of-possession verification did not complete',
+      },
     });
 
-    res.json({
-      status: 'ok',
-      message: 'Key exchange successful',
-      device: {
-        id: agent.id,
-        uuid: agent.uuid,
-        deviceName: agent.name,
-      }
+    return reply.status(401).send({
+      error: 'Proof of possession required',
+      message: 'Device must register a public key and provide a valid signature for key exchange',
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error('Error during key exchange:', error);
     
     await logAuditEvent({
@@ -1138,14 +1074,16 @@ router.post('/device/:uuid/key-exchange', keyExchangeLimiter, async (req, res) =
       ipAddress,
       userAgent,
       severity: AuditSeverity.ERROR,
-      details: { error: error.message }
+      details: { error: error instanceof Error ? error.message : 'Unknown error' }
     });
 
-    res.status(500).json({
+    return reply.status(500).send({
       error: 'Key exchange failed',
-      message: error.message
+      message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
 
-export default router;
+};
+
+export default plugin;

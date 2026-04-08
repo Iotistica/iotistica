@@ -3,7 +3,7 @@
  * Communicates with Global Billing API for license and subscription management
  */
 
-import axios, { AxiosInstance } from 'axios';
+import { fetch } from 'undici';
 import { LicenseValidator } from './auth/license-validator';
 
 export interface CheckoutSessionResponse {
@@ -20,7 +20,6 @@ export interface LicenseResponse {
 
 export class BillingClient {
   private static instance: BillingClient;
-  private client: AxiosInstance;
   private billingApiUrl: string;
   private customerId: string;
 
@@ -31,14 +30,17 @@ export class BillingClient {
     if (!this.billingApiUrl) {
       console.warn('⚠️  BILLING_API_URL not configured');
     }
+  }
 
-    this.client = axios.create({
-      baseURL: this.billingApiUrl,
-      timeout: 10000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
+  private async request<T>(method: string, path: string, body?: unknown): Promise<{ data: T }> {
+    const response = await fetch(this.billingApiUrl + path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(10000)
     });
+    if (!response.ok) throw new Error(`Billing API error: HTTP ${response.status}`);
+    return { data: await response.json() as T };
   }
 
   static getInstance(): BillingClient {
@@ -67,7 +69,8 @@ export class BillingClient {
       throw new Error('Billing API not configured. Set BILLING_API_URL and CUSTOMER_ID');
     }
 
-    const response = await this.client.post<CheckoutSessionResponse>(
+    const response = await this.request<CheckoutSessionResponse>(
+      'POST',
       '/api/subscriptions/checkout',
       {
         customer_id: this.customerId,
@@ -88,7 +91,8 @@ export class BillingClient {
       throw new Error('Billing API not configured. Set BILLING_API_URL and CUSTOMER_ID');
     }
 
-    const response = await this.client.get<LicenseResponse>(
+    const response = await this.request<LicenseResponse>(
+      'GET',
       `/api/licenses/${this.customerId}`
     );
 
@@ -110,7 +114,7 @@ export class BillingClient {
       return;
     }
 
-    await this.client.post('/api/usage/report', {
+    await this.request('POST', '/api/usage/report', {
       customer_id: this.customerId,
       instance_id: process.env.INSTANCE_ID || 'default',
       active_agents: activeDevices,
@@ -128,7 +132,7 @@ export class BillingClient {
       throw new Error('Billing API not configured. Set BILLING_API_URL and CUSTOMER_ID');
     }
 
-    const response = await this.client.get(`/api/subscriptions/${this.customerId}`);
+    const response = await this.request<any>('GET', `/api/subscriptions/${this.customerId}`);
     return response.data.subscription;
   }
 }

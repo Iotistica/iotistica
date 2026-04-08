@@ -11,15 +11,15 @@
  * 4. Track sync status and version
  */
 
-import { query } from '../db/connection';
-import { EventPublisher } from './event-sourcing';
-import logger from '../utils/logger';
-import { v4 as uuidv4 } from 'uuid';
-import { DeviceTargetStateModel } from '../db/models';
-import type { ModbusDataPoint, OPCUADataPoint, AnomalyDetectionDataPointConfig, AnomalyMetric } from '../types/target-state';
-import { mqttDeviceTopic } from '../mqtt/topics';
-import { encodeIfUuid } from '../mqtt/codec';
-import { getTenantId } from '../redis/tenant-keys';
+import { query } from '../../db/connection';
+import { EventPublisher } from '../event-sourcing';
+import logger from '../../utils/logger';
+import { randomUUID as uuidv4 } from 'crypto';
+import { DeviceTargetStateModel } from '../../db/models';
+import type { ModbusDataPoint, OPCUADataPoint, AnomalyDetectionDataPointConfig, AnomalyMetric } from '../../types/target-state';
+import { mqttDeviceTopic } from '../../mqtt/topics';
+import { encodeIfUuid } from '../../mqtt/codec';
+import { getTenantId } from '../../redis/tenant-keys';
 
 const eventPublisher = new EventPublisher();
 

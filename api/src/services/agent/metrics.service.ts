@@ -1,5 +1,5 @@
-import { query } from '../db/connection';
-import logger from '../utils/logger';
+import { query } from '../../db/connection';
+import logger from '../../utils/logger';
 
 // ---------------------------------------------------------------------------
 // Input types

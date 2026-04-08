@@ -5,8 +5,9 @@
  * API_BASE is derived once here and re-exported for proxies.ts.
  */
 
-import express from 'express';
-import { setupApiDocs } from '../docs';
+import type { FastifyInstance } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
+import { areApiDocsEnabled, setupApiDocs } from '../docs';
 
 // Route modules
 import authRoutes from '../routes/auth';
@@ -18,20 +19,17 @@ import deviceMetricsRoutes from '../routes/agent-metrics';
 import provisioningRoutes from '../routes/provisioning';
 import agentsRoutes from '../routes/agents';
 import adminRoutes from '../routes/admin';
-import appsRoutes from '../routes/apps';
-import imageRegistryRoutes from '../routes/image-registry';
 import deviceJobsRoutes from '../routes/agent-jobs';
 import rotationRoutes from '../routes/rotation';
 import eventsRoutes from '../routes/events';
 import mqttBrokerRoutes from '../mqtt/broker';
 import mqttMetricsRoutes from '../mqtt/metrics';
-import { router as deviceSensorsRoutes } from '../routes/agent-devices';
-import { router as trafficRoutes } from '../routes/traffic';
-import { router as deviceTagsRoutes } from '../routes/agent-tags';
+import deviceSensorsRoutes from '../routes/agent-devices';
+import deviceTagsRoutes from '../routes/agent-tags';
 import dashboardLayoutsRoutes from '../routes/dashboard-layouts';
 import mosquittoAuthRoutes from '../mqtt/auth';
-import { router as noderedStorageRoutes } from '../routes/nodered';
-import { router as metricsRoutes } from '../routes/metrics';
+import noderedStorageRoutes from '../routes/nodered';
+import metricsRoutes from '../routes/metrics';
 import prometheusRoutes from '../routes/prometheus';
 import anomalyRoutes from '../routes/anomaly';
 import anomalyIncidentsRoutes from '../routes/anomaly-incidents';
@@ -42,12 +40,13 @@ import dashboardAiRoutes from '../routes/dashboard-ai';
 import licenseRoutes from '../routes/license';
 import billingRoutes from '../routes/billing';
 import fleetRoutes from '../routes/fleets';
+import readingsRoutes from '../routes/readings';
 
 import {
-  globalApiRateLimit,
-  authRateLimit,
-  deviceDataRateLimit,
-  adminRateLimit,
+  globalRateLimitOptions,
+  authRateLimitOptions,
+  deviceDataRateLimitOptions,
+  adminRateLimitOptions,
 } from '../middleware/rate-limit';
 import jwtAuth from '../middleware/jwt-auth';
 
@@ -68,24 +67,28 @@ const PATHS = {
   dashboardLayouts:   '/dashboard-layouts',
   dashboard:          '/dashboard',
   metricsCatalog:     '/metrics',
+  readings:           '/readings',
+  anomaly:            '/anomaly',
 } as const;
 
-export function mountRoutes(app: express.Application): void {
+export async function mountRoutes(fastify: FastifyInstance): Promise<void> {
+  const apiDocsEnabled = areApiDocsEnabled();
+
   // Root info endpoint
-  app.get(PATHS.root, (req, res) => {
-    res.json({
+  fastify.get(PATHS.root, async (_request, reply) => {
+    return reply.send({
       status: 'ok',
       service: 'Iotistica API',
       version: '2.0.0',
       apiVersion: API_VERSION,
       apiBase: API_BASE,
-      documentation: '/api/docs',
+      documentation: apiDocsEnabled ? '/api/docs' : undefined,
     });
   });
 
   // Health check (Kubernetes liveness/readiness probes)
-  app.get(PATHS.health, (req, res) => {
-    res.status(200).json({
+  fastify.get(PATHS.health, async (_request, reply) => {
+    return reply.status(200).send({
       status: 'healthy',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
@@ -93,73 +96,80 @@ export function mountRoutes(app: express.Application): void {
   });
 
   // API documentation (Swagger/OpenAPI)
-  setupApiDocs(app, API_BASE);
+  await setupApiDocs(fastify, API_BASE);
 
   // Prometheus scrape endpoint (no auth, standard /metrics path)
-  app.use(prometheusRoutes);
+  await fastify.register(prometheusRoutes);
 
   // Mosquitto HTTP auth backend (no versioning - called directly by mosquitto-go-auth)
-  app.use(PATHS.mosquittoAuth, mosquittoAuthRoutes);
+  await fastify.register(mosquittoAuthRoutes, { prefix: PATHS.mosquittoAuth });
 
   // ============================================================================
-  // Versioned API sub-router — all routes below are relative to API_BASE
+  // Versioned API scope — all routes below are relative to API_BASE
   // ============================================================================
-  const api = express.Router();
+  await fastify.register(async function apiBase(f) {
+    // Global rate limit — covers all versioned routes
+    await f.register(rateLimit, globalRateLimitOptions);
 
-  // Rate Limiting - applied first so it covers all versioned routes
-  api.use(globalApiRateLimit);
+    // Auth — strict rate limit (brute-force protection)
+    await f.register(async function authScope(af) {
+      await af.register(rateLimit, authRateLimitOptions);
+      await af.register(authRoutes);
+    }, { prefix: PATHS.auth });
 
-  // Auth - strict rate limit (brute-force protection)
-  api.use(PATHS.auth, authRateLimit, authRoutes);
+    // CRITICAL: agentsRoutes BEFORE usersRoutes to prevent /:id matching /agents
+    await f.register(agentsRoutes);
 
-  // CRITICAL: agentsRoutes BEFORE usersRoutes to prevent /:id matching /agents
-  api.use(agentsRoutes);
+    // User / admin management — JWT required + admin rate limit
+    await f.register(async function adminScope(af) {
+      await af.register(rateLimit, adminRateLimitOptions);
+      await af.register(usersRoutes, { prefix: PATHS.users });
+      await af.register(adminRoutes, { prefix: PATHS.admin });
+    });
 
-  // User / admin management - JWT required
-  api.use(PATHS.users, jwtAuth, adminRateLimit, usersRoutes);
-  api.use(PATHS.admin, jwtAuth, adminRateLimit, adminRoutes);
+    // Invites: accept is public (handled internally), other ops require jwtAuth
+    await f.register(invitesRoutes);
 
-  // Invites: accept is public (handled internally), other ops require jwtAuth
-  api.use(invitesRoutes);
+    // Device data ingestion — high rate limits (supports 16Hz sensor data)
+    await f.register(async function deviceDataScope(df) {
+      await df.register(rateLimit, deviceDataRateLimitOptions);
+      await df.register(deviceLogsRoutes);
+      await df.register(deviceMetricsRoutes);
+      await df.register(deviceSensorsRoutes);
+    });
 
-  // Device data ingestion - high rate limits (supports 16Hz sensor data)
-  api.use(deviceDataRateLimit, deviceLogsRoutes);
-  api.use(deviceDataRateLimit, deviceMetricsRoutes);
-  api.use(deviceDataRateLimit, deviceSensorsRoutes);
+    // Standard API routes (global rate limit already applied at apiBase scope)
+    // ORDERING NOTE:
+    //   - noderedStorageRoutes: before any pathless jwtAuth middleware
+    //   - fleet/anomaly/incidents/alerts: MUST be before profileRoutes (/:name catches everything)
+    const standardRoutes = [
+      licenseRoutes,
+      billingRoutes,
+      provisioningRoutes,
+      deviceStateRoutes,
+      deviceJobsRoutes,
+      rotationRoutes,
+      noderedStorageRoutes,   // IMPORTANT: before pathless jwtAuth routers
+      fleetRoutes,            // MUST be before profileRoutes
+      anomalyIncidentsRoutes, // MUST be before profileRoutes
+      anomalyAlertsRoutes,    // MUST be before profileRoutes
+      mqttMetricsRoutes,
+      eventsRoutes,
+      mqttBrokerRoutes,
+      deviceTagsRoutes,
+      aiChatRoutes,
+    ];
+    for (const route of standardRoutes) {
+      await f.register(route);
+    }
 
-  // Standard API routes - global rate limit already applied above
-  // ORDERING NOTE:
-  //   - noderedStorageRoutes: before any pathless jwtAuth middleware
-  //   - fleet/anomaly/incidents/alerts: MUST be before profileRoutes (/:name catches everything)
-  const standardRoutes = [
-    licenseRoutes,
-    billingRoutes,
-    provisioningRoutes,
-    appsRoutes,
-    deviceStateRoutes,
-    imageRegistryRoutes,
-    deviceJobsRoutes,
-    rotationRoutes,
-    noderedStorageRoutes,   // IMPORTANT: before pathless jwtAuth routers
-    fleetRoutes,            // MUST be before profileRoutes
-    anomalyRoutes,          // MUST be before profileRoutes
-    anomalyIncidentsRoutes, // MUST be before profileRoutes
-    anomalyAlertsRoutes,    // MUST be before profileRoutes
-    mqttMetricsRoutes,
-    eventsRoutes,
-    mqttBrokerRoutes,
-    trafficRoutes,
-    deviceTagsRoutes,
-    aiChatRoutes,
-  ];
-  standardRoutes.forEach(r => api.use(r));
+    // Fixed sub-path prefix routes
+    await f.register(profileRoutes, { prefix: PATHS.profiles });
+    await f.register(dashboardLayoutsRoutes, { prefix: PATHS.dashboardLayouts });
+    await f.register(dashboardAiRoutes, { prefix: PATHS.dashboard });
+    await f.register(metricsRoutes, { prefix: PATHS.metricsCatalog });
+    await f.register(readingsRoutes, { prefix: PATHS.readings });
+    await f.register(anomalyRoutes, { prefix: PATHS.anomaly });
 
-  // Fixed sub-path prefix routes (cannot use the forEach pattern above)
-  api.use(PATHS.profiles, profileRoutes);
-  api.use(PATHS.dashboardLayouts, dashboardLayoutsRoutes);
-  api.use(PATHS.dashboard, dashboardAiRoutes);
-  api.use(PATHS.metricsCatalog, metricsRoutes);
-
-  // Mount the versioned sub-router once
-  app.use(API_BASE, api);
+  }, { prefix: API_BASE });
 }

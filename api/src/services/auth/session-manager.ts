@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import logger from '../../utils/logger';
 import { query } from '../../db/connection';
 
@@ -101,7 +101,7 @@ export class SessionManager {
       }
     }
 
-    const sessionId = uuidv4();
+    const sessionId = randomUUID();
     const now = new Date();
 
     const sessionInfo: SessionInfo = {

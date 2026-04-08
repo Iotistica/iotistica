@@ -1,16 +1,51 @@
-/**
+﻿/**
  * Readings API Routes
  * 
  * Endpoints for querying time-series sensor data from readings hypertable.
  */
 
-import express from 'express';
 import { z } from 'zod';
-import { readingsService } from '../services/readings.service';
+import { readingsService } from '../services/ingestion/readings.service';
 import { jwtAuth } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
+import type { FastifyPluginAsync } from 'fastify'
 
-const router = express.Router();
+interface AgentUuidParams {
+  agent_uuid: string;
+}
+
+interface AgentMetricParams extends AgentUuidParams {
+  metric: string;
+}
+
+interface LatestReadingsQuerystring {
+  metrics?: string;
+}
+
+interface TimeSeriesQuerystring {
+  metric?: string;
+  protocol?: string;
+  start?: string;
+  end?: string;
+  limit?: string;
+}
+
+interface AggregateQuerystring {
+  start?: string;
+  end?: string;
+}
+
+interface InsertReadingBody {
+  agent_uuid?: string;
+  metric_name?: string;
+  value?: number;
+  unit?: string;
+  protocol?: string;
+  quality?: 'good' | 'fair' | 'poor';
+  extra?: Record<string, unknown> | null;
+}
+
+const plugin: FastifyPluginAsync = async (fastify) => {
 
 // Validation schemas
 const uuidSchema = z.string().uuid('Invalid device UUID format');
@@ -24,12 +59,12 @@ const limitSchema = z.number().int().min(1).max(10000).default(1000);
  * Query params:
  * - metrics: Comma-separated list of metric names (optional)
  */
-router.get('/:agent_uuid/latest', jwtAuth, async (req, res) => {
+fastify.get<{ Params: AgentUuidParams; Querystring: LatestReadingsQuerystring }>('/:agent_uuid/latest', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { agent_uuid } = req.params;
     const { metrics } = req.query;
-    const requestId = (req as any).id || 'unknown';
-    const userId = (req as any).user?.id;
+    const requestId = req.id || 'unknown';
+    const userId = req.user?.id;
 
     // Validate agent_uuid
     const validatedUuid = uuidSchema.parse(agent_uuid);
@@ -38,19 +73,19 @@ router.get('/:agent_uuid/latest', jwtAuth, async (req, res) => {
 
     const readings = await readingsService.getLatest(validatedUuid, metric_names);
 
-    res.json({
+    return reply.send({
       agent_uuid: validatedUuid,
       count: readings.length,
       readings
     });
-  } catch (error: any) {
-    const requestId = (req as any).id || 'unknown';
+  } catch (error: unknown) {
+    const requestId = req.id || 'unknown';
     if (error instanceof z.ZodError) {
       logger.warn('Invalid request parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid agent UUID format', requestId });
+      return reply.status(400).send({ error: 'Invalid agent UUID format', requestId });
     }
-    logger.error('Error getting latest readings', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error getting latest readings', { requestId, userId: req.user?.id, error: error instanceof Error ? error.message : 'Unknown error' });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
@@ -65,11 +100,11 @@ router.get('/:agent_uuid/latest', jwtAuth, async (req, res) => {
  * - end: ISO 8601 end time (optional)
  * - limit: Max results (default: 1000)
  */
-router.get('/:agent_uuid/timeseries', jwtAuth, async (req, res) => {
+fastify.get<{ Params: AgentUuidParams; Querystring: TimeSeriesQuerystring }>('/:agent_uuid/timeseries', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { agent_uuid } = req.params;
     const { metric, protocol, start, end, limit } = req.query;
-    const requestId = (req as any).id || 'unknown';
+    const requestId = req.id || 'unknown';
 
     // Validate agent_uuid
     const validatedUuid = uuidSchema.parse(agent_uuid);
@@ -87,13 +122,13 @@ router.get('/:agent_uuid/timeseries', jwtAuth, async (req, res) => {
     if (start) {
       startTime = new Date(start as string);
       if (isNaN(startTime.getTime())) {
-        return res.status(400).json({ error: 'Invalid start time format', requestId });
+        return reply.status(400).send({ error: 'Invalid start time format', requestId });
       }
     }
     if (end) {
       endTime = new Date(end as string);
       if (isNaN(endTime.getTime())) {
-        return res.status(400).json({ error: 'Invalid end time format', requestId });
+        return reply.status(400).send({ error: 'Invalid end time format', requestId });
       }
     }
 
@@ -106,19 +141,19 @@ router.get('/:agent_uuid/timeseries', jwtAuth, async (req, res) => {
       limit: validatedLimit
     });
 
-    res.json({
+    return reply.send({
       agent_uuid: validatedUuid,
       count: readings.length,
       readings
     });
-  } catch (error: any) {
-    const requestId = (req as any).id || 'unknown';
+  } catch (error: unknown) {
+    const requestId = req.id || 'unknown';
     if (error instanceof z.ZodError) {
       logger.warn('Invalid request parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid parameters', requestId });
+      return reply.status(400).send({ error: 'Invalid parameters', requestId });
     }
-    logger.error('Error getting timeseries', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error getting timeseries', { requestId, userId: req.user?.id, error: error instanceof Error ? error.message : 'Unknown error' });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
@@ -130,14 +165,14 @@ router.get('/:agent_uuid/timeseries', jwtAuth, async (req, res) => {
  * - start: ISO 8601 start time (required)
  * - end: ISO 8601 end time (required)
  */
-router.get('/:agent_uuid/:metric/hourly', jwtAuth, async (req, res) => {
+fastify.get<{ Params: AgentMetricParams; Querystring: AggregateQuerystring }>('/:agent_uuid/:metric/hourly', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { agent_uuid, metric } = req.params;
     const { start, end } = req.query;
-    const requestId = (req as any).id || 'unknown';
+    const requestId = req.id || 'unknown';
 
     if (!start || !end) {
-      return res.status(400).json({ error: 'start and end times are required', requestId });
+      return reply.status(400).send({ error: 'start and end times are required', requestId });
     }
 
     // Validate inputs
@@ -148,7 +183,7 @@ router.get('/:agent_uuid/:metric/hourly', jwtAuth, async (req, res) => {
     const startTime = new Date(start as string);
     const endTime = new Date(end as string);
     if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-      return res.status(400).json({ error: 'Invalid date format', requestId });
+      return reply.status(400).send({ error: 'Invalid date format', requestId });
     }
 
     const aggregates = await readingsService.getHourlyAggregates(
@@ -158,21 +193,21 @@ router.get('/:agent_uuid/:metric/hourly', jwtAuth, async (req, res) => {
       endTime
     );
 
-    res.json({
+    return reply.send({
       agent_uuid: validatedUuid,
       metric_name: validatedMetric,
       interval: 'hourly',
       count: aggregates.length,
       aggregates
     });
-  } catch (error: any) {
-    const requestId = (req as any).id || 'unknown';
+  } catch (error: unknown) {
+    const requestId = req.id || 'unknown';
     if (error instanceof z.ZodError) {
       logger.warn('Invalid request parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid parameters', requestId });
+      return reply.status(400).send({ error: 'Invalid parameters', requestId });
     }
-    logger.error('Error getting hourly aggregates', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error getting hourly aggregates', { requestId, userId: req.user?.id, error: error instanceof Error ? error.message : 'Unknown error' });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
@@ -184,14 +219,14 @@ router.get('/:agent_uuid/:metric/hourly', jwtAuth, async (req, res) => {
  * - start: ISO 8601 start time (required)
  * - end: ISO 8601 end time (required)
  */
-router.get('/:agent_uuid/:metric/daily', jwtAuth, async (req, res) => {
+fastify.get<{ Params: AgentMetricParams; Querystring: AggregateQuerystring }>('/:agent_uuid/:metric/daily', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { agent_uuid, metric } = req.params;
     const { start, end } = req.query;
-    const requestId = (req as any).id || 'unknown';
+    const requestId = req.id || 'unknown';
 
     if (!start || !end) {
-      return res.status(400).json({ error: 'start and end times are required', requestId });
+      return reply.status(400).send({ error: 'start and end times are required', requestId });
     }
 
     // Validate inputs
@@ -202,7 +237,7 @@ router.get('/:agent_uuid/:metric/daily', jwtAuth, async (req, res) => {
     const startTime = new Date(start as string);
     const endTime = new Date(end as string);
     if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) {
-      return res.status(400).json({ error: 'Invalid date format', requestId });
+      return reply.status(400).send({ error: 'Invalid date format', requestId });
     }
 
     const aggregates = await readingsService.getDailyAggregates(
@@ -212,21 +247,21 @@ router.get('/:agent_uuid/:metric/daily', jwtAuth, async (req, res) => {
       endTime
     );
 
-    res.json({
+    return reply.send({
       agent_uuid: validatedUuid,
       metric_name: validatedMetric,
       interval: 'daily',
       count: aggregates.length,
       aggregates
     });
-  } catch (error: any) {
-    const requestId = (req as any).id || 'unknown';
+  } catch (error: unknown) {
+    const requestId = req.id || 'unknown';
     if (error instanceof z.ZodError) {
       logger.warn('Invalid request parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid parameters', requestId });
+      return reply.status(400).send({ error: 'Invalid parameters', requestId });
     }
-    logger.error('Error getting daily aggregates', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error getting daily aggregates', { requestId, userId: req.user?.id, error: error instanceof Error ? error.message : 'Unknown error' });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
@@ -234,29 +269,29 @@ router.get('/:agent_uuid/:metric/daily', jwtAuth, async (req, res) => {
  * Get metrics summary
  * GET /api/readings/:agent_uuid/summary
  */
-router.get('/:agent_uuid/summary', jwtAuth, async (req, res) => {
+fastify.get<{ Params: AgentUuidParams }>('/:agent_uuid/summary', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { agent_uuid } = req.params;
-    const requestId = (req as any).id || 'unknown';
+    const requestId = req.id || 'unknown';
 
     // Validate agent_uuid
     const validatedUuid = uuidSchema.parse(agent_uuid);
 
     const summary = await readingsService.getMetricsSummary(validatedUuid);
 
-    res.json({
+    return reply.send({
       agent_uuid: validatedUuid,
       total_metrics: summary.length,
       metrics: summary
     });
-  } catch (error: any) {
-    const requestId = (req as any).id || 'unknown';
+  } catch (error: unknown) {
+    const requestId = req.id || 'unknown';
     if (error instanceof z.ZodError) {
       logger.warn('Invalid request parameters', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid agent UUID format', requestId });
+      return reply.status(400).send({ error: 'Invalid agent UUID format', requestId });
     }
-    logger.error('Error getting metrics summary', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error getting metrics summary', { requestId, userId: req.user?.id, error: error instanceof Error ? error.message : 'Unknown error' });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
@@ -275,15 +310,15 @@ router.get('/:agent_uuid/summary', jwtAuth, async (req, res) => {
  *   "extra": { "slave_id": 1 }
  * }
  */
-router.post('/', jwtAuth, async (req, res) => {
+fastify.post<{ Body: InsertReadingBody }>('/', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const reading = req.body;
-    const requestId = (req as any).id || 'unknown';
-    const userId = (req as any).user?.id;
+    const requestId = req.id || 'unknown';
+    const userId = req.user?.id;
 
     // Validate required fields
     if (!reading.agent_uuid || !reading.metric_name || !reading.protocol) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'agent_uuid, metric_name, and protocol are required',
         requestId
       });
@@ -313,16 +348,18 @@ router.post('/', jwtAuth, async (req, res) => {
     await readingsService.insert(sanitizedReading);
 
     logger.info('Reading inserted', { requestId, userId, deviceUuid: validatedUuid, metric: validatedMetric });
-    res.status(201).json({ message: 'Reading inserted successfully', requestId });
-  } catch (error: any) {
-    const requestId = (req as any).id || 'unknown';
+    return reply.status(201).send({ message: 'Reading inserted successfully', requestId });
+  } catch (error: unknown) {
+    const requestId = req.id || 'unknown';
     if (error instanceof z.ZodError) {
       logger.warn('Invalid reading data', { requestId, errors: error.errors });
-      return res.status(400).json({ error: 'Invalid reading data', requestId });
+      return reply.status(400).send({ error: 'Invalid reading data', requestId });
     }
-    logger.error('Error inserting reading', { requestId, userId: (req as any).user?.id, error: error.message });
-    res.status(500).json({ error: 'Internal server error', requestId });
+    logger.error('Error inserting reading', { requestId, userId: req.user?.id, error: error instanceof Error ? error.message : 'Unknown error' });
+    return reply.status(500).send({ error: 'Internal server error', requestId });
   }
 });
 
-export default router;
+};
+
+export default plugin;

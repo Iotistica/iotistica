@@ -12,7 +12,7 @@
  */
 
 import crypto from 'crypto';
-import axios, { AxiosError } from 'axios';
+import { fetch } from 'undici';
 
 class SimpleCache<T> {
   private store = new Map<string, T>();
@@ -86,42 +86,42 @@ async function fetchFromProvisioning(
     throw new Error('INTERNAL_AUTH_TOKEN not configured (required for provisioning API calls)');
   }
 
+  let response: Awaited<ReturnType<typeof fetch>>;
   try {
-    const response = await axios.get(
+    response = await fetch(
       `${PROVISIONING_API_URL}/api/internal/users/${auth0_sub}/tenants/${customer_id}/role`,
       {
         headers: {
           'X-Internal-Token': INTERNAL_AUTH_TOKEN,
           'Content-Type': 'application/json'
         },
-        timeout: 5000  // 5-second timeout to avoid blocking requests
+        signal: AbortSignal.timeout(5000)
       }
     );
-
-    if (!response.data?.success || !response.data?.data) {
-      throw new Error(`Invalid response from provisioning API: ${JSON.stringify(response.data)}`);
-    }
-
-    return response.data.data as RoleAndStatus;
   } catch (error: any) {
-    const axiosErr = error as AxiosError;
-
-    if (axiosErr.response?.status === 404) {
-      throw new Error(
-        `User ${auth0_sub} not found in customer ${customer_id} (provisioning returned 404)`
-      );
-    }
-
-    if (axiosErr.response?.status === 401) {
-      throw new Error('Invalid INTERNAL_AUTH_TOKEN (provisioning rejected request)');
-    }
-
-    if (axiosErr.code === 'ECONNREFUSED' || axiosErr.code === 'ETIMEDOUT') {
-      throw new Error(`Provisioning API unreachable: ${error.message}`);
-    }
-
-    throw error;
+    throw new Error(`Provisioning API unreachable: ${error.message}`);
   }
+
+  if (response.status === 404) {
+    throw new Error(
+      `User ${auth0_sub} not found in customer ${customer_id} (provisioning returned 404)`
+    );
+  }
+
+  if (response.status === 401) {
+    throw new Error('Invalid INTERNAL_AUTH_TOKEN (provisioning rejected request)');
+  }
+
+  if (!response.ok) {
+    throw new Error(`Provisioning API returned ${response.status}`);
+  }
+
+  const data = await response.json() as any;
+  if (!data?.success || !data?.data) {
+    throw new Error(`Invalid response from provisioning API: ${JSON.stringify(data)}`);
+  }
+
+  return data.data as RoleAndStatus;
 }
 
 /**

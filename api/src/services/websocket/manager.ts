@@ -53,7 +53,7 @@ import jwt, { JwtPayload } from 'jsonwebtoken';
 import { z } from 'zod';
 import { AgentModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
 import logger from '../../utils/logger';
-import fetch from 'node-fetch';
+import { fetch } from 'undici';
 import { sessionManager } from '../auth/session-manager';
 import { agentMetricsPattern, getTenantId, tenantPrefix } from '../../redis/tenant-keys';
 import {

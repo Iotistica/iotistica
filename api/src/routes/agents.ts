@@ -1,4 +1,3 @@
-// ...existing code...
 /**
  * Update device details (name, type, IP, MAC)
  * PATCH /api/v1/agents/:uuid
@@ -11,7 +10,7 @@
  * Endpoints for managing individual agents and their deployed applications
  */
 
-import express from 'express';
+
 import { query } from '../db/connection';
 import { z } from 'zod';
 import {
@@ -33,9 +32,123 @@ import { virtualAgentDeployer } from '../services/provisioning/virtual-agent-dep
 import { provisioningService } from '../services/provisioning/provisioning.service';
 import { mqttDeviceTopic } from '../mqtt/topics';
 import { getTenantId } from '../redis/tenant-keys';
+import type { FastifyPluginAsync } from 'fastify'
 
+type AgentUuidParams = {
+  uuid: string;
+};
 
-export const router = express.Router();
+type AgentUuidAppParams = {
+  uuid: string;
+  appId: string;
+};
+
+type AgentUpdateBody = {
+  deviceName?: string;
+  deviceType?: string;
+  ipAddress?: string;
+  macAddress?: string;
+  location?: string | null;
+};
+
+type AgentsListQuerystring = {
+  online?: string;
+  page?: string | number;
+  limit?: string | number;
+  filter?: string;
+  includeTags?: string;
+};
+
+type DeviceTagInput = {
+  key: string;
+  value: string;
+};
+
+type RegisterAgentBody = {
+  deviceName?: string;
+  deviceType?: string;
+  ipAddress?: string;
+  macAddress?: string;
+  namespace?: string;
+  fleet_uuid?: string;
+  tags?: DeviceTagInput[];
+  metadata?: unknown;
+  endpoints?: Array<{ protocol: string; [key: string]: unknown }>;
+  devicePublicKey?: string;
+};
+
+type ActiveBody = {
+  is_active?: boolean;
+};
+
+type AppServiceInput = {
+  serviceName: string;
+  image: string;
+  ports?: string[];
+  environment?: Record<string, string>;
+  volumes?: string[];
+  config?: Record<string, unknown>;
+  state?: string;
+};
+
+type CreateAppBody = {
+  appId?: number;
+  appName?: string;
+  services?: AppServiceInput[];
+};
+
+type UpdateAppBody = {
+  appName?: string;
+  services?: AppServiceInput[];
+};
+
+type DeployedByBody = {
+  deployedBy?: string;
+};
+
+type BrokerBody = {
+  brokerId?: number;
+};
+
+type UpdateAgentBody = {
+  version?: string;
+  scheduled_time?: string;
+  force?: boolean;
+};
+
+type VirtualAgentBody = {
+  deviceName?: string;
+  fleetId?: string;
+  namespace?: string;
+  description?: string;
+  tags?: DeviceTagInput[];
+};
+
+function parseNumericQuery(value: string | number | undefined, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
+
+function getHeaderValue(header: string | string[] | undefined): string | undefined {
+  if (Array.isArray(header)) {
+    return header[0];
+  }
+
+  return header;
+}
+
+const plugin: FastifyPluginAsync = async (fastify) => {
+
 
 // SECURITY: Input validation schema for device updates
 const deviceNameSchema = z.string().min(1).max(255).regex(/^[a-zA-Z0-9\-_\s.]+$/, 'Device name contains invalid characters. Allowed: letters, numbers, spaces, hyphens, underscores, dots');
@@ -44,14 +157,14 @@ const ipAddressSchema = z.string().ip({ version: 'v4' }).or(z.string().ip({ vers
 const macAddressSchema = z.string().regex(/^([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]{2})$/, 'Invalid MAC address format (use XX:XX:XX:XX:XX:XX)');
 const locationSchema = z.string().max(255).regex(/^[a-zA-Z0-9\-_\s.,()]+$/, 'Location contains invalid characters') .nullable();
 
-router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
+fastify.patch<{ Params: AgentUuidParams; Body: AgentUpdateBody }>('/agents/:uuid', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
     const { deviceName, deviceType, ipAddress, macAddress, location } = req.body;
 
     // Validate at least one field is present
     if (!deviceName && !deviceType && !ipAddress && !macAddress && location === undefined) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'At least one of deviceName, deviceType, ipAddress, macAddress, or location must be provided.'
       });
@@ -61,7 +174,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
     if (deviceName) {
       const validName = deviceNameSchema.safeParse(deviceName);
       if (!validName.success) {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Invalid deviceName',
           message: validName.error.errors[0].message
         });
@@ -71,7 +184,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
     if (deviceType) {
       const validType = deviceTypeSchema.safeParse(deviceType);
       if (!validType.success) {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Invalid deviceType',
           message: validType.error.errors[0].message
         });
@@ -81,7 +194,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
     if (ipAddress) {
       const validIp = ipAddressSchema.safeParse(ipAddress);
       if (!validIp.success) {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Invalid ipAddress',
           message: 'IP address must be valid IPv4, IPv6, or hostname'
         });
@@ -91,7 +204,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
     if (macAddress) {
       const validMac = macAddressSchema.safeParse(macAddress);
       if (!validMac.success) {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Invalid macAddress',
           message: 'MAC address must be in format XX:XX:XX:XX:XX:XX'
         });
@@ -101,7 +214,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
     if (location !== undefined) {
       const validLocation = locationSchema.safeParse(location);
       if (!validLocation.success) {
-        return res.status(400).json({
+        return reply.status(400).send({
           error: 'Invalid location',
           message: validLocation.error.errors[0].message
         });
@@ -110,7 +223,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
 
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -141,7 +254,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
       }
     });
 
-    res.json({
+    reply.send({
       success: true,
       device: {
         uuid: updatedDevice.uuid,
@@ -162,7 +275,7 @@ router.patch('/agents/:uuid', jwtAuth, async (req, res) => {
       deviceId: req.params.uuid,
       userId: req.user?.id
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Internal server error',
       requestId: req.id || 'unknown'
     });
@@ -188,7 +301,7 @@ const eventPublisher = new EventPublisher();
  * Get distinct locations from agents and endpoint agents
  * GET /api/v1/agents/locations
  */
-router.get('/agents/locations', jwtAuth, async (req, res) => {
+fastify.get('/agents/locations', { preHandler: [jwtAuth] }, async (_req, reply) => {
   try {
     // Get distinct locations from both agents and endpoint agents
     const result = await query(`
@@ -203,12 +316,12 @@ router.get('/agents/locations', jwtAuth, async (req, res) => {
       ORDER BY location
     `);
     
-    res.json({
+    reply.send({
       locations: result.rows.map(row => row.location)
     });
   } catch (error: any) {
     logger.error('Error fetching locations:', error);
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to fetch locations',
       message: error.message
     });
@@ -219,16 +332,16 @@ router.get('/agents/locations', jwtAuth, async (req, res) => {
  * List all agents
  * GET /api/v1/agents
  */
-router.get('/agents', jwtAuth, async (req, res) => {
+fastify.get<{ Querystring: AgentsListQuerystring }>('/agents', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const isOnline = req.query.online === 'true' ? true : 
                      req.query.online === 'false' ? false : 
                      undefined;
     
     // Extract pagination parameters from query
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
-    const filter = (req.query.filter as string)?.toLowerCase() || 'all';
+    const page = parseNumericQuery(req.query.page, 1);
+    const limit = parseNumericQuery(req.query.limit, 10);
+    const filter = req.query.filter?.toLowerCase() || 'all';
     const includeTags = req.query.includeTags === 'true';
 
     const agents = await AgentModel.list({ isOnline });
@@ -323,7 +436,7 @@ router.get('/agents', jwtAuth, async (req, res) => {
       }));
     }
 
-    res.json({
+    reply.send({
       count: agentsWithTags.length,
       agents: agentsWithTags,
       pagination: {
@@ -338,7 +451,7 @@ router.get('/agents', jwtAuth, async (req, res) => {
       error: error.message,
       stack: error.stack
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to list agents',
       message: error.message
     });
@@ -349,13 +462,13 @@ router.get('/agents', jwtAuth, async (req, res) => {
  * Get specific device
  * GET /api/v1/agents/:uuid
  */
-router.get('/agents/:uuid', async (req, res) => {
+fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid', async (req, reply) => {
   try {
     const { uuid } = req.params;
 
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -364,7 +477,7 @@ router.get('/agents/:uuid', async (req, res) => {
     const targetState = await DeviceTargetStateModel.get(uuid);
     const currentState = await DeviceCurrentStateModel.get(uuid);
 
-    res.json({
+    reply.send({
       device,
       target_state: targetState ? {
         apps: typeof targetState.apps === 'string' ? JSON.parse(targetState.apps as any) : targetState.apps,
@@ -389,7 +502,7 @@ router.get('/agents/:uuid', async (req, res) => {
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to get device',
       message: error.message
     });
@@ -428,12 +541,13 @@ router.get('/agents/:uuid', async (req, res) => {
  * - namespace: K8s namespace (optional, default: 'virtual-agents')
  * - tags: Array of {key, value} tags (optional)
  */
-router.post('/agents', jwtAuth, async (req, res) => {
+fastify.post<{ Body: RegisterAgentBody }>('/agents', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { deviceName, deviceType, ipAddress, macAddress, namespace, fleet_uuid, tags, metadata, endpoints } = req.body;
+    const userAgent = getHeaderValue(req.headers['user-agent']);
 
     if (!deviceName) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Device name required',
         message: 'deviceName is required'
       });
@@ -468,7 +582,7 @@ router.post('/agents', jwtAuth, async (req, res) => {
             namespace: targetNamespace
           });
         } else if (fleetResult.rows.length === 0) {
-          return res.status(400).json({
+          return reply.status(400).send({
             error: 'Invalid fleet_uuid',
             message: `Fleet ${fleet_uuid} not found`
           });
@@ -493,7 +607,7 @@ router.post('/agents', jwtAuth, async (req, res) => {
       const deviceApiKey = crypto.randomBytes(32).toString('hex');
 
       // Register device and trigger K8s deployment via provisioning service
-      const provisioningResponse = await provisioningService.registerDevice(
+      await provisioningService.registerDevice(
         {
           uuid: deviceUuid,
           agentName: uniqueDeviceName,
@@ -506,7 +620,7 @@ router.post('/agents', jwtAuth, async (req, res) => {
           endpoints // Pass protocol endpoints
         },
         req.ip,
-        req.get('user-agent')
+        userAgent
       );
 
       // Save tags if provided
@@ -521,7 +635,7 @@ router.post('/agents', jwtAuth, async (req, res) => {
         }
       }
 
-      return res.status(202).json({
+      return reply.status(202).send({
         success: true,
         deviceUuid,
         deviceName: uniqueDeviceName,
@@ -600,7 +714,7 @@ router.post('/agents', jwtAuth, async (req, res) => {
       deviceType: type
     });
 
-    res.status(201).json({
+    reply.status(201).send({
       success: true,
       device: {
         uuid: device.uuid,
@@ -625,7 +739,7 @@ router.post('/agents', jwtAuth, async (req, res) => {
       eventType: AuditEventType.PROVISIONING_FAILED,
       severity: AuditSeverity.ERROR,
       ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
+      userAgent: getHeaderValue(req.headers['user-agent']),
       details: {
         error: error.message,
         deviceName: req.body.deviceName,
@@ -633,7 +747,7 @@ router.post('/agents', jwtAuth, async (req, res) => {
       }
     }).catch(err => logger.error('Audit log failed', err));
 
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to register device',
       message: error.message
     });
@@ -644,13 +758,13 @@ router.post('/agents', jwtAuth, async (req, res) => {
  * Activate/deactivate device
  * PATCH /api/v1/agents/:uuid/active
  */
-router.patch('/agents/:uuid/active', async (req, res) => {
+fastify.patch<{ Params: AgentUuidParams; Body: ActiveBody }>('/agents/:uuid/active', async (req, reply) => {
   try {
     const { uuid } = req.params;
     const { is_active } = req.body;
 
     if (typeof is_active !== 'boolean') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'is_active must be a boolean (true or false)'
       });
@@ -658,7 +772,7 @@ router.patch('/agents/:uuid/active', async (req, res) => {
 
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -698,8 +812,8 @@ router.patch('/agents/:uuid/active', async (req, res) => {
         impact: 'medium',
         actor: {
           type: 'user',
-          id: (req as any).user?.id || 'system',
-          name: (req as any).user?.email,
+          id: String(req.user?.id ?? 'system'),
+          name: req.user?.email,
           ip_address: req.ip
         }
       }
@@ -717,7 +831,7 @@ router.patch('/agents/:uuid/active', async (req, res) => {
       }
     });
 
-    res.json({
+    reply.send({
       status: 'ok',
       message: `Device ${action}`,
       device: {
@@ -733,7 +847,7 @@ router.patch('/agents/:uuid/active', async (req, res) => {
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to update device status',
       message: error.message
     });
@@ -745,13 +859,13 @@ router.patch('/agents/:uuid/active', async (req, res) => {
  * DELETE /api/v1/agents/:uuid
  * Requires device authentication - device must send its API key
  */
-router.delete('/agents/:uuid', deviceAuth, async (req, res) => {
+fastify.delete<{ Params: AgentUuidParams }>('/agents/:uuid', { preHandler: [deviceAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
 
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -764,7 +878,7 @@ router.delete('/agents/:uuid', deviceAuth, async (req, res) => {
       deviceName: req.device?.deviceName 
     });
 
-    res.json({
+    reply.send({
       status: 'ok',
       message: 'Device deleted',
     });
@@ -774,7 +888,7 @@ router.delete('/agents/:uuid', deviceAuth, async (req, res) => {
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to delete device',
       message: error.message
     });
@@ -805,21 +919,21 @@ router.delete('/agents/:uuid', deviceAuth, async (req, res) => {
  * 
  * This copies the app template and deploys with device-specific configuration
  */
-router.post('/agents/:uuid/apps', async (req, res) => {
+fastify.post<{ Params: AgentUuidParams; Body: CreateAppBody }>('/agents/:uuid/apps', async (req, reply) => {
   try {
     const { uuid } = req.params;
     const { appId, appName, services } = req.body;
 
     // Validation
     if (!appId || typeof appId !== 'number') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'appId is required and must be a number'
       });
     }
 
     if (!services || !Array.isArray(services)) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'services is required and must be an array'
       });
@@ -837,7 +951,7 @@ router.post('/agents/:uuid/apps', async (req, res) => {
       appNameToUse = appResult.rows[0].app_name;
     } else if (!appName) {
       // No catalog entry and no appName provided
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: `Application ${appId} not found in catalog. Please provide appName for ad-hoc deployment.`
       });
@@ -847,7 +961,7 @@ router.post('/agents/:uuid/apps', async (req, res) => {
     // Verify device exists
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: `Device ${uuid} not found`
       });
@@ -859,7 +973,7 @@ router.post('/agents/:uuid/apps', async (req, res) => {
 
     // Generate service IDs for each service
     const servicesWithIds = await Promise.all(
-      services.map(async (service: any, index: number) => {
+      services.map(async (service, index) => {
         // Get next service ID from sequence
         const idResult = await query<{ nextval: number }>(
           "SELECT nextval('global_service_id_seq') as nextval"
@@ -918,7 +1032,7 @@ router.post('/agents/:uuid/apps', async (req, res) => {
       services: servicesWithIds.map(s => s.serviceName)
     });
 
-    res.status(201).json({
+    reply.status(201).send({
       status: 'ok',
       message: 'Application deployed to device',
       deviceUuid: uuid,
@@ -933,7 +1047,7 @@ router.post('/agents/:uuid/apps', async (req, res) => {
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to deploy application',
       message: error.message
     });
@@ -946,21 +1060,21 @@ router.post('/agents/:uuid/apps', async (req, res) => {
  * 
  * Body: { services: [...] } - replaces services for this app
  */
-router.patch('/agents/:uuid/apps/:appId', async (req, res) => {
+fastify.patch<{ Params: AgentUuidAppParams; Body: UpdateAppBody }>('/agents/:uuid/apps/:appId', async (req, reply) => {
   try {
     const { uuid, appId: appIdStr } = req.params;
     const { appName, services } = req.body;
 
     const appId = parseInt(appIdStr);
     if (isNaN(appId)) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'appId must be a number'
       });
     }
 
     if (!services || !Array.isArray(services)) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'services is required and must be an array'
       });
@@ -969,7 +1083,7 @@ router.patch('/agents/:uuid/apps/:appId', async (req, res) => {
     // Get current target state
     const currentTarget = await DeviceTargetStateModel.get(uuid);
     if (!currentTarget) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: `Device ${uuid} has no target state`
       });
@@ -978,7 +1092,7 @@ router.patch('/agents/:uuid/apps/:appId', async (req, res) => {
     const currentApps = currentTarget.apps || {};
 
     if (!currentApps[appId]) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: `App ${appId} not deployed on device ${uuid}`
       });
@@ -987,7 +1101,7 @@ router.patch('/agents/:uuid/apps/:appId', async (req, res) => {
     // Preserve existing service IDs or generate new ones for new services
     const existingServices = currentApps[appId].services || [];
     const servicesWithIds = await Promise.all(
-      services.map(async (service: any) => {
+      services.map(async (service) => {
         // Try to find existing service by name to preserve its ID
         const existingService = existingServices.find((s: any) => s.serviceName === service.serviceName);
         
@@ -1036,7 +1150,7 @@ router.patch('/agents/:uuid/apps/:appId', async (req, res) => {
       serviceCount: servicesWithIds.length
     });
 
-    res.json({
+    reply.send({
       status: 'ok',
       message: 'Application updated on device',
       deviceUuid: uuid,
@@ -1052,7 +1166,7 @@ router.patch('/agents/:uuid/apps/:appId', async (req, res) => {
       deviceId: req.params.uuid,
       appId: req.params.appId
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to update application',
       message: error.message
     });
@@ -1063,13 +1177,13 @@ router.patch('/agents/:uuid/apps/:appId', async (req, res) => {
  * Remove app from device
  * DELETE /api/v1/agents/:uuid/apps/:appId
  */
-router.delete('/agents/:uuid/apps/:appId', async (req, res) => {
+fastify.delete<{ Params: AgentUuidAppParams }>('/agents/:uuid/apps/:appId', async (req, reply) => {
   try {
     const { uuid, appId: appIdStr } = req.params;
 
     const appId = parseInt(appIdStr);
     if (isNaN(appId)) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'appId must be a number'
       });
@@ -1078,7 +1192,7 @@ router.delete('/agents/:uuid/apps/:appId', async (req, res) => {
     // Get current target state
     const currentTarget = await DeviceTargetStateModel.get(uuid);
     if (!currentTarget) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: `Device ${uuid} has no target state`
       });
@@ -1087,7 +1201,7 @@ router.delete('/agents/:uuid/apps/:appId', async (req, res) => {
     const currentApps = currentTarget.apps || {};
 
     if (!currentApps[appId]) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: `App ${appId} not deployed on device ${uuid}`
       });
@@ -1107,7 +1221,7 @@ router.delete('/agents/:uuid/apps/:appId', async (req, res) => {
       appName
     });
 
-    res.json({
+    reply.send({
       status: 'ok',
       message: 'Application removed from device',
       deviceUuid: uuid,
@@ -1122,7 +1236,7 @@ router.delete('/agents/:uuid/apps/:appId', async (req, res) => {
       deviceId: req.params.uuid,
       appId: req.params.appId
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to remove application',
       message: error.message
     });
@@ -1135,14 +1249,14 @@ router.delete('/agents/:uuid/apps/:appId', async (req, res) => {
  * 
  * Deploys a specific app by incrementing version
  */
-router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
+fastify.post<{ Params: AgentUuidAppParams; Body: DeployedByBody }>('/agents/:uuid/apps/:appId/deploy', async (req, reply) => {
   try {
     const { uuid, appId: appIdStr } = req.params;
     const deployedBy = req.body.deployedBy || 'dashboard';
 
     const appId = parseInt(appIdStr);
     if (isNaN(appId)) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'appId must be a number'
       });
@@ -1157,7 +1271,7 @@ router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
     // Verify device exists
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -1166,7 +1280,7 @@ router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
     // Check if app exists in target state
     const currentTarget = await DeviceTargetStateModel.get(uuid);
     if (!currentTarget) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: `Device ${uuid} has no target state`
       });
@@ -1174,7 +1288,7 @@ router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
 
     const currentApps = currentTarget.apps || {};
     if (!currentApps[appId]) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: `App ${appId} not found in target state`
       });
@@ -1206,7 +1320,7 @@ router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
       deployedBy
     });
 
-    res.json({
+    reply.send({
       status: 'ok',
       message: `Application ${appName} deployed successfully`,
       version: deployedState.version,
@@ -1222,7 +1336,7 @@ router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
       deviceId: req.params.uuid,
       appId: req.params.appId
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to deploy application',
       message: error.message
     });
@@ -1235,7 +1349,7 @@ router.post('/agents/:uuid/apps/:appId/deploy', async (req, res) => {
  * 
  * Increments version so device will pick up changes
  */
-router.post('/agents/:uuid/deploy', async (req, res) => {
+fastify.post<{ Params: AgentUuidParams; Body: DeployedByBody }>('/agents/:uuid/deploy', async (req, reply) => {
   try {
     const { uuid } = req.params;
     const deployedBy = req.body.deployedBy || 'dashboard';
@@ -1248,7 +1362,7 @@ router.post('/agents/:uuid/deploy', async (req, res) => {
     // Verify device exists
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -1257,14 +1371,14 @@ router.post('/agents/:uuid/deploy', async (req, res) => {
     // Check if there's anything to deploy
     const currentTarget = await DeviceTargetStateModel.get(uuid);
     if (!currentTarget) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: `Device ${uuid} has no target state to deploy`
       });
     }
 
     if (!currentTarget.needs_deployment) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Nothing to deploy',
         message: 'Target state is already deployed',
         version: currentTarget.version
@@ -1293,7 +1407,7 @@ router.post('/agents/:uuid/deploy', async (req, res) => {
       deployedBy
     });
 
-    res.json({
+    reply.send({
       status: 'ok',
       message: 'Target state deployed successfully',
       deviceUuid: uuid,
@@ -1309,7 +1423,7 @@ router.post('/agents/:uuid/deploy', async (req, res) => {
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to deploy target state',
       message: error.message
     });
@@ -1323,7 +1437,7 @@ router.post('/agents/:uuid/deploy', async (req, res) => {
  * Resets needs_deployment flag without changing version
  * Discards pending changes and reverts to last deployed state
  */
-router.post('/agents/:uuid/deploy/cancel', async (req, res) => {
+fastify.post<{ Params: AgentUuidParams }>('/agents/:uuid/deploy/cancel', async (req, reply) => {
   try {
     const { uuid } = req.params;
 
@@ -1332,7 +1446,7 @@ router.post('/agents/:uuid/deploy/cancel', async (req, res) => {
     // Verify device exists
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -1341,14 +1455,14 @@ router.post('/agents/:uuid/deploy/cancel', async (req, res) => {
     // Get current target state
     const currentTarget = await DeviceTargetStateModel.get(uuid);
     if (!currentTarget) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Not found',
         message: `Device ${uuid} has no target state`
       });
     }
 
     if (!currentTarget.needs_deployment) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Nothing to cancel',
         message: 'No pending changes to cancel',
         version: currentTarget.version
@@ -1402,7 +1516,7 @@ router.post('/agents/:uuid/deploy/cancel', async (req, res) => {
       version: currentTarget.version
     });
 
-    res.json({
+    reply.send({
       status: 'ok',
       message: 'Pending deployment canceled successfully',
       deviceUuid: uuid,
@@ -1415,7 +1529,7 @@ router.post('/agents/:uuid/deploy/cancel', async (req, res) => {
       stack: error.stack,
       deviceId: req.params.uuid
     });
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to cancel deployment',
       message: error.message
     });
@@ -1432,13 +1546,13 @@ router.post('/agents/:uuid/deploy/cancel', async (req, res) => {
  * 
  * Notifies device via shadow delta to reconnect to new broker
  */
-router.put('/agents/:uuid/broker', async (req, res) => {
+fastify.put<{ Params: AgentUuidParams; Body: BrokerBody }>('/agents/:uuid/broker', async (req, reply) => {
   try {
     const { uuid } = req.params;
     const { brokerId } = req.body;
 
     if (!brokerId || typeof brokerId !== 'number') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid request',
         message: 'brokerId is required and must be a number'
       });
@@ -1452,7 +1566,7 @@ router.put('/agents/:uuid/broker', async (req, res) => {
     // 1. Verify device exists
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -1462,7 +1576,7 @@ router.put('/agents/:uuid/broker', async (req, res) => {
     const broker = await SystemConfig.getMqttBroker(brokerId);
     
     if (!broker) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Broker not found',
         message: `Broker ${brokerId} not found or inactive`
       });
@@ -1582,7 +1696,7 @@ router.put('/agents/:uuid/broker', async (req, res) => {
       }
     });
 
-    res.json({
+    reply.send({
       success: true,
       message: `Device assigned to broker: ${broker.name}`,
       device: {
@@ -1621,7 +1735,7 @@ router.put('/agents/:uuid/broker', async (req, res) => {
       }
     });
 
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to assign device to broker',
       message: error.message
     });
@@ -1633,14 +1747,14 @@ router.put('/agents/:uuid/broker', async (req, res) => {
  * POST /api/v1/agents/:uuid/update-agent
  * Body: { version, scheduled_time?, force? }
  */
-router.post('/agents/:uuid/update-agent', async (req, res) => {
+fastify.post<{ Params: AgentUuidParams; Body: UpdateAgentBody }>('/agents/:uuid/update-agent', async (req, reply) => {
   try {
     const { uuid } = req.params;
     const { version, scheduled_time, force = false } = req.body;
 
     // Validate version format if provided
     if (version && !/^\d+\.\d+\.\d+$/.test(version) && version !== 'latest') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Invalid version format',
         message: 'Version must be in format X.Y.Z or "latest"'
       });
@@ -1649,7 +1763,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
     // Check if device exists
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
@@ -1660,7 +1774,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
     const brokerConfig = await getDefaultBrokerConfig();
     
     if (!brokerConfig) {
-      return res.status(500).json({
+      return reply.status(500).send({
         error: 'MQTT broker not configured',
         message: 'Cannot trigger agent update - MQTT broker configuration missing'
       });
@@ -1680,7 +1794,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
 
     // Create MQTT client
     const mqtt = await import('mqtt');
-    const mqttOptions: any = {
+    const mqttOptions: Record<string, unknown> = {
       username: mqttUsername,
       password: mqttPassword,
       clientId: `api-agent-update-${Date.now()}`,
@@ -1766,7 +1880,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
       }
     );
 
-    res.json({
+    reply.send({
       success: true,
       message: 'Agent update command sent via MQTT',
       device: {
@@ -1798,7 +1912,7 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
       }
     });
 
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to trigger agent update',
       message: error.message
     });
@@ -1814,12 +1928,13 @@ router.post('/agents/:uuid/update-agent', async (req, res) => {
  * POST /api/v1/agents/virtual
  * Body: { deviceName, fleetId?, namespace?, description?, tags? }
  */
-router.post('/agents/virtual', jwtAuth, async (req, res) => {
+fastify.post<{ Body: VirtualAgentBody }>('/agents/virtual', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { deviceName, fleetId, namespace, description, tags } = req.body;
+    const userAgent = getHeaderValue(req.headers['user-agent']);
 
     if (!deviceName) {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Device name required',
         message: 'deviceName is required'
       });
@@ -1850,7 +1965,7 @@ router.post('/agents/virtual', jwtAuth, async (req, res) => {
           namespace: targetNamespace
         });
       } else if (fleetResult.rows.length === 0) {
-        return res.status(400).json({
+          return reply.status(400).send({
           error: 'Invalid fleetId',
           message: `Fleet ${fleetId} not found`
         });
@@ -1870,7 +1985,7 @@ router.post('/agents/virtual', jwtAuth, async (req, res) => {
     });
 
     // Register device and trigger K8s deployment via provisioning service
-    const provisioningResponse = await provisioningService.registerDevice(
+    await provisioningService.registerDevice(
       {
         uuid: deviceUuid,
         agentName: deviceName,
@@ -1881,7 +1996,7 @@ router.post('/agents/virtual', jwtAuth, async (req, res) => {
         fleet_uuid: fleetId || undefined // Pass fleet_uuid if provided
       },
       req.ip,
-      req.get('user-agent')
+      userAgent
     );
 
     // Save tags if provided
@@ -1896,7 +2011,7 @@ router.post('/agents/virtual', jwtAuth, async (req, res) => {
       }
     }
 
-    res.status(202).json({
+    reply.status(202).send({
       message: 'Virtual agent deployment initiated',
       deviceUuid,
       deviceName,
@@ -1915,7 +2030,7 @@ router.post('/agents/virtual', jwtAuth, async (req, res) => {
       eventType: AuditEventType.PROVISIONING_FAILED,
       severity: AuditSeverity.ERROR,
       ipAddress: req.ip,
-      userAgent: req.get('user-agent'),
+      userAgent: getHeaderValue(req.headers['user-agent']),
       details: {
         error: error.message,
         deviceName: req.body.deviceName,
@@ -1923,7 +2038,7 @@ router.post('/agents/virtual', jwtAuth, async (req, res) => {
       }
     }).catch(err => logger.error('Audit log failed', err));
 
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to create virtual agent',
       message: error.message
     });
@@ -1934,20 +2049,20 @@ router.post('/agents/virtual', jwtAuth, async (req, res) => {
  * Get virtual agent deployment status
  * GET /api/v1/agents/:uuid/deployment-status
  */
-router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
+fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/deployment-status', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
 
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
     }
 
     if (device.type !== 'virtual') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Not a virtual agent',
         message: 'This endpoint is only for virtual agents'
       });
@@ -1956,7 +2071,7 @@ router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
     // Get status from K8s deployer
     const deploymentStatus = await virtualAgentDeployer.getStatus(uuid);
 
-    res.json({
+    reply.send({
       deviceUuid: uuid,
       deviceName: device.name,
       deploymentStatus: deploymentStatus.status,
@@ -1976,7 +2091,7 @@ router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
       deviceId: req.params.uuid
     });
 
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to get deployment status',
       message: error.message
     });
@@ -1987,20 +2102,20 @@ router.get('/agents/:uuid/deployment-status', jwtAuth, async (req, res) => {
  * Destroy a virtual agent (delete pod and secret)
  * DELETE /api/v1/agents/:uuid/virtual
  */
-router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
+fastify.delete<{ Params: AgentUuidParams }>('/agents/:uuid/virtual', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
 
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
     }
 
     if (device.type !== 'virtual') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Not a virtual agent',
         message: 'This endpoint is only for virtual agents'
       });
@@ -2038,7 +2153,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
       }
     }).catch(err => logger.error('Audit log failed', err));
 
-    res.json({
+    reply.send({
       message: 'Virtual agent deleted successfully (K8s + database)',
       deviceUuid: uuid,
       deviceName: device.name
@@ -2060,7 +2175,7 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
       }
     }).catch(err => logger.error('Audit log failed', err));
 
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to destroy virtual agent',
       message: error.message
     });
@@ -2071,20 +2186,20 @@ router.delete('/agents/:uuid/virtual', jwtAuth, async (req, res) => {
  * Restart a virtual agent (delete pod, let Deployment recreate it)
  * POST /api/v1/agents/:uuid/virtual/restart
  */
-router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
+fastify.post<{ Params: AgentUuidParams }>('/agents/:uuid/virtual/restart', { preHandler: [jwtAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
 
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
     }
 
     if (device.type !== 'virtual') {
-      return res.status(400).json({
+      return reply.status(400).send({
         error: 'Not a virtual agent',
         message: 'This endpoint is only for virtual agents'
       });
@@ -2108,7 +2223,7 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
       }
     }).catch(err => logger.error('Audit log failed', err));
 
-    res.json({
+    reply.send({
       message: 'Virtual agent restart initiated',
       deviceUuid: uuid,
       deviceName: device.name,
@@ -2132,11 +2247,13 @@ router.post('/agents/:uuid/virtual/restart', jwtAuth, async (req, res) => {
       }
     }).catch(err => logger.error('Audit log failed', err));
 
-    res.status(500).json({
+    reply.status(500).send({
       error: 'Failed to restart virtual agent',
       message: error.message
     });
   }
 });
 
-export default router;
+};
+
+export default plugin;

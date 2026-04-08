@@ -4,13 +4,16 @@
  * Handles user registration, login, logout, token refresh, and password management
  */
 
-import bcrypt from 'bcrypt';
-import crypto from 'crypto';
 import { query } from '../../db/connection';
 import { generateAccessToken, generateRefreshToken, verifyToken } from '../../middleware/jwt-auth';
 import logger from '../../utils/logger';
+import {
+  hashMachineSecret,
+  hashPassword,
+  verifyMachineSecret,
+  verifyPassword,
+} from '../../utils/secret-hashing';
 
-const BCRYPT_ROUNDS = 10;
 const REFRESH_TOKEN_EXPIRY_DAYS = 7;
 
 export interface LoginResult {
@@ -64,7 +67,7 @@ export async function registerUser(input: RegisterInput): Promise<LoginResult> {
   }
 
   // Hash password
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  const passwordHash = await hashPassword(password);
 
   // Insert user
   const result = await query(
@@ -142,14 +145,21 @@ export async function loginUser(
   }
 
   // Verify password
-  const isValidPassword = await bcrypt.compare(password, user.password_hash);
+  const passwordVerification = await verifyPassword(password, user.password_hash);
 
-  if (!isValidPassword) {
+  if (!passwordVerification.valid) {
     logAuditEvent('login_failed', user.id, ipAddress, {
       reason: 'invalid_password',
       username: user.username
     }).catch(err => logger.warn('Failed to log audit event:', err));
     throw new Error('Invalid username or password');
+  }
+
+  if (passwordVerification.upgradedHash) {
+    await query(
+      'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [passwordVerification.upgradedHash, user.id],
+    );
   }
 
   // Update last login timestamp
@@ -227,14 +237,19 @@ export async function refreshAccessToken(
 
     // Check if refresh token exists and is not revoked.
     // Token hashes are salted, so we must compare with bcrypt.compare against candidates.
+    const deterministicTokenHash = hashMachineSecret(refreshToken, 'refresh-token');
+
     const result = await query(
       `SELECT rt.id, rt.user_id, rt.token_hash, rt.revoked, u.username, u.email, u.role, u.is_active
        FROM refresh_tokens rt
        JOIN users u ON rt.user_id = u.id
-       WHERE rt.user_id = $1 AND rt.revoked = false AND rt.expires_at > CURRENT_TIMESTAMP
+       WHERE rt.user_id = $1
+         AND rt.revoked = false
+         AND rt.expires_at > CURRENT_TIMESTAMP
+         AND (rt.token_hash = $2 OR rt.token_hash LIKE '$2%')
        ORDER BY rt.created_at DESC
        LIMIT 20`,
-      [payload.userId]
+      [payload.userId, deterministicTokenHash]
     );
 
     if (result.rows.length === 0) {
@@ -243,9 +258,15 @@ export async function refreshAccessToken(
 
     let tokenData: any = null;
     for (const row of result.rows) {
-      const matches = await bcrypt.compare(refreshToken, row.token_hash);
-      if (matches) {
+      const tokenVerification = await verifyMachineSecret(refreshToken, row.token_hash, 'refresh-token');
+      if (tokenVerification.valid) {
         tokenData = row;
+        if (tokenVerification.upgradedHash) {
+          await query(
+            'UPDATE refresh_tokens SET token_hash = $1 WHERE id = $2',
+            [tokenVerification.upgradedHash, row.id],
+          );
+        }
         break;
       }
     }
@@ -338,17 +359,16 @@ export async function changePassword(
   const user = result.rows[0];
 
   // Verify current password
-  const isValidPassword = await bcrypt.compare(currentPassword, user.password_hash);
+  const currentPasswordVerification = await verifyPassword(currentPassword, user.password_hash);
 
-  if (!isValidPassword) {
+  if (!currentPasswordVerification.valid) {
     logAuditEvent('password_change_failed', userId, null, {
       reason: 'invalid_current_password'
     }).catch(err => logger.warn('Failed to log audit event:', err));
     throw new Error('Current password is incorrect');
   }
 
-  // Hash new password
-  const newPasswordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  const newPasswordHash = await hashPassword(newPassword);
 
   // Update password
   await query(
@@ -402,7 +422,7 @@ export async function bootstrapAdminPassword(
   }
 
   const admin = result.rows[0];
-  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  const passwordHash = await hashPassword(newPassword);
 
   await query(
     `UPDATE users
@@ -457,7 +477,7 @@ export async function setPasswordFromReset(
   const user = result.rows[0];
 
   // Hash new password
-  const newPasswordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  const newPasswordHash = await hashPassword(newPassword);
 
   // Update password
   await query(
@@ -495,7 +515,7 @@ async function storeRefreshToken(
   ipAddress?: string | null,
   userAgent?: string | null
 ): Promise<void> {
-  const tokenHash = await bcrypt.hash(refreshToken, 10);
+  const tokenHash = hashMachineSecret(refreshToken, 'refresh-token');
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
 

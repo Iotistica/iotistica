@@ -19,15 +19,64 @@
  * - GET /api/v1/agents/:uuid/metrics - Get device metrics
  */
 
-import express from 'express';
+
 import { query } from '../db/connection';
 import {
   AgentModel,
   DeviceMetricsModel,
 } from '../db/models';
+import { logger } from '../utils/logger';
+import type { FastifyPluginAsync } from 'fastify'
 
+type AgentUuidParams = {
+  uuid: string;
+};
 
-export const router = express.Router();
+type MetricsQuerystring = {
+  limit?: string | number;
+  period?: string;
+};
+
+type ProcessHistoryQuerystring = {
+  limit?: string | number;
+  hours?: string | number;
+};
+
+type NetworkInterfaceRow = {
+  name: string;
+  type?: string;
+  ip4?: string;
+  ip6?: string;
+  mac?: string;
+  operstate?: string;
+  default?: boolean;
+  virtual?: boolean;
+  ssid?: string;
+  signalLevel?: number;
+};
+
+type ProcessHistoryRow = {
+  top_processes: unknown;
+  recorded_at: Date;
+};
+
+function parseNumericQuery(value: string | number | undefined, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return fallback;
+}
+
+const plugin: FastifyPluginAsync = async (fastify) => {
+
 
 /**
  * Get device metrics
@@ -37,11 +86,11 @@ export const router = express.Router();
  * - period: time period (30min, 6h, 12h, 24h)
  * Note: No auth required - called by dashboard, not device
  */
-router.get('/agents/:uuid/metrics', async (req, res) => {
+fastify.get<{ Params: AgentUuidParams; Querystring: MetricsQuerystring }>('/agents/:uuid/metrics', async (req, reply) => {
   try {
     const { uuid } = req.params;
-    const limit = parseInt(req.query.limit as string) || 100;
-    const period = req.query.period as string;
+    const limit = parseNumericQuery(req.query.limit, 100);
+    const { period } = req.query;
 
     let metrics;
     
@@ -71,13 +120,13 @@ router.get('/agents/:uuid/metrics', async (req, res) => {
       metrics = await DeviceMetricsModel.getRecent(uuid, limit);
     }
 
-    res.json({
+    return reply.send({
       count: metrics.length,
       metrics,
     });
   } catch (error: any) {
-    console.error('Error getting metrics:', error);
-    res.status(500).json({
+    logger.error('Error getting metrics', { error: error.message, stack: error.stack });
+    return reply.status(500).send({
       error: 'Failed to get metrics',
       message: error.message
     });
@@ -88,28 +137,28 @@ router.get('/agents/:uuid/metrics', async (req, res) => {
  * Get current top processes for device
  * GET /api/v1/agents/:uuid/processes
  */
-router.get('/agents/:uuid/processes', async (req, res) => {
+fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/processes', async (req, reply) => {
   try {
     const { uuid } = req.params;
 
     // Get device to check if it exists and get latest processes
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
     }
 
-    res.json({
+    return reply.send({
       agent_uuid: uuid,
       top_processes: device.top_processes || [],
       is_online: device.is_online,
       last_updated: device.modified_at,
     });
   } catch (error: any) {
-    console.error('Error getting top processes:', error);
-    res.status(500).json({
+    logger.error('Error getting top processes', { error: error.message, stack: error.stack });
+    return reply.status(500).send({
       error: 'Failed to get top processes',
       message: error.message
     });
@@ -120,21 +169,21 @@ router.get('/agents/:uuid/processes', async (req, res) => {
  * Get network interfaces for device
  * GET /api/v1/agents/:uuid/network-interfaces
  */
-router.get('/agents/:uuid/network-interfaces', async (req, res) => {
+fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/network-interfaces', async (req, reply) => {
   try {
     const { uuid } = req.params;
 
     // Get device to check if it exists and get network interfaces
     const device = await AgentModel.getByUuid(uuid);
     if (!device) {
-      return res.status(404).json({
+      return reply.status(404).send({
         error: 'Device not found',
         message: `Device ${uuid} not found`
       });
     }
 
     // Get network interfaces from device (stored as JSONB)
-    let interfaces = [];
+    let interfaces: Array<Record<string, unknown>> = [];
     
     if (device.network_interfaces) {
       // Parse if it's a string, otherwise use as-is
@@ -143,7 +192,7 @@ router.get('/agents/:uuid/network-interfaces', async (req, res) => {
         : device.network_interfaces;
       
       // Transform to dashboard format
-      interfaces = networkData.map((iface: any) => ({
+      interfaces = (networkData as NetworkInterfaceRow[]).map((iface) => ({
         id: iface.name,
         name: iface.name,
         type: iface.type || 'ethernet',
@@ -173,15 +222,15 @@ router.get('/agents/:uuid/network-interfaces', async (req, res) => {
       });
     }
 
-    res.json({
+    return reply.send({
       agent_uuid: uuid,
       interfaces,
       is_online: device.is_online,
       last_updated: device.modified_at,
     });
   } catch (error: any) {
-    console.error('Error getting network interfaces:', error);
-    res.status(500).json({
+    logger.error('Error getting network interfaces', { error: error.message, stack: error.stack });
+    return reply.status(500).send({
       error: 'Failed to get network interfaces',
       message: error.message
     });
@@ -192,14 +241,14 @@ router.get('/agents/:uuid/network-interfaces', async (req, res) => {
  * Get historical process metrics for device
  * GET /api/v1/agents/:uuid/processes/history
  */
-router.get('/agents/:uuid/processes/history', async (req, res) => {
+fastify.get<{ Params: AgentUuidParams; Querystring: ProcessHistoryQuerystring }>('/agents/:uuid/processes/history', async (req, reply) => {
   try {
     const { uuid } = req.params;
-    const limit = parseInt(req.query.limit as string) || 50;
-    const hours = parseInt(req.query.hours as string) || 24;
+    const limit = parseNumericQuery(req.query.limit, 50);
+    const hours = parseNumericQuery(req.query.hours, 24);
 
     // Query metrics with process data
-    const result = await query(
+    const result = await query<ProcessHistoryRow>(
       `SELECT top_processes, recorded_at 
        FROM agent_metrics 
        WHERE agent_uuid = $1 
@@ -211,21 +260,21 @@ router.get('/agents/:uuid/processes/history', async (req, res) => {
     );
 
     // Parse JSONB data
-    const history = result.rows.map(row => ({
+    const history = result.rows.map((row) => ({
       top_processes: typeof row.top_processes === 'string' 
         ? JSON.parse(row.top_processes) 
         : row.top_processes,
       recorded_at: row.recorded_at,
     }));
 
-    res.json({
+    return reply.send({
       agent_uuid: uuid,
       count: history.length,
       history,
     });
   } catch (error: any) {
-    console.error('Error getting process history:', error);
-    res.status(500).json({
+    logger.error('Error getting process history', { error: error.message, stack: error.stack });
+    return reply.status(500).send({
       error: 'Failed to get process history',
       message: error.message
     });
@@ -233,4 +282,6 @@ router.get('/agents/:uuid/processes/history', async (req, res) => {
 });
 
 
-export default router;
+};
+
+export default plugin;

@@ -1,571 +1,612 @@
-/**
+﻿/**
  * Event Sourcing Routes
  * Endpoints for querying device-related events for timeline visualization
  */
 
-import express from 'express';
-import { 
+import type { FastifyPluginAsync } from 'fastify';
+
+import {
   EventStore,
-  searchEvents,
-  getDeviceTimeline,
   aggregateByPeriod,
   getDeviceSummary,
-  type EventSearchCriteria
+  getDeviceTimeline,
+  searchEvents,
+  type Event,
+  type EventSearchCriteria,
 } from '../services/event-sourcing';
-import { logger } from '../utils/logger';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
+import { logger } from '../utils/logger';
 
-export const router = express.Router();
+type AggregatePeriod = 'hour' | 'day' | 'week' | 'month';
 
-// All routes require authentication and admin role
-router.use('/events', jwtAuth);
-router.use(requireRole('admin'));
+interface DeviceUuidParams {
+  deviceUuid: string;
+}
 
-// ============================================================================
-// Event Query Endpoints
-// ============================================================================
+interface CorrelationIdParams {
+  correlationId: string;
+}
 
-/**
- * Advanced event search with filtering
- * GET /api/v1/events/search
- * 
- * Query params:
- * - deviceUuid: Filter by device UUID
- * - eventTypes: Comma-separated event types
- * - aggregateTypes: Comma-separated aggregate types
- * - dateFrom: ISO date string
- * - dateTo: ISO date string
- * - severity: Comma-separated severity levels
- * - actorType: Actor type (system, user, device, agent, api, scheduler)
- * - actorId: Actor ID
- * - correlationId: Correlation ID
- * - limit: Max results (default 100, max 1000)
- * - offset: Pagination offset
- */
-router.get('/events/search', async (req, res) => {
-  try {
-    const criteria: EventSearchCriteria = {};
+interface SearchEventsQuerystring {
+  deviceUuid?: string;
+  eventTypes?: string;
+  aggregateTypes?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  severity?: string;
+  actorType?: string;
+  actorId?: string;
+  correlationId?: string;
+  limit?: string | number;
+  offset?: string | number;
+}
 
-    if (req.query.deviceUuid) {
-      criteria.deviceUuid = req.query.deviceUuid as string;
+interface TimelineQuerystring {
+  sinceDate?: string;
+  eventTypes?: string;
+  includeSampled?: string | boolean;
+  limit?: string | number;
+}
+
+interface AggregateQuerystring {
+  period?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+interface SummaryQuerystring {
+  daysBack?: string | number;
+}
+
+interface DeviceEventsQuerystring {
+  limit?: string | number;
+  sinceEventId?: string | number;
+  eventType?: string;
+}
+
+interface RecentEventsQuerystring {
+  limit?: string | number;
+  aggregateType?: string;
+}
+
+interface StatsQuerystring {
+  daysBack?: string | number;
+}
+
+interface ReplayBody {
+  fromTime?: string;
+  toTime?: string;
+}
+
+interface SnapshotBody {
+  timestamp?: string;
+}
+
+interface CompareBody {
+  time1?: string;
+  time2?: string;
+}
+
+interface TimelineOptions {
+  sinceDate?: Date;
+  eventTypes?: string[];
+  includeSampled?: boolean;
+  limit?: number;
+}
+
+interface EventDescriptionInput {
+  event_type: string;
+  data?: Record<string, unknown> | null;
+}
+
+function parseInteger(value: string | number | undefined, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
     }
+  }
 
-    if (req.query.eventTypes) {
-      criteria.eventTypes = (req.query.eventTypes as string).split(',').map(t => t.trim());
-    }
+  return fallback;
+}
 
-    if (req.query.aggregateTypes) {
-      criteria.aggregateTypes = (req.query.aggregateTypes as string).split(',').map(t => t.trim());
-    }
+function parseStringList(value: string | undefined): string[] | undefined {
+  if (!value) {
+    return undefined;
+  }
 
-    if (req.query.dateFrom) {
-      criteria.dateFrom = new Date(req.query.dateFrom as string);
-    }
+  const items = value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
 
-    if (req.query.dateTo) {
-      criteria.dateTo = new Date(req.query.dateTo as string);
-    }
+  return items.length ? items : undefined;
+}
 
-    if (req.query.severity) {
-      criteria.severity = (req.query.severity as string).split(',').map(s => s.trim());
-    }
+function parseBoolean(value: string | boolean | undefined, fallback = false): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
 
-    if (req.query.actorType) {
-      criteria.actor = { type: req.query.actorType as string };
-      if (req.query.actorId) {
-        criteria.actor.id = req.query.actorId as string;
+  if (typeof value === 'string') {
+    return value.toLowerCase() === 'true';
+  }
+
+  return fallback;
+}
+
+function isAggregatePeriod(value: string): value is AggregatePeriod {
+  return ['hour', 'day', 'week', 'month'].includes(value);
+}
+
+const plugin: FastifyPluginAsync = async (fastify) => {
+  fastify.addHook('preHandler', jwtAuth);
+  fastify.addHook('preHandler', requireRole('admin'));
+
+  fastify.get<{ Querystring: SearchEventsQuerystring }>('/events/search', async (req, reply) => {
+    try {
+      const criteria: EventSearchCriteria = {};
+      const {
+        deviceUuid,
+        eventTypes,
+        aggregateTypes,
+        dateFrom,
+        dateTo,
+        severity,
+        actorType,
+        actorId,
+        correlationId,
+        limit,
+        offset,
+      } = req.query;
+
+      if (deviceUuid) {
+        criteria.deviceUuid = deviceUuid;
       }
-    }
 
-    if (req.query.correlationId) {
-      criteria.correlationId = req.query.correlationId as string;
-    }
-
-    if (req.query.limit) {
-      const limit = parseInt(req.query.limit as string, 10);
-      criteria.limit = Math.min(limit, 1000); // Max 1000
-    }
-
-    if (req.query.offset) {
-      criteria.offset = parseInt(req.query.offset as string, 10);
-    }
-
-    const events = await searchEvents(criteria);
-
-    res.json({
-      success: true,
-      count: events.length,
-      events,
-      criteria: {
-        ...criteria,
-        dateFrom: criteria.dateFrom?.toISOString(),
-        dateTo: criteria.dateTo?.toISOString(),
+      const parsedEventTypes = parseStringList(eventTypes);
+      if (parsedEventTypes) {
+        criteria.eventTypes = parsedEventTypes;
       }
-    });
-  } catch (error) {
-    logger.error('Error searching events:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to search events',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
 
-/**
- * Get chronological event timeline for device
- * GET /api/v1/events/device/:deviceUuid/timeline
- * 
- * Query params:
- * - sinceDate: ISO date string (get events since this date)
- * - eventTypes: Comma-separated event types to include
- * - includeSampled: Include debug-level events (default: false)
- * - limit: Max events (default 1000)
- */
-router.get('/events/device/:deviceUuid/timeline', async (req, res) => {
-  try {
-    const { deviceUuid } = req.params;
-    const options: any = {};
-
-    if (req.query.sinceDate) {
-      options.sinceDate = new Date(req.query.sinceDate as string);
-    }
-
-    if (req.query.eventTypes) {
-      options.eventTypes = (req.query.eventTypes as string).split(',').map(t => t.trim());
-    }
-
-    if (req.query.includeSampled) {
-      options.includeSampled = req.query.includeSampled === 'true';
-    }
-
-    if (req.query.limit) {
-      options.limit = parseInt(req.query.limit as string, 10);
-    }
-
-    const events = await getDeviceTimeline(deviceUuid, options);
-
-    res.json({
-      success: true,
-      deviceUuid,
-      count: events.length,
-      events,
-      options: {
-        ...options,
-        sinceDate: options.sinceDate?.toISOString(),
+      const parsedAggregateTypes = parseStringList(aggregateTypes);
+      if (parsedAggregateTypes) {
+        criteria.aggregateTypes = parsedAggregateTypes;
       }
-    });
-  } catch (error) {
-    logger.error(`Error getting timeline for device ${req.params.deviceUuid}:`, error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get device timeline',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
 
-/**
- * Aggregate events by time period
- * GET /api/v1/events/device/:deviceUuid/aggregate
- * 
- * Query params:
- * - period: hour|day|week|month (required)
- * - dateFrom: ISO date string (required)
- * - dateTo: ISO date string (required)
- */
-router.get('/events/device/:deviceUuid/aggregate', async (req, res) => {
-  try {
-    const { deviceUuid } = req.params;
-    const { period, dateFrom, dateTo } = req.query;
+      if (dateFrom) {
+        criteria.dateFrom = new Date(dateFrom);
+      }
 
-    if (!period || !dateFrom || !dateTo) {
-      return res.status(400).json({
+      if (dateTo) {
+        criteria.dateTo = new Date(dateTo);
+      }
+
+      const parsedSeverity = parseStringList(severity);
+      if (parsedSeverity) {
+        criteria.severity = parsedSeverity;
+      }
+
+      if (actorType) {
+        criteria.actor = { type: actorType };
+        if (actorId) {
+          criteria.actor.id = actorId;
+        }
+      }
+
+      if (correlationId) {
+        criteria.correlationId = correlationId;
+      }
+
+      if (limit !== undefined) {
+        criteria.limit = Math.min(parseInteger(limit, 100), 1000);
+      }
+
+      if (offset !== undefined) {
+        criteria.offset = parseInteger(offset, 0);
+      }
+
+      const events = await searchEvents(criteria);
+
+      return reply.send({
+        success: true,
+        count: events.length,
+        events,
+        criteria: {
+          ...criteria,
+          dateFrom: criteria.dateFrom?.toISOString(),
+          dateTo: criteria.dateTo?.toISOString(),
+        },
+      });
+    } catch (error: unknown) {
+      logger.error('Error searching events:', error);
+      return reply.status(500).send({
         success: false,
-        error: 'Missing required parameters',
-        message: 'period, dateFrom, and dateTo are required'
+        error: 'Failed to search events',
+        message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  });
 
-    if (!['hour', 'day', 'week', 'month'].includes(period as string)) {
-      return res.status(400).json({
+  fastify.get<{ Params: DeviceUuidParams; Querystring: TimelineQuerystring }>('/events/device/:deviceUuid/timeline', async (req, reply) => {
+    try {
+      const { deviceUuid } = req.params;
+      const options: TimelineOptions = {};
+      const { sinceDate, eventTypes, includeSampled, limit } = req.query;
+
+      if (sinceDate) {
+        options.sinceDate = new Date(sinceDate);
+      }
+
+      const parsedEventTypes = parseStringList(eventTypes);
+      if (parsedEventTypes) {
+        options.eventTypes = parsedEventTypes;
+      }
+
+      if (includeSampled !== undefined) {
+        options.includeSampled = parseBoolean(includeSampled);
+      }
+
+      if (limit !== undefined) {
+        options.limit = parseInteger(limit, 1000);
+      }
+
+      const events = await getDeviceTimeline(deviceUuid, options);
+
+      return reply.send({
+        success: true,
+        deviceUuid,
+        count: events.length,
+        events,
+        options: {
+          ...options,
+          sinceDate: options.sinceDate?.toISOString(),
+        },
+      });
+    } catch (error: unknown) {
+      logger.error(`Error getting timeline for device ${req.params.deviceUuid}:`, error);
+      return reply.status(500).send({
         success: false,
-        error: 'Invalid period',
-        message: 'period must be one of: hour, day, week, month'
+        error: 'Failed to get device timeline',
+        message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  });
 
-    const aggregation = await aggregateByPeriod(
-      deviceUuid,
-      period as 'hour' | 'day' | 'week' | 'month',
-      new Date(dateFrom as string),
-      new Date(dateTo as string)
-    );
+  fastify.get<{ Params: DeviceUuidParams; Querystring: AggregateQuerystring }>('/events/device/:deviceUuid/aggregate', async (req, reply) => {
+    try {
+      const { deviceUuid } = req.params;
+      const { period, dateFrom, dateTo } = req.query;
 
-    res.json({
-      success: true,
-      deviceUuid,
-      period,
-      dateFrom,
-      dateTo,
-      count: aggregation.length,
-      aggregation
-    });
-  } catch (error) {
-    logger.error(`Error aggregating events for device ${req.params.deviceUuid}:`, error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to aggregate events',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
+      if (!period || !dateFrom || !dateTo) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Missing required parameters',
+          message: 'period, dateFrom, and dateTo are required',
+        });
+      }
 
-/**
- * Get event summary and health score for device
- * GET /api/v1/events/device/:deviceUuid/summary
- * 
- * Query params:
- * - daysBack: Number of days to analyze (default: 30)
- */
-router.get('/events/device/:deviceUuid/summary', async (req, res) => {
-  try {
-    const { deviceUuid } = req.params;
-    const daysBack = req.query.daysBack 
-      ? parseInt(req.query.daysBack as string, 10) 
-      : 30;
+      if (!isAggregatePeriod(period)) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Invalid period',
+          message: 'period must be one of: hour, day, week, month',
+        });
+      }
 
-    const summary = await getDeviceSummary(deviceUuid, daysBack);
+      const aggregation = await aggregateByPeriod(
+        deviceUuid,
+        period,
+        new Date(dateFrom),
+        new Date(dateTo)
+      );
 
-    res.json({
-      success: true,
-      deviceUuid,
-      daysBack,
-      summary
-    });
-  } catch (error) {
-    logger.error(`Error getting summary for device ${req.params.deviceUuid}:`, error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to get device summary',
-      message: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-/**
- * Get events for a specific device
- * GET /api/v1/events/device/:deviceUuid
- * Query params:
- *   - limit: number of events to return (default 50, max 500)
- *   - sinceEventId: get events after this event ID
- *   - eventType: filter by specific event type
- */
-router.get('/events/device/:deviceUuid', async (req, res) => {
-  try {
-    const { deviceUuid } = req.params;
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 500);
-    const sinceEventId = req.query.sinceEventId ? parseInt(req.query.sinceEventId as string) : undefined;
-    const eventType = req.query.eventType as string | undefined;
-
-    logger.info(`Fetching events for device: ${deviceUuid}`);
-
-    // Get events for this device
-    let events = await EventStore.getAggregateEvents('agent', deviceUuid, sinceEventId);
-
-    // Filter by event type if specified
-    if (eventType) {
-      events = events.filter(e => e.event_type === eventType);
-    }
-
-    // Apply limit
-    events = events.slice(0, limit);
-
-    // Transform events for timeline display
-    const timelineEvents = events.map(event => ({
-      id: event.id,
-      event_id: event.event_id,
-      timestamp: event.timestamp,
-      type: event.event_type,
-      category: categorizeEvent(event.event_type),
-      title: generateEventTitle(event.event_type),
-      description: generateEventDescription(event),
-      data: event.data,
-      metadata: event.metadata,
-      source: event.source,
-      correlation_id: event.correlation_id,
-    }));
-
-    res.json({
-      success: true,
-      count: timelineEvents.length,
-      deviceUuid,
-      events: timelineEvents,
-    });
-  } catch (error) {
-    logger.error('Error fetching device events:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch device events',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-/**
- * Get event chain by correlation ID
- * GET /api/v1/events/chain/:correlationId
- */
-router.get('/events/chain/:correlationId', async (req, res) => {
-  try {
-    const { correlationId } = req.params;
-
-    logger.info(`Fetching event chain for correlation: ${correlationId}`);
-
-    const events = await EventStore.getEventChain(correlationId);
-
-    const timelineEvents = events.map(event => ({
-      id: event.id,
-      event_id: event.event_id,
-      timestamp: event.timestamp,
-      type: event.event_type,
-      category: categorizeEvent(event.event_type),
-      title: generateEventTitle(event.event_type),
-      description: generateEventDescription(event),
-      aggregate_type: event.aggregate_type,
-      aggregate_id: event.aggregate_id,
-      data: event.data,
-      metadata: event.metadata,
-      source: event.source,
-    }));
-
-    res.json({
-      success: true,
-      count: timelineEvents.length,
-      correlationId,
-      events: timelineEvents,
-    });
-  } catch (error) {
-    logger.error('Error fetching event chain:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch event chain',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-/**
- * Get recent events across all agents
- * GET /api/v1/events/recent
- * Query params:
- *   - limit: number of events to return (default 100, max 500)
- *   - aggregateType: filter by aggregate type (e.g., 'agent', 'app')
- */
-router.get('/events/recent', async (req, res) => {
-  try {
-    const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
-    const aggregateType = req.query.aggregateType as string | undefined;
-
-    logger.info(`Fetching recent events (limit: ${limit})`);
-
-    const events = await EventStore.getRecentEvents(limit, aggregateType);
-
-    const timelineEvents = events.map(event => ({
-      id: event.id,
-      event_id: event.event_id,
-      timestamp: event.timestamp,
-      type: event.event_type,
-      category: categorizeEvent(event.event_type),
-      title: generateEventTitle(event.event_type),
-      description: generateEventDescription(event),
-      aggregate_type: event.aggregate_type,
-      aggregate_id: event.aggregate_id,
-      data: event.data,
-      metadata: event.metadata,
-      source: event.source,
-    }));
-
-    res.json({
-      success: true,
-      count: timelineEvents.length,
-      events: timelineEvents,
-    });
-  } catch (error) {
-    logger.error('Error fetching recent events:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch recent events',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-/**
- * Get event statistics
- * GET /api/v1/events/stats
- * Query params:
- *   - daysBack: number of days to look back (default 7)
- */
-router.get('/events/stats', async (req, res) => {
-  try {
-    const daysBack = parseInt(req.query.daysBack as string) || 7;
-
-    logger.info(`Fetching event stats (${daysBack} days)`);
-
-    const stats = await EventStore.getStats(daysBack);
-
-    res.json({
-      success: true,
-      daysBack,
-      stats,
-    });
-  } catch (error) {
-    logger.error('Error fetching event stats:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch event statistics',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-/**
- * Replay events within time window (for debugging)
- * POST /api/v1/events/device/:deviceUuid/replay
- * Body:
- *   - fromTime: ISO timestamp
- *   - toTime: ISO timestamp
- */
-router.post('/events/device/:deviceUuid/replay', async (req, res) => {
-  try {
-    const { deviceUuid } = req.params;
-    const { fromTime, toTime } = req.body;
-
-    if (!fromTime || !toTime) {
-      return res.status(400).json({
+      return reply.send({
+        success: true,
+        deviceUuid,
+        period,
+        dateFrom,
+        dateTo,
+        count: aggregation.length,
+        aggregation,
+      });
+    } catch (error: unknown) {
+      logger.error(`Error aggregating events for device ${req.params.deviceUuid}:`, error);
+      return reply.status(500).send({
         success: false,
-        error: 'fromTime and toTime are required',
+        error: 'Failed to aggregate events',
+        message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  });
 
-    logger.info(`Replaying events for device ${deviceUuid} from ${fromTime} to ${toTime}`);
+  fastify.get<{ Params: DeviceUuidParams; Querystring: SummaryQuerystring }>('/events/device/:deviceUuid/summary', async (req, reply) => {
+    try {
+      const { deviceUuid } = req.params;
+      const daysBack = parseInteger(req.query.daysBack, 30);
 
-    const result = await EventStore.replayEvents(
-      deviceUuid,
-      new Date(fromTime),
-      new Date(toTime)
-    );
+      const summary = await getDeviceSummary(deviceUuid, daysBack);
 
-    res.json({
-      success: true,
-      deviceUuid,
-      fromTime,
-      toTime,
-      ...result,
-    });
-  } catch (error) {
-    logger.error('Error replaying events:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to replay events',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
-
-/**
- * Create snapshot of device state at specific point in time
- * POST /api/v1/events/device/:deviceUuid/snapshot
- * Body:
- *   - timestamp: ISO timestamp
- */
-router.post('/events/device/:deviceUuid/snapshot', async (req, res) => {
-  try {
-    const { deviceUuid } = req.params;
-    const { timestamp } = req.body;
-
-    if (!timestamp) {
-      return res.status(400).json({
+      return reply.send({
+        success: true,
+        deviceUuid,
+        daysBack,
+        summary,
+      });
+    } catch (error: unknown) {
+      logger.error(`Error getting summary for device ${req.params.deviceUuid}:`, error);
+      return reply.status(500).send({
         success: false,
-        error: 'timestamp is required',
+        error: 'Failed to get device summary',
+        message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  });
 
-    logger.info(`Creating snapshot for device ${deviceUuid} at ${timestamp}`);
+  fastify.get<{ Params: DeviceUuidParams; Querystring: DeviceEventsQuerystring }>('/events/device/:deviceUuid', async (req, reply) => {
+    try {
+      const { deviceUuid } = req.params;
+      const limit = Math.min(parseInteger(req.query.limit, 50), 500);
+      const sinceEventId = req.query.sinceEventId !== undefined
+        ? parseInteger(req.query.sinceEventId, 0)
+        : undefined;
+      const { eventType } = req.query;
 
-    const snapshot = await EventStore.createSnapshot(
-      deviceUuid,
-      new Date(timestamp)
-    );
+      logger.info(`Fetching events for device: ${deviceUuid}`);
 
-    res.json({
-      success: true,
-      ...snapshot,
-    });
-  } catch (error) {
-    logger.error('Error creating snapshot:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create snapshot',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
+      let events = await EventStore.getAggregateEvents('agent', deviceUuid, sinceEventId);
 
-/**
- * Compare device state between two points in time
- * POST /api/v1/events/device/:deviceUuid/compare
- * Body:
- *   - time1: ISO timestamp (earlier time)
- *   - time2: ISO timestamp (later time)
- */
-router.post('/events/device/:deviceUuid/compare', async (req, res) => {
-  try {
-    const { deviceUuid } = req.params;
-    const { time1, time2 } = req.body;
+      if (eventType) {
+        events = events.filter((event) => event.event_type === eventType);
+      }
 
-    if (!time1 || !time2) {
-      return res.status(400).json({
+      events = events.slice(0, limit);
+
+      const timelineEvents = events.map((event) => ({
+        id: event.id,
+        event_id: event.event_id,
+        timestamp: event.timestamp,
+        type: event.event_type,
+        category: categorizeEvent(event.event_type),
+        title: generateEventTitle(event.event_type),
+        description: generateEventDescription(event),
+        data: event.data,
+        metadata: event.metadata,
+        source: event.source,
+        correlation_id: event.correlation_id,
+      }));
+
+      return reply.send({
+        success: true,
+        count: timelineEvents.length,
+        deviceUuid,
+        events: timelineEvents,
+      });
+    } catch (error: unknown) {
+      logger.error('Error fetching device events:', error);
+      return reply.status(500).send({
         success: false,
-        error: 'time1 and time2 are required',
+        error: 'Failed to fetch device events',
+        message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  });
 
-    logger.info(`Comparing states for device ${deviceUuid} between ${time1} and ${time2}`);
+  fastify.get<{ Params: CorrelationIdParams }>('/events/chain/:correlationId', async (req, reply) => {
+    try {
+      const { correlationId } = req.params;
 
-    const comparison = await EventStore.compareStates(
-      deviceUuid,
-      new Date(time1),
-      new Date(time2)
-    );
+      logger.info(`Fetching event chain for correlation: ${correlationId}`);
 
-    res.json({
-      success: true,
-      deviceUuid,
-      time1,
-      time2,
-      changes_count: comparison.changes.length,
-      events_between_count: comparison.events_between.length,
-      ...comparison,
-    });
-  } catch (error) {
-    logger.error('Error comparing states:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to compare states',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
+      const events = await EventStore.getEventChain(correlationId);
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
+      const timelineEvents = events.map((event) => ({
+        id: event.id,
+        event_id: event.event_id,
+        timestamp: event.timestamp,
+        type: event.event_type,
+        category: categorizeEvent(event.event_type),
+        title: generateEventTitle(event.event_type),
+        description: generateEventDescription(event),
+        aggregate_type: event.aggregate_type,
+        aggregate_id: event.aggregate_id,
+        data: event.data,
+        metadata: event.metadata,
+        source: event.source,
+      }));
 
-/**
- * Categorize event types for display
- */
+      return reply.send({
+        success: true,
+        count: timelineEvents.length,
+        correlationId,
+        events: timelineEvents,
+      });
+    } catch (error: unknown) {
+      logger.error('Error fetching event chain:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to fetch event chain',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  fastify.get<{ Querystring: RecentEventsQuerystring }>('/events/recent', async (req, reply) => {
+    try {
+      const limit = Math.min(parseInteger(req.query.limit, 100), 500);
+      const { aggregateType } = req.query;
+
+      logger.info(`Fetching recent events (limit: ${limit})`);
+
+      const events = await EventStore.getRecentEvents(limit, aggregateType);
+
+      const timelineEvents = events.map((event) => ({
+        id: event.id,
+        event_id: event.event_id,
+        timestamp: event.timestamp,
+        type: event.event_type,
+        category: categorizeEvent(event.event_type),
+        title: generateEventTitle(event.event_type),
+        description: generateEventDescription(event),
+        aggregate_type: event.aggregate_type,
+        aggregate_id: event.aggregate_id,
+        data: event.data,
+        metadata: event.metadata,
+        source: event.source,
+      }));
+
+      return reply.send({
+        success: true,
+        count: timelineEvents.length,
+        events: timelineEvents,
+      });
+    } catch (error: unknown) {
+      logger.error('Error fetching recent events:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to fetch recent events',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  fastify.get<{ Querystring: StatsQuerystring }>('/events/stats', async (req, reply) => {
+    try {
+      const daysBack = parseInteger(req.query.daysBack, 7);
+
+      logger.info(`Fetching event stats (${daysBack} days)`);
+
+      const stats = await EventStore.getStats(daysBack);
+
+      return reply.send({
+        success: true,
+        daysBack,
+        stats,
+      });
+    } catch (error: unknown) {
+      logger.error('Error fetching event stats:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to fetch event statistics',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  fastify.post<{ Params: DeviceUuidParams; Body: ReplayBody }>('/events/device/:deviceUuid/replay', async (req, reply) => {
+    try {
+      const { deviceUuid } = req.params;
+      const { fromTime, toTime } = req.body;
+
+      if (!fromTime || !toTime) {
+        return reply.status(400).send({
+          success: false,
+          error: 'fromTime and toTime are required',
+        });
+      }
+
+      logger.info(`Replaying events for device ${deviceUuid} from ${fromTime} to ${toTime}`);
+
+      const result = await EventStore.replayEvents(
+        deviceUuid,
+        new Date(fromTime),
+        new Date(toTime)
+      );
+
+      return reply.send({
+        success: true,
+        deviceUuid,
+        fromTime,
+        toTime,
+        ...result,
+      });
+    } catch (error: unknown) {
+      logger.error('Error replaying events:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to replay events',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  fastify.post<{ Params: DeviceUuidParams; Body: SnapshotBody }>('/events/device/:deviceUuid/snapshot', async (req, reply) => {
+    try {
+      const { deviceUuid } = req.params;
+      const { timestamp } = req.body;
+
+      if (!timestamp) {
+        return reply.status(400).send({
+          success: false,
+          error: 'timestamp is required',
+        });
+      }
+
+      logger.info(`Creating snapshot for device ${deviceUuid} at ${timestamp}`);
+
+      const snapshot = await EventStore.createSnapshot(
+        deviceUuid,
+        new Date(timestamp)
+      );
+
+      return reply.send({
+        success: true,
+        ...snapshot,
+      });
+    } catch (error: unknown) {
+      logger.error('Error creating snapshot:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to create snapshot',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+
+  fastify.post<{ Params: DeviceUuidParams; Body: CompareBody }>('/events/device/:deviceUuid/compare', async (req, reply) => {
+    try {
+      const { deviceUuid } = req.params;
+      const { time1, time2 } = req.body;
+
+      if (!time1 || !time2) {
+        return reply.status(400).send({
+          success: false,
+          error: 'time1 and time2 are required',
+        });
+      }
+
+      logger.info(`Comparing states for device ${deviceUuid} between ${time1} and ${time2}`);
+
+      const comparison = await EventStore.compareStates(
+        deviceUuid,
+        new Date(time1),
+        new Date(time2)
+      );
+
+      return reply.send({
+        success: true,
+        deviceUuid,
+        time1,
+        time2,
+        changes_count: comparison.changes.length,
+        events_between_count: comparison.events_between.length,
+        ...comparison,
+      });
+    } catch (error: unknown) {
+      logger.error('Error comparing states:', error);
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to compare states',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  });
+};
+
 function categorizeEvent(eventType: string): string {
   if (eventType.startsWith('target_state.')) return 'configuration';
   if (eventType.startsWith('current_state.')) return 'telemetry';
@@ -578,11 +619,8 @@ function categorizeEvent(eventType: string): string {
   return 'other';
 }
 
-/**
- * Generate human-readable event titles
- */
 function generateEventTitle(eventType: string): string {
-  const titleMap: { [key: string]: string } = {
+  const titleMap: Record<string, string> = {
     'target_state.updated': 'Target State Updated',
     'current_state.updated': 'Current State Updated',
     'reconciliation.started': 'Reconciliation Started',
@@ -606,34 +644,44 @@ function generateEventTitle(eventType: string): string {
     'job.failed': 'Job Failed',
   };
 
-  return titleMap[eventType] || eventType.split('.').map(s => 
-    s.charAt(0).toUpperCase() + s.slice(1)
-  ).join(' ');
+  return titleMap[eventType] || eventType
+    .split('.')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
 }
 
-/**
- * Generate event description from event data
- */
-function generateEventDescription(event: any): string {
+function generateEventDescription(event: EventDescriptionInput): string {
   const { event_type, data } = event;
+  const eventData = data ?? {};
 
   try {
     switch (event_type) {
-      case 'target_state.updated':
-        const changedFields = data.changed_fields || [];
-        return changedFields.length > 0 
+      case 'target_state.updated': {
+        const changedFields = Array.isArray(eventData.changed_fields)
+          ? eventData.changed_fields.filter((field): field is string => typeof field === 'string')
+          : [];
+        return changedFields.length > 0
           ? `Changed: ${changedFields.join(', ')}`
           : 'Configuration updated';
+      }
 
-      case 'reconciliation.completed':
-        return data.success 
-          ? `${data.actions_count || 0} actions completed in ${data.duration_ms}ms`
+      case 'reconciliation.completed': {
+        const success = eventData.success === true;
+        const actionsCount = typeof eventData.actions_count === 'number' ? eventData.actions_count : 0;
+        const durationMs = typeof eventData.duration_ms === 'number' ? eventData.duration_ms : 'unknown';
+        return success
+          ? `${actionsCount} actions completed in ${durationMs}ms`
           : 'Reconciliation failed';
+      }
 
       case 'container.start':
       case 'container.stop':
       case 'container.restart':
-        return data.container_name || data.app_name || 'Container operation';
+        return typeof eventData.container_name === 'string'
+          ? eventData.container_name
+          : typeof eventData.app_name === 'string'
+            ? eventData.app_name
+            : 'Container operation';
 
       case 'current_state.updated':
         return 'Device reported new state';
@@ -645,15 +693,14 @@ function generateEventDescription(event: any): string {
         return 'Device disconnected';
 
       default:
-        // Try to extract meaningful description from data
-        if (data.message) return data.message;
-        if (data.description) return data.description;
-        if (data.status) return data.status;
+        if (typeof eventData.message === 'string') return eventData.message;
+        if (typeof eventData.description === 'string') return eventData.description;
+        if (typeof eventData.status === 'string') return eventData.status;
         return 'Event occurred';
     }
-  } catch (error) {
+  } catch {
     return 'Event occurred';
   }
 }
 
-export default router;
+export default plugin;
