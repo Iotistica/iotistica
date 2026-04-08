@@ -251,7 +251,7 @@ export class LicenseGenerator {
 
     // Sign with RS256
     const privateKey = await importPKCS8(this.privateKey, 'RS256');
-    const token = await new SignJWT(licenseData)
+    const token = await new SignJWT(licenseData as unknown as Record<string, unknown>)
       .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
       .setIssuedAt()
       .setExpirationTime('365d')

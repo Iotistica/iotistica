@@ -39,7 +39,7 @@ function parseDurationSeconds(value: number | string): number {
     return value;
   }
 
-  const match = /^(\d+)([smhdw])$/.exec(value);
+  const match = /^(\d+)([smhdw])$/.exec(String(value));
   if (!match) {
     throw new Error(`Unsupported JWT duration: ${value}`);
   }

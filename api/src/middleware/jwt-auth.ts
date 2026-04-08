@@ -431,7 +431,7 @@ export async function validateAuth0JWT(token: string): Promise<{
 
   return {
     sub: payload.sub,
-    email: payload.email || '',
+    email: typeof payload.email === 'string' ? payload.email : '',
     exp: payload.exp
   };
 }
