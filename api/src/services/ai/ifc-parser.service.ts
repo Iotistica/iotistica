@@ -461,7 +461,7 @@ export class IFCParserService {
                 }
               }
               
-              logger.info(`      Relating actor ID: ${actorId} (from RelatingActor:`, rel.RelatingActor, ')');
+              logger.info({ relatingActor: rel.RelatingActor }, `      Relating actor ID: ${actorId} (from RelatingActor)`);
               
               if (actorId) {
                 const parentDevice = edgeDevices.find(d => d.expressId === actorId);

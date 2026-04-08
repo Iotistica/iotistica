@@ -290,7 +290,7 @@ export class WebSocketManager {
       this.redisRealtimeEnabled = true;
       
       logger.debug('Redis pub/sub integration initialized');
-      logger.debug('Subscribed to patterns:', tenantMetricsPattern, tenantLogsPattern, legacyMetricsPattern, legacyLogsPattern);
+      logger.debug({ tenantMetricsPattern, tenantLogsPattern, legacyMetricsPattern, legacyLogsPattern }, 'Subscribed to patterns');
     } catch (error) {
       this.redisRealtimeEnabled = false;
       this.redisClient = null;

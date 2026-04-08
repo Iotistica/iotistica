@@ -3,47 +3,13 @@
  * Logs to both file and database for compliance and monitoring
  */
 
-import winston from 'winston';
 import { query } from '../db/connection';
+import { createAppLogger } from './logger';
 
 // Detect Kubernetes environment (KUBERNETES_SERVICE_HOST is auto-injected)
 const isKubernetes = !!process.env.KUBERNETES_SERVICE_HOST;
 
-// Winston logger configuration
-export const auditLogger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  defaultMeta: { service: 'Iotistic-api' },
-  transports: [
-    // Console output (always enabled, required for Kubernetes)
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    })
-  ]
-});
-
-// Add file transports only if NOT in Kubernetes
-if (!isKubernetes) {
-  auditLogger.add(new winston.transports.File({ 
-    filename: 'logs/audit.log',
-    maxsize: 10485760, // 10MB
-    maxFiles: 10,
-    tailable: true
-  }));
-  auditLogger.add(new winston.transports.File({ 
-    filename: 'logs/error.log', 
-    level: 'error',
-    maxsize: 10485760,
-    maxFiles: 5
-  }));
-}
+export const auditLogger = createAppLogger({ channel: 'audit', runtime: isKubernetes ? 'kubernetes' : 'local' });
 
 // Severity levels
 export enum AuditSeverity {
@@ -107,7 +73,7 @@ export interface AuditLogEntry {
 }
 
 /**
- * Log an audit event to both Winston and database
+ * Log an audit event to both the application logger and database
  */
 export async function logAuditEvent(entry: AuditLogEntry): Promise<void> {
   const {
@@ -120,7 +86,7 @@ export async function logAuditEvent(entry: AuditLogEntry): Promise<void> {
     severity = AuditSeverity.INFO
   } = entry;
 
-  // Log to Winston
+  // Log to the application logger
   const logData = {
     event: eventType,
     deviceUuid: agentUuid ? `${agentUuid.substring(0, 8)}...` : undefined,
@@ -133,13 +99,13 @@ export async function logAuditEvent(entry: AuditLogEntry): Promise<void> {
   switch (severity) {
     case AuditSeverity.CRITICAL:
     case AuditSeverity.ERROR:
-      auditLogger.error(eventType, logData);
+      auditLogger.error(logData, eventType);
       break;
     case AuditSeverity.WARNING:
-      auditLogger.warn(eventType, logData);
+      auditLogger.warn(logData, eventType);
       break;
     default:
-      auditLogger.info(eventType, logData);
+      auditLogger.info(logData, eventType);
   }
 
   // Log to database

@@ -34,7 +34,7 @@ export async function createApp(): Promise<FastifyInstance> {
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID(),
     trustProxy: getTrustProxy(),
-    // Disable built-in pino logger — we use Winston via hooks
+    // Disable Fastify's built-in logger — request logging runs through our app logger hooks
     logger: false,
     // Relax content-type check so clients can send application/json without charset
     ajv: {

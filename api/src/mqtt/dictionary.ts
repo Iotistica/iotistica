@@ -14,6 +14,7 @@ import { createHash } from 'crypto';
 import { DeviceDictionaryService } from '../services/agent/dictionary';
 import { mqttDeviceTopic as deviceTopic } from './topics';
 import { getTenantId } from '../redis/tenant-keys';
+import type { AppLogger } from '../utils/logger';
 
 // Domain types from agent (must match agent's DictionaryDomain type)
 type DictionaryDomain = 'key' | 'metric' | 'unit' | 'quality' | 'device';
@@ -87,14 +88,14 @@ type CompactedMessage = CompactedMessageTuples | CompactedMessageLegacy;
 
 export class CloudDictionaryManager {
   private redis: any; // RedisClient type
-  private logger?: any; // Winston logger
+  private logger?: AppLogger;
   private strictVersioning: boolean; // Reject version mismatches by default
   private mqttPublish?: (topic: string, payload: any) => Promise<void>; // For resync requests
   private resyncRequested: Set<string> = new Set(); // Track agents we've requested resync from
 
   constructor(
     redis: any, 
-    logger?: any, 
+    logger?: AppLogger, 
     options?: { 
       strictVersioning?: boolean;
       mqttPublish?: (topic: string, payload: any) => Promise<void>;

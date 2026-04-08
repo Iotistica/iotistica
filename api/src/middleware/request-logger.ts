@@ -1,5 +1,5 @@
 /**
- * Winston request logging — Fastify onRequest + onResponse hooks.
+ * Application request logging — Fastify onRequest + onResponse hooks.
  *
  * - Debug-logs every incoming request (method + url + query + IP)
  * - On response: skips 200s to reduce noise; logs 4xx as warn, 5xx as error

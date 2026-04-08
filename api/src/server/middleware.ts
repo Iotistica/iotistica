@@ -1,6 +1,6 @@
 /**
  * General application hooks: body parsing (built-in Fastify), brotli decompression,
- * traffic logging, and Winston request logging.
+ * traffic logging, and request logging.
  *
  * Note: Request ID is handled automatically by Fastify via the `requestIdHeader`
  * and `genReqId` options passed to the Fastify factory — no custom middleware needed.
@@ -41,6 +41,6 @@ export async function applyMiddleware(fastify: FastifyInstance): Promise<void> {
   );
 
 
-  // Winston per-request logging (skips 200s to reduce noise)
+  // Per-request logging (skips 200s to reduce noise)
   registerRequestLogger(fastify);
 }

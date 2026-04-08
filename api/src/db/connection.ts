@@ -294,7 +294,7 @@ export async function testConnection(): Promise<boolean> {
     });
     
     const result = await query('SELECT NOW() as now');
-    logger.log(' Database connected successfully at', result.rows[0].now);
+    logger.info(` Database connected successfully at ${String(result.rows[0].now)}`);
     return true;
   } catch (error) {
     logger.error(' Database connection failed:', error);

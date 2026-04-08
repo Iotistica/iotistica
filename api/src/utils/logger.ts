@@ -1,93 +1,341 @@
 /**
- * General Purpose Logger
- * Wrapper around Winston for application logging
+ * General purpose application logger.
+ *
+ * This module owns the logging contract used across the API so the backing
+ * implementation can change without forcing another logging rewrite.
  */
 
-import winston from 'winston';
+import fs from 'fs';
 import path from 'path';
+import { Writable } from 'stream';
+import pino, { destination, multistream, stdSerializers, type Logger as PinoLogger } from 'pino';
+
+export interface AppLogger {
+  info(message: string): void;
+  info(message: string, meta: unknown): void;
+  info(meta: unknown, message?: string): void;
+  warn(message: string): void;
+  warn(message: string, meta: unknown): void;
+  warn(meta: unknown, message?: string): void;
+  error(message: string): void;
+  error(message: string, meta: unknown): void;
+  error(meta: unknown, message?: string): void;
+  debug(message: string): void;
+  debug(message: string, meta: unknown): void;
+  debug(meta: unknown, message?: string): void;
+  child(bindings: Record<string, unknown>): AppLogger;
+}
+
+type LogLevel = 'info' | 'warn' | 'error' | 'debug';
+
+interface ConsoleLogRecord {
+  level?: number;
+  time?: string;
+  msg?: string;
+  service?: string;
+  operation?: string;
+  step?: string;
+  [key: string]: unknown;
+}
+
+interface NormalizedLogArgs {
+  msg?: string;
+  meta?: Record<string, unknown>;
+}
+
+type LogStream = ReturnType<typeof destination> | NodeJS.WriteStream | Writable;
+
+const PINO_LEVEL_LABELS: Record<number, string> = {
+  10: 'trace',
+  20: 'debug',
+  30: 'info',
+  40: 'warn',
+  50: 'error',
+  60: 'fatal'
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeError(error: Error): Record<string, unknown> {
+  return {
+    error: error.message,
+    name: error.name,
+    stack: error.stack
+  };
+}
+
+function normalizeMeta(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value instanceof Error) {
+    return normalizeError(value);
+  }
+
+  if (isRecord(value)) {
+    return value;
+  }
+
+  return { value };
+}
+
+function normalizeArgs(first: unknown, second?: unknown): NormalizedLogArgs {
+  if (typeof first === 'string') {
+    if (second === undefined) {
+      return { msg: first };
+    }
+
+    if (typeof second === 'string' || typeof second === 'number' || typeof second === 'boolean' || typeof second === 'bigint') {
+      return { msg: `${first} ${String(second)}` };
+    }
+
+    return {
+      msg: first,
+      meta: normalizeMeta(second)
+    };
+  }
+
+  if (first instanceof Error) {
+    return {
+      msg: typeof second === 'string' ? second : first.message,
+      meta: normalizeError(first)
+    };
+  }
+
+  if (second === undefined) {
+    return {
+      meta: normalizeMeta(first),
+      msg: typeof first === 'undefined' ? undefined : undefined
+    };
+  }
+
+  if (typeof second === 'string') {
+    return {
+      msg: second,
+      meta: normalizeMeta(first)
+    };
+  }
+
+  return {
+    msg: typeof first === 'undefined' ? undefined : String(first),
+    meta: normalizeMeta(second)
+  };
+}
+
+function getDisplayTime(value?: string): string {
+  if (!value) {
+    return new Date().toISOString().slice(11, 19);
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toISOString().slice(11, 19);
+}
+
+function getLevelLabel(level?: number): string {
+  if (!level) {
+    return 'info';
+  }
+
+  return PINO_LEVEL_LABELS[level] ?? String(level);
+}
+
+function formatConsoleMeta(record: ConsoleLogRecord): string {
+  const {
+    level,
+    time,
+    msg,
+    service,
+    operation,
+    step,
+    pid,
+    hostname,
+    ...meta
+  } = record;
+
+  if (Object.keys(meta).length === 0) {
+    return '';
+  }
+
+  return ` ${JSON.stringify(meta)}`;
+}
+
+function formatConsoleLine(record: ConsoleLogRecord): string {
+  const timestamp = getDisplayTime(record.time);
+  const level = getLevelLabel(record.level);
+  const operationPrefix = record.operation
+    ? `[${String(record.operation)}]${record.step ? ` ${String(record.step)} ->` : ''} `
+    : '';
+  const message = record.msg ?? '';
+
+  return `${timestamp} [${level}]: ${operationPrefix}${message}${formatConsoleMeta(record)}`;
+}
+
+function createPrettyConsoleStream(): Writable {
+  let buffered = '';
+
+  const flushLine = (line: string): void => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed) as ConsoleLogRecord;
+      process.stdout.write(`${formatConsoleLine(parsed)}\n`);
+    } catch {
+      process.stdout.write(`${trimmed}\n`);
+    }
+  };
+
+  return new Writable({
+    write(chunk, _encoding, callback) {
+      buffered += chunk.toString();
+      const lines = buffered.split('\n');
+      buffered = lines.pop() ?? '';
+
+      for (const line of lines) {
+        flushLine(line);
+      }
+
+      callback();
+    },
+    final(callback) {
+      flushLine(buffered);
+      buffered = '';
+      callback();
+    }
+  });
+}
+
+function writeLog(loggerInstance: PinoLogger, level: LogLevel, first: unknown, second?: unknown): void {
+  const { msg, meta } = normalizeArgs(first, second);
+
+  switch (level) {
+    case 'info':
+      if (meta && msg) {
+        loggerInstance.info(meta, msg);
+      } else if (meta) {
+        loggerInstance.info(meta);
+      } else if (msg) {
+        loggerInstance.info(msg);
+      }
+      return;
+    case 'warn':
+      if (meta && msg) {
+        loggerInstance.warn(meta, msg);
+      } else if (meta) {
+        loggerInstance.warn(meta);
+      } else if (msg) {
+        loggerInstance.warn(msg);
+      }
+      return;
+    case 'error':
+      if (meta && msg) {
+        loggerInstance.error(meta, msg);
+      } else if (meta) {
+        loggerInstance.error(meta);
+      } else if (msg) {
+        loggerInstance.error(msg);
+      }
+      return;
+    case 'debug':
+      if (meta && msg) {
+        loggerInstance.debug(meta, msg);
+      } else if (meta) {
+        loggerInstance.debug(meta);
+      } else if (msg) {
+        loggerInstance.debug(msg);
+      }
+      return;
+  }
+}
+
+function wrapLogger(loggerInstance: PinoLogger): AppLogger {
+  return {
+    info(first: unknown, second?: unknown) {
+      writeLog(loggerInstance, 'info', first, second);
+    },
+    warn(first: unknown, second?: unknown) {
+      writeLog(loggerInstance, 'warn', first, second);
+    },
+    error(first: unknown, second?: unknown) {
+      writeLog(loggerInstance, 'error', first, second);
+    },
+    debug(first: unknown, second?: unknown) {
+      writeLog(loggerInstance, 'debug', first, second);
+    },
+    child(bindings: Record<string, unknown>) {
+      return wrapLogger(loggerInstance.child(bindings));
+    }
+  };
+}
+
+function createStreams() {
+  const streams: Array<{ stream: LogStream; level?: string }> = [{
+    stream: isKubernetes ? process.stdout : createPrettyConsoleStream()
+  }];
+
+  if (!isKubernetes) {
+    fs.mkdirSync(path.join(process.cwd(), 'logs'), { recursive: true });
+    streams.push({ stream: destination(path.join('logs', 'combined.log')) });
+    streams.push({ stream: destination(path.join('logs', 'error.log')), level: 'error' });
+  }
+
+  return multistream(streams);
+}
+
+export function createAppLogger(bindings?: Record<string, unknown>): AppLogger {
+  const loggerInstance = bindings ? rootLogger.child(bindings) : rootLogger;
+  return wrapLogger(loggerInstance);
+}
 
 // Detect Kubernetes environment (KUBERNETES_SERVICE_HOST is auto-injected)
 const isKubernetes = !!process.env.KUBERNETES_SERVICE_HOST;
 
-// Create logger instance
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-    winston.format.errors({ stack: true }),
-    winston.format.splat(),
-    winston.format.json()
-  ),
-  defaultMeta: { service: 'iotistic-api' },
-  transports: []  // Start with empty transports
-});
+const rootLogger = pino(
+  {
+    level: process.env.LOG_LEVEL || 'info',
+    timestamp: pino.stdTimeFunctions.isoTime,
+    base: {
+      service: 'iotistic-api'
+    },
+    serializers: {
+      err: stdSerializers.err,
+      error: stdSerializers.err
+    }
+  },
+  createStreams()
+);
 
-// Add file transports only if NOT in Kubernetes
-if (!isKubernetes) {
-  logger.add(new winston.transports.File({ 
-    filename: path.join('logs', 'combined.log'),
-    maxsize: 10485760, // 10MB
-    maxFiles: 10,
-    tailable: true
-  }));
-  logger.add(new winston.transports.File({ 
-    filename: path.join('logs', 'error.log'),
-    level: 'error',
-    maxsize: 10485760,
-    maxFiles: 5
-  }));
-}
-
-// Always add console transport (required for Kubernetes)
-logger.add(new winston.transports.Console({
-  format: winston.format.combine(
-    winston.format.colorize(),
-    winston.format.timestamp({ format: 'HH:mm:ss' }),
-    winston.format.printf(({ timestamp, level, message, service, operation, step, ...meta }) => {
-      // Filter out 'service' and internal fields from meta
-      const relevantMeta = Object.keys(meta).filter(key => 
-        key !== 'timestamp' && key !== 'level' && key !== 'message'
-      );
-      
-      // Build operation context (for human readability)
-        let prefix = '';
-        if (operation) {
-          prefix = `[${operation}]`;
-          if (step) {
-            prefix += ` ${step} →`;
-          }
-          prefix += ' ';
-        }
-        
-        const metaStr = relevantMeta.length > 0 
-          ? ' ' + JSON.stringify(meta) 
-          : '';
-        
-        return `${timestamp} [${level}]: ${prefix}${message}${metaStr}`;
-      })
-    )
-  }));
+const logger = createAppLogger();
 
 // Helper functions for structured logging with visual grouping
 export const logOperation = {
   // Start an operation
-  start: (operation: string, message: string, meta?: Record<string, any>) => {
-    logger.info(message, { ...meta, operation, step: 'START' });
+  start: (operation: string, message: string, meta?: Record<string, unknown>) => {
+    logger.info({ ...meta, operation, step: 'START' }, message);
   },
   
   // Log a step within an operation
-  step: (operation: string, message: string, meta?: Record<string, any>) => {
-    logger.info(message, { ...meta, operation });
+  step: (operation: string, message: string, meta?: Record<string, unknown>) => {
+    logger.info({ ...meta, operation }, message);
   },
   
   // Complete an operation
-  complete: (operation: string, message: string, meta?: Record<string, any>) => {
-    logger.info(message, { ...meta, operation, step: 'DONE' });
+  complete: (operation: string, message: string, meta?: Record<string, unknown>) => {
+    logger.info({ ...meta, operation, step: 'DONE' }, message);
   },
   
   // Error in an operation
-  error: (operation: string, message: string, error: Error, meta?: Record<string, any>) => {
-    logger.error(message, { ...meta, operation, step: 'ERROR', error: error.message, stack: error.stack });
+  error: (operation: string, message: string, error: Error, meta?: Record<string, unknown>) => {
+    logger.error({ ...meta, operation, step: 'ERROR', error: error.message, stack: error.stack }, message);
   }
 };
 
