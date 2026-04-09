@@ -4,5 +4,5 @@
 user admin
 topic readwrite #
 
-user mqtt-user-1
-topic write i/c-3dOFzo/a/Onleo1J2Rn6nM3EVXYR9Jw/d/-QhISF5nTXuuDkIr-4IXtQ/#
+user mqtt-user-2
+topic write i/84c49f7b9cb5462c886c02b7ce3003aa/a/DNqINSbhSESmGLu752IprQ/d/LOp5F97ZTY-9wGFDgi_N_Q/#

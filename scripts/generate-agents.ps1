@@ -40,7 +40,7 @@
 
 param(
     [int]$Count = 1,
-    [int]$StartIndex = 1,
+    [Nullable[int]]$StartIndex = $null,
     [string]$OutputFile = "docker-compose.agents.yml",
     [ValidateSet('auto', 'docker', 'cloud', 'local-docker', 'cloud-k8s')]
     [string]$EnvironmentProfile = 'auto',
@@ -400,11 +400,29 @@ function Test-AgentResourcesExist {
     return $false
 }
 
+function Resolve-StartIndex {
+    param(
+        [Nullable[int]]$RequestedStartIndex,
+        [bool]$Cleanup,
+        [string]$OutputFile
+    )
+
+    if ($null -ne $RequestedStartIndex) {
+        return [int]$RequestedStartIndex
+    }
+
+    if ($Cleanup) {
+        return 1
+    }
+
+    return Get-NextAvailableAgentIndex -OutputFile $OutputFile
+}
+
 $ResolvedEnvironmentProfile = Resolve-EnvironmentProfile -RequestedProfile $EnvironmentProfile
 Apply-EnvironmentProfile -ProfileName $ResolvedEnvironmentProfile
 
 if (-not $PSBoundParameters.ContainsKey('StartIndex')) {
-    $StartIndex = Get-NextAvailableAgentIndex -OutputFile $OutputFile
+    $StartIndex = Resolve-StartIndex -RequestedStartIndex $StartIndex -Cleanup $Cleanup.IsPresent -OutputFile $OutputFile
     Write-Host "Auto-selected StartIndex: $StartIndex" -ForegroundColor Cyan
 }
 

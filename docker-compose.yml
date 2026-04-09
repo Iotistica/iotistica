@@ -532,7 +532,7 @@ services:
             - MQTT_PASSWORD=test123
             - MQTT_CLIENT_ID=mqtt-device-2
             - MQTT_DEVICE_UUID=253bd0b3-61e0-4109-a490-29f91ddbf381
-            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/cUYIFBI3TleEyr75pxDgVA/d/AMxqzEP_TF6eJcU9c3pW7A
+            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/DNqINSbhSESmGLu752IprQ/d/LOp5F97ZTY-9wGFDgi_N_Q
             - MQTT_METRIC_NAMES=pressure,vibration,temperature2
             - MQTT_METRIC_UNITS=temperature2:C
             - MQTT_METRIC_BASES=temperature2:26
