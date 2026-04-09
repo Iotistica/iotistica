@@ -376,6 +376,9 @@ export class RedisDeviceQueue {
         const trimTarget = streamFullyDrained
           ? Math.min(this.maxStreamLength, Math.max(0, this.idleTrimStreamLength))
           : this.maxStreamLength;
+        if (streamFullyDrained && (metrics.maxDwellMs !== 0 || metrics.getDwellLatencyP95() !== 0)) {
+          metrics.clearDwellLatency();
+        }
         if (streamFullyDrained && streamLen > trimTarget) {
           await this.redisConsumer.xtrim(this.streamKey, 'MAXLEN', String(trimTarget)).catch(() => {});
           metrics.streamLength = trimTarget;
