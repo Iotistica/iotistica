@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger';
 import { getRedisIngestion, getRedisConsumer } from '../redis/client-factory';
 import {
+  agentDevicesIngestionStreamKey,
   agentDevicesReadyStreamKey,
   agentDevicesDlqStreamKey,
   consumerGroupName,
@@ -58,6 +59,30 @@ function readFloatEnv(key: string, fallback: string): number {
   return parseFloat(process.env[key] || fallback);
 }
 
+function resolveIngestionStreamKey(streamKey?: string): { ingestionStreamKey: string; tenantId: string; usedFallback: boolean } {
+  const configuredStreamKey = (streamKey || process.env.REDIS_INGESTION_STREAM_KEY || '').trim();
+  if (configuredStreamKey) {
+    return {
+      ingestionStreamKey: configuredStreamKey,
+      tenantId: parseAgentDevicesIngestionStreamKey(configuredStreamKey).tenantId,
+      usedFallback: false,
+    };
+  }
+
+  const fallbackTenantId = (
+    process.env.INGESTION_TENANT_ID
+    || process.env.DEVELOPMENT_TENANT_ID
+    || process.env.NAMESPACE
+    || 'demo'
+  ).trim();
+
+  return {
+    ingestionStreamKey: agentDevicesIngestionStreamKey(fallbackTenantId),
+    tenantId: fallbackTenantId,
+    usedFallback: true,
+  };
+}
+
 export class RedisDeviceQueue {
   private redisIngestion: Redis;
   private redisConsumer: Redis;
@@ -104,13 +129,17 @@ export class RedisDeviceQueue {
     this.redisIngestion = getRedisIngestion();
     this.redisConsumer = getRedisConsumer();
 
-    const configuredStreamKey = (streamKey || process.env.REDIS_INGESTION_STREAM_KEY || '').trim();
-    if (!configuredStreamKey) {
-      throw new Error('REDIS_INGESTION_STREAM_KEY must be set for ingestion service');
+    const resolvedStream = resolveIngestionStreamKey(streamKey);
+    this.ingestionStreamKey = resolvedStream.ingestionStreamKey;
+    this.tenantId = resolvedStream.tenantId;
+
+    if (resolvedStream.usedFallback) {
+      logger.warn('REDIS_INGESTION_STREAM_KEY not set; using temporary fallback ingestion stream key', {
+        tenantId: this.tenantId,
+        ingestionStreamKey: this.ingestionStreamKey,
+      });
     }
 
-    this.ingestionStreamKey = configuredStreamKey;
-    this.tenantId = parseAgentDevicesIngestionStreamKey(configuredStreamKey).tenantId;
     this.consumerGroup = consumerGroupName(this.tenantId, DEVICE_WRITER_GROUP_SUFFIX);
     this.consumerName = makeConsumerName(this.tenantId, POD_IDENTITY);
 

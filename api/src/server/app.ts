@@ -7,13 +7,27 @@
  * Does NOT start listening — that is handled by server/lifecycle.ts.
  */
 
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyRequest } from 'fastify';
 import { randomUUID } from 'crypto';
 import { applySecurity } from './security';
 import { applyMiddleware } from './middleware';
 import { mountRoutes } from './routes';
 import { mountProxies } from './proxies';
 import logger, { pinoLogger } from '../utils/logger';
+
+const requestStartTimes = new WeakMap<FastifyRequest, bigint>();
+
+function getRequestLogLevel(statusCode: number, error?: Error): 'debug' | 'warn' | 'error' {
+  if (error || statusCode >= 500) {
+    return 'error';
+  }
+
+  if (statusCode >= 400) {
+    return 'warn';
+  }
+
+  return 'debug';
+}
 
 // Trust proxy: K8s deployments always run behind a load balancer
 function getTrustProxy(): boolean | number | string {
@@ -29,19 +43,36 @@ function getTrustProxy(): boolean | number | string {
 }
 
 export async function createApp(): Promise<FastifyInstance> {
-  const fastify = Fastify({
+  const fastifyOptions = {
     // Request ID: honour X-Request-ID header, fall back to random UUID
     requestIdHeader: 'x-request-id',
     genReqId: () => randomUUID(),
     trustProxy: getTrustProxy(),
     loggerInstance: pinoLogger,
+    disableRequestLogging: true,
     // Relax content-type check so clients can send application/json without charset
     ajv: {
       customOptions: {
         allowUnionTypes: true,
       },
     },
-  }) as unknown as FastifyInstance;
+  } as const;
+
+  const fastify = Fastify(fastifyOptions as Parameters<typeof Fastify>[0]) as unknown as FastifyInstance;
+
+  fastify.addHook('onRequest', async (request) => {
+    requestStartTimes.set(request, process.hrtime.bigint());
+    request.log.debug({ req: request.raw }, 'incoming request');
+  });
+
+  fastify.addHook('onResponse', async (request, reply) => {
+    const start = requestStartTimes.get(request);
+    const responseTime = start ? Number(process.hrtime.bigint() - start) / 1_000_000 : undefined;
+    requestStartTimes.delete(request);
+
+    const level = getRequestLogLevel(reply.statusCode);
+    request.log[level]({ res: reply, responseTime }, 'request completed');
+  });
 
   // Decorate request properties so Fastify's strict type system is satisfied
   fastify.decorateRequest('user', null);
