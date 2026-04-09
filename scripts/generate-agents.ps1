@@ -167,7 +167,7 @@ $ProfileDefaults = @{
         DbPassword = 'postgres'
         DbSslMode = ''
         DatabaseUrl = ''
-        IOTISTICA_API = 'http://host.docker.internal:4002'
+        IOTISTICA_API = 'http://api:3002'
     }
     'cloud' = @{
         ApiUrl = 'https://demo-api.iotistica.com/'
@@ -260,7 +260,11 @@ function Resolve-AgentApiEndpoint {
             return 'http://localhost:4002'
         }
 
-        return 'http://host.docker.internal:4002'
+        if (-not [string]::IsNullOrWhiteSpace($ConfiguredEndpoint)) {
+            return $ConfiguredEndpoint
+        }
+
+        return 'http://api:3002'
     }
 
     if ($UseHostNetwork) {
@@ -343,6 +347,57 @@ function Get-NextAvailableAgentIndex {
     }
 
     return $maxIndex + 1
+}
+
+function Test-AgentResourcesExist {
+    param(
+        [int]$StartIndex,
+        [int]$Count,
+        [string]$OutputFile
+    )
+
+    $endIndex = $StartIndex + $Count - 1
+    $candidateSources = New-Object System.Collections.Generic.List[string]
+
+    try {
+        $containerNames = @(docker ps -a --format '{{.Names}}' 2>$null)
+        foreach ($name in $containerNames) {
+            if (-not [string]::IsNullOrWhiteSpace($name)) {
+                $candidateSources.Add($name)
+            }
+        }
+    } catch {
+        # Ignore Docker lookup failures and fall back to file inspection.
+    }
+
+    try {
+        $volumeNames = @(docker volume ls --format '{{.Name}}' 2>$null)
+        foreach ($name in $volumeNames) {
+            if (-not [string]::IsNullOrWhiteSpace($name)) {
+                $candidateSources.Add($name)
+            }
+        }
+    } catch {
+        # Ignore Docker lookup failures and fall back to file inspection.
+    }
+
+    $outputPath = Join-Path $PSScriptRoot '..' $OutputFile
+    if (Test-Path $outputPath) {
+        try {
+            $candidateSources.Add((Get-Content $outputPath -Raw))
+        } catch {
+            # Ignore file read issues.
+        }
+    }
+
+    $combined = [string]::Join("`n", $candidateSources)
+    for ($i = $StartIndex; $i -le $endIndex; $i++) {
+        if ($combined -match [regex]::Escape("agent-$i")) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 $ResolvedEnvironmentProfile = Resolve-EnvironmentProfile -RequestedProfile $EnvironmentProfile
@@ -1141,6 +1196,11 @@ function Get-SimulationConfig {
 if ($Cleanup) {
     Remove-AgentResources -StartIndex $StartIndex -Count $Count
     exit 0
+}
+
+if (Test-AgentResourcesExist -StartIndex $StartIndex -Count $Count -OutputFile $OutputFile) {
+    Write-Host "`n♻️  Existing agent resources detected for indices $StartIndex to $($StartIndex + $Count - 1). Cleaning target range before regeneration..." -ForegroundColor Yellow
+    Remove-AgentResources -StartIndex $StartIndex -Count $Count
 }
 
 Write-Host "Generating $Count agents (indices $StartIndex to $($StartIndex + $Count - 1))..." -ForegroundColor Cyan
