@@ -44,7 +44,7 @@ env:
   K8S_NAMESPACE: iotistic-nodeport
   CHART_PATH: ./k8s/charts/iotistic
   VALUES_FILE: ./k8s/charts/iotistic/values.yaml
-  APPS: api dashboard nodered
+  APPS: api ingestion dashboard nodered
 
 jobs:
   validate-release:
@@ -453,6 +453,8 @@ jobs:
           
           # Update image tags using yq (strict, no fallback)
           yq eval ".api.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
+          yq eval ".ingestion.image.repository = \"iotistic/ingestion\"" -i "$VALUES_FILE"
+          yq eval ".ingestion.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           yq eval ".dashboard.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           yq eval ".nodered.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           
@@ -460,6 +462,8 @@ jobs:
           echo ""
           echo "Updated fields:"
           yq eval ".api.image.tag" "$VALUES_FILE" | sed 's/^/  api.image.tag: /'
+          yq eval ".ingestion.image.repository" "$VALUES_FILE" | sed 's/^/  ingestion.image.repository: /'
+          yq eval ".ingestion.image.tag" "$VALUES_FILE" | sed 's/^/  ingestion.image.tag: /'
           yq eval ".dashboard.image.tag" "$VALUES_FILE" | sed 's/^/  dashboard.image.tag: /'
           yq eval ".nodered.image.tag" "$VALUES_FILE" | sed 's/^/  nodered.image.tag: /'
 
@@ -512,6 +516,8 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Updated Fields:**" >> $GITHUB_STEP_SUMMARY
           echo "- \`api.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ingestion.image.repository\`: \`iotistic/ingestion\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ingestion.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`dashboard.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`nodered.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
