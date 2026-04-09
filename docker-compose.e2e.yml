@@ -4,6 +4,7 @@
 # testing a systemd-installed edge agent:
 #   - PostgreSQL 16 for device state and provisioning data
 #   - Redis for API workers and realtime features
+#   - Ingestion service for write-side telemetry processing
 #   - Mosquitto Go-Auth as the cloud broker
 #   - Prebuilt API and dashboard images pulled from Docker Hub by default
 #
@@ -120,10 +121,12 @@ services:
       - DB_SSL=${DB_SSL:-false}
       - DB_SSL_REJECT_UNAUTHORIZED=${DB_SSL_REJECT_UNAUTHORIZED:-false}
       - FORCE_COLOR=${FORCE_COLOR:-1}
+      - INGESTION_INTERNAL_URL=${INGESTION_INTERNAL_URL:-http://ingestion:3003}
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
       - REDIS_USERNAME=${REDIS_USERNAME:-}
+      - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN:-integration-test-internal-auth-token}
       - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-mosquitto}
       - MQTT_BROKER_PORT=${MQTT_BROKER_PORT:-1883}
       - MQTT_BROKER_PROTOCOL=${MQTT_BROKER_PROTOCOL:-mqtt}
@@ -142,6 +145,78 @@ services:
       - "${API_PORT_EXT:-4002}:3002"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - iotistica-net
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: ingestion/Dockerfile
+    image: ${E2E_INGESTION_IMAGE:-iotistic/ingestion:e2e-local}
+    container_name: iotistic-ingestion-e2e
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      - PORT=${INGESTION_PORT:-3003}
+      - NODE_ENV=${NODE_ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN:-integration-test-internal-auth-token}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-iotistic}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_POOL_SIZE=${INGESTION_DB_POOL_SIZE:-20}
+      - DB_IDLE_TIMEOUT_MS=${INGESTION_DB_IDLE_TIMEOUT_MS:-10000}
+      - DB_CONNECTION_TIMEOUT_MS=${INGESTION_DB_CONNECTION_TIMEOUT_MS:-10000}
+      - DB_STATEMENT_TIMEOUT_MS=${INGESTION_DB_STATEMENT_TIMEOUT_MS:-45000}
+      - DB_APPLICATION_NAME=${INGESTION_DB_APPLICATION_NAME:-iotistic-ingestion-e2e}
+      - DB_SSL=${DB_SSL:-false}
+      - DB_SSL_REJECT_UNAUTHORIZED=${DB_SSL_REJECT_UNAUTHORIZED:-false}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
+      - REDIS_USERNAME=${REDIS_USERNAME:-}
+      - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-false}
+      - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
+      - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-250}
+      - REDIS_INGESTION_STREAM_MAXLEN=${REDIS_INGESTION_STREAM_MAXLEN:-10000}
+      - REDIS_IDLE_INGESTION_STREAM_MAXLEN=${REDIS_IDLE_INGESTION_STREAM_MAXLEN:-250}
+      - REDIS_PROCESSING_STREAM_MAXLEN=${REDIS_PROCESSING_STREAM_MAXLEN:-100000}
+      - REDIS_DLQ_MAXLEN=${REDIS_DLQ_MAXLEN:-1000}
+      - REDIS_DEVICE_STREAM_HIGH_WATERMARK_PCT=${REDIS_DEVICE_STREAM_HIGH_WATERMARK_PCT:-0.8}
+      - REDIS_MEMORY_HIGH_WATERMARK_PCT=${REDIS_MEMORY_HIGH_WATERMARK_PCT:-75}
+      - WORKER_COUNT=${WORKER_COUNT:-6}
+      - BATCH_SIZE=${BATCH_SIZE:-500}
+      - FLUSH_INTERVAL_MS=${FLUSH_INTERVAL_MS:-2000}
+      - AUTOSCALE_MIN_WORKERS=${AUTOSCALE_MIN_WORKERS:-4}
+      - AUTOSCALE_MAX_WORKERS=${AUTOSCALE_MAX_WORKERS:-20}
+      - AUTOSCALE_LAG_SCALE_UP_MS=${AUTOSCALE_LAG_SCALE_UP_MS:-5000}
+      - AUTOSCALE_LAG_CRITICAL_MS=${AUTOSCALE_LAG_CRITICAL_MS:-15000}
+      - AUTOSCALE_SCALE_DOWN_STABLE_CHECKS=${AUTOSCALE_SCALE_DOWN_STABLE_CHECKS:-12}
+      - AUTOSCALE_COOLDOWN_MS=${AUTOSCALE_COOLDOWN_MS:-5000}
+      - DB_WAITING_HIGH_WATERMARK=${DB_WAITING_HIGH_WATERMARK:-5}
+      - DB_SATURATION_HIGH_WATERMARK_PCT=${DB_SATURATION_HIGH_WATERMARK_PCT:-70}
+      - DB_BACKPRESSURE_SLEEP_MS=${DB_BACKPRESSURE_SLEEP_MS:-500}
+    ports:
+      - "${INGESTION_PORT_EXT:-4003}:3003"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
       interval: 10s
       timeout: 5s
       retries: 5

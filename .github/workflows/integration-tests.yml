@@ -60,11 +60,14 @@ jobs:
       - name: Pull prebuilt API and dashboard images
         run: docker compose -f "$COMPOSE_FILE" pull api dashboard
 
+      - name: Build ingestion image
+        run: docker compose -f "$COMPOSE_FILE" build ingestion
+
       - name: Build MQTT simulator image
         run: docker build -t iotistic/mqtt-simulator:latest ./simulators/mqtt-simulator
 
-      - name: Start database, cache, API, and dashboard
-        run: docker compose -f "$COMPOSE_FILE" up -d postgres redis api dashboard
+      - name: Start database, cache, ingestion, API, and dashboard
+        run: docker compose -f "$COMPOSE_FILE" up -d postgres redis ingestion api dashboard
 
       - name: Install dashboard test dependencies and wait for backend readiness
         run: |
@@ -86,6 +89,13 @@ jobs:
           timeout 60 bash -c '
             until docker compose -f "$COMPOSE_FILE" exec -T redis redis-cli ping | grep -q PONG; do
               sleep 2
+            done
+          '
+
+          echo "Waiting for ingestion service..."
+          timeout 180 bash -c '
+            until curl -fsS http://localhost:4003/health > /dev/null; do
+              sleep 3
             done
           '
 
@@ -113,7 +123,18 @@ jobs:
           echo "=== Dashboard runtime config.js ==="
           curl -fsS http://localhost:3000/config.js
 
+          echo "=== Direct ingestion health ==="
+          curl -fsS http://localhost:4003/health | jq '.'
+
           wait "$PLAYWRIGHT_SETUP_PID"
+
+      - name: Verify API can reach ingestion control plane
+        run: |
+          docker compose -f "$COMPOSE_FILE" exec -T api node --input-type=module - <<'NODE'
+          const { getRemoteIngestionHealth } = await import('./dist/services/telemetry/client.js');
+          const payload = await getRemoteIngestionHealth();
+          console.log(JSON.stringify(payload, null, 2));
+          NODE
 
       - name: Seed local dashboard test user
         id: dashboard_auth
@@ -376,6 +397,16 @@ jobs:
               echo "$AGENTS_RESPONSE" | jq ".count, (.agents[]? | {uuid, device_name, provisioning_state, fleet_uuid})"
             done
           '
+
+      - name: Verify authenticated ingestion health endpoint through API
+        env:
+          ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
+        run: |
+          RESPONSE=$(curl -fsS http://localhost:4002/api/v1/metrics/ingestion-health \
+            -H "Authorization: Bearer $ACCESS_TOKEN")
+
+          echo "$RESPONSE" | jq '.'
+          test "$(echo "$RESPONSE" | jq -r '.ingestionHealthy')" = "true"
 
       - name: Verify dashboard sidebar and capture dashboard diagnostics
         working-directory: dashboard

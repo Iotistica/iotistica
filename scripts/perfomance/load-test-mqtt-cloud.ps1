@@ -10,8 +10,7 @@
       - active agent UUIDs come from the app database in CNPG
             - MQTT credentials default to the live API runtime MQTT settings
             - publish path targets the external broker endpoint used by agents
-      - health polling uses /api/v1/metrics/ingestion-health when a JWT is supplied,
-        otherwise falls back to the public /metrics Prometheus endpoint
+            - health polling scrapes the ingestion deployment directly via its local /metrics endpoint
 
     This keeps the local script intact and provides a cloud-specific workflow for
     namespaces like demo.
@@ -38,8 +37,7 @@
     Public API base URL. Defaults to demo-api.iotistica.com.
 
 .PARAMETER JwtToken
-    Optional bearer token for /api/v1/metrics/ingestion-health.
-    If omitted, the script falls back to scraping /metrics.
+    Unused for health polling. Retained for backward compatibility.
 
 .PARAMETER TenantId
     Explicit tenant/customer identifier. When omitted, read from the license secret.
@@ -67,6 +65,9 @@
 
 .PARAMETER ApiDeploymentName
     API deployment used to discover live MQTT runtime credentials. Defaults to demo-iotistic-api.
+
+.PARAMETER IngestionDeploymentName
+    Ingestion deployment used to scrape live ingestion metrics. Defaults to demo-iotistic-ingestion.
 
 .PARAMETER MqttPodName
     Explicit Mosquitto pod name. When omitted, discovered by label.
@@ -111,6 +112,7 @@ param(
     [bool]   $MqttUseTls        = $true,
     [bool]   $MqttInsecureTls   = $true,
     [string] $ApiDeploymentName = "demo-iotistic-api",
+    [string] $IngestionDeploymentName = "demo-iotistic-ingestion",
     [string] $MqttPodName       = "",
     [string] $CnpgNamespace     = "iotistica-cnpg-cl01",
     [string] $CnpgPodName       = "iotistica-cnpg-cl01-1",
@@ -363,66 +365,130 @@ function Get-PrometheusGaugeValue {
     [double]::Parse($match.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
 }
 
-function Get-IngestionSnapshotFromMetrics {
-    param([string]$Url)
+function Get-IngestionSnapshotViaIngestionPod {
+    param(
+        [string]$NamespaceName,
+        [string]$DeploymentName
+    )
 
-    try {
-        $content = Invoke-WebRequest -Uri "$Url/metrics" -UseBasicParsing -TimeoutSec 10 | Select-Object -ExpandProperty Content
-    } catch {
-        return $null
+    if ([string]::IsNullOrWhiteSpace($DeploymentName)) {
+        throw 'IngestionDeploymentName must be set for health polling'
     }
 
-    [pscustomobject]@{
-        streamLength      = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_stream_length'
-        workerLag         = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_worker_lag'
-        pendingMessages   = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_pending_count'
-        dlqLength         = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_dlq_length'
-        workerCount       = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_worker_count'
-        dwellP95Ms        = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_dwell_latency_p95_ms'
-        batchLatP95Ms     = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_batch_latency_p95_ms'
-        messagesProcessed = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_messages_processed_total'
-        readingsInserted  = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_readings_inserted_total'
-        messagesDropped   = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_messages_dropped_total'
+    $nodeScript = @'
+fetch('http://127.0.0.1:3003/metrics')
+  .then(async (response) => {
+    const text = await response.text();
+    if (!response.ok) {
+      console.error(`HTTP ${response.status} ${text}`);
+      process.exit(1);
+    }
+
+    process.stdout.write(text);
+  })
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+'@
+
+    try {
+        $content = Invoke-KubectlCapture @(
+            'exec', '-n', $NamespaceName, "deployment/$DeploymentName",
+            '--', 'node', '-e', $nodeScript
+        )
+
+        if (-not $content) {
+            throw "Ingestion metrics scrape returned no content from deployment '$DeploymentName' in namespace '$NamespaceName'"
+        }
+
+        $snapshot = [pscustomobject]@{
+            streamLength      = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_stream_length'
+            workerLag         = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_worker_lag'
+            pendingMessages   = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_pending_count'
+            dlqLength         = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_dlq_length'
+            workerCount       = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_worker_count'
+            dwellP95Ms        = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_dwell_latency_p95_ms'
+            batchLatP95Ms     = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_batch_latency_p95_ms'
+            messagesProcessed = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_messages_processed_total'
+            readingsInserted  = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_readings_inserted_total'
+            messagesDropped   = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_messages_dropped_total'
+        }
+
+        if ($null -eq $snapshot.streamLength -and
+            $null -eq $snapshot.workerLag -and
+            $null -eq $snapshot.pendingMessages -and
+            $null -eq $snapshot.workerCount) {
+            throw "Ingestion metrics scrape succeeded but did not return expected iotistic_ingestion_* metrics from deployment '$DeploymentName'"
+        }
+
+        return $snapshot
+    } catch {
+        $message = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { [string]$_ }
+        throw "Failed to scrape ingestion metrics from deployment '$DeploymentName' in namespace '$NamespaceName': $message"
     }
 }
 
 function Get-IngestionSnapshot {
+    Get-IngestionSnapshotViaIngestionPod -NamespaceName $Namespace -DeploymentName $IngestionDeploymentName
+}
+
+function Get-HealthValue {
     param(
-        [string]$Url,
-        [string]$Token
+        [object]$Health,
+        [string[]]$Names,
+        [object]$Default = $null
     )
 
-    if ($Token) {
-        try {
-            return Invoke-RestMethod -Uri "$Url/api/v1/metrics/ingestion-health" `
-                -Headers @{ Authorization = "Bearer $Token" } `
-                -TimeoutSec 10 -ErrorAction Stop
-        } catch {
-            return Get-IngestionSnapshotFromMetrics -Url $Url
+    foreach ($name in $Names) {
+        $value = Get-OptionalValue -InputObject $Health -PropertyName $name
+        if ($null -ne $value) {
+            return $value
         }
     }
 
-    Get-IngestionSnapshotFromMetrics -Url $Url
+    return $Default
+}
+
+function Get-HealthDeltaValue {
+    param(
+        [object]$Health,
+        [object]$BaselineHealth,
+        [string[]]$Names,
+        [object]$Default = $null
+    )
+
+    $current = Get-HealthValue -Health $Health -Names $Names -Default $null
+    if ($null -eq $current) {
+        return $Default
+    }
+
+    $baseline = Get-HealthValue -Health $BaselineHealth -Names $Names -Default 0
+
+    try {
+        return [int64]$current - [int64]$baseline
+    } catch {
+        return $Default
+    }
 }
 
 function Write-HealthRow {
-    param($Health, [int]$Injected, [int]$Total, [double]$ElapsedSec)
+    param($Health, $BaselineHealth, [int]$Injected, [int]$Total, [int]$MetricsPerMessage, [double]$ElapsedSec)
 
     if (-not $Health) {
-        Write-Host "  [health poll failed]" -ForegroundColor DarkGray
-        return
+        throw 'Health snapshot is missing; ingestion metrics scrape must succeed'
     }
 
     $rate = if ($ElapsedSec -gt 0) { [math]::Round($Injected / $ElapsedSec, 1) } else { 0 }
-    $streamLen = $Health.streamLength ?? '?'
-    $workers   = $Health.workerCount ?? $Health.workers ?? '?'
-    $lag       = $Health.workerLag ?? '?'
-    $processed = $Health.messagesProcessed ?? '?'
-    $inserted  = $Health.readingsInserted ?? '?'
-    $dropped   = $Health.messagesDropped ?? '?'
-    $pending   = $Health.pendingMessages ?? '?'
-    $dwellP95  = $Health.dwellP95Ms ?? '?'
-    $batchP95  = $Health.batchLatP95Ms ?? '?'
+    $streamLen = Get-HealthValue -Health $Health -Names @('streamLength') -Default '?'
+    $workers   = Get-HealthValue -Health $Health -Names @('workerCount', 'workers') -Default '?'
+    $lag       = Get-HealthValue -Health $Health -Names @('workerLag', 'lagMs', 'maxDwellMs') -Default '?'
+    $processed = Get-HealthDeltaValue -Health $Health -BaselineHealth $BaselineHealth -Names @('messagesProcessed') -Default '?'
+    $inserted  = Get-HealthDeltaValue -Health $Health -BaselineHealth $BaselineHealth -Names @('readingsInserted') -Default '?'
+    $dropped   = Get-HealthDeltaValue -Health $Health -BaselineHealth $BaselineHealth -Names @('messagesDropped') -Default '?'
+    $pending   = Get-HealthValue -Health $Health -Names @('pendingMessages') -Default '?'
+    $dwellP95  = Get-HealthValue -Health $Health -Names @('dwellP95Ms') -Default '?'
+    $batchP95  = Get-HealthValue -Health $Health -Names @('batchLatP95Ms') -Default '?'
 
     $droppedValue = 0
     try { $droppedValue = [int]$dropped } catch { $droppedValue = 0 }
@@ -432,11 +498,13 @@ function Write-HealthRow {
 
     $droppedColor = if ($droppedValue -gt 0) { 'Red' } else { 'Green' }
     $lagColor = if ($lagValue -gt 20000) { 'Red' } elseif ($lagValue -gt 5000) { 'Yellow' } else { 'Cyan' }
+    $injectedReadings = $Injected * $MetricsPerMessage
+    $totalReadings = $Total * $MetricsPerMessage
 
-    Write-Host ("{0,8} | {1,6}/{2} | rate={3,7}/s | stream={4,5} lag=" -f `
-        (Get-Date -Format 'HH:mm:ss'), $Injected, $Total, $rate, $streamLen) -NoNewline
+    Write-Host ("{0,8} | msg={1,5}/{2,-5} rd={3,6}/{4,-6} | rate={5,7}/s | stream={6,5} lag=" -f `
+        (Get-Date -Format 'HH:mm:ss'), $Injected, $Total, $injectedReadings, $totalReadings, $rate, $streamLen) -NoNewline
     Write-Host ("{0,6}" -f $lag) -ForegroundColor $lagColor -NoNewline
-    Write-Host ("  pending={0,5} workers={1,2} processed={2,7} inserted={3,7} dropped=" -f `
+    Write-Host ("  pending={0,5} workers={1,2} procΔ={2,7} insΔ={3,7} dropΔ=" -f `
         $pending, $workers, $processed, $inserted) -NoNewline
     Write-Host ("{0,4}" -f $dropped) -ForegroundColor $droppedColor -NoNewline
     Write-Host ("  dwellP95={0}ms batchP95={1}ms" -f $dwellP95, $batchP95)
@@ -446,6 +514,7 @@ function Write-FlushRow {
     param(
         [int]$Injected,
         [int]$Total,
+        [int]$MetricsPerMessage,
         [double]$ElapsedSec,
         [int]$PendingMessages,
         [int]$TopicCount,
@@ -453,14 +522,22 @@ function Write-FlushRow {
     )
 
     $rate = if ($ElapsedSec -gt 0) { [math]::Round($Injected / $ElapsedSec, 1) } else { 0 }
-    Write-Host ("{0,8} | {1,6}/{2} | rate={3,7}/s | publishing {4,5} msgs across {5,2} topics | {6}" -f `
-        (Get-Date -Format 'HH:mm:ss'), $Injected, $Total, $rate, $PendingMessages, $TopicCount, $Phase) -ForegroundColor DarkGray
+    $injectedReadings = $Injected * $MetricsPerMessage
+    $totalReadings = $Total * $MetricsPerMessage
+    Write-Host ("{0,8} | msg={1,5}/{2,-5} rd={3,6}/{4,-6} | rate={5,7}/s | publishing {6,5} msgs across {7,2} topics | {8}" -f `
+        (Get-Date -Format 'HH:mm:ss'), $Injected, $Total, $injectedReadings, $totalReadings, $rate, $PendingMessages, $TopicCount, $Phase) -ForegroundColor DarkGray
 }
 
 function Build-EndpointsPayload {
-    param([string]$AgentUuid, [string]$AgentName, [int]$MetricCount)
+    param(
+        [string]$AgentUuid,
+        [string]$AgentName,
+        [int]$MetricCount,
+        [datetime]$BaseTimestamp,
+        [int]$Sequence
+    )
 
-    $now = (Get-Date).ToUniversalTime().ToString('o')
+    $timestamp = $BaseTimestamp.AddMilliseconds($Sequence).ToUniversalTime().ToString('o')
     $metricNames = @('temperature','humidity','pressure','vibration','current','voltage','co2','flow','rpm','power')
     $baseValues  = @{
         temperature = 23.0; humidity = 45.0; pressure = 101.3; vibration = 5.0
@@ -477,12 +554,12 @@ function Build-EndpointsPayload {
         $name = $metricNames[($_ - 1) % $metricNames.Length]
         $base = $baseValues[$name]
         $value = [math]::Round($base + (Get-Random -Minimum -5 -Maximum 5) * 0.1 * $base / 100, 4)
-        @{ metric = $name; value = $value; unit = $units[$name]; quality = 'good'; timestamp = $now; protocol = 'mqtt' }
+        @{ metric = $name; value = $value; unit = $units[$name]; quality = 'good'; timestamp = $timestamp; protocol = 'mqtt' }
     }
 
     @{
         deviceName = $AgentName
-        timestamp  = $now
+        timestamp  = $timestamp
         data       = @{
             protocol   = 'mqtt'
             readings   = $readings
@@ -627,12 +704,14 @@ Write-Host "  Tenant      : $TenantId  (encoded: $encodedTenant)"
 $sampleAgent = $selectedAgents[0]
 $sampleTopic = $agentTopics[$sampleAgent.Uuid]
 Write-Host "  Topic fmt   : $($sampleTopic -replace (Encode-Uuid $sampleAgent.Uuid), '{encodedAgentUuid}')  (e.g. $sampleTopic)"
-$healthPollDesc = if ($JwtToken) { 'JWT health endpoint with /metrics fallback' } else { 'public /metrics fallback only' }
+$healthPollDesc = 'direct ingestion scrape only'
 Write-Host "  Health poll : every ${PollIntervalSec}s — $healthPollDesc"
 Write-Host ''
 
-Write-Host ("{0,8} | {1,13} | {2,12} | {3,18} | {4,24} | {5,22}" -f `
-    'Time', 'Injected/Total', 'rate/stream', 'lag/pending/workers', 'processed/inserted/dropped', 'dwellP95/batchP95')
+$baselineHealth = Get-IngestionSnapshot
+
+Write-Host ("{0,8} | {1,27} | {2,12} | {3,18} | {4,24} | {5,22}" -f `
+    'Time', 'Msgs/Total  Readings/Total', 'rate/stream', 'lag/pending/workers', 'procΔ/insΔ/dropΔ', 'dwellP95/batchP95')
 Write-Host ('-' * 130)
 
 $batchSize = 200
@@ -643,6 +722,7 @@ $lastPollAt = 0.0
 $delayMs = if ($RatePerSecond -gt 0) { [int](1000.0 / $RatePerSecond) } else { 0 }
 $injected = 0
 $totalPending = 0
+$runBaseTimestamp = (Get-Date).ToUniversalTime()
 
 $pendingBatches = @{}
 foreach ($uuid in ($selectedAgents.Uuid | Select-Object -Unique)) {
@@ -651,7 +731,7 @@ foreach ($uuid in ($selectedAgents.Uuid | Select-Object -Unique)) {
 
 for ($i = 0; $i -lt $MessageCount; $i++) {
     $agent = $selectedAgents[$i % $AgentCount]
-    $payload = Build-EndpointsPayload -AgentUuid $agent.Uuid -AgentName $agent.Name -MetricCount $MetricsPerMessage
+    $payload = Build-EndpointsPayload -AgentUuid $agent.Uuid -AgentName $agent.Name -MetricCount $MetricsPerMessage -BaseTimestamp $runBaseTimestamp -Sequence $i
     $json = $payload | ConvertTo-Json -Depth 10 -Compress
     $pendingBatches[$agent.Uuid].Add($json)
     $injected++
@@ -659,16 +739,16 @@ for ($i = 0; $i -lt $MessageCount; $i++) {
 
     if ($totalPending -ge $roundSize) {
         $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
-        Write-FlushRow -Injected $injected -Total $MessageCount -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'flush start'
+        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'flush start'
         Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -User $MqttUsername -Pass $MqttPassword -BrokerHost $MqttHost -Port $MqttPort -UseTls $MqttUseTls -InsecureTls $MqttInsecureTls -PodName $MqttPodName -SecretNamespace $Namespace
         $totalPending = 0
 
         $elapsedSec = $stopwatch.Elapsed.TotalSeconds
-        Write-FlushRow -Injected $injected -Total $MessageCount -ElapsedSec $elapsedSec -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'flush done'
+        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'flush done'
 
         if (($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
-            $health = Get-IngestionSnapshot -Url $ApiUrl -Token $JwtToken
-            Write-HealthRow -Health $health -Injected $injected -Total $MessageCount -ElapsedSec $elapsedSec
+            $health = Get-IngestionSnapshot
+            Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
             $lastPollAt = $elapsedSec
         }
     }
@@ -677,20 +757,20 @@ for ($i = 0; $i -lt $MessageCount; $i++) {
 
     $elapsedSec = $stopwatch.Elapsed.TotalSeconds
     if ($totalPending -eq 0 -and ($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
-        $health = Get-IngestionSnapshot -Url $ApiUrl -Token $JwtToken
-        Write-HealthRow -Health $health -Injected $injected -Total $MessageCount -ElapsedSec $elapsedSec
+        $health = Get-IngestionSnapshot
+        Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
         $lastPollAt = $elapsedSec
     }
 }
 
 if ($totalPending -gt 0) {
     $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
-    Write-FlushRow -Injected $injected -Total $MessageCount -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'final flush start'
+    Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'final flush start'
 }
 Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -User $MqttUsername -Pass $MqttPassword -BrokerHost $MqttHost -Port $MqttPort -UseTls $MqttUseTls -InsecureTls $MqttInsecureTls -PodName $MqttPodName -SecretNamespace $Namespace
 
 if ($totalPending -gt 0) {
-    Write-FlushRow -Injected $injected -Total $MessageCount -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'final flush done'
+    Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'final flush done'
 }
 
 $stopwatch.Stop()
@@ -708,12 +788,12 @@ Write-Host 'Waiting for worker to drain stream (lag=0, pending=0)...' -Foregroun
 $drainTimeout = [System.Diagnostics.Stopwatch]::StartNew()
 while ($drainTimeout.Elapsed.TotalSeconds -lt 120) {
     Start-Sleep -Seconds $PollIntervalSec
-    $health = Get-IngestionSnapshot -Url $ApiUrl -Token $JwtToken
-    Write-HealthRow -Health $health -Injected $injected -Total $MessageCount -ElapsedSec ($totalSec + $drainTimeout.Elapsed.TotalSeconds)
+    $health = Get-IngestionSnapshot
+    Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec ($totalSec + $drainTimeout.Elapsed.TotalSeconds)
 
     if ($health) {
-        $lag = [int]($health.workerLag ?? -1)
-        $pending = [int]($health.pendingMessages ?? -1)
+        $lag = [int](Get-HealthValue -Health $health -Names @('workerLag', 'lagMs', 'maxDwellMs') -Default -1)
+        $pending = [int](Get-HealthValue -Health $health -Names @('pendingMessages') -Default -1)
         if ($lag -eq 0 -and $pending -eq 0) {
             Write-Host ''
             Write-Host 'Worker caught up (lag=0, pending=0).' -ForegroundColor Green
@@ -724,19 +804,21 @@ while ($drainTimeout.Elapsed.TotalSeconds -lt 120) {
 
 Write-Host ''
 Write-Host '=== Final Stats ===' -ForegroundColor Cyan
-$finalHealth = Get-IngestionSnapshot -Url $ApiUrl -Token $JwtToken
+$finalHealth = Get-IngestionSnapshot
 if ($finalHealth) {
-    $processed = $finalHealth.messagesProcessed ?? '?'
-    $inserted = $finalHealth.readingsInserted ?? '?'
-    $dropped = $finalHealth.messagesDropped ?? '?'
-    $lag = $finalHealth.workerLag ?? '?'
-    $pending = $finalHealth.pendingMessages ?? '?'
-    $dlq = $finalHealth.dlqLength ?? '?'
+    $processed = Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('messagesProcessed') -Default '?'
+    $inserted = Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('readingsInserted') -Default '?'
+    $dropped = Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('messagesDropped') -Default '?'
+    $lag = Get-HealthValue -Health $finalHealth -Names @('workerLag', 'lagMs', 'maxDwellMs') -Default '?'
+    $pending = Get-HealthValue -Health $finalHealth -Names @('pendingMessages') -Default '?'
+    $dlq = Get-HealthValue -Health $finalHealth -Names @('dlqLength') -Default '?'
     Write-Host ("  Consumer lag    : {0}  pending: {1}" -f $lag, $pending)
-    Write-Host ("  Processed       : {0}" -f $processed)
-    Write-Host ("  Readings in DB  : {0}" -f $inserted)
-    $droppedColor = if ([int]$dropped -gt 0) { 'Red' } else { 'Green' }
-    Write-Host ("  Dropped         : {0}" -f $dropped) -ForegroundColor $droppedColor
+    Write-Host ("  Processed (run) : {0}" -f $processed)
+    Write-Host ("  Readings (run)  : {0}" -f $inserted)
+    $droppedNumeric = 0
+    try { $droppedNumeric = [int]$dropped } catch { $droppedNumeric = 0 }
+    $droppedColor = if ($droppedNumeric -gt 0) { 'Red' } else { 'Green' }
+    Write-Host ("  Dropped (run)   : {0}" -f $dropped) -ForegroundColor $droppedColor
     Write-Host ("  DLQ length      : {0}" -f $dlq)
 } else {
     Write-Host '  Could not retrieve final health snapshot.' -ForegroundColor DarkGray
