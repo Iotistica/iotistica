@@ -192,10 +192,22 @@ function Invoke-KubectlCapture {
     if ($LASTEXITCODE -ne 0) {
         throw "kubectl $($Arguments -join ' ') failed: $result"
     }
-    if ($result -is [System.Array]) {
-        return ($result -join "`n").Trim()
+
+    $text = if ($result -is [System.Array]) {
+        ($result -join "`n")
+    } else {
+        [string]$result
     }
-    return [string]$result
+
+    $cleanLines = @(
+        $text -split "`r?`n" |
+            Where-Object {
+                $_ -and
+                $_ -notmatch '^[EWI][0-9]{4}\s+[0-9:.]+\s+\d+\s+.*$'
+            }
+    )
+
+    ($cleanLines -join "`n").Trim()
 }
 
 function Get-SecretValue {
@@ -230,6 +242,24 @@ function Get-OptionalObjectProperty {
     }
 
     return [string]$property.Value
+}
+
+function Get-OptionalValue {
+    param(
+        [object]$InputObject,
+        [string]$PropertyName
+    )
+
+    if ($null -eq $InputObject) {
+        return $null
+    }
+
+    $property = $InputObject.PSObject.Properties[$PropertyName]
+    if ($null -eq $property) {
+        return $null
+    }
+
+    return $property.Value
 }
 
 function Get-TenantIdFromLicenseSecret {
@@ -383,7 +413,7 @@ function Write-HealthRow {
         return
     }
 
-    $rate = if ($ElapsedSec -gt 0) { [int]($Injected / $ElapsedSec) } else { 0 }
+    $rate = if ($ElapsedSec -gt 0) { [math]::Round($Injected / $ElapsedSec, 1) } else { 0 }
     $streamLen = $Health.streamLength ?? '?'
     $workers   = $Health.workerCount ?? $Health.workers ?? '?'
     $lag       = $Health.workerLag ?? '?'
@@ -403,7 +433,7 @@ function Write-HealthRow {
     $droppedColor = if ($droppedValue -gt 0) { 'Red' } else { 'Green' }
     $lagColor = if ($lagValue -gt 20000) { 'Red' } elseif ($lagValue -gt 5000) { 'Yellow' } else { 'Cyan' }
 
-    Write-Host ("{0,8} | {1,6}/{2} | rate={3,5}/s | stream={4,5} lag=" -f `
+    Write-Host ("{0,8} | {1,6}/{2} | rate={3,7}/s | stream={4,5} lag=" -f `
         (Get-Date -Format 'HH:mm:ss'), $Injected, $Total, $rate, $streamLen) -NoNewline
     Write-Host ("{0,6}" -f $lag) -ForegroundColor $lagColor -NoNewline
     Write-Host ("  pending={0,5} workers={1,2} processed={2,7} inserted={3,7} dropped=" -f `
@@ -422,8 +452,8 @@ function Write-FlushRow {
         [string]$Phase
     )
 
-    $rate = if ($ElapsedSec -gt 0) { [int]($Injected / $ElapsedSec) } else { 0 }
-    Write-Host ("{0,8} | {1,6}/{2} | rate={3,5}/s | publishing {4,5} msgs across {5,2} topics | {6}" -f `
+    $rate = if ($ElapsedSec -gt 0) { [math]::Round($Injected / $ElapsedSec, 1) } else { 0 }
+    Write-Host ("{0,8} | {1,6}/{2} | rate={3,7}/s | publishing {4,5} msgs across {5,2} topics | {6}" -f `
         (Get-Date -Format 'HH:mm:ss'), $Injected, $Total, $rate, $PendingMessages, $TopicCount, $Phase) -ForegroundColor DarkGray
 }
 
@@ -607,6 +637,7 @@ Write-Host ('-' * 130)
 
 $batchSize = 200
 $roundSize = $batchSize * $AgentCount
+Write-Host "  Flush size  : $roundSize msgs ($batchSize per agent x $AgentCount agents)" -ForegroundColor DarkGray
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $lastPollAt = 0.0
 $delayMs = if ($RatePerSecond -gt 0) { [int](1000.0 / $RatePerSecond) } else { 0 }
@@ -645,7 +676,7 @@ for ($i = 0; $i -lt $MessageCount; $i++) {
     if ($delayMs -gt 0) { Start-Sleep -Milliseconds $delayMs }
 
     $elapsedSec = $stopwatch.Elapsed.TotalSeconds
-    if (($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
+    if ($totalPending -eq 0 -and ($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
         $health = Get-IngestionSnapshot -Url $ApiUrl -Token $JwtToken
         Write-HealthRow -Health $health -Injected $injected -Total $MessageCount -ElapsedSec $elapsedSec
         $lastPollAt = $elapsedSec
@@ -710,5 +741,3 @@ if ($finalHealth) {
 } else {
     Write-Host '  Could not retrieve final health snapshot.' -ForegroundColor DarkGray
 }
-
-Write-Host ''

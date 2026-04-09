@@ -1,0 +1,1 @@
+{"version":3,"file":"reading-inserter.d.ts","sourceRoot":"","sources":["../../src/services/reading-inserter.ts"],"names":[],"mappings":"AAGA,OAAO,EAAE,eAAe,EAAE,MAAM,SAAS,CAAC;AAI1C,qBAAa,eAAe;IAC1B,OAAO,CAAC,QAAQ,CAAC,eAAe,CAAyB;IAEzD,OAAO,CAAC,KAAK;IAIP,WAAW,CAAC,IAAI,EAAE,eAAe,EAAE,GAAG,OAAO,CAAC,IAAI,CAAC;YAsD3C,qBAAqB;CAepC"}

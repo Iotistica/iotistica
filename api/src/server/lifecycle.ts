@@ -8,6 +8,7 @@ import logger from '../utils/logger';
 import { websocketManager } from '../services/websocket/manager';
 import { startHttpsServer } from './https';
 import { createGracefulShutdown } from './shutdown';
+import type https from 'https';
 
 type NetworkError = NodeJS.ErrnoException & {
   address?: string;

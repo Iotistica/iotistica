@@ -22,7 +22,7 @@ import {
   refreshViews,
 } from '../services/agent/metrics.service';
 import type { TimeRange, Aggregation, RefreshView } from '../services/agent/metrics.service';
-import { redisDeviceQueue } from '../services/ingestion/redis-device-queue';
+import { getRemoteIngestionHealth } from '../services/telemetry/client';
 import type { FastifyPluginAsync } from 'fastify'
 
 const plugin: FastifyPluginAsync = async (fastify) => {
@@ -164,7 +164,7 @@ fastify.get<{ Querystring: LatestQuerystring }>('/latest', { preHandler: [jwtAut
 fastify.get('/ingestion-health', { preHandler: [jwtAuth] }, async (req, reply) => {
   const requestId = req.id || 'unknown';
   try {
-    const health = await redisDeviceQueue.getIngestionHealth();
+    const health = await getRemoteIngestionHealth();
     return reply.send(health);
   } catch (error: unknown) {
     logger.error('Error getting ingestion health', {

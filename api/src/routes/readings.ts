@@ -5,7 +5,8 @@
  */
 
 import { z } from 'zod';
-import { readingsService } from '../services/ingestion/readings.service';
+import { insertRemoteReading } from '../services/telemetry/client';
+import { readingsService } from '../services/telemetry/readings.service';
 import { jwtAuth } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
 import type { FastifyPluginAsync } from 'fastify'
@@ -345,7 +346,7 @@ fastify.post<{ Body: InsertReadingBody }>('/', { preHandler: [jwtAuth] }, async 
       extra: reading.extra || null
     };
 
-    await readingsService.insert(sanitizedReading);
+    await insertRemoteReading(sanitizedReading);
 
     logger.info('Reading inserted', { requestId, userId, deviceUuid: validatedUuid, metric: validatedMetric });
     return reply.status(201).send({ message: 'Reading inserted successfully', requestId });

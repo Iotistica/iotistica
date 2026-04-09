@@ -1,0 +1,4 @@
+# Trivy ignore file for the ingestion service.
+# No active suppressions are defined yet.
+# Add CVE entries here only when the vulnerability is verified as non-runtime,
+# not reachable, or awaiting an upstream fix.

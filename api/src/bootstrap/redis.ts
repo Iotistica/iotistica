@@ -10,8 +10,7 @@ import logger from '../utils/logger';
 import { redisClient } from '../redis/client';
 import { redisFactory } from '../redis/client-factory';
 import { startMetricsBatchWorker } from '../services/agent/metrics-worker';
-import { redisLogQueue } from '../services/ingestion/redis-log-queue';
-import { redisDeviceQueue } from '../services/ingestion';
+import { redisLogQueue } from '../services/telemetry/logs-queue';
 
 /**
  * Flush the Mosquitto go-auth Redis cache (DB 1) on startup.
@@ -57,7 +56,7 @@ async function flushMqttAuthCache(): Promise<void> {
   }
 }
 
-export async function bootstrapRedis(): Promise<void> {
+async function connectSharedRedisClient(): Promise<void> {
   // Redis client - non-fatal, degrades to PostgreSQL-only mode
   try {
     await redisClient.connect();
@@ -68,6 +67,10 @@ export async function bootstrapRedis(): Promise<void> {
       note: 'This is non-critical - metrics will use PostgreSQL only',
     });
   }
+}
+
+export async function bootstrapApiRedis(): Promise<void> {
+  await connectSharedRedisClient();
 
   // Flush go-auth MQTT auth cache so stale DENY entries from the previous
   // container lifecycle do not block MQTT reconnection.
@@ -87,15 +90,6 @@ export async function bootstrapRedis(): Promise<void> {
     logger.info('Redis log queue worker started');
   } catch (error) {
     logger.error('Failed to start Redis log queue worker', { error });
-    process.exit(1);
-  }
-
-  // Device queue worker - CRITICAL: device data won't be persisted without it
-  try {
-    await redisDeviceQueue.startWorker();
-    logger.info('Redis device queue worker started');
-  } catch (error) {
-    logger.error('Failed to start Redis device queue worker', { error });
     process.exit(1);
   }
 }

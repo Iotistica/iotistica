@@ -4,7 +4,7 @@
  * Endpoints for querying anomaly scores and aggregates from edge AI
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { readingsService } from '../services/ingestion/readings.service';
+import { readingsService } from '../services/telemetry/readings.service';
 import logger from '../utils/logger';
 import { jwtAuth } from '../middleware/jwt-auth';
 

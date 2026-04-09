@@ -132,6 +132,7 @@ services:
             - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
             # Shell security (HMAC signature verification)
             - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
+            - INGESTION_INTERNAL_URL=${INGESTION_INTERNAL_URL:-http://ingestion:3003}
             - REDIS_HOST=${REDIS_HOST:-redis}
             - REDIS_PORT=${REDIS_PORT:-6379}
             - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
@@ -141,26 +142,7 @@ services:
             - REDIS_USE_TLS=${REDIS_USE_TLS}
             - REDIS_TLS_ENABLED=${REDIS_TLS_ENABLED}
             - REDIS_TLS_SERVERNAME=${REDIS_TLS_SERVERNAME}
-            # Redis OOM Protection (Tier-1: Circuit breaker + disk spool)
-            - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-true}
-            - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
-            - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-1000}
-            # Redis OOM Protection (Tier-2: Stream MAXLEN limits)
-            # Sizing guide: INGESTION = (peak_msg_per_sec × target_buffer_seconds)
-            #   e.g. 100 devices × 10 readings/s = 1000 msg/s → 10000 = ~10s buffer
-            #   Increase if workers are slower than producers (check workerLag in /admin/sensor-queue/stats)
-            - REDIS_INGESTION_STREAM_MAXLEN=${REDIS_INGESTION_STREAM_MAXLEN:-10000}
-            - REDIS_PROCESSING_STREAM_MAXLEN=${REDIS_PROCESSING_STREAM_MAXLEN:-100000}
-            # DLQ: keep last N failed messages for inspection; flush periodically
-            - REDIS_DLQ_MAXLEN=${REDIS_DLQ_MAXLEN:-1000}
             - MODBUS_TCP_HOST=${MODBUS_TCP_HOST:-iotistic-modbus-sim}
-            # Device ingestion worker tuning
-            - DEVICE_WORKER_COUNT=${DEVICE_WORKER_COUNT:-6}
-            - DEVICE_BATCH_SIZE=${DEVICE_BATCH_SIZE:-500}
-            - DEVICE_AUTOSCALE_LAG_SCALE_UP_MS=${DEVICE_AUTOSCALE_LAG_SCALE_UP_MS:-5000}
-            - DEVICE_AUTOSCALE_LAG_CRITICAL_MS=${DEVICE_AUTOSCALE_LAG_CRITICAL_MS:-15000}
-            - DEVICE_AUTOSCALE_COOLDOWN_MS=${DEVICE_AUTOSCALE_COOLDOWN_MS:-5000}
-            - DEVICE_AUTOSCALE_MAX_WORKERS=${DEVICE_AUTOSCALE_MAX_WORKERS:-20}
             - TAILSCALE_ENABLED=false
             - MQTT_MONITOR_URL=${MQTT_MONITOR_URL:-http://mqtt-monitor:3500}
             - POSTOFFICE_URL=${POSTOFFICE_URL:-http://postoffice:3300}
@@ -179,7 +161,6 @@ services:
             - "3443:3443"
         volumes:
             - ./certs:/app/certs:ro
-            - iotistic-api-spool:/var/lib/iotistic/spool  # Persistent disk spool for circuit breaker
             # Mount kubeconfig for local K8s access (accessible by appuser)
             - ${USERPROFILE}/.kube:/home/appuser/.kube:ro
         healthcheck:
@@ -192,6 +173,83 @@ services:
             redis:
                 condition: service_healthy
       
+        networks:
+            - iotistica-net
+
+    ingestion:
+        build:
+            context: .
+            dockerfile: ingestion/Dockerfile
+        container_name: iotistic-ingestion
+        restart: always
+        tty: true
+        stdin_open: true
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"
+        environment:
+            - PORT=${INGESTION_PORT:-3003}
+            - NODE_ENV=${NODE_ENV:-development}
+            - LOG_LEVEL=${LOG_LEVEL:-debug}
+            - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
+            - REDIS_INGESTION_STREAM_KEY=${REDIS_INGESTION_STREAM_KEY:-tenant:{73eddd385ce8}:agent:devices:ingestion}
+            - DB_HOST=${DB_HOST:-postgres}
+            - DB_PORT=${DB_PORT:-30692}
+            - DB_NAME=${POSTGRES_DB:-iotistica}
+            - DB_USER=${DB_USER:-admin}
+            - DB_PASSWORD=${DB_PASSWORD}
+            - DB_POOL_SIZE=${INGESTION_DB_POOL_SIZE:-20}
+            - DB_IDLE_TIMEOUT_MS=${INGESTION_DB_IDLE_TIMEOUT_MS:-10000}
+            - DB_CONNECTION_TIMEOUT_MS=${INGESTION_DB_CONNECTION_TIMEOUT_MS:-10000}
+            - DB_STATEMENT_TIMEOUT_MS=${INGESTION_DB_STATEMENT_TIMEOUT_MS:-45000}
+            - DB_APPLICATION_NAME=${INGESTION_DB_APPLICATION_NAME:-iotistic-ingestion-local}
+            - DB_SSL=${DB_SSL:-true}
+            - DB_SSL_REJECT_UNAUTHORIZED=${DB_SSL_REJECT_UNAUTHORIZED:-false}
+            - REDIS_HOST=${REDIS_HOST:-redis}
+            - REDIS_PORT=${REDIS_PORT:-6379}
+            - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
+            - REDIS_USERNAME=${REDIS_USERNAME}
+            - REDIS_CLUSTER=${REDIS_CLUSTER}
+            - REDIS_TLS=${REDIS_TLS}
+            - REDIS_USE_TLS=${REDIS_USE_TLS}
+            - REDIS_TLS_ENABLED=${REDIS_TLS_ENABLED}
+            - REDIS_TLS_SERVERNAME=${REDIS_TLS_SERVERNAME}
+            - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-true}
+            - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
+            - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-1000}
+            - REDIS_INGESTION_STREAM_MAXLEN=${REDIS_INGESTION_STREAM_MAXLEN:-10000}
+            - REDIS_IDLE_INGESTION_STREAM_MAXLEN=${REDIS_IDLE_INGESTION_STREAM_MAXLEN:-250}
+            - REDIS_PROCESSING_STREAM_MAXLEN=${REDIS_PROCESSING_STREAM_MAXLEN:-100000}
+            - REDIS_DLQ_MAXLEN=${REDIS_DLQ_MAXLEN:-1000}
+            - REDIS_DEVICE_STREAM_HIGH_WATERMARK_PCT=${REDIS_DEVICE_STREAM_HIGH_WATERMARK_PCT:-0.8}
+            - REDIS_MEMORY_HIGH_WATERMARK_PCT=${REDIS_MEMORY_HIGH_WATERMARK_PCT:-75}
+            - WORKER_COUNT=${WORKER_COUNT:-6}
+            - BATCH_SIZE=${BATCH_SIZE:-500}
+            - FLUSH_INTERVAL_MS=${FLUSH_INTERVAL_MS:-2000}
+            - AUTOSCALE_MIN_WORKERS=${AUTOSCALE_MIN_WORKERS:-4}
+            - AUTOSCALE_MAX_WORKERS=${AUTOSCALE_MAX_WORKERS:-20}
+            - AUTOSCALE_LAG_SCALE_UP_MS=${AUTOSCALE_LAG_SCALE_UP_MS:-5000}
+            - AUTOSCALE_LAG_CRITICAL_MS=${AUTOSCALE_LAG_CRITICAL_MS:-15000}
+            - AUTOSCALE_SCALE_DOWN_STABLE_CHECKS=${AUTOSCALE_SCALE_DOWN_STABLE_CHECKS:-12}
+            - AUTOSCALE_COOLDOWN_MS=${AUTOSCALE_COOLDOWN_MS:-5000}
+            - DB_WAITING_HIGH_WATERMARK=${DB_WAITING_HIGH_WATERMARK:-5}
+            - DB_SATURATION_HIGH_WATERMARK_PCT=${DB_SATURATION_HIGH_WATERMARK_PCT:-70}
+            - DB_BACKPRESSURE_SLEEP_MS=${DB_BACKPRESSURE_SLEEP_MS:-500}
+        expose:
+            - "3003"
+        volumes:
+            - iotistic-ingestion-spool:/var/lib/iotistic/spool
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
+        depends_on:
+            redis:
+                condition: service_healthy
         networks:
             - iotistica-net
 
@@ -820,26 +878,26 @@ services:
     #         start_period: 30s
 
 volumes:
-  wg-data:
-  agent-20-data:
-    driver: local
-  iotistic-pg-data:
-    driver: local
-  iotistic-redis-data:
-    driver: local
-  iotistic-api-spool:
-    driver: local
-  ollama-data:
-    driver: local
-  vpn-config:
-    driver: local
-  vpn-logs:
-    driver: local
-  prometheus-data:
-    driver: local
-  grafana-data:
-    driver: local
-  emqx-data:
+    wg-data:
+    agent-20-data:
+        driver: local
+    iotistic-pg-data:
+        driver: local
+    iotistic-redis-data:
+        driver: local
+    iotistic-ingestion-spool:
+        driver: local
+    ollama-data:
+        driver: local
+    vpn-config:
+        driver: local
+    vpn-logs:
+        driver: local
+    prometheus-data:
+        driver: local
+    grafana-data:
+        driver: local
+    emqx-data:
         driver: local
  
 networks:

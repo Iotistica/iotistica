@@ -1,0 +1,32 @@
+{
+  "name": "iotistica-ingestion",
+  "version": "0.0.1",
+  "description": "Iotistica ingestion worker service",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "watch": "tsc --watch",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true});\""
+  },
+  "dependencies": {
+    "ioredis": "^5.3.2",
+    "jose": "^6.2.2",
+    "pg": "^8.11.3",
+    "pg-copy-streams": "^6.0.5",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.22",
+    "@types/pg": "^8.10.9",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "picomatch": "2.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

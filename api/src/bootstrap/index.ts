@@ -14,20 +14,19 @@ import { bootstrapDatabase } from './database';
 import { bootstrapConfig } from './config';
 import { bootstrapLicense } from './license';
 import { bootstrapWorkers } from './workers';
-import { bootstrapRedis } from './redis';
+import { bootstrapApiRedis } from './redis';
 import { bootstrapMqtt } from './mqtt';
 
 export async function bootstrap(): Promise<void> {
-  logger.info('Initializing Iotistica Unified API...');
+  logger.info('Initializing Iotistica API service...');
 
   await fatal('Database', bootstrapDatabase);
   await fatal('System configuration', bootstrapConfig);
   await fatal('License validator', bootstrapLicense);
 
-  await bootstrapWorkers(); // non-critical, handles own warnings
-  await bootstrapRedis();   // critical workers call process.exit internally
-
-  bootstrapMqtt();          // fire-and-forget, never blocks
+  await bootstrapWorkers();
+  await bootstrapApiRedis();
+  bootstrapMqtt();
 }
 
 async function fatal(name: string, fn: () => Promise<void>): Promise<void> {

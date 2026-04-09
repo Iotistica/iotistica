@@ -29,20 +29,17 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
       process.exit(1);
     }, timeoutMs);
 
-    // HTTPS server
     if (ctx.httpsServer) {
       try {
         ctx.httpsServer.close(() => logger.info('HTTPS Server closed'));
       } catch { /* ignore */ }
     }
 
-    // WebSocket
     try {
       websocketManager.shutdown();
       logger.info('WebSocket Server stopped');
     } catch { /* ignore */ }
 
-    // Metrics batch worker
     try {
       const { stopMetricsBatchWorker } = await import('../services/agent/metrics-worker');
       await stopMetricsBatchWorker();
@@ -54,40 +51,27 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
       await redisClient.disconnect();
     } catch { /* ignore */ }
 
-    // MQTT
     try {
       await shutdownMqtt();
     } catch { /* ignore */ }
 
-    // Heartbeat monitor
     try {
       const heartbeatMonitor = await import('../services/health/heartbeat-monitor');
       heartbeatMonitor.default.stop();
     } catch { /* ignore */ }
 
-    // MQTT jobs handler
     try {
       const { stopJobsHandler } = await import('../mqtt/handlers');
       await stopJobsHandler();
       logger.info('MQTT Jobs Handler stopped');
     } catch { /* ignore */ }
 
-    // Redis log queue (final batch)
     try {
-      const { redisLogQueue } = await import('../services/ingestion/redis-log-queue');
+      const { redisLogQueue } = await import('../services/telemetry/logs-queue');
       await redisLogQueue.stopWorker();
       logger.info('Redis log queue worker stopped');
     } catch (error) {
       logger.error('Error stopping Redis log queue worker', { error });
-    }
-
-    // Redis device queue (final batch)
-    try {
-      const { redisDeviceQueue } = await import('../services/ingestion');
-      await redisDeviceQueue.stopWorker();
-      logger.info('Redis device queue worker stopped');
-    } catch (error) {
-      logger.error('Error stopping Redis device queue worker', { error });
     }
 
     // Database pool

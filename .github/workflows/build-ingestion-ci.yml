@@ -1,0 +1,198 @@
+name: CI Build, Scan & Push Ingestion
+
+on: 
+  push:
+    branches:
+      - master
+    paths:
+      - 'ingestion/**' 
+      - '.github/workflows/build-ingestion-ci.yml'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (commit SHA, tag, or branch)'
+        required: false
+        default: master
+        type: string
+
+concurrency:
+  group: ingestion-ci
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, Scan & Push
+    runs-on: [arc-runner-set-iotistica-light]
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ingestion/package-lock.json
+
+      - name: Install ingestion dependencies
+        working-directory: ./ingestion
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Build Ingestion
+        working-directory: ./ingestion
+        run: npm run build
+
+      - name: Calculate commit SHA
+        id: sha
+        run: |
+          SHA=$(git rev-parse HEAD)
+          SHORT_SHA=${SHA:0:12}
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "Build for commit: $SHA ($SHORT_SHA)"
+
+      - name: Display Build Info
+        run: |
+          echo "## Building Docker Image" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.sha.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Tag:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/ingestion:ci-${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait for Docker daemon
+        run: |
+          for i in $(seq 1 15); do
+            docker info > /dev/null 2>&1 && echo "Docker daemon ready" && break
+            echo "Waiting for Docker daemon... ($i/15)"
+            sleep 2
+          done
+          docker info
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:buildx-stable-1
+            network=host
+
+      # Login to Docker Hub (only if tests passed)d
+      - name: Login to Docker Hub
+        if: success()
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      # Build and push image in a single Buildx run
+      - name: Build and push image
+        id: docker_build
+        if: success()
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./ingestion/Dockerfile
+          push: true
+          provenance: false
+          platforms: linux/amd64
+          cache-from: type=gha,scope=ingestion-ci
+          cache-to: type=gha,scope=ingestion-ci,mode=min,ignore-error=true
+          tags: |
+            iotistic/ingestion:ci-${{ steps.sha.outputs.short_sha }}
+            iotistic/ingestion:ci-latest
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+      # Security scan with Trivy
+      - name: Scan Ingestion image with Trivy
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: 'iotistic/ingestion:ci-${{ steps.sha.outputs.short_sha }}'
+          output-file: 'trivy-results.sarif'
+          fail-on-critical: 'true'
+          ignore-file: 'ingestion/.trivyignore'
+
+      - name: Get Docker image size
+        if: always()
+        id: image_size
+        run: |
+          IMAGE_TAG="iotistic/ingestion:ci-${{ steps.sha.outputs.short_sha }}"
+
+          # Pull from registry because image may not be loaded locally when push=true
+          docker pull "$IMAGE_TAG" > /dev/null 2>&1 || true
+
+          if docker image inspect "$IMAGE_TAG" > /dev/null 2>&1; then
+            SIZE_BYTES=$(docker image inspect "$IMAGE_TAG" --format='{{.Size}}')
+            SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
+            LAYERS=$(docker image inspect "$IMAGE_TAG" --format='{{len .RootFS.Layers}}')
+          else
+            SIZE_BYTES=0
+            SIZE_MB=0
+            LAYERS=0
+          fi
+
+          echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
+          echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
+          echo "layers=$LAYERS" >> $GITHUB_OUTPUT
+
+      - name: Generate Summary Report
+        if: always()
+        run: |
+          echo "# Build & Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** ${{ steps.image_size.outputs.size_mb }} MB" >> $GITHUB_STEP_SUMMARY
+          echo "**Layers:** ${{ steps.image_size.outputs.layers }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:**" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/ingestion:ci-${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
+          echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY
+
+
+  # trigger-integration-tests:
+  #   name: Trigger Integration Tests
+  #   needs: [version, buildx]
+  #   runs-on: [iotistic-lab-sc]
+  #   permissions:
+  #     actions: write
+  #     contents: read
+  #   if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    
+  #   steps:
+  #     - name: Trigger integration tests
+  #       uses: actions/github-script@v7
+  #       with:
+  #         github-token: ${{ secrets.GITHUB_TOKEN }}
+  #         script: |
+  #           await github.rest.actions.createWorkflowDispatch({
+  #             owner: context.repo.owner,
+  #             repo: context.repo.repo,
+  #             workflow_id: 'integration-tests.yml',
+  #             ref: 'master',
+  #             inputs: {
+  #               api_version: '${{ needs.version.outputs.package_version }}'
+  #             }
+  #           });
+            
+  #           console.log('Integration tests triggered with API version: ${{ needs.version.outputs.package_version }}');
+

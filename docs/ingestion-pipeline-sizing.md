@@ -30,10 +30,10 @@ API  ──XADD──▶  Redis Stream  (tenant:{id}:agent:devices:ingestion)
               XREADGROUP BLOCK
                      │
               ┌──────┴──────────────────────────────────┐
-              │  Worker Pool (DEVICE_WORKER_COUNT base)  │
+              │  Worker Pool (WORKER_COUNT base)         │
               │  • each worker owns a dedicated Redis    │
               │    connection (workerRedis)              │
-              │  • reads COUNT=DEVICE_BATCH_SIZE entries │
+              │  • reads COUNT=BATCH_SIZE entries        │
               │  • resolves device UUIDs → DB IDs        │
               │  • bulk-inserts via COPY FROM STDIN      │
               │  • ACKs with same workerRedis connection │
@@ -62,7 +62,7 @@ API  ──XADD──▶  Redis Stream  (tenant:{id}:agent:devices:ingestion)
 |-----------|--------|
 | Redis | `redis:7-alpine`, 512 MB `maxmemory`, `noeviction` |
 | PostgreSQL | Local Docker, single node (not CNPG) |
-| API | `DEVICE_WORKER_COUNT=6`, `DEVICE_AUTOSCALE_MAX_WORKERS=20` |
+| API | `WORKER_COUNT=6`, `AUTOSCALE_MAX_WORKERS=20` |
 | Stream MAXLEN | `10,000` (default demo value) |
 | Batch size | `500` (doubles to `1000` under pressure) |
 | Insert mode | `COPY FROM STDIN` (`BULK_INSERT_MODE=copy`) |
@@ -152,7 +152,7 @@ Mapping to real deployments:
 
 ### Why autoscaling did not trigger
 
-`DEVICE_AUTOSCALE_LAG_SCALE_UP_MS=5,000 ms` — a worker is only added when the oldest  
+`AUTOSCALE_LAG_SCALE_UP_MS=5,000 ms` — a worker is only added when the oldest  
 unprocessed entry in the stream is more than 5 seconds old.
 
 At steady state, lag was **< 300 ms**. To trigger autoscaling you need a sustained injection  
@@ -174,37 +174,37 @@ For a 5-minute recovery window at 500 r/s: `500 × 300 = 150,000`
 
 ## 5. Environment Variables Reference
 
-All variables are read at startup in `api/src/services/ingestion/redis-queue.ts`.
+All variables are read at startup in `ingestion/src/services/redis-device-queue.ts`.
 
 ### Worker pool
 
 | Variable | Code default | Demo values.yaml | Description |
 |----------|-------------|-----------------|-------------|
-| `DEVICE_WORKER_COUNT` | `2` | `6` | Base worker goroutines started at boot |
-| `DEVICE_BATCH_SIZE` | `100` | `500` | Entries per XREADGROUP read (doubles under pressure, max 5000) |
-| `DEVICE_FLUSH_INTERVAL_MS` | `2000` | `2000` | XREADGROUP BLOCK timeout (ms) — how long a worker waits for new entries |
-| `DEVICE_MAX_RETRIES` | `3` | — | Retry attempts before moving entry to DLQ |
+| `WORKER_COUNT` | `2` | `6` | Base worker goroutines started at boot |
+| `BATCH_SIZE` | `100` | `500` | Entries per XREADGROUP read (doubles under pressure, max 5000) |
+| `FLUSH_INTERVAL_MS` | `2000` | `2000` | XREADGROUP BLOCK timeout (ms) — how long a worker waits for new entries |
+| `MAX_RETRIES` | `3` | — | Retry attempts before moving entry to DLQ |
 
 ### Autoscaler
 
 | Variable | Code default | Demo values.yaml | Description |
 |----------|-------------|-----------------|-------------|
-| `DEVICE_AUTOSCALE_MIN_WORKERS` | `1` | `1` | Floor: workers never drop below this |
-| `DEVICE_AUTOSCALE_MAX_WORKERS` | `20` | `20` | Ceiling: workers never exceed this per pod |
-| `DEVICE_AUTOSCALE_LAG_SCALE_UP_MS` | `30000` | `5000` | Add a worker when oldest pending entry age > this |
-| `DEVICE_AUTOSCALE_LAG_CRITICAL_MS` | `60000` | `15000` | Scale to max workers immediately |
-| `DEVICE_AUTOSCALE_LAG_TARGET_MS` | `10000` | — | Target lag; scale down toward this |
-| `DEVICE_AUTOSCALE_SCALE_DOWN_STABLE_CHECKS` | `3` | — | Consecutive checks below target before scale-down |
-| `DEVICE_AUTOSCALE_COOLDOWN_MS` | `30000` | `5000` | Minimum time between scale events |
-| `DEVICE_AUTOSCALE_DB_BLOCK_PCT` | `80` | — | Scale up if DB blocking connections exceed this % |
+| `AUTOSCALE_MIN_WORKERS` | `1` | `1` | Floor: workers never drop below this |
+| `AUTOSCALE_MAX_WORKERS` | `20` | `20` | Ceiling: workers never exceed this per pod |
+| `AUTOSCALE_LAG_SCALE_UP_MS` | `30000` | `5000` | Add a worker when oldest pending entry age > this |
+| `AUTOSCALE_LAG_CRITICAL_MS` | `60000` | `15000` | Scale to max workers immediately |
+| `AUTOSCALE_LAG_TARGET_MS` | `10000` | — | Target lag; scale down toward this |
+| `AUTOSCALE_SCALE_DOWN_STABLE_CHECKS` | `3` | — | Consecutive checks below target before scale-down |
+| `AUTOSCALE_COOLDOWN_MS` | `30000` | `5000` | Minimum time between scale events |
+| `AUTOSCALE_DB_BLOCK_PCT` | `80` | — | Scale up if DB blocking connections exceed this % |
 
 ### DB backpressure
 
 | Variable | Code default | Demo values.yaml | Description |
 |----------|-------------|-----------------|-------------|
-| `DEVICE_DB_WAITING_HIGH_WATERMARK` | `10` | `5` | Scale down if >N connections waiting for DB |
-| `DEVICE_DB_SATURATION_HIGH_WATERMARK_PCT` | `85` | `70` | Scale down if DB saturation > this % |
-| `DEVICE_DB_BACKPRESSURE_SLEEP_MS` | `250` | `500` | Sleep between batches when DB is saturated |
+| `DB_WAITING_HIGH_WATERMARK` | `10` | `5` | Scale down if >N connections waiting for DB |
+| `DB_SATURATION_HIGH_WATERMARK_PCT` | `85` | `70` | Scale down if DB saturation > this % |
+| `DB_BACKPRESSURE_SLEEP_MS` | `250` | `500` | Sleep between batches when DB is saturated |
 
 ### Redis stream caps
 
@@ -291,8 +291,8 @@ helm upgrade <release> charts/iotistica-app \
 |-----------|---------|----------|------------|
 | readings/sec (target) | < 500 | 500–5,000 | 5,000–50,000 |
 | rows/day | < 43M | 43M–432M | 432M–4.3B |
-| `DEVICE_WORKER_COUNT` | 6 | 10 | 20 |
-| `DEVICE_AUTOSCALE_MAX_WORKERS` | 10 | 20 | 20 (+ HPA pods) |
+| `WORKER_COUNT` | 6 | 10 | 20 |
+| `AUTOSCALE_MAX_WORKERS` | 10 | 20 | 20 (+ HPA pods) |
 | `REDIS_INGESTION_STREAM_MAXLEN` | 60,000 | 600,000 | 1,200,000 |
 | `redis.maxMemory` | 512 MB | 2 GB | 8 GB |
 | API CPU request / limit | 250m / 1000m | 1000m / 2000m | 2000m / 4000m |
@@ -333,11 +333,11 @@ SELECT add_compression_policy('readings', INTERVAL '7 days');
 ### API pod sizing logic
 
 ```
-cpu_request = (DEVICE_WORKER_COUNT × 80m) + 200m_Node.js_overhead
-cpu_limit   = (DEVICE_AUTOSCALE_MAX_WORKERS × 300m) + 300m_overhead
+cpu_request = (WORKER_COUNT × 80m) + 200m_Node.js_overhead
+cpu_limit   = (AUTOSCALE_MAX_WORKERS × 300m) + 300m_overhead
               (or set HPA and keep limit at 2–4 vCPU)
 
-memory_request = 256Mi base + (DEVICE_WORKER_COUNT × 20Mi per worker channel)
+memory_request = 256Mi base + (WORKER_COUNT × 20Mi per worker channel)
 memory_limit   = request × 3  (Node.js heap can spike during batch processing)
 ```
 
@@ -385,10 +385,10 @@ Example: MAXLEN=600,000 → `600,000 × 500B × 3 = 900MB` → set `maxMemory: 2
 **How to detect:** `XLEN stream` never grows despite high injection rate; TimescaleDB row count grows slower than expected.  
 **Fix:** `MAXLEN = readings_per_sec × 300` (5-minute buffer minimum).
 
-### 2. DEVICE_AUTOSCALE_LAG thresholds not adjusted from demo defaults
+### 2. AUTOSCALE_LAG thresholds not adjusted from demo defaults
 
 **Symptom:** Workers don't autoscale even under heavy load because `LAG_SCALE_UP_MS=30000` (code default) requires 30 seconds of lag before adding a worker.  
-**Fix:** Set `DEVICE_AUTOSCALE_LAG_SCALE_UP_MS: "5000"` for production (as in demo values.yaml).
+**Fix:** Set `AUTOSCALE_LAG_SCALE_UP_MS: "5000"` for production (as in demo values.yaml).
 
 ### 3. Shared Redis connection for XACK (historical — fixed)
 
@@ -399,8 +399,8 @@ Example: MAXLEN=600,000 → `600,000 × 500B × 3 = 900MB` → set `maxMemory: 2
 ### 4. DB pool exhaustion under autoscaling
 
 **Symptom:** `DB_POOL_SIZE` connections are all in use; workers queue behind DB pool instead of processing.  
-**How to detect:** `DEVICE_DB_WAITING_HIGH_WATERMARK` exceeded; `insertMs` spikes to seconds.  
-**Fix:** Set `DB_POOL_SIZE ≥ DEVICE_WORKER_COUNT + 5` to ensure workers are never pool-starved.
+**How to detect:** `DB_WAITING_HIGH_WATERMARK` exceeded; `insertMs` spikes to seconds.  
+**Fix:** Set `DB_POOL_SIZE ≥ WORKER_COUNT + 5` to ensure workers are never pool-starved.
 
 ### 5. BULK_INSERT_MODE not set to 'copy'
 

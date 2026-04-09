@@ -8,7 +8,7 @@ import { pool, query } from '../db/connection';
 import type MqttManager from './manager';
 import type { DeviceDataMessage, StateMessage } from './manager';
 import { processAgentStateReport } from '../services/agent/state';
-import { redisDeviceQueue } from '../services/ingestion';
+import { redisDeviceQueue } from '../services/telemetry';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
 import { EventPublisher } from '../services/event-sourcing';
 import { getTenantId } from '../redis/tenant-keys';

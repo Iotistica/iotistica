@@ -23,7 +23,7 @@ async function waitForDatabase(maxAttempts = 10): Promise<void> {
   throw new Error(`PostgreSQL did not become ready after ${maxAttempts} attempts`);
 }
 
-export async function bootstrapDatabase(): Promise<void> {
+export async function bootstrapDatabaseConnection(): Promise<void> {
   logger.info('Attempting PostgreSQL connection:', {
     host: process.env.DB_HOST || 'localhost',
     port: process.env.DB_PORT || '5432',
@@ -32,6 +32,11 @@ export async function bootstrapDatabase(): Promise<void> {
   });
 
   await waitForDatabase();
+  logger.info('Database connection verified');
+}
+
+export async function bootstrapDatabase(): Promise<void> {
+  await bootstrapDatabaseConnection();
 
   if (process.env.DB_SKIP_MIGRATIONS !== 'true') {
     const migrationStatus = await getMigrationStatus();
