@@ -21,7 +21,7 @@ permissions:
 
 env:
   COMPOSE_FILE: docker-compose.e2e.yml
-  PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
+  PLAYWRIGHT_BROWSERS_PATH: /home/runner/.cache/ms-playwright
 
 concurrency:
   group: integration-tests-${{ github.ref }}
@@ -54,7 +54,7 @@ jobs:
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
-          path: ~/.cache/ms-playwright
+          path: /home/runner/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('dashboard/package-lock.json') }}
 
       - name: Pull prebuilt API and dashboard images
@@ -69,15 +69,16 @@ jobs:
       - name: Start database, cache, ingestion, API, and dashboard
         run: docker compose -f "$COMPOSE_FILE" up -d postgres redis ingestion api dashboard
 
-      - name: Install dashboard test dependencies and wait for backend readiness
-        run: |
-          (
-            cd dashboard
-            npm ci
-            npx playwright install --with-deps chromium
-          ) &
-          PLAYWRIGHT_SETUP_PID=$!
+      - name: Install dashboard test dependencies
+        working-directory: dashboard
+        run: npm ci
 
+      - name: Install Playwright Chromium
+        working-directory: dashboard
+        run: npx playwright install chromium
+
+      - name: Wait for backend readiness
+        run: |
           echo "Waiting for PostgreSQL..."
           timeout 90 bash -c '
             until docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U postgres > /dev/null 2>&1; do
@@ -125,8 +126,6 @@ jobs:
 
           echo "=== Direct ingestion health ==="
           curl -fsS http://localhost:4003/health | jq '.'
-
-          wait "$PLAYWRIGHT_SETUP_PID"
 
       - name: Verify API can reach ingestion control plane
         run: |
