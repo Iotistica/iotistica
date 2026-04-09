@@ -509,6 +509,7 @@ jobs:
           echo "Mosquitto auth files verified successfully."
 
       - name: Verify MQTT simulator publishes data
+        id: mqtt_publish
         env:
           ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
           AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
@@ -528,6 +529,10 @@ jobs:
           fi
 
           echo "Found device: $DEVICE_NAME (uuid=$DEVICE_UUID, topic=$BASE_TOPIC)"
+
+          echo "mqtt_device_name=$DEVICE_NAME" >> "$GITHUB_OUTPUT"
+          echo "mqtt_device_uuid=$DEVICE_UUID" >> "$GITHUB_OUTPUT"
+          echo "mqtt_topic=$BASE_TOPIC" >> "$GITHUB_OUTPUT"
 
           # Clean up any leftover container from a previous run
           docker rm -f sim-mqtt-e2e 2>/dev/null || true
@@ -568,6 +573,70 @@ jobs:
             echo "FAIL: simulator did not publish any messages"
             exit 1
           fi
+
+      - name: Verify agent forwards MQTT data to cloud ingestion
+        env:
+          ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
+          AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
+          DEVICE_UUID: ${{ steps.mqtt_publish.outputs.mqtt_device_uuid }}
+          DEVICE_NAME: ${{ steps.mqtt_publish.outputs.mqtt_device_name }}
+        run: |
+          if [ -z "$DEVICE_UUID" ]; then
+            echo "FAIL: mqtt device uuid output missing"
+            exit 1
+          fi
+
+          echo "Waiting for forwarded MQTT readings from agent device $DEVICE_NAME ($DEVICE_UUID)..."
+
+          timeout 120 bash -c '
+            until DB_RESULT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -t -A -F "|" -c "
+              SELECT
+                COUNT(*)::int,
+                COUNT(DISTINCT metric_name)::int,
+                COALESCE(string_agg(DISTINCT metric_name, "," ORDER BY metric_name), "")
+              FROM readings
+              WHERE protocol = ''mqtt''
+                AND COALESCE(extra->>''device_uuid'', extra->>''deviceUuid'') = ''${DEVICE_UUID}''
+                AND time > NOW() - INTERVAL ''10 minutes'';"); do
+              sleep 3
+            done
+
+            echo "DB_RESULT=$DB_RESULT"
+
+            READING_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f1 | tr -d "[:space:]")
+            METRIC_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f2 | tr -d "[:space:]")
+            METRIC_NAMES=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f3-)
+
+            until [ "${READING_COUNT:-0}" -ge 2 ] && [ "${METRIC_COUNT:-0}" -ge 2 ]; do
+              sleep 4
+              DB_RESULT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -t -A -F "|" -c "
+                SELECT
+                  COUNT(*)::int,
+                  COUNT(DISTINCT metric_name)::int,
+                  COALESCE(string_agg(DISTINCT metric_name, "," ORDER BY metric_name), "")
+                FROM readings
+                WHERE protocol = ''mqtt''
+                  AND COALESCE(extra->>''device_uuid'', extra->>''deviceUuid'') = ''${DEVICE_UUID}''
+                  AND time > NOW() - INTERVAL ''10 minutes'';")
+
+              echo "DB_RESULT=$DB_RESULT"
+              READING_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f1 | tr -d "[:space:]")
+              METRIC_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f2 | tr -d "[:space:]")
+              METRIC_NAMES=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f3-)
+            done
+
+            echo "Observed $READING_COUNT MQTT readings across $METRIC_COUNT metrics: $METRIC_NAMES"
+          '
+
+          API_RESULT=$(curl -fsS "http://localhost:4002/api/v1/metrics/latest?deviceUuid=${DEVICE_UUID}&agentUuid=${AGENT_UUID}" \
+            -H "Authorization: Bearer $ACCESS_TOKEN")
+
+          echo "=== API latest readings ==="
+          echo "$API_RESULT" | jq '.'
+
+          test "$(echo "$API_RESULT" | jq -r '.count >= 2')" = "true"
+          echo "$API_RESULT" | jq -e '.readings | any(.metric_name == "temperature")' > /dev/null
+          echo "$API_RESULT" | jq -e '.readings | any(.metric_name == "humidity")' > /dev/null
 
       - name: Cleanup e2e test devices
         if: always()
