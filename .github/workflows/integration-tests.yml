@@ -601,13 +601,13 @@ jobs:
 
           read_db_counts() {
             docker compose -f "$COMPOSE_FILE" exec -T postgres \
-              psql -U postgres -d iotistic -v ON_ERROR_STOP=1 -v device_uuid="$DEVICE_UUID" -t -A -F "|" -c "
+              psql -U postgres -d iotistic -v ON_ERROR_STOP=1 -t -A -F "|" -c "
                 SELECT
                   COUNT(*)::int AS reading_count,
                   COUNT(DISTINCT metric_name)::int AS metric_count
                 FROM readings
                 WHERE protocol = 'mqtt'
-                  AND COALESCE(extra->>'device_uuid', extra->>'deviceUuid') = :'device_uuid'
+                  AND COALESCE(extra->>'device_uuid', extra->>'deviceUuid') = '$DEVICE_UUID'
                   AND time > NOW() - INTERVAL '10 minutes';"
           }
 
@@ -633,7 +633,10 @@ jobs:
 
           echo "Observed $READING_COUNT MQTT readings across $METRIC_COUNT metrics in raw readings"
 
-          API_RESULT=$(curl -fsS "http://localhost:4002/api/v1/metrics/latest?deviceUuid=${DEVICE_UUID}&agentUuid=${AGENT_UUID}" \
+          echo "Refreshing latest materialized view before API assertion..."
+          docker compose -f "$COMPOSE_FILE" exec -T api node --input-type=module -e "import('./dist/services/agent/metrics.service.js').then(async ({ refreshViews }) => { await refreshViews('latest'); console.log('latest view refreshed'); }).catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });"
+
+          API_RESULT=$(curl -fsS "http://localhost:4002/api/v1/metrics/latest?deviceUuid=${DEVICE_UUID}" \
             -H "Authorization: Bearer $ACCESS_TOKEN")
 
           echo "=== API latest readings ==="
