@@ -602,11 +602,22 @@ jobs:
       - name: Verify agent publishes MQTT data to cloud broker
         run: |
           echo "Waiting for agent real publish-manager success log..."
-          timeout 90 bash -c '
-            until sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Published [0-9]+ messages" | grep -vq "no-op baseline"; do
-              sleep 5
-            done
-          '
+
+          DEADLINE=$((SECONDS + 120))
+          while true; do
+            if sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Published [0-9]+ messages" | grep -vq "no-op baseline"; then
+              break
+            fi
+
+            if [ "$SECONDS" -ge "$DEADLINE" ]; then
+              echo "FAIL: timed out waiting for non-baseline agent publish log"
+              echo "=== Agent publish diagnostics ==="
+              sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Published [0-9]+ messages|MQTT not connected|Failed to publish batch|Queued failed publish|buffering [0-9]+ messages|Connected to MQTT broker|MQTT broker disconnected" || true
+              exit 1
+            fi
+
+            sleep 5
+          done
 
           echo "=== Agent real publish log excerpt ==="
           sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Published [0-9]+ messages" | grep -v "no-op baseline" || true
