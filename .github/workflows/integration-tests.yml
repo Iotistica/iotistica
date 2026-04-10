@@ -66,8 +66,8 @@ jobs:
       - name: Build MQTT simulator image
         run: docker build -t iotistic/mqtt-simulator:latest ./simulators/mqtt-simulator
 
-      - name: Start database, cache, ingestion, API, and dashboard
-        run: docker compose -f "$COMPOSE_FILE" up -d postgres redis ingestion api dashboard
+      - name: Start database, cache, broker, ingestion, API, and dashboard
+        run: docker compose -f "$COMPOSE_FILE" up -d postgres redis mosquitto ingestion api dashboard
 
       - name: Install dashboard test dependencies
         working-directory: dashboard
@@ -100,6 +100,20 @@ jobs:
             done
           '
 
+          echo "Waiting for cloud Mosquitto container..."
+          timeout 60 bash -c '
+            until docker inspect --format="{{.State.Status}}" iotistic-mosquitto-e2e 2>/dev/null | grep -q running; do
+              sleep 2
+            done
+          '
+
+          echo "Waiting for Mosquitto to be reachable from the API container..."
+          timeout 90 bash -c '
+            until docker compose -f "$COMPOSE_FILE" exec -T api node -e "const socket = require(\"net\").createConnection({ host: \"mosquitto\", port: 1883 }); socket.setTimeout(5000); socket.on(\"connect\", () => { socket.end(); process.exit(0); }); socket.on(\"timeout\", () => { socket.destroy(); process.exit(1); }); socket.on(\"error\", () => process.exit(1));"; do
+              sleep 3
+            done
+          '
+
           echo "Waiting for API..."
           timeout 180 bash -c '
             until curl -fsS http://localhost:4002/health > /dev/null; do
@@ -126,6 +140,16 @@ jobs:
 
           echo "=== Direct ingestion health ==="
           curl -fsS http://localhost:4003/health | jq '.'
+
+          echo "Waiting for API MQTT session..."
+          timeout 120 bash -c '
+            until docker compose -f "$COMPOSE_FILE" logs api --tail=300 2>&1 | grep -q "MQTT CLIENT CONNECTED TO BROKER"; do
+              sleep 5
+            done
+          '
+
+          echo "=== API MQTT startup log excerpt ==="
+          docker compose -f "$COMPOSE_FILE" logs api --tail=120 | grep -E "MQTT CONNECTION (SUMMARY|ERROR)|MQTT CLIENT CONNECTED TO BROKER|Scheduling MQTT reconnect|MQTT reconnected successfully" || true
 
       - name: Verify API can reach ingestion control plane
         run: |
@@ -164,37 +188,6 @@ jobs:
             echo "$USER_JSON"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Start cloud Mosquitto broker
-        run: docker compose -f "$COMPOSE_FILE" up -d mosquitto
-
-      - name: Wait for cloud Mosquitto
-        run: |
-          echo "Waiting for cloud Mosquitto container..."
-          timeout 60 bash -c '
-            until docker inspect --format="{{.State.Status}}" iotistic-mosquitto-e2e 2>/dev/null | grep -q running; do
-              sleep 2
-            done
-          '
-
-          echo "Waiting for Mosquitto to be reachable from the API container..."
-          timeout 90 bash -c '
-            until docker compose -f "$COMPOSE_FILE" exec -T api node -e "const socket = require(\"net\").createConnection({ host: \"mosquitto\", port: 1883 }); socket.setTimeout(5000); socket.on(\"connect\", () => { socket.end(); process.exit(0); }); socket.on(\"timeout\", () => { socket.destroy(); process.exit(1); }); socket.on(\"error\", () => process.exit(1));"; do
-              sleep 3
-            done
-          '
-
-      - name: Wait for API MQTT reconnect
-        run: |
-          echo "Waiting for API to reconnect to cloud Mosquitto..."
-          timeout 120 bash -c '
-            until docker compose -f "$COMPOSE_FILE" logs api --tail=300 2>&1 | grep -q "MQTT CLIENT CONNECTED TO BROKER"; do
-              sleep 5
-            done
-          '
-
-          echo "=== API MQTT reconnect log excerpt ==="
-          docker compose -f "$COMPOSE_FILE" logs api --tail=120 | grep -E "MQTT CONNECTION (SUMMARY|ERROR)|MQTT CLIENT CONNECTED TO BROKER|Scheduling MQTT reconnect|MQTT reconnected successfully" || true
 
       - name: Seed integration fleet and provisioning key
         id: provision
