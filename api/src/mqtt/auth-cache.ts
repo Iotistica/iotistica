@@ -82,6 +82,11 @@ const MQTT_AUTH_CACHE_TTL_SECONDS = readPositiveIntEnv('MQTT_AUTH_CACHE_TTL_SECO
 const MQTT_AUTH_DENY_CACHE_TTL_SECONDS = readPositiveIntEnv('MQTT_AUTH_DENY_CACHE_TTL_SECONDS', 5);
 const MQTT_AUTH_CACHE_MAX_ENTRIES = readPositiveIntEnv('MQTT_AUTH_CACHE_MAX_ENTRIES', 5000);
 const MQTT_AUTH_LOADER_TIMEOUT_MS = readPositiveIntEnv('MQTT_AUTH_LOADER_TIMEOUT_MS', 100);
+const MQTT_AUTH_COLD_START_TIMEOUT_MS = readPositiveIntEnv(
+  'MQTT_AUTH_COLD_START_TIMEOUT_MS',
+  Math.max(500, MQTT_AUTH_LOADER_TIMEOUT_MS),
+);
+const MQTT_AUTH_COLD_START_WINDOW_SECONDS = readPositiveIntEnv('MQTT_AUTH_COLD_START_WINDOW_SECONDS', 30);
 const MQTT_AUTH_CACHE_LOG_HITS = /^(1|true|yes)$/i.test(process.env.MQTT_AUTH_CACHE_LOG_HITS ?? 'false');
 const MQTT_AUTH_SHARED_CACHE_ENABLED = /^(1|true|yes)$/i.test(process.env.MQTT_AUTH_SHARED_CACHE_ENABLED ?? 'false');
 const MQTT_AUTH_SHARED_CACHE_PREFIX = process.env.MQTT_AUTH_SHARED_CACHE_PREFIX?.trim() || 'mqtt-auth-cache:v1';
@@ -108,6 +113,49 @@ function applyTtlJitter(ttlSeconds: number): number {
   const normalizedTtlSeconds = Math.max(1, ttlSeconds);
   const jitterMultiplier = 1 - MQTT_AUTH_CACHE_JITTER_RATIO + (Math.random() * MQTT_AUTH_CACHE_JITTER_RATIO * 2);
   return Math.max(1, Math.round(normalizedTtlSeconds * jitterMultiplier));
+}
+
+function buildCacheEntry<T>(ttlSeconds: number, value: T): CacheEntry<T> {
+  return {
+    expiresAt: Date.now() + applyTtlJitter(ttlSeconds) * 1000,
+    value,
+  };
+}
+
+function isColdStartWindow(): boolean {
+  return process.uptime() < MQTT_AUTH_COLD_START_WINDOW_SECONDS;
+}
+
+function getCurrentAuthLoaderTimeoutMs(): number {
+  return isColdStartWindow()
+    ? Math.max(MQTT_AUTH_LOADER_TIMEOUT_MS, MQTT_AUTH_COLD_START_TIMEOUT_MS)
+    : MQTT_AUTH_LOADER_TIMEOUT_MS;
+}
+
+async function executeWithColdStartGrace<T>(
+  label: 'user' | 'superuser' | 'acl',
+  username: string,
+  execute: (timeoutMs: number) => Promise<T>,
+): Promise<T> {
+  const timeoutMs = getCurrentAuthLoaderTimeoutMs();
+
+  try {
+    return await execute(timeoutMs);
+  } catch (error) {
+    if (!isCacheLoaderTimeoutError(error) || !isColdStartWindow()) {
+      throw error;
+    }
+
+    authCacheLogger.warn('MQTT auth loader timed out during cold start, retrying once', {
+      username,
+      label,
+      timeoutMs,
+      uptimeSeconds: Number(process.uptime().toFixed(1)),
+    });
+
+    await delay(50);
+    return execute(Math.max(timeoutMs, MQTT_AUTH_COLD_START_TIMEOUT_MS));
+  }
 }
 
 function touchLruEntry<T>(entries: Map<string, T>, key: string, value: T): void {
@@ -397,7 +445,7 @@ async function tryAcquireDistributedLoadLock(
   kind: SharedCacheKind,
   scopeKey: string,
 ): Promise<DistributedLoadLock | null> {
-  if (!MQTT_AUTH_SHARED_LOCK_ENABLED) {
+  if (!MQTT_AUTH_SHARED_LOCK_ENABLED || isColdStartWindow()) {
     return null;
   }
 
@@ -448,7 +496,7 @@ async function waitForSharedCacheFill<T>(
   scopeKey: string,
   adapter: SharedCacheAdapter<T>,
 ): Promise<SharedCacheEntry<T> | null> {
-  if (!MQTT_AUTH_SHARED_LOCK_ENABLED || MQTT_AUTH_SHARED_LOCK_WAIT_TIMEOUT_MS <= 0) {
+  if (!MQTT_AUTH_SHARED_LOCK_ENABLED || isColdStartWindow() || MQTT_AUTH_SHARED_LOCK_WAIT_TIMEOUT_MS <= 0) {
     return null;
   }
 
@@ -502,6 +550,11 @@ class InFlightTtlCache<T> {
     this.inFlight.clear();
   }
 
+  set(key: string, entry: CacheEntry<T>): void {
+    touchLruEntry(this.entries, key, entry);
+    evictLeastRecentlyUsed(this.entries, this.maxEntries);
+  }
+
   async getOrLoad(
     key: string,
     loader: () => Promise<CacheLoadResult<T>>,
@@ -510,6 +563,7 @@ class InFlightTtlCache<T> {
       kind: SharedCacheKind;
       scopeKey: string;
     },
+    timeoutMs = MQTT_AUTH_LOADER_TIMEOUT_MS,
   ): Promise<T> {
     const now = Date.now();
     const cached = this.entries.get(key);
@@ -587,12 +641,9 @@ class InFlightTtlCache<T> {
         kind: sharedCache?.kind,
       });
 
-      return withTimeout(loadPromise, MQTT_AUTH_LOADER_TIMEOUT_MS)
+      return withTimeout(loadPromise, timeoutMs)
         .then(({ ttlSeconds, value }) => {
-          const entry = {
-            expiresAt: Date.now() + applyTtlJitter(ttlSeconds) * 1000,
-            value,
-          };
+          const entry = buildCacheEntry(ttlSeconds, value);
 
           logCacheEvent('MQTT auth cache loader filled', {
             cacheKey: key,
@@ -672,7 +723,44 @@ export function getDenyCacheTtlSeconds(): number {
 }
 
 export function getAuthLoaderTimeoutMs(): number {
-  return MQTT_AUTH_LOADER_TIMEOUT_MS;
+  return getCurrentAuthLoaderTimeoutMs();
+}
+
+export async function seedMqttUserAuthDecision(
+  username: string,
+  password: string,
+  decision: CachedMqttUserAuthDecision,
+  ttlSeconds = getAllowCacheTtlSeconds(),
+): Promise<void> {
+  const passwordKey = buildPasswordKey(username, password);
+  const cacheKey = `user:${passwordKey}`;
+  const entry = buildCacheEntry(ttlSeconds, decision);
+  mqttUserAuthCache.set(cacheKey, entry);
+  await writeSharedCacheEntry('user', passwordKey, entry, userAuthCacheAdapter);
+}
+
+export async function seedMqttSuperuserDecision(
+  username: string,
+  decision: CachedMqttSuperuserDecision,
+  ttlSeconds = getAllowCacheTtlSeconds(),
+): Promise<void> {
+  const usernameKey = buildUsernameKey(username);
+  const cacheKey = `superuser:${username}`;
+  const entry = buildCacheEntry(ttlSeconds, decision);
+  mqttSuperuserCache.set(cacheKey, entry);
+  await writeSharedCacheEntry('superuser', usernameKey, entry, superuserCacheAdapter);
+}
+
+export async function seedMqttAclRules(
+  username: string,
+  result: CachedMqttAclRulesResult,
+  ttlSeconds = getAllowCacheTtlSeconds(),
+): Promise<void> {
+  const usernameKey = buildUsernameKey(username);
+  const cacheKey = `acl:${username}`;
+  const entry = buildCacheEntry(ttlSeconds, result);
+  mqttAclRulesCache.set(cacheKey, entry);
+  await writeSharedCacheEntry('acl', usernameKey, entry, aclRulesCacheAdapter);
 }
 
 export async function getCachedMqttUserAuthDecision(
@@ -682,18 +770,21 @@ export async function getCachedMqttUserAuthDecision(
 ): Promise<CachedMqttUserAuthDecision> {
   const passwordKey = buildPasswordKey(username, password);
   try {
-    return await mqttUserAuthCache.getOrLoad(`user:${passwordKey}`, loader, {
-      adapter: userAuthCacheAdapter,
-      kind: 'user',
-      scopeKey: passwordKey,
-    });
+    return await executeWithColdStartGrace('user', username, (timeoutMs) =>
+      mqttUserAuthCache.getOrLoad(`user:${passwordKey}`, loader, {
+        adapter: userAuthCacheAdapter,
+        kind: 'user',
+        scopeKey: passwordKey,
+      }, timeoutMs)
+    );
   } catch (error) {
     if (isCacheLoaderTimeoutError(error)) {
       authCacheLogger.warn('MQTT user auth loader timed out, denying request', {
-        timeoutMs: MQTT_AUTH_LOADER_TIMEOUT_MS,
+        timeoutMs: getCurrentAuthLoaderTimeoutMs(),
         username,
+        coldStart: isColdStartWindow(),
       });
-      return { error: 'Authentication backend timeout', isSuperuser: false, result: 'deny' };
+      return { error: isColdStartWindow() ? 'cold-start-timeout' : 'Authentication backend timeout', isSuperuser: false, result: 'deny' };
     }
 
     throw error;
@@ -706,18 +797,21 @@ export async function getCachedMqttSuperuserDecision(
 ): Promise<CachedMqttSuperuserDecision> {
   const usernameKey = buildUsernameKey(username);
   try {
-    return await mqttSuperuserCache.getOrLoad(`superuser:${username}`, loader, {
-      adapter: superuserCacheAdapter,
-      kind: 'superuser',
-      scopeKey: usernameKey,
-    });
+    return await executeWithColdStartGrace('superuser', username, (timeoutMs) =>
+      mqttSuperuserCache.getOrLoad(`superuser:${username}`, loader, {
+        adapter: superuserCacheAdapter,
+        kind: 'superuser',
+        scopeKey: usernameKey,
+      }, timeoutMs)
+    );
   } catch (error) {
     if (isCacheLoaderTimeoutError(error)) {
       authCacheLogger.warn('MQTT superuser loader timed out, denying request', {
-        timeoutMs: MQTT_AUTH_LOADER_TIMEOUT_MS,
+        timeoutMs: getCurrentAuthLoaderTimeoutMs(),
         username,
+        coldStart: isColdStartWindow(),
       });
-      return { error: 'Authorization backend timeout', isSuperuser: false, result: 'deny' };
+      return { error: isColdStartWindow() ? 'cold-start-timeout' : 'Authorization backend timeout', isSuperuser: false, result: 'deny' };
     }
 
     throw error;
@@ -730,19 +824,22 @@ export async function getCachedMqttAclRules(
 ): Promise<CachedMqttAclRulesResult> {
   const usernameKey = buildUsernameKey(username);
   try {
-    return await mqttAclRulesCache.getOrLoad(`acl:${username}`, loader, {
-      adapter: aclRulesCacheAdapter,
-      kind: 'acl',
-      scopeKey: usernameKey,
-    });
+    return await executeWithColdStartGrace('acl', username, (timeoutMs) =>
+      mqttAclRulesCache.getOrLoad(`acl:${username}`, loader, {
+        adapter: aclRulesCacheAdapter,
+        kind: 'acl',
+        scopeKey: usernameKey,
+      }, timeoutMs)
+    );
   } catch (error) {
     if (isCacheLoaderTimeoutError(error)) {
       authCacheLogger.warn('MQTT ACL loader timed out, denying request', {
-        timeoutMs: MQTT_AUTH_LOADER_TIMEOUT_MS,
+        timeoutMs: getCurrentAuthLoaderTimeoutMs(),
         username,
+        coldStart: isColdStartWindow(),
       });
       return {
-        error: 'ACL backend timeout',
+        error: isColdStartWindow() ? 'cold-start-timeout' : 'ACL backend timeout',
         rules: [],
       };
     }

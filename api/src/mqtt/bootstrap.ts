@@ -12,6 +12,7 @@
 import crypto from 'crypto';
 import { query } from '../db/connection';
 import logger from '../utils/logger';
+import { buildCachedAclRule, seedMqttAclRules, seedMqttSuperuserDecision, seedMqttUserAuthDecision } from './auth-cache';
 import { hashPassword } from '../utils/secret-hashing';
 
 /**
@@ -56,6 +57,12 @@ export async function initializeMqttAdmin() {
         VALUES ($1, '#', 7, 100)
       `, [username]);
     }
+
+    await Promise.all([
+      seedMqttUserAuthDecision(username, password, { isSuperuser: false, result: 'allow' }),
+      seedMqttSuperuserDecision(username, { isSuperuser: true, result: 'allow' }),
+      seedMqttAclRules(username, { rules: [buildCachedAclRule('#', 7)] }),
+    ]);
 
     logger.info(`MQTT admin user '${username}' initialized`);
   } catch (error) {
