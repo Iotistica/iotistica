@@ -603,8 +603,7 @@ jobs:
             until DB_RESULT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -t -A -F "|" -c "
               SELECT
                 COUNT(*)::int,
-                COUNT(DISTINCT metric_name)::int,
-                COALESCE(string_agg(DISTINCT metric_name, "," ORDER BY metric_name), "")
+                COUNT(DISTINCT metric_name)::int
               FROM readings
               WHERE protocol = ''mqtt''
                 AND COALESCE(extra->>''device_uuid'', extra->>''deviceUuid'') = ''${DEVICE_UUID}''
@@ -616,15 +615,13 @@ jobs:
 
             READING_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f1 | tr -d "[:space:]")
             METRIC_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f2 | tr -d "[:space:]")
-            METRIC_NAMES=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f3-)
 
             until [ "${READING_COUNT:-0}" -ge 2 ] && [ "${METRIC_COUNT:-0}" -ge 2 ]; do
               sleep 4
               DB_RESULT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -t -A -F "|" -c "
                 SELECT
                   COUNT(*)::int,
-                  COUNT(DISTINCT metric_name)::int,
-                  COALESCE(string_agg(DISTINCT metric_name, "," ORDER BY metric_name), "")
+                  COUNT(DISTINCT metric_name)::int
                 FROM readings
                 WHERE protocol = ''mqtt''
                   AND COALESCE(extra->>''device_uuid'', extra->>''deviceUuid'') = ''${DEVICE_UUID}''
@@ -633,10 +630,9 @@ jobs:
               echo "DB_RESULT=$DB_RESULT"
               READING_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f1 | tr -d "[:space:]")
               METRIC_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f2 | tr -d "[:space:]")
-              METRIC_NAMES=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f3-)
             done
 
-            echo "Observed $READING_COUNT MQTT readings across $METRIC_COUNT metrics: $METRIC_NAMES"
+            echo "Observed $READING_COUNT MQTT readings across $METRIC_COUNT metrics in raw readings"
           '
 
           API_RESULT=$(curl -fsS "http://localhost:4002/api/v1/metrics/latest?deviceUuid=${DEVICE_UUID}&agentUuid=${AGENT_UUID}" \
