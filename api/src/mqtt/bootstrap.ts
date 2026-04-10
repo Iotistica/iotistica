@@ -15,6 +15,29 @@ import logger from '../utils/logger';
 import { buildCachedAclRule, seedMqttAclRules, seedMqttSuperuserDecision, seedMqttUserAuthDecision } from './auth-cache';
 import { hashPassword } from '../utils/secret-hashing';
 
+interface WarmMqttUserRow {
+  username: string;
+  is_superuser: boolean;
+}
+
+interface WarmMqttAclRow {
+  username: string;
+  topic: string;
+  access: number;
+}
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const MQTT_AUTH_WARMUP_USER_LIMIT = readPositiveIntEnv('MQTT_AUTH_WARMUP_USER_LIMIT', 100);
+
 /**
  * Initialize MQTT admin user (superuser)
  */
@@ -115,11 +138,79 @@ export async function initializeNodeRedMqttCredentials(): Promise<{ username: st
       VALUES ($1, '#', 3, 100)
     `, [username]);
 
+    await Promise.all([
+      seedMqttUserAuthDecision(username, password, { isSuperuser: false, result: 'allow' }),
+      seedMqttSuperuserDecision(username, { isSuperuser: true, result: 'allow' }),
+      seedMqttAclRules(username, { rules: [buildCachedAclRule('#', 3)] }),
+    ]);
+
 
     return { username, password };
 
   } catch (error) {
     logger.error('Failed to initialize Node-RED MQTT credentials:', error);
     return null;
+  }
+}
+
+export async function warmMqttAuthCaches(): Promise<void> {
+  if (MQTT_AUTH_WARMUP_USER_LIMIT <= 0) {
+    logger.info('Skipping MQTT auth cache warmup (MQTT_AUTH_WARMUP_USER_LIMIT <= 0)');
+    return;
+  }
+
+  try {
+    const usersResult = await query<WarmMqttUserRow>(
+      `SELECT username, is_superuser
+       FROM mqtt_users
+       WHERE is_active = true
+       ORDER BY updated_at DESC NULLS LAST, created_at DESC
+       LIMIT $1`,
+      [MQTT_AUTH_WARMUP_USER_LIMIT],
+    );
+
+    if (usersResult.rows.length === 0) {
+      logger.info('MQTT auth cache warmup found no active users');
+      return;
+    }
+
+    const usernames = usersResult.rows.map((row) => row.username);
+    const aclResult = await query<WarmMqttAclRow>(
+      `SELECT username, topic, access
+       FROM mqtt_acls
+       WHERE username = ANY($1::text[])
+       ORDER BY username ASC, priority DESC, topic ASC`,
+      [usernames],
+    );
+
+    const aclMap = new Map<string, ReturnType<typeof buildCachedAclRule>[]>();
+    for (const row of aclResult.rows) {
+      const rules = aclMap.get(row.username) ?? [];
+      rules.push(buildCachedAclRule(row.topic, row.access));
+      aclMap.set(row.username, rules);
+    }
+
+    await Promise.all(usersResult.rows.map(async (row) => {
+      await Promise.all([
+        seedMqttSuperuserDecision(row.username, {
+          isSuperuser: row.is_superuser,
+          result: row.is_superuser ? 'allow' : 'deny',
+          error: row.is_superuser ? undefined : 'Not a superuser',
+        }),
+        seedMqttAclRules(row.username, {
+          rules: aclMap.get(row.username) ?? [],
+        }),
+      ]);
+    }));
+
+    logger.info('MQTT auth cache warmup completed', {
+      warmedUsers: usersResult.rows.length,
+      warmedAclRules: aclResult.rows.length,
+      warmupUserLimit: MQTT_AUTH_WARMUP_USER_LIMIT,
+    });
+  } catch (error) {
+    logger.warn('MQTT auth cache warmup failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }

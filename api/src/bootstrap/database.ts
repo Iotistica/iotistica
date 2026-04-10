@@ -5,7 +5,7 @@
 import logger from '../utils/logger';
 import { testConnection } from '../db/connection';
 import { getMigrationStatus, runMigrations } from '../db/migrations';
-import { initializeMqttAdmin, initializeNodeRedMqttCredentials } from '../mqtt/bootstrap';
+import { initializeMqttAdmin, initializeNodeRedMqttCredentials, warmMqttAuthCaches } from '../mqtt/bootstrap';
 
 /**
  * Poll testConnection() with exponential backoff until the database is ready.
@@ -63,4 +63,6 @@ export async function bootstrapDatabase(): Promise<void> {
   if (nodeRedCreds) {
     logger.info('Node-RED MQTT credentials generated (first-time setup)');
   }
+
+  await warmMqttAuthCaches();
 }
