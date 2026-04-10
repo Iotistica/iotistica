@@ -41,6 +41,31 @@ function readPositiveIntEnv(name: string, fallback: number): number {
 const MQTT_AUTH_CACHE_TTL_SECONDS = readPositiveIntEnv('MQTT_AUTH_CACHE_TTL_SECONDS', 30);
 const MQTT_AUTH_DENY_CACHE_TTL_SECONDS = readPositiveIntEnv('MQTT_AUTH_DENY_CACHE_TTL_SECONDS', 5);
 const MQTT_AUTH_CACHE_MAX_ENTRIES = readPositiveIntEnv('MQTT_AUTH_CACHE_MAX_ENTRIES', 5000);
+const MQTT_AUTH_CACHE_JITTER_RATIO = 0.1;
+const MQTT_AUTH_REGEX_CACHE_MAX_ENTRIES = Math.max(256, Math.floor(MQTT_AUTH_CACHE_MAX_ENTRIES / 2));
+
+function applyTtlJitter(ttlSeconds: number): number {
+  const normalizedTtlSeconds = Math.max(1, ttlSeconds);
+  const jitterMultiplier = 1 - MQTT_AUTH_CACHE_JITTER_RATIO + (Math.random() * MQTT_AUTH_CACHE_JITTER_RATIO * 2);
+  return Math.max(1, Math.round(normalizedTtlSeconds * jitterMultiplier));
+}
+
+function touchLruEntry<T>(entries: Map<string, T>, key: string, value: T): void {
+  entries.delete(key);
+  entries.set(key, value);
+}
+
+function evictLeastRecentlyUsed<T>(entries: Map<string, T>, maxEntries: number): void {
+  while (entries.size > maxEntries) {
+    const oldestKey = entries.keys().next().value;
+    if (!oldestKey) {
+      return;
+    }
+    entries.delete(oldestKey);
+  }
+}
+
+const aclRegexCache = new Map<string, RegExp>();
 
 class InFlightTtlCache<T> {
   private readonly entries = new Map<string, CacheEntry<T>>();
@@ -58,6 +83,7 @@ class InFlightTtlCache<T> {
     const cached = this.entries.get(key);
 
     if (cached && cached.expiresAt > now) {
+      touchLruEntry(this.entries, key, cached);
       return cached.value;
     }
 
@@ -72,18 +98,11 @@ class InFlightTtlCache<T> {
 
     const loadPromise = loader()
       .then(({ ttlSeconds, value }) => {
-        this.entries.delete(key);
-        this.entries.set(key, {
-          expiresAt: Date.now() + Math.max(1, ttlSeconds) * 1000,
+        touchLruEntry(this.entries, key, {
+          expiresAt: Date.now() + applyTtlJitter(ttlSeconds) * 1000,
           value,
         });
-
-        if (this.entries.size > this.maxEntries) {
-          const oldestKey = this.entries.keys().next().value;
-          if (oldestKey) {
-            this.entries.delete(oldestKey);
-          }
-        }
+        evictLeastRecentlyUsed(this.entries, this.maxEntries);
 
         return value;
       })
@@ -104,10 +123,25 @@ function buildPasswordKey(username: string, password: string): string {
   return createHash('sha256').update(username).update('\u0000').update(password).digest('hex');
 }
 
+function getOrCreateAclMatcher(topic: string): RegExp | undefined {
+  if (!topic.includes('+') && !topic.includes('#')) {
+    return undefined;
+  }
+
+  const cached = aclRegexCache.get(topic);
+  if (cached) {
+    touchLruEntry(aclRegexCache, topic, cached);
+    return cached;
+  }
+
+  const matcher = new RegExp(`^${topic.replace(/\+/g, '[^/]+').replace(/#/g, '.*').replace(/\//g, '\\/')}$`);
+  touchLruEntry(aclRegexCache, topic, matcher);
+  evictLeastRecentlyUsed(aclRegexCache, MQTT_AUTH_REGEX_CACHE_MAX_ENTRIES);
+  return matcher;
+}
+
 export function buildCachedAclRule(topic: string, access: number): CachedMqttAclRule {
-  const matcher = topic.includes('+') || topic.includes('#')
-    ? new RegExp(`^${topic.replace(/\+/g, '[^/]+').replace(/#/g, '.*').replace(/\//g, '\\/')}$`)
-    : undefined;
+  const matcher = getOrCreateAclMatcher(topic);
 
   return {
     access,
@@ -120,6 +154,7 @@ export function clearMqttAuthCaches(): void {
   mqttUserAuthCache.clear();
   mqttSuperuserCache.clear();
   mqttAclRulesCache.clear();
+  aclRegexCache.clear();
 }
 
 export function getAllowCacheTtlSeconds(): number {
