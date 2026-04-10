@@ -332,6 +332,27 @@ jobs:
           test "$(echo "$STATUS" | jq -r '.apiEndpoint')" = "http://localhost:4002"
           test "$(echo "$STATUS" | jq -r '.mqttConfigured')" = "true"
 
+          MQTT_BROKER_URL=$(echo "$STATUS" | jq -r '.mqttBrokerUrl // empty')
+          if [ -z "$MQTT_BROKER_URL" ]; then
+            echo "FAIL: provisioning status did not include mqttBrokerUrl"
+            exit 1
+          fi
+
+          echo "Provisioned cloud MQTT broker URL: $MQTT_BROKER_URL"
+          test "$MQTT_BROKER_URL" = "mqtt://localhost:5883"
+
+      - name: Verify agent cloud MQTT connection
+        run: |
+          echo "Waiting for agent to establish cloud MQTT session..."
+          timeout 120 bash -c '
+            until sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -q "Connected to MQTT broker"; do
+              sleep 5
+            done
+          '
+
+          echo "=== Agent cloud MQTT log excerpt ==="
+          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Provisioning response received|Device provisioned successfully|Connected to MQTT broker|MQTT manager initialized|MQTT broker disconnected" || true
+
       - name: Verify agent was registered in backend
         run: |
           docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -c \
