@@ -8,6 +8,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { fetch } from 'undici';
 import { query } from '../db/connection';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
+import { clearMqttAuthCaches } from '../mqtt/auth-cache';
 import * as authService from '../services/auth/auth.service';
 import logger from '../utils/logger';
 import { hashPassword } from '../utils/secret-hashing';
@@ -545,6 +546,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
          RETURNING id, username, is_superuser, is_active, created_at, updated_at`,
         [username, passwordHash, is_superuser, is_active]
       );
+      clearMqttAuthCaches();
 
       reply.status(201).send({
         success: true,
@@ -617,6 +619,8 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         });
       }
 
+      clearMqttAuthCaches();
+
       reply.status(200).send({
         success: true,
         message: 'MQTT user updated successfully',
@@ -646,6 +650,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
       const username = userResult.rows[0].username;
       await query('DELETE FROM mqtt_acls WHERE username = $1', [username]);
       await query('DELETE FROM mqtt_users WHERE id = $1', [id]);
+      clearMqttAuthCaches();
 
       reply.status(200).send({
         success: true,
@@ -694,6 +699,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
          RETURNING id, username, topic, access, priority, created_at`,
         [username, topic, access, priority]
       );
+      clearMqttAuthCaches();
 
       reply.status(201).send({
         success: true,
@@ -761,6 +767,8 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         });
       }
 
+      clearMqttAuthCaches();
+
       reply.status(200).send({
         success: true,
         message: 'ACL rule updated successfully',
@@ -786,6 +794,8 @@ const plugin: FastifyPluginAsync = async (fastify) => {
           message: 'ACL rule not found',
         });
       }
+
+      clearMqttAuthCaches();
 
       reply.status(200).send({
         success: true,

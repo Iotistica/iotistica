@@ -1,5 +1,14 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { pool } from '../db/connection';
+import {
+  buildCachedAclRule,
+  getAllowCacheTtlSeconds,
+  getCachedMqttAclRules,
+  getCachedMqttSuperuserDecision,
+  getCachedMqttUserAuthDecision,
+  getDenyCacheTtlSeconds,
+  type CachedMqttAclRule,
+} from './auth-cache';
 import logger from '../utils/logger';
 import { verifyPassword } from '../utils/secret-hashing';
 
@@ -33,6 +42,14 @@ interface MqttAclRow {
   access: number;
 }
 
+function topicMatches(topic: string, rule: CachedMqttAclRule): boolean {
+  if (topic === rule.topic) {
+    return true;
+  }
+
+  return rule.matcher?.test(topic) ?? false;
+}
+
 const plugin: FastifyPluginAsync = async (fastify) => {
   const authLogger = logger.child({ module: 'MosquittoAuth' });
 
@@ -44,24 +61,11 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     return body?.[key] ?? query[key];
   }
 
-  function topicMatches(topic: string, pattern: string): boolean {
-    if (topic === pattern) {
-      return true;
-    }
-
-    const regexPattern = pattern
-      .replace(/\+/g, '[^/]+')
-      .replace(/#/g, '.*')
-      .replace(/\//g, '\\/');
-
-    return new RegExp(`^${regexPattern}$`).test(topic);
-  }
-
   fastify.post<{ Body: MosquittoAuthBody; Querystring: MosquittoAuthQuerystring }>('/user', async (req, reply) => {
     const username = getRequestValue(req.body, req.query, 'username');
     const password = getRequestValue(req.body, req.query, 'password');
 
-    authLogger.info('User authentication request received', {
+    authLogger.debug('User authentication request received', {
       hasBody: !!req.body,
       bodyKeys: req.body ? Object.keys(req.body) : [],
       hasQuery: Object.keys(req.query).length > 0,
@@ -76,37 +80,55 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const result = await pool.query<MqttUserRow>(
-        'SELECT password_hash, is_active FROM mqtt_users WHERE username = $1',
-        [username],
-      );
-
-      if (result.rows.length === 0) {
-        authLogger.info('User not found', { username });
-        return reply.status(403).send({ result: 'deny', error: 'User not found' });
-      }
-
-      const user = result.rows[0];
-      if (!user.is_active) {
-        authLogger.info('User inactive', { username });
-        return reply.status(403).send({ result: 'deny', error: 'User inactive' });
-      }
-
-      const passwordVerification = await verifyPassword(password, user.password_hash);
-      if (!passwordVerification.valid) {
-        authLogger.info('Invalid password for user', { username });
-        return reply.status(403).send({ result: 'deny', error: 'Invalid password' });
-      }
-
-      if (passwordVerification.upgradedHash) {
-        await pool.query(
-          'UPDATE mqtt_users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE username = $2',
-          [passwordVerification.upgradedHash, username],
+      const decision = await getCachedMqttUserAuthDecision(username, password, async () => {
+        const result = await pool.query<MqttUserRow>(
+          'SELECT password_hash, is_active FROM mqtt_users WHERE username = $1',
+          [username],
         );
+
+        if (result.rows.length === 0) {
+          return {
+            ttlSeconds: getDenyCacheTtlSeconds(),
+            value: { error: 'User not found', isSuperuser: false, result: 'deny' as const },
+          };
+        }
+
+        const user = result.rows[0];
+        if (!user.is_active) {
+          return {
+            ttlSeconds: getDenyCacheTtlSeconds(),
+            value: { error: 'User inactive', isSuperuser: false, result: 'deny' as const },
+          };
+        }
+
+        const passwordVerification = await verifyPassword(password, user.password_hash);
+        if (!passwordVerification.valid) {
+          return {
+            ttlSeconds: getDenyCacheTtlSeconds(),
+            value: { error: 'Invalid password', isSuperuser: false, result: 'deny' as const },
+          };
+        }
+
+        if (passwordVerification.upgradedHash) {
+          await pool.query(
+            'UPDATE mqtt_users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE username = $2',
+            [passwordVerification.upgradedHash, username],
+          );
+        }
+
+        return {
+          ttlSeconds: getAllowCacheTtlSeconds(),
+          value: { isSuperuser: false, result: 'allow' as const },
+        };
+      });
+
+      if (decision.result === 'allow') {
+        authLogger.debug('User authenticated successfully', { username });
+        return reply.status(200).send({ result: 'allow', is_superuser: false });
       }
 
-      authLogger.info('User authenticated successfully', { username });
-      return reply.status(200).send({ result: 'allow', is_superuser: false });
+      authLogger.debug('User authentication denied', { username, reason: decision.error });
+      return reply.status(403).send({ result: 'deny', error: decision.error || 'Authentication failed' });
     } catch (error) {
       authLogger.error('Database error during user authentication', {
         username,
@@ -125,19 +147,35 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const result = await pool.query<MqttSuperuserRow>(
-        'SELECT is_superuser FROM mqtt_users WHERE username = $1 AND is_active = true',
-        [username],
-      );
+      const decision = await getCachedMqttSuperuserDecision(username, async () => {
+        const result = await pool.query<MqttSuperuserRow>(
+          'SELECT is_superuser FROM mqtt_users WHERE username = $1 AND is_active = true',
+          [username],
+        );
 
-      if (result.rows.length === 0) {
-        authLogger.info('User not found or inactive', { username });
-        return reply.status(403).send({ result: 'deny', error: 'User not found or inactive' });
-      }
+        if (result.rows.length === 0) {
+          return {
+            ttlSeconds: getDenyCacheTtlSeconds(),
+            value: { error: 'User not found or inactive', isSuperuser: false, result: 'deny' as const },
+          };
+        }
 
-      return result.rows[0].is_superuser
+        if (result.rows[0].is_superuser) {
+          return {
+            ttlSeconds: getAllowCacheTtlSeconds(),
+            value: { isSuperuser: true, result: 'allow' as const },
+          };
+        }
+
+        return {
+          ttlSeconds: getAllowCacheTtlSeconds(),
+          value: { error: 'Not a superuser', isSuperuser: false, result: 'deny' as const },
+        };
+      });
+
+      return decision.result === 'allow'
         ? reply.status(200).send({ result: 'allow', is_superuser: true })
-        : reply.status(403).send({ result: 'deny', error: 'Not a superuser' });
+        : reply.status(403).send({ result: 'deny', error: decision.error || 'Not a superuser' });
     } catch (error) {
       authLogger.error('Database error during superuser check', {
         username,
@@ -183,45 +221,73 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     });
 
     try {
-      const superuserResult = await pool.query<MqttSuperuserRow>(
-        'SELECT is_superuser FROM mqtt_users WHERE username = $1 AND is_active = true',
-        [username],
-      );
+      const superuserDecision = await getCachedMqttSuperuserDecision(username, async () => {
+        const result = await pool.query<MqttSuperuserRow>(
+          'SELECT is_superuser FROM mqtt_users WHERE username = $1 AND is_active = true',
+          [username],
+        );
 
-      if (superuserResult.rows.length > 0 && superuserResult.rows[0].is_superuser) {
-        authLogger.info('User is superuser, access GRANTED', { username, topic });
+        if (result.rows.length === 0) {
+          return {
+            ttlSeconds: getDenyCacheTtlSeconds(),
+            value: { error: 'User not found or inactive', isSuperuser: false, result: 'deny' as const },
+          };
+        }
+
+        if (result.rows[0].is_superuser) {
+          return {
+            ttlSeconds: getAllowCacheTtlSeconds(),
+            value: { isSuperuser: true, result: 'allow' as const },
+          };
+        }
+
+        return {
+          ttlSeconds: getAllowCacheTtlSeconds(),
+          value: { error: 'Not a superuser', isSuperuser: false, result: 'deny' as const },
+        };
+      });
+
+      if (superuserDecision.isSuperuser) {
+        authLogger.debug('User is superuser, access granted', { username, topic });
         return reply.status(200).send({ result: 'allow' });
       }
 
-      const aclResult = await pool.query<MqttAclRow>(
-        'SELECT topic, access FROM mqtt_acls WHERE username = $1',
-        [username],
-      );
+      const aclRules = await getCachedMqttAclRules(username, async () => {
+        const aclResult = await pool.query<MqttAclRow>(
+          'SELECT topic, access FROM mqtt_acls WHERE username = $1',
+          [username],
+        );
 
-      if (aclResult.rows.length === 0) {
-        authLogger.info('No ACL rules found for user, access DENIED', { username, topic });
+        return {
+          ttlSeconds: aclResult.rows.length > 0 ? getAllowCacheTtlSeconds() : getDenyCacheTtlSeconds(),
+          value: aclResult.rows.map((rule) => buildCachedAclRule(rule.topic, rule.access)),
+        };
+      });
+
+      if (aclRules.length === 0) {
+        authLogger.debug('No ACL rules found for user, access denied', { username, topic });
         return reply.status(403).send({ result: 'deny', error: 'No ACL rules found' });
       }
 
-      for (const rule of aclResult.rows) {
-        if (!topicMatches(topic, rule.topic)) {
+      for (const rule of aclRules) {
+        if (!topicMatches(topic, rule)) {
           continue;
         }
 
         const hasAccess = (rule.access & resolvedAcc) === resolvedAcc;
         if (hasAccess) {
-          authLogger.debug('ACL matched pattern, access GRANTED', { username, topic, pattern: rule.topic });
+          authLogger.debug('ACL matched pattern, access granted', { username, topic, pattern: rule.topic });
           return reply.status(200).send({ result: 'allow' });
         }
 
-        authLogger.info('ACL matched pattern but insufficient access level, access DENIED', {
+        authLogger.debug('ACL matched pattern but insufficient access level, access denied', {
           username,
           topic,
           pattern: rule.topic,
         });
       }
 
-      authLogger.info('No matching ACL rule for topic, access DENIED', { username, topic });
+      authLogger.debug('No matching ACL rule for topic, access denied', { username, topic });
       return reply.status(403).send({ result: 'deny', error: 'Access denied' });
     } catch (error) {
       authLogger.error('Database error during ACL check', {
