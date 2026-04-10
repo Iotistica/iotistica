@@ -177,9 +177,9 @@ jobs:
             done
           '
 
-          echo "Waiting for cloud Mosquitto health..."
+          echo "Waiting for Mosquitto to be reachable from the API container..."
           timeout 90 bash -c '
-            until [ "$(docker inspect --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}" iotistic-mosquitto-e2e 2>/dev/null)" = "healthy" ]; do
+            until docker compose -f "$COMPOSE_FILE" exec -T api node -e "const socket = require(\"net\").createConnection({ host: \"mosquitto\", port: 1883 }); socket.setTimeout(5000); socket.on(\"connect\", () => { socket.end(); process.exit(0); }); socket.on(\"timeout\", () => { socket.destroy(); process.exit(1); }); socket.on(\"error\", () => process.exit(1));"; do
               sleep 3
             done
           '
