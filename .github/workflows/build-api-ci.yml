@@ -22,7 +22,7 @@ concurrency:
 jobs:
   build:
     name: Test, Build, Scan & Push
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [ubuntu-24.04]
     permissions:
       contents: read
       security-events: write

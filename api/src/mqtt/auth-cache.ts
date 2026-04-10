@@ -82,6 +82,7 @@ const MQTT_AUTH_CACHE_TTL_SECONDS = readPositiveIntEnv('MQTT_AUTH_CACHE_TTL_SECO
 const MQTT_AUTH_DENY_CACHE_TTL_SECONDS = readPositiveIntEnv('MQTT_AUTH_DENY_CACHE_TTL_SECONDS', 5);
 const MQTT_AUTH_CACHE_MAX_ENTRIES = readPositiveIntEnv('MQTT_AUTH_CACHE_MAX_ENTRIES', 5000);
 const MQTT_AUTH_LOADER_TIMEOUT_MS = readPositiveIntEnv('MQTT_AUTH_LOADER_TIMEOUT_MS', 100);
+const MQTT_AUTH_CACHE_LOG_HITS = /^(1|true|yes)$/i.test(process.env.MQTT_AUTH_CACHE_LOG_HITS ?? 'false');
 const MQTT_AUTH_SHARED_CACHE_ENABLED = /^(1|true|yes)$/i.test(process.env.MQTT_AUTH_SHARED_CACHE_ENABLED ?? 'false');
 const MQTT_AUTH_SHARED_CACHE_PREFIX = process.env.MQTT_AUTH_SHARED_CACHE_PREFIX?.trim() || 'mqtt-auth-cache:v1';
 const MQTT_AUTH_SHARED_CACHE_EPOCH_REFRESH_SECONDS = readPositiveIntEnv('MQTT_AUTH_SHARED_CACHE_EPOCH_REFRESH_SECONDS', 2);
@@ -94,6 +95,14 @@ const MQTT_AUTH_REGEX_CACHE_MAX_ENTRIES = Math.max(256, Math.floor(MQTT_AUTH_CAC
 
 let localCacheEpoch = 0;
 let cachedSharedEpoch: CacheEntry<string> | null = null;
+
+function logCacheEvent(event: string, meta: Record<string, unknown>): void {
+  if (!MQTT_AUTH_CACHE_LOG_HITS) {
+    return;
+  }
+
+  authCacheLogger.debug(event, meta);
+}
 
 function applyTtlJitter(ttlSeconds: number): number {
   const normalizedTtlSeconds = Math.max(1, ttlSeconds);
@@ -506,6 +515,7 @@ class InFlightTtlCache<T> {
     const cached = this.entries.get(key);
 
     if (cached && cached.expiresAt > now) {
+      logCacheEvent('MQTT auth cache local hit', { cacheKey: key });
       touchLruEntry(this.entries, key, cached);
       return cached.value;
     }
@@ -516,6 +526,7 @@ class InFlightTtlCache<T> {
 
     const pending = this.inFlight.get(key);
     if (pending) {
+      logCacheEvent('MQTT auth cache in-flight hit', { cacheKey: key });
       return pending;
     }
 
@@ -529,23 +540,52 @@ class InFlightTtlCache<T> {
       if (sharedCache) {
         const sharedEntry = await readSharedCacheEntry(sharedCache.kind, sharedCache.scopeKey, sharedCache.adapter);
         if (sharedEntry) {
+          logCacheEvent('MQTT auth cache shared hit', {
+            cacheKey: key,
+            kind: sharedCache.kind,
+          });
           return resolveValue(sharedEntry);
         }
+
+        logCacheEvent('MQTT auth cache shared miss', {
+          cacheKey: key,
+          kind: sharedCache.kind,
+        });
       }
 
       let distributedLock: DistributedLoadLock | null = null;
       if (sharedCache) {
         distributedLock = await tryAcquireDistributedLoadLock(sharedCache.kind, sharedCache.scopeKey);
+        logCacheEvent(
+          distributedLock ? 'MQTT auth cache distributed lock acquired' : 'MQTT auth cache distributed lock contended',
+          {
+            cacheKey: key,
+            kind: sharedCache.kind,
+          },
+        );
 
         if (!distributedLock) {
           const sharedEntry = await waitForSharedCacheFill(sharedCache.kind, sharedCache.scopeKey, sharedCache.adapter);
           if (sharedEntry) {
+            logCacheEvent('MQTT auth cache shared fill observed', {
+              cacheKey: key,
+              kind: sharedCache.kind,
+            });
             return resolveValue(sharedEntry);
           }
+
+          logCacheEvent('MQTT auth cache shared fill wait expired', {
+            cacheKey: key,
+            kind: sharedCache.kind,
+          });
         }
       }
 
       const loadPromise = loader();
+      logCacheEvent('MQTT auth cache loader invoked', {
+        cacheKey: key,
+        kind: sharedCache?.kind,
+      });
 
       return withTimeout(loadPromise, MQTT_AUTH_LOADER_TIMEOUT_MS)
         .then(({ ttlSeconds, value }) => {
@@ -553,6 +593,12 @@ class InFlightTtlCache<T> {
             expiresAt: Date.now() + applyTtlJitter(ttlSeconds) * 1000,
             value,
           };
+
+          logCacheEvent('MQTT auth cache loader filled', {
+            cacheKey: key,
+            kind: sharedCache?.kind,
+            ttlSeconds,
+          });
 
           if (sharedCache) {
             void writeSharedCacheEntry(sharedCache.kind, sharedCache.scopeKey, entry, sharedCache.adapter);
