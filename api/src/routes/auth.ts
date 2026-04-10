@@ -546,7 +546,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
          RETURNING id, username, is_superuser, is_active, created_at, updated_at`,
         [username, passwordHash, is_superuser, is_active]
       );
-      clearMqttAuthCaches();
+      await clearMqttAuthCaches();
 
       reply.status(201).send({
         success: true,
@@ -619,7 +619,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      clearMqttAuthCaches();
+      await clearMqttAuthCaches();
 
       reply.status(200).send({
         success: true,
@@ -650,7 +650,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
       const username = userResult.rows[0].username;
       await query('DELETE FROM mqtt_acls WHERE username = $1', [username]);
       await query('DELETE FROM mqtt_users WHERE id = $1', [id]);
-      clearMqttAuthCaches();
+      await clearMqttAuthCaches();
 
       reply.status(200).send({
         success: true,
@@ -699,7 +699,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
          RETURNING id, username, topic, access, priority, created_at`,
         [username, topic, access, priority]
       );
-      clearMqttAuthCaches();
+      await clearMqttAuthCaches();
 
       reply.status(201).send({
         success: true,
@@ -767,7 +767,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      clearMqttAuthCaches();
+      await clearMqttAuthCaches();
 
       reply.status(200).send({
         success: true,
@@ -795,7 +795,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      clearMqttAuthCaches();
+      await clearMqttAuthCaches();
 
       reply.status(200).send({
         success: true,

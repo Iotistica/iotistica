@@ -8,6 +8,7 @@ import {
   getCachedMqttUserAuthDecision,
   getDenyCacheTtlSeconds,
   type CachedMqttAclRule,
+  type CachedMqttAclRulesResult,
 } from './auth-cache';
 import logger from '../utils/logger';
 import { verifyPassword } from '../utils/secret-hashing';
@@ -252,7 +253,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         return reply.status(200).send({ result: 'allow' });
       }
 
-      const aclRules = await getCachedMqttAclRules(username, async () => {
+      const aclResult = await getCachedMqttAclRules(username, async () => {
         const aclResult = await pool.query<MqttAclRow>(
           'SELECT topic, access FROM mqtt_acls WHERE username = $1',
           [username],
@@ -260,9 +261,18 @@ const plugin: FastifyPluginAsync = async (fastify) => {
 
         return {
           ttlSeconds: aclResult.rows.length > 0 ? getAllowCacheTtlSeconds() : getDenyCacheTtlSeconds(),
-          value: aclResult.rows.map((rule) => buildCachedAclRule(rule.topic, rule.access)),
+          value: {
+            rules: aclResult.rows.map((rule) => buildCachedAclRule(rule.topic, rule.access)),
+          } satisfies CachedMqttAclRulesResult,
         };
       });
+
+      if (aclResult.error) {
+        authLogger.warn('ACL backend check failed closed', { username, topic, reason: aclResult.error });
+        return reply.status(403).send({ result: 'deny', error: aclResult.error });
+      }
+
+      const aclRules = aclResult.rules;
 
       if (aclRules.length === 0) {
         authLogger.debug('No ACL rules found for user, access denied', { username, topic });
