@@ -303,8 +303,8 @@ docker exec -it iotistic-mqtt-monitor curl http://localhost:3500/api/v1/status
 # Install dependencies
 npm install
 
-# Copy environment template
-cp .env.example .env
+# Create a local .env file if you need custom settings
+# Example: PORT=3500
 
 # Run in development mode
 npm run dev

@@ -1,13 +1,13 @@
 import fastify, { type FastifyInstance } from 'fastify';
 import fastifyCors from '@fastify/cors';
 import { Pool } from 'pg';
-import dotenv from 'dotenv';
 import { MQTTMonitorService } from './services/monitor';
 import { StatsHistoryService } from './services/history';
 import { logger } from './utils/logger';
+import { loadDefaultEnvFiles } from './utils/env';
 import monitorRoutes from './routes';
 
-dotenv.config();
+loadDefaultEnvFiles();
 
 const PORT = parseInt(process.env.PORT || '3500');
 const HOST = process.env.HOST || '0.0.0.0';
