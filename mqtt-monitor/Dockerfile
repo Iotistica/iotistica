@@ -29,7 +29,9 @@ COPY package*.json ./
 
 # Install production dependencies only
 RUN npm ci --omit=dev && \
-    npm cache clean --force
+  npm cache clean --force && \
+  rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack && \
+  rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 # Copy built application from builder
 COPY --from=builder /app/dist ./dist
