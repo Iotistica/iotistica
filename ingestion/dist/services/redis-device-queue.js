@@ -31,6 +31,25 @@ function readIntEnv(key, fallback) {
 function readFloatEnv(key, fallback) {
     return parseFloat(process.env[key] || fallback);
 }
+function resolveIngestionStreamKey(streamKey) {
+    const configuredStreamKey = (streamKey || process.env.REDIS_INGESTION_STREAM_KEY || '').trim();
+    if (configuredStreamKey) {
+        return {
+            ingestionStreamKey: configuredStreamKey,
+            tenantId: (0, tenant_keys_1.parseAgentDevicesIngestionStreamKey)(configuredStreamKey).tenantId,
+            usedFallback: false,
+        };
+    }
+    const fallbackTenantId = (process.env.INGESTION_TENANT_ID
+        || process.env.DEVELOPMENT_TENANT_ID
+        || process.env.NAMESPACE
+        || 'demo').trim();
+    return {
+        ingestionStreamKey: (0, tenant_keys_1.agentDevicesIngestionStreamKey)(fallbackTenantId),
+        tenantId: fallbackTenantId,
+        usedFallback: true,
+    };
+}
 class RedisDeviceQueue {
     redisIngestion;
     redisConsumer;
@@ -71,12 +90,15 @@ class RedisDeviceQueue {
     constructor(streamKey) {
         this.redisIngestion = (0, client_factory_1.getRedisIngestion)();
         this.redisConsumer = (0, client_factory_1.getRedisConsumer)();
-        const configuredStreamKey = (streamKey || process.env.REDIS_INGESTION_STREAM_KEY || '').trim();
-        if (!configuredStreamKey) {
-            throw new Error('REDIS_INGESTION_STREAM_KEY must be set for ingestion service');
+        const resolvedStream = resolveIngestionStreamKey(streamKey);
+        this.ingestionStreamKey = resolvedStream.ingestionStreamKey;
+        this.tenantId = resolvedStream.tenantId;
+        if (resolvedStream.usedFallback) {
+            logger_1.logger.warn('REDIS_INGESTION_STREAM_KEY not set; using temporary fallback ingestion stream key', {
+                tenantId: this.tenantId,
+                ingestionStreamKey: this.ingestionStreamKey,
+            });
         }
-        this.ingestionStreamKey = configuredStreamKey;
-        this.tenantId = (0, tenant_keys_1.parseAgentDevicesIngestionStreamKey)(configuredStreamKey).tenantId;
         this.consumerGroup = (0, tenant_keys_1.consumerGroupName)(this.tenantId, DEVICE_WRITER_GROUP_SUFFIX);
         this.consumerName = (0, tenant_keys_1.consumerName)(this.tenantId, POD_IDENTITY);
         this.workerCount = readIntEnv('WORKER_COUNT', '2');
@@ -252,6 +274,9 @@ class RedisDeviceQueue {
                 const trimTarget = streamFullyDrained
                     ? Math.min(this.maxStreamLength, Math.max(0, this.idleTrimStreamLength))
                     : this.maxStreamLength;
+                if (streamFullyDrained && (metrics_1.metrics.maxDwellMs !== 0 || metrics_1.metrics.getDwellLatencyP95() !== 0)) {
+                    metrics_1.metrics.clearDwellLatency();
+                }
                 if (streamFullyDrained && streamLen > trimTarget) {
                     await this.redisConsumer.xtrim(this.streamKey, 'MAXLEN', String(trimTarget)).catch(() => { });
                     metrics_1.metrics.streamLength = trimTarget;

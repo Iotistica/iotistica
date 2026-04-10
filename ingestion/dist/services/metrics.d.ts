@@ -24,6 +24,7 @@ export declare class DeviceQueueMetrics {
     recordBatchLatency(ms: number): void;
     recordInsertLatency(ms: number): void;
     recordDwellLatency(ms: number): void;
+    clearDwellLatency(): void;
     getBatchLatencyP95(): number;
     getInsertLatencyP95(): number;
     getDwellLatencyP95(): number;

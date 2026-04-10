@@ -147,7 +147,7 @@ async function start() {
     logger.info('Stats history service initialized');
 
     // Inject monitor instance and history service into routes
-    const { setMonitorInstance } = await import('./routes');
+    const { setMonitorInstance } = await import('./routes/index.js');
     setMonitorInstance(monitor, dbService, historyService);
 
     // Start Express server

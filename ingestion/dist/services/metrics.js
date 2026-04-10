@@ -40,6 +40,10 @@ class DeviceQueueMetrics {
         if (this.dwellLatencies.length > this.maxSamples)
             this.dwellLatencies.shift();
     }
+    clearDwellLatency() {
+        this.maxDwellMs = 0;
+        this.dwellLatencies = [];
+    }
     getBatchLatencyP95() {
         if (this.batchLatencies.length === 0)
             return 0;

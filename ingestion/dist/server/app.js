@@ -154,7 +154,7 @@ function createIngestionServer() {
     return (0, http_1.createServer)((req, reply) => {
         const requestId = getRequestId(req);
         const start = process.hrtime.bigint();
-        logger_1.default.info('incoming request', {
+        logger_1.default.debug('incoming request', {
             reqId: requestId,
             req: {
                 method: req.method,
@@ -167,7 +167,7 @@ function createIngestionServer() {
         reply.on('finish', () => {
             const durationNs = process.hrtime.bigint() - start;
             const responseTime = Number(durationNs) / 1_000_000;
-            logger_1.default.info('request completed', {
+            logger_1.default.debug('request completed', {
                 reqId: requestId,
                 res: { statusCode: reply.statusCode },
                 responseTime,

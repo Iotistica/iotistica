@@ -9,7 +9,7 @@ const logger = {
 };
 const emailConfig = {
     enabled: true,
-    from: '"Iotistic Platform" <noreply@iotistic.ca>',
+    from: '"Iotistic Platform" <noreply@iotistica.com>',
     debug: true,
     smtp: {
         host: 'smtp.gmail.com',

@@ -21,7 +21,7 @@
     "@types/node": "^20.19.22",
     "@types/pg": "^8.10.9",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.2"
   },
   "overrides": {
     "picomatch": "2.3.2"

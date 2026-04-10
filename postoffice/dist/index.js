@@ -56,7 +56,7 @@ class PostOffice {
         this.logger = logger;
         this.baseUrl = baseUrl;
         this.mailDefaults = {
-            from: config.from || '"Iotistica Platform" <donotreply@iotistic.ca>'
+            from: config.from || '"Iotistica Platform" <donotreply@iotistica.com>'
         };
         this.registerTemplate('VerifyEmail', templates.VerifyEmail);
         this.registerTemplate('UserSuspended', templates.UserSuspended);

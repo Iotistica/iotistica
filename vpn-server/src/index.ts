@@ -148,7 +148,7 @@ async function main(): Promise<void> {
     logger.info('Process will remain alive until receiving shutdown signal');
     
     // Use setInterval to keep the event loop active (prevents Node.js from exiting)
-    const keepAliveInterval = setInterval(() => {
+    setInterval(() => {
       logger.debug('VPN server health check', {
         uptime: process.uptime(),
         memory: process.memoryUsage()
