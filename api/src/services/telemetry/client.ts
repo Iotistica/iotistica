@@ -63,10 +63,3 @@ export async function getRemoteIngestionHealth<T>(): Promise<T> {
 export async function getRemoteIngestionStats<T>(): Promise<T> {
   return requestJson<T>('/api/v1/admin/ingestion/stats');
 }
-
-export async function insertRemoteReading(reading: RemoteReadingInsertPayload): Promise<void> {
-  await requestJson<{ message: string }>('/api/v1/readings/internal', {
-    method: 'POST',
-    body: JSON.stringify(reading),
-  });
-}

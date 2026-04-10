@@ -197,7 +197,6 @@ services:
             - NODE_ENV=${NODE_ENV:-development}
             - LOG_LEVEL=${LOG_LEVEL:-debug}
             - INGESTION_PROFILE=${INGESTION_PROFILE:-balanced}
-            - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
             - REDIS_INGESTION_STREAM_KEY=${REDIS_INGESTION_STREAM_KEY:-tenant:{73eddd385ce8}:agent:devices:ingestion}
             - DB_HOST=${DB_HOST:-postgres}
             - DB_PORT=${DB_PORT:-30692}

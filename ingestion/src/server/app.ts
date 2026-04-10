@@ -21,19 +21,6 @@ function getRequestId(req: IncomingMessage): string {
   return headerValue?.trim() || randomUUID();
 }
 
-function assertInternalAuth(requestToken: string | undefined): void {
-  const expectedToken = process.env.INTERNAL_AUTH_TOKEN?.trim();
-
-  if (!expectedToken) {
-    throw new Error('INTERNAL_AUTH_TOKEN must be set for the ingestion service');
-  }
-
-  if (!requestToken || requestToken !== expectedToken) {
-    const error = new Error('Unauthorized internal request');
-    (error as Error & { statusCode?: number }).statusCode = 401;
-    throw error;
-  }
-}
 
 function sendJson(reply: ServerResponse, statusCode: number, body: unknown, requestId?: string): void {
   const payload = JSON.stringify(body);
@@ -94,29 +81,6 @@ async function routeRequest(req: IncomingMessage, reply: ServerResponse, request
   const method = req.method || 'GET';
   const url = req.url || '/';
 
-  if (method === 'POST' && url === '/api/v1/readings/internal') {
-    try {
-      assertInternalAuth(getInternalAuthHeader(req));
-      const reading = await readJsonBody<InternalReadingInsertPayload>(req);
-      await readingsService.insert({
-        agent_uuid: reading.agent_uuid,
-        metric_name: reading.metric_name,
-        value: reading.value,
-        unit: reading.unit,
-        protocol: reading.protocol,
-        quality: reading.quality,
-        extra: reading.extra || {},
-      });
-      sendJson(reply, 201, { message: 'Reading inserted successfully' }, requestId);
-    } catch (error) {
-      logger.error('Error inserting reading in ingestion service', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      const statusCode = error instanceof Error && 'statusCode' in error ? Number((error as { statusCode?: number }).statusCode) || 500 : 500;
-      sendJson(reply, statusCode, { error: statusCode === 401 ? 'Unauthorized' : error instanceof Error ? error.message : 'Internal server error' }, requestId);
-    }
-    return;
-  }
 
   if (method !== 'GET') {
     sendJson(reply, 405, { error: 'Method not allowed' }, requestId);
@@ -138,33 +102,7 @@ async function routeRequest(req: IncomingMessage, reply: ServerResponse, request
     return;
   }
 
-  if (url === '/api/v1/metrics/ingestion-health') {
-    try {
-      assertInternalAuth(getInternalAuthHeader(req));
-      sendJson(reply, 200, await redisDeviceQueue.getIngestionHealth(), requestId);
-    } catch (error) {
-      logger.error('Error getting ingestion health from ingestion service', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      const statusCode = error instanceof Error && 'statusCode' in error ? Number((error as { statusCode?: number }).statusCode) || 500 : 500;
-      sendJson(reply, statusCode, { error: statusCode === 401 ? 'Unauthorized' : 'Internal server error' }, requestId);
-    }
-    return;
-  }
 
-  if (url === '/api/v1/admin/ingestion/stats') {
-    try {
-      assertInternalAuth(getInternalAuthHeader(req));
-      sendJson(reply, 200, await redisDeviceQueue.getStats(), requestId);
-    } catch (error) {
-      logger.error('Error getting ingestion stats from ingestion service', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      const statusCode = error instanceof Error && 'statusCode' in error ? Number((error as { statusCode?: number }).statusCode) || 500 : 500;
-      sendJson(reply, statusCode, { error: statusCode === 401 ? 'Unauthorized' : 'Internal server error' }, requestId);
-    }
-    return;
-  }
 
   sendJson(reply, 404, {
     error: 'Not found',

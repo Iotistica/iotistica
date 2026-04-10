@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { insertRemoteReading } from '../services/telemetry/client';
+
 import { readingsService } from '../services/telemetry/readings.service';
 import { jwtAuth } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
@@ -296,70 +296,6 @@ fastify.get<{ Params: AgentUuidParams }>('/:agent_uuid/summary', { preHandler: [
   }
 });
 
-/**
- * Insert reading (for testing/manual entry)
- * POST /api/readings
- * 
- * Body:
- * {
- *   "agent_uuid": "...",
- *   "metric_name": "temperature",
- *   "value": 23.5,
- *   "unit": "°C",
- *   "protocol": "modbus",
- *   "quality": "good",
- *   "extra": { "slave_id": 1 }
- * }
- */
-fastify.post<{ Body: InsertReadingBody }>('/', { preHandler: [jwtAuth] }, async (req, reply) => {
-  try {
-    const reading = req.body;
-    const requestId = req.id || 'unknown';
-    const userId = req.user?.id;
-
-    // Validate required fields
-    if (!reading.agent_uuid || !reading.metric_name || !reading.protocol) {
-      return reply.status(400).send({
-        error: 'agent_uuid, metric_name, and protocol are required',
-        requestId
-      });
-    }
-
-    // Validate inputs
-    const validatedUuid = uuidSchema.parse(reading.agent_uuid);
-    const validatedMetric = metricNameSchema.parse(reading.metric_name);
-    const validatedProtocol = z.string().min(1).max(50).parse(reading.protocol);
-    const validatedValue = z.number().parse(reading.value);
-
-    // Validate quality if provided
-    if (reading.quality) {
-      z.enum(['good', 'fair', 'poor']).parse(reading.quality);
-    }
-
-    const sanitizedReading = {
-      agent_uuid: validatedUuid,
-      metric_name: validatedMetric,
-      value: validatedValue,
-      unit: reading.unit ? z.string().max(20).parse(reading.unit) : undefined,
-      protocol: validatedProtocol,
-      quality: reading.quality || 'good',
-      extra: reading.extra || null
-    };
-
-    await insertRemoteReading(sanitizedReading);
-
-    logger.info('Reading inserted', { requestId, userId, deviceUuid: validatedUuid, metric: validatedMetric });
-    return reply.status(201).send({ message: 'Reading inserted successfully', requestId });
-  } catch (error: unknown) {
-    const requestId = req.id || 'unknown';
-    if (error instanceof z.ZodError) {
-      logger.warn('Invalid reading data', { requestId, errors: error.errors });
-      return reply.status(400).send({ error: 'Invalid reading data', requestId });
-    }
-    logger.error('Error inserting reading', { requestId, userId: req.user?.id, error: error instanceof Error ? error.message : 'Unknown error' });
-    return reply.status(500).send({ error: 'Internal server error', requestId });
-  }
-});
 
 };
 
