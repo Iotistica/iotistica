@@ -195,7 +195,7 @@ interface MonitorOptions {
   // Production safety options
   monitorTopics?: string[]; // Scoped monitoring (default: ['#'])
   excludeTopics?: string[]; // Topics to exclude from monitoring
-  ignoreRetained?: boolean; // Ignore retained message deliveries (default: true)
+  ignoreRetained?: boolean; // Ignore retained message deliveries (default: false)
   maxPayloadBytes?: number; // Max payload size to store (default: 8KB)
   maxTopics?: number; // Max topics to track (default: 10000)
   topicIdleTTL?: number; // Prune topics idle for N ms (default: 24h)
@@ -345,6 +345,22 @@ export class MQTTMonitorService extends EventEmitter {
   // Prometheus exporter
   private prometheusExporter: PrometheusExporter;
 
+  private static parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
+    if (value === undefined) {
+      return defaultValue;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'off'].includes(normalized)) {
+      return false;
+    }
+
+    return defaultValue;
+  }
+
   constructor(options: MonitorOptions, dbService?: any) {
     super();
     this.options = {
@@ -355,7 +371,7 @@ export class MQTTMonitorService extends EventEmitter {
       dbSyncInterval: 30000, // 30 seconds default
       monitorTopics: ['#'], // Default to all topics
       excludeTopics: [], // No exclusions by default
-      ignoreRetained: true, // Ignore retained deliveries by default
+      ignoreRetained: false, // Retained deliveries help seed topic discovery after restarts
       maxPayloadBytes: 64 * 1024, // 64KB max payload (accommodates decompressed data)
       maxTopics: 10000, // 10k topic limit
       topicIdleTTL: 24 * 60 * 60 * 1000, // 24 hours
@@ -432,6 +448,7 @@ export class MQTTMonitorService extends EventEmitter {
     const persistToDatabase = process.env.MQTT_PERSIST_DB !== 'false';
     const dbSyncInterval = parseInt(process.env.MQTT_DB_SYNC_INTERVAL || '30000');
     const maxPayloadBytes = parseInt(process.env.MQTT_MAX_PAYLOAD_BYTES || '65536'); // 64KB default
+    const ignoreRetained = this.parseBooleanEnv(process.env.MQTT_IGNORE_RETAINED, false);
 
     let dbService: MQTTDatabaseService | null = null;
 
@@ -451,6 +468,7 @@ export class MQTTMonitorService extends EventEmitter {
           persistToDatabase,
           dbSyncInterval,
           maxPayloadBytes,
+          ignoreRetained,
         },
         dbService
       );
