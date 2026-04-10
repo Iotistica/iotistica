@@ -1,22 +1,26 @@
 # Stage 1: Dependencies (production only)
-FROM node:20-alpine AS deps
+FROM node:20-alpine3.22 AS deps
 WORKDIR /app
+
+RUN apk upgrade --no-cache
 
 # Copy package files for dependency installation
 COPY package*.json ./
 
-# Install production dependencies only with clean cache766
+# Install production dependencies only with clean cache
 RUN npm ci --only=production && \
     npm cache clean --force
 
 # Stage 2: Builder
-FROM node:20-alpine AS builder
+FROM node:20-alpine3.22 AS builder
 WORKDIR /app
+
+RUN apk upgrade --no-cache
 
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including devDependencies for build)1
+# Install all dependencies (including devDependencies for build)
 RUN npm ci && \
     npm cache clean --force
 
@@ -30,13 +34,12 @@ COPY database ./database
 RUN npm run build
 
 # Stage 3: Production runtime
-FROM node:20-alpine AS production
+FROM node:20-alpine3.22 AS production
 WORKDIR /app
 
 # Install runtime system dependencies in single layer with cleanup
 # Added ca-certificates and iptables for Tailscale support
-# Upgrade zlib to fix CVE-2026-22184, CVE-2026-27171
-RUN apk upgrade --no-cache zlib && \
+RUN apk upgrade --no-cache && \
     apk add --no-cache \
     curl \
     tini \
