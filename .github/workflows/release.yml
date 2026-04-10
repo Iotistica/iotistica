@@ -44,7 +44,7 @@ env:
   K8S_NAMESPACE: iotistic-nodeport
   CHART_PATH: ./k8s/charts/iotistic
   VALUES_FILE: ./k8s/charts/iotistic/values.yaml
-  APPS: api ingestion dashboard nodered
+  APPS: api ingestion dashboard nodered mqtt-monitor
 
 jobs:
   validate-release:
@@ -457,6 +457,7 @@ jobs:
           yq eval ".ingestion.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           yq eval ".dashboard.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           yq eval ".nodered.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
+          yq eval ".mqttMonitor.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           
           echo "✅ Updated image tags to ${RELEASE}"
           echo ""
@@ -466,6 +467,7 @@ jobs:
           yq eval ".ingestion.image.tag" "$VALUES_FILE" | sed 's/^/  ingestion.image.tag: /'
           yq eval ".dashboard.image.tag" "$VALUES_FILE" | sed 's/^/  dashboard.image.tag: /'
           yq eval ".nodered.image.tag" "$VALUES_FILE" | sed 's/^/  nodered.image.tag: /'
+          yq eval ".mqttMonitor.image.tag" "$VALUES_FILE" | sed 's/^/  mqttMonitor.image.tag: /'
 
       - name: Commit and push changes
         run: |
@@ -520,6 +522,7 @@ jobs:
           echo "- \`ingestion.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`dashboard.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`nodered.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`mqttMonitor.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Successfully updated ArgoCD values and pushed to iot-k8s repository**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
