@@ -7,6 +7,7 @@ import {
   getCachedMqttSuperuserDecision,
   getCachedMqttUserAuthDecision,
   getDenyCacheTtlSeconds,
+  getUserAllowCacheTtlSeconds,
   type CachedMqttAclRule,
   type CachedMqttAclRulesResult,
 } from './auth-cache';
@@ -118,7 +119,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         }
 
         return {
-          ttlSeconds: getAllowCacheTtlSeconds(),
+          ttlSeconds: getUserAllowCacheTtlSeconds(),
           value: { isSuperuser: false, result: 'allow' as const },
         };
       });

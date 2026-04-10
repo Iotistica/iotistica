@@ -182,31 +182,171 @@ function Get-IngestionHealth {
     } catch { return $null }
 }
 
+function Get-PrometheusGaugeValue {
+    param(
+        [string]$Content,
+        [string]$MetricName
+    )
+
+    $pattern = "(?m)^" + [Regex]::Escape($MetricName) + "(?:\{[^\}]*\})?\s+([-+0-9.eE]+)\s*$"
+    $match = [Regex]::Match($Content, $pattern)
+    if (-not $match.Success) {
+        return $null
+    }
+
+    [double]::Parse($match.Groups[1].Value, [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-IngestionSnapshotViaDocker {
+    $nodeScript = @'
+fetch('http://127.0.0.1:3003/metrics')
+  .then(async (response) => {
+    const text = await response.text();
+    if (!response.ok) {
+      console.error(`HTTP ${response.status} ${text}`);
+      process.exit(1);
+    }
+
+    process.stdout.write(text);
+  })
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+'@
+
+    $rawContent = docker exec iotistic-ingestion node -e $nodeScript 2>&1
+    $content = if ($rawContent -is [System.Array]) {
+        ($rawContent -join "`n")
+    } else {
+        [string]$rawContent
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to scrape ingestion metrics from local container 'iotistic-ingestion': $content"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($content)) {
+        throw "Local ingestion metrics scrape returned no content from container 'iotistic-ingestion'"
+    }
+
+    $snapshot = [pscustomobject]@{
+        streamLength      = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_stream_length'
+        workerLag         = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_worker_lag'
+        pendingMessages   = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_pending_count'
+        dlqLength         = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_dlq_length'
+        workerCount       = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_worker_count'
+        dwellP95Ms        = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_dwell_latency_p95_ms'
+        batchLatP95Ms     = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_batch_latency_p95_ms'
+        messagesProcessed = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_messages_processed_total'
+        readingsInserted  = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_readings_inserted_total'
+        messagesDropped   = Get-PrometheusGaugeValue -Content $content -MetricName 'iotistic_ingestion_messages_dropped_total'
+    }
+
+    if ($null -eq $snapshot.streamLength -and
+        $null -eq $snapshot.workerLag -and
+        $null -eq $snapshot.pendingMessages -and
+        $null -eq $snapshot.workerCount) {
+        throw "Local ingestion metrics scrape succeeded but did not return expected iotistic_ingestion_* metrics"
+    }
+
+    return $snapshot
+}
+
+function Get-IngestionSnapshot {
+    return Get-IngestionSnapshotViaDocker
+}
+
+function Get-HealthValue {
+    param(
+        [object]$Health,
+        [string[]]$Names,
+        [object]$Default = $null
+    )
+
+    foreach ($name in $Names) {
+        $property = $Health.PSObject.Properties[$name]
+        if ($null -ne $property -and $null -ne $property.Value) {
+            return $property.Value
+        }
+    }
+
+    return $Default
+}
+
+function Get-HealthDeltaValue {
+    param(
+        [object]$Health,
+        [object]$BaselineHealth,
+        [string[]]$Names,
+        [object]$Default = $null
+    )
+
+    $current = Get-HealthValue -Health $Health -Names $Names -Default $null
+    if ($null -eq $current) {
+        return $Default
+    }
+
+    $baseline = Get-HealthValue -Health $BaselineHealth -Names $Names -Default 0
+
+    try {
+        return [int64]$current - [int64]$baseline
+    } catch {
+        return $Default
+    }
+}
+
 function Write-HealthRow {
-    param($h, [int]$Injected, [int]$Total, [double]$ElapsedSec)
-    if (-not $h) { Write-Host "  [health poll failed]" -ForegroundColor DarkGray; return }
+    param($Health, $BaselineHealth, [int]$Injected, [int]$Total, [int]$MetricsPerMessage, [double]$ElapsedSec)
+    if (-not $Health) { Write-Host "  [health poll failed]" -ForegroundColor DarkGray; return }
 
-    $rate = if ($ElapsedSec -gt 0) { [int]($Injected / $ElapsedSec) } else { 0 }
+    $rate = if ($ElapsedSec -gt 0) { [math]::Round($Injected / $ElapsedSec, 1) } else { 0 }
+    $streamLen = Get-HealthValue -Health $Health -Names @('streamLength') -Default '?'
+    $workers   = Get-HealthValue -Health $Health -Names @('workerCount', 'workers') -Default '?'
+    $lag       = Get-HealthValue -Health $Health -Names @('workerLag', 'lagMs', 'maxDwellMs') -Default '?'
+    $processed = Get-HealthDeltaValue -Health $Health -BaselineHealth $BaselineHealth -Names @('messagesProcessed') -Default '?'
+    $inserted  = Get-HealthDeltaValue -Health $Health -BaselineHealth $BaselineHealth -Names @('readingsInserted') -Default '?'
+    $dropped   = Get-HealthDeltaValue -Health $Health -BaselineHealth $BaselineHealth -Names @('messagesDropped') -Default '?'
+    $pending   = Get-HealthValue -Health $Health -Names @('pendingMessages') -Default '?'
+    $dwellP95  = Get-HealthValue -Health $Health -Names @('dwellP95Ms') -Default '?'
+    $batchP95  = Get-HealthValue -Health $Health -Names @('batchLatP95Ms') -Default '?'
 
-    $streamLen = $h.streamLength      ?? "?"
-    $workers   = $h.workerCount       ?? $h.workers ?? "?"
-    $lag       = $h.workerLag         ?? "?"
-    $processed = $h.messagesProcessed ?? "?"
-    $inserted  = $h.readingsInserted  ?? "?"
-    $dropped   = $h.messagesDropped   ?? "?"
-    $dwellP95  = $h.dwellP95Ms        ?? "?"
-    $batchP95  = $h.batchLatP95Ms     ?? "?"
+    $droppedValue = 0
+    try { $droppedValue = [int]$dropped } catch { $droppedValue = 0 }
 
-    $droppedColor = if ($dropped -gt 0) { "Red" } else { "Green" }
-    $lagColor     = if ($lag -gt 20000) { "Red" } elseif ($lag -gt 5000) { "Yellow" } else { "Cyan" }
+    $lagValue = 0
+    try { $lagValue = [int]$lag } catch { $lagValue = 0 }
 
-    Write-Host ("{0,8} | {1,6}/{2} msg/s | stream={3,5}  lag=" -f `
-        (Get-Date -Format "HH:mm:ss"), $Injected, $Total, $streamLen) -NoNewline
-    Write-Host ("{0,6}ms" -f $lag) -ForegroundColor $lagColor -NoNewline
-    Write-Host ("  workers={0,2}  processed={1,6}  inserted={2,7}  dropped=" -f `
-        $workers, $processed, $inserted) -NoNewline
+    $droppedColor = if ($droppedValue -gt 0) { 'Red' } else { 'Green' }
+    $lagColor = if ($lagValue -gt 20000) { 'Red' } elseif ($lagValue -gt 5000) { 'Yellow' } else { 'Cyan' }
+    $injectedReadings = $Injected * $MetricsPerMessage
+    $totalReadings = $Total * $MetricsPerMessage
+
+    Write-Host ("{0,8} | msg={1,5}/{2,-5} rd={3,6}/{4,-6} | rate={5,7}/s | stream={6,5} lag=" -f `
+        (Get-Date -Format 'HH:mm:ss'), $Injected, $Total, $injectedReadings, $totalReadings, $rate, $streamLen) -NoNewline
+    Write-Host ("{0,6}" -f $lag) -ForegroundColor $lagColor -NoNewline
+    Write-Host ("  pending={0,5} workers={1,2} procΔ={2,7} insΔ={3,7} dropΔ=" -f `
+        $pending, $workers, $processed, $inserted) -NoNewline
     Write-Host ("{0,4}" -f $dropped) -ForegroundColor $droppedColor -NoNewline
-    Write-Host ("  dwellP95={0}ms  batchP95={1}ms" -f $dwellP95, $batchP95)
+    Write-Host ("  dwellP95={0}ms batchP95={1}ms" -f $dwellP95, $batchP95)
+}
+
+function Write-FlushRow {
+    param(
+        [int]$Injected,
+        [int]$Total,
+        [int]$MetricsPerMessage,
+        [double]$ElapsedSec,
+        [int]$PendingMessages,
+        [int]$TopicCount,
+        [string]$Phase
+    )
+
+    $rate = if ($ElapsedSec -gt 0) { [math]::Round($Injected / $ElapsedSec, 1) } else { 0 }
+    $injectedReadings = $Injected * $MetricsPerMessage
+    $totalReadings = $Total * $MetricsPerMessage
+    Write-Host ("{0,8} | msg={1,5}/{2,-5} rd={3,6}/{4,-6} | rate={5,7}/s | publishing {6,5} msgs across {7,2} topics | {8}" -f `
+        (Get-Date -Format 'HH:mm:ss'), $Injected, $Total, $injectedReadings, $totalReadings, $rate, $PendingMessages, $TopicCount, $Phase) -ForegroundColor DarkGray
 }
 
 # ─── MQTT message builder ─────────────────────────────────────────────────────
@@ -354,18 +494,16 @@ Write-Host "  Broker      : $MqttHost`:$MqttPort  user=$MqttUsername"
 Write-Host "  Tenant      : $TenantId  (encoded: $encodedTenant)"
 $sampleTopic = Get-DeviceTopic -EncodedTenant $encodedTenant -EncodedAgent (Encode-Uuid $agentUuids[0])
 Write-Host "  Topic fmt   : $($sampleTopic -replace (Encode-Uuid $agentUuids[0]), '{encodedAgentUuid}')  (e.g. $sampleTopic)"
-$healthPollDesc = if ($JwtToken) { "enabled" } else { "disabled (no JWT token)" }
+$healthPollDesc = if ($JwtToken) { "API health endpoint" } else { "direct ingestion scrape" }
 Write-Host "  Health poll : every ${PollIntervalSec}s — $healthPollDesc"
 Write-Host ""
 
 # ─── Header row ───────────────────────────────────────────────────────────────
-if ($JwtToken) {
-    Write-Host ("{0,8} | {1,13}       | {2,14}  {3,15}  {4,14}  {5,9}  {6,20}" -f `
-        "Time", "Injected/Total", "streamLen lag", "workers processed", "inserted dropped", "dwellP95", "batchP95")
-    Write-Host ("-" * 130)
-} else {
-    Write-Host "(health polling disabled — no JWT token)" -ForegroundColor DarkGray
-}
+$baselineHealth = if ($JwtToken) { $null } else { Get-IngestionSnapshot }
+
+Write-Host ("{0,8} | {1,27} | {2,12} | {3,18} | {4,24} | {5,22}" -f `
+    'Time', 'Msgs/Total  Readings/Total', 'rate/stream', 'lag/pending/workers', 'procΔ/insΔ/dropΔ', 'dwellP95/batchP95')
+Write-Host ('-' * 130)
 
 # ─── Injection loop ───────────────────────────────────────────────────────────
 #
@@ -379,6 +517,7 @@ if ($JwtToken) {
 
 $batchSize    = 200   # messages per agent per parallel round
 $roundSize    = $batchSize * $AgentCount   # total messages that trigger a flush
+Write-Host "  Flush size  : $roundSize msgs ($batchSize per agent x $AgentCount agents)" -ForegroundColor DarkGray
 $stopwatch    = [System.Diagnostics.Stopwatch]::StartNew()
 $lastPollAt   = 0.0
 $delayMs      = if ($RatePerSecond -gt 0) { [int](1000.0 / $RatePerSecond) } else { 0 }
@@ -428,23 +567,39 @@ for ($i = 0; $i -lt $MessageCount; $i++) {
 
     # Flush all agents in parallel when a full round is accumulated
     if ($totalPending -ge $roundSize) {
+        $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
+        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'flush start'
         Flush-AllBatchesParallel
         $totalPending = 0
+
+        $elapsedSec = $stopwatch.Elapsed.TotalSeconds
+        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'flush done'
+
+        if (($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
+            $health = if ($JwtToken) { Get-IngestionHealth -Url $ApiUrl -Token $JwtToken } else { Get-IngestionSnapshot }
+            Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
+            $lastPollAt = $elapsedSec
+        }
     }
 
     if ($delayMs -gt 0) { Start-Sleep -Milliseconds $delayMs }
 
-    if ($JwtToken) {
-        $elapsedSec = $stopwatch.Elapsed.TotalSeconds
-        if (($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
-            $health = Get-IngestionHealth -Url $ApiUrl -Token $JwtToken
-            Write-HealthRow -h $health -Injected $injected -Total $MessageCount -ElapsedSec $elapsedSec
-            $lastPollAt = $elapsedSec
-        }
+    $elapsedSec = $stopwatch.Elapsed.TotalSeconds
+    if ($totalPending -eq 0 -and ($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
+        $health = if ($JwtToken) { Get-IngestionHealth -Url $ApiUrl -Token $JwtToken } else { Get-IngestionSnapshot }
+        Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
+        $lastPollAt = $elapsedSec
     }
 }
 
-Flush-AllBatchesParallel  # drain remaining partial batches
+if ($totalPending -gt 0) {
+    $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
+    Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'final flush start'
+    Flush-AllBatchesParallel
+    Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'final flush done'
+} else {
+    Flush-AllBatchesParallel  # drain remaining partial batches
+}
 
 $stopwatch.Stop()
 $totalSec     = $stopwatch.Elapsed.TotalSeconds
@@ -465,7 +620,7 @@ if ($JwtToken) {
     while ($drainTimeout.Elapsed.TotalSeconds -lt 120) {
         Start-Sleep -Seconds $PollIntervalSec
         $health = Get-IngestionHealth -Url $ApiUrl -Token $JwtToken
-        Write-HealthRow -h $health -Injected $injected -Total $MessageCount `
+        Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage `
             -ElapsedSec ($totalSec + $drainTimeout.Elapsed.TotalSeconds)
 
         $wlag    = [int]($health.workerLag     ?? -1)
@@ -477,7 +632,21 @@ if ($JwtToken) {
         }
     }
 } else {
-    Write-Host "(pass -JwtToken to enable live drain monitoring)" -ForegroundColor DarkGray
+    Write-Host "Waiting for worker to drain stream (lag=0, pending=0)..." -ForegroundColor Yellow
+    while ($drainTimeout.Elapsed.TotalSeconds -lt 120) {
+        Start-Sleep -Seconds $PollIntervalSec
+        $health = Get-IngestionSnapshot
+        Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage `
+            -ElapsedSec ($totalSec + $drainTimeout.Elapsed.TotalSeconds)
+
+        $wlag = [int](Get-HealthValue -Health $health -Names @('workerLag') -Default -1)
+        $pending = [int](Get-HealthValue -Health $health -Names @('pendingMessages') -Default -1)
+        if ($wlag -eq 0 -and $pending -eq 0) {
+            Write-Host ""
+            Write-Host "Worker caught up (lag=0, pending=0)." -ForegroundColor Green
+            break
+        }
+    }
 }
 
 # ─── Final summary ────────────────────────────────────────────────────────────
@@ -485,13 +654,16 @@ Write-Host ""
 Write-Host "=== Final Stats ===" -ForegroundColor Cyan
 
 $finalHealth = Get-IngestionHealth -Url $ApiUrl -Token $JwtToken
+if (-not $finalHealth -and -not $JwtToken) {
+    $finalHealth = Get-IngestionSnapshot
+}
 if ($finalHealth) {
-    $processed = $finalHealth.messagesProcessed ?? "?"
-    $inserted  = $finalHealth.readingsInserted  ?? "?"
-    $dropped   = $finalHealth.messagesDropped   ?? "?"
-    $lag       = $finalHealth.workerLag         ?? "?"
-    $pending   = $finalHealth.pendingMessages   ?? "?"
-    $dlq       = $finalHealth.dlqLength         ?? "?"
+    $processed = if ($baselineHealth) { Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('messagesProcessed') -Default '?' } else { Get-HealthValue -Health $finalHealth -Names @('messagesProcessed') -Default '?' }
+    $inserted  = if ($baselineHealth) { Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('readingsInserted') -Default '?' } else { Get-HealthValue -Health $finalHealth -Names @('readingsInserted') -Default '?' }
+    $dropped   = if ($baselineHealth) { Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('messagesDropped') -Default '?' } else { Get-HealthValue -Health $finalHealth -Names @('messagesDropped') -Default '?' }
+    $lag       = Get-HealthValue -Health $finalHealth -Names @('workerLag') -Default '?'
+    $pending   = Get-HealthValue -Health $finalHealth -Names @('pendingMessages') -Default '?'
+    $dlq       = Get-HealthValue -Health $finalHealth -Names @('dlqLength') -Default '?'
     Write-Host ("  Consumer lag    : {0}  pending: {1}" -f $lag, $pending)
     Write-Host ("  Processed       : {0}" -f $processed)
     Write-Host ("  Readings in DB  : {0}" -f $inserted)
@@ -506,7 +678,7 @@ if ($finalHealth) {
         Write-Host "  Inspect with: docker exec iotistic-redis redis-cli XRANGE $dlqKey - + COUNT 5" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "  (health poll unavailable — pass -JwtToken for final stats)" -ForegroundColor DarkGray
+    Write-Host "  (ingestion metrics unavailable for final stats)" -ForegroundColor DarkGray
 }
 
 Write-Host ""

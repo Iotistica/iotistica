@@ -79,12 +79,24 @@ function readPositiveIntEnv(name: string, fallback: number): number {
 }
 
 const MQTT_AUTH_CACHE_TTL_SECONDS = readPositiveIntEnv('MQTT_AUTH_CACHE_TTL_SECONDS', 30);
+const MQTT_AUTH_USER_CACHE_TTL_SECONDS = readPositiveIntEnv(
+  'MQTT_AUTH_USER_CACHE_TTL_SECONDS',
+  Math.max(300, MQTT_AUTH_CACHE_TTL_SECONDS),
+);
 const MQTT_AUTH_DENY_CACHE_TTL_SECONDS = readPositiveIntEnv('MQTT_AUTH_DENY_CACHE_TTL_SECONDS', 5);
 const MQTT_AUTH_CACHE_MAX_ENTRIES = readPositiveIntEnv('MQTT_AUTH_CACHE_MAX_ENTRIES', 5000);
 const MQTT_AUTH_LOADER_TIMEOUT_MS = readPositiveIntEnv('MQTT_AUTH_LOADER_TIMEOUT_MS', 100);
+const MQTT_AUTH_USER_LOADER_TIMEOUT_MS = readPositiveIntEnv(
+  'MQTT_AUTH_USER_LOADER_TIMEOUT_MS',
+  Math.max(500, MQTT_AUTH_LOADER_TIMEOUT_MS),
+);
 const MQTT_AUTH_COLD_START_TIMEOUT_MS = readPositiveIntEnv(
   'MQTT_AUTH_COLD_START_TIMEOUT_MS',
   Math.max(500, MQTT_AUTH_LOADER_TIMEOUT_MS),
+);
+const MQTT_AUTH_USER_COLD_START_TIMEOUT_MS = readPositiveIntEnv(
+  'MQTT_AUTH_USER_COLD_START_TIMEOUT_MS',
+  Math.max(MQTT_AUTH_COLD_START_TIMEOUT_MS, MQTT_AUTH_USER_LOADER_TIMEOUT_MS),
 );
 const MQTT_AUTH_COLD_START_WINDOW_SECONDS = readPositiveIntEnv('MQTT_AUTH_COLD_START_WINDOW_SECONDS', 30);
 const MQTT_AUTH_CACHE_LOG_HITS = /^(1|true|yes)$/i.test(process.env.MQTT_AUTH_CACHE_LOG_HITS ?? 'false');
@@ -126,7 +138,13 @@ function isColdStartWindow(): boolean {
   return process.uptime() < MQTT_AUTH_COLD_START_WINDOW_SECONDS;
 }
 
-function getCurrentAuthLoaderTimeoutMs(): number {
+function getCurrentAuthLoaderTimeoutMs(label: 'user' | 'superuser' | 'acl'): number {
+  if (label === 'user') {
+    return isColdStartWindow()
+      ? Math.max(MQTT_AUTH_USER_LOADER_TIMEOUT_MS, MQTT_AUTH_USER_COLD_START_TIMEOUT_MS)
+      : MQTT_AUTH_USER_LOADER_TIMEOUT_MS;
+  }
+
   return isColdStartWindow()
     ? Math.max(MQTT_AUTH_LOADER_TIMEOUT_MS, MQTT_AUTH_COLD_START_TIMEOUT_MS)
     : MQTT_AUTH_LOADER_TIMEOUT_MS;
@@ -137,7 +155,7 @@ async function executeWithColdStartGrace<T>(
   username: string,
   execute: (timeoutMs: number) => Promise<T>,
 ): Promise<T> {
-  const timeoutMs = getCurrentAuthLoaderTimeoutMs();
+  const timeoutMs = getCurrentAuthLoaderTimeoutMs(label);
 
   try {
     return await execute(timeoutMs);
@@ -154,7 +172,11 @@ async function executeWithColdStartGrace<T>(
     });
 
     await delay(50);
-    return execute(Math.max(timeoutMs, MQTT_AUTH_COLD_START_TIMEOUT_MS));
+    const retryTimeoutMs = label === 'user'
+      ? Math.max(timeoutMs, MQTT_AUTH_USER_COLD_START_TIMEOUT_MS)
+      : Math.max(timeoutMs, MQTT_AUTH_COLD_START_TIMEOUT_MS);
+
+    return execute(retryTimeoutMs);
   }
 }
 
@@ -718,19 +740,23 @@ export function getAllowCacheTtlSeconds(): number {
   return MQTT_AUTH_CACHE_TTL_SECONDS;
 }
 
+export function getUserAllowCacheTtlSeconds(): number {
+  return MQTT_AUTH_USER_CACHE_TTL_SECONDS;
+}
+
 export function getDenyCacheTtlSeconds(): number {
   return MQTT_AUTH_DENY_CACHE_TTL_SECONDS;
 }
 
-export function getAuthLoaderTimeoutMs(): number {
-  return getCurrentAuthLoaderTimeoutMs();
+export function getAuthLoaderTimeoutMs(label: 'user' | 'superuser' | 'acl' = 'superuser'): number {
+  return getCurrentAuthLoaderTimeoutMs(label);
 }
 
 export async function seedMqttUserAuthDecision(
   username: string,
   password: string,
   decision: CachedMqttUserAuthDecision,
-  ttlSeconds = getAllowCacheTtlSeconds(),
+  ttlSeconds = getUserAllowCacheTtlSeconds(),
 ): Promise<void> {
   const passwordKey = buildPasswordKey(username, password);
   const cacheKey = `user:${passwordKey}`;
@@ -780,7 +806,7 @@ export async function getCachedMqttUserAuthDecision(
   } catch (error) {
     if (isCacheLoaderTimeoutError(error)) {
       authCacheLogger.warn('MQTT user auth loader timed out, denying request', {
-        timeoutMs: getCurrentAuthLoaderTimeoutMs(),
+        timeoutMs: getCurrentAuthLoaderTimeoutMs('user'),
         username,
         coldStart: isColdStartWindow(),
       });
@@ -807,7 +833,7 @@ export async function getCachedMqttSuperuserDecision(
   } catch (error) {
     if (isCacheLoaderTimeoutError(error)) {
       authCacheLogger.warn('MQTT superuser loader timed out, denying request', {
-        timeoutMs: getCurrentAuthLoaderTimeoutMs(),
+        timeoutMs: getCurrentAuthLoaderTimeoutMs('superuser'),
         username,
         coldStart: isColdStartWindow(),
       });
@@ -834,7 +860,7 @@ export async function getCachedMqttAclRules(
   } catch (error) {
     if (isCacheLoaderTimeoutError(error)) {
       authCacheLogger.warn('MQTT ACL loader timed out, denying request', {
-        timeoutMs: getCurrentAuthLoaderTimeoutMs(),
+        timeoutMs: getCurrentAuthLoaderTimeoutMs('acl'),
         username,
         coldStart: isColdStartWindow(),
       });
