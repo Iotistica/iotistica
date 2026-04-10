@@ -20,7 +20,7 @@
     "noUnusedParameters": true,
     "exactOptionalPropertyTypes": true,
     "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "allowSyntheticDefaultImports": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
