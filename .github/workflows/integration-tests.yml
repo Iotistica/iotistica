@@ -583,19 +583,20 @@ jobs:
           echo "=== sim-mqtt-e2e logs ==="
           echo "$SIM_LOGS"
 
-          docker rm -f sim-mqtt-e2e 2>/dev/null || true
-
           if echo "$SIM_LOGS" | grep -q "Connected to MQTT broker"; then
             echo "PASS: simulator connected to broker"
           else
             echo "FAIL: simulator did not connect to broker"
+            docker rm -f sim-mqtt-e2e 2>/dev/null || true
             exit 1
           fi
 
           if echo "$SIM_LOGS" | grep -qE "Publish confirmed|Publish queued"; then
             echo "PASS: simulator published messages"
+            echo "Leaving simulator running so the agent can produce a non-baseline cloud publish"
           else
             echo "FAIL: simulator did not publish any messages"
+            docker rm -f sim-mqtt-e2e 2>/dev/null || true
             exit 1
           fi
 
