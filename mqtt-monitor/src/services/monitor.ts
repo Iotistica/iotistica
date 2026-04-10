@@ -15,11 +15,11 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { EventEmitter } from 'events';
 import { inflateSync } from 'zlib';
-import * as msgpack from 'msgpack-lite';
-import isUtf8 from 'is-utf8';
+import msgpack from 'msgpackr';
 import { MQTTDatabaseService } from './db';
 import logger from '../utils/logger';
 import { PrometheusExporter } from './prometheus';
+import { isUtf8Buffer } from '../utils/is-utf8';
 
 // Update interval for metrics (milliseconds)
 const METRICS_UPDATE_INTERVAL = parseInt(process.env.MQTT_METRICS_UPDATE_INTERVAL || '5000');
@@ -1725,7 +1725,7 @@ class MessageAggregator {
           logger.debug(`Decompressed ${isGzip ? 'gzip' : 'deflate'} payload for topic ${topic}: ${payload.length}B -> ${decompressed.length}B`);
           
           // Check if decompressed data is still binary (might be MessagePack)
-          if (!isUtf8(decompressed)) {
+          if (!isUtf8Buffer(decompressed)) {
             try {
               // Try to decode MessagePack
               const decoded = msgpack.decode(decompressed);
@@ -1757,7 +1757,7 @@ class MessageAggregator {
       messageType = 'truncated';
       isTruncated = true;
     } else {
-      isBinary = !isUtf8(processedPayload);
+      isBinary = !isUtf8Buffer(processedPayload);
       if (isBinary) {
         // Don't base64 encode by default (can explode memory on hot binary topics)
         if (this.options.encodeBinaryPayloads) {

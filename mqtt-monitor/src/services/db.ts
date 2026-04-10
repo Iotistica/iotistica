@@ -4,7 +4,7 @@
  */
 
 import { Pool } from 'pg';
-import crypto from 'crypto';
+import { createHash } from 'node:crypto';
 
 export interface MQTTTopicRecord {
   id?: number;
@@ -248,7 +248,7 @@ export class MQTTDatabaseService {
     sampleMessage?: string
   ): Promise<void> {
     const schemaStr = JSON.stringify(schema);
-    const schemaHash = crypto.createHash('md5').update(schemaStr).digest('hex');
+    const schemaHash = createHash('md5').update(schemaStr).digest('hex');
 
     // Check if this exact schema already exists
     const existing = await this.pool.query(
@@ -466,7 +466,7 @@ export class MQTTDatabaseService {
         }
         
         const schemaStr = JSON.stringify(item.schema);
-        const schemaHash = crypto.createHash('md5').update(schemaStr).digest('hex');
+        const schemaHash = createHash('md5').update(schemaStr).digest('hex');
         const topicId = topicIdMap.get(item.topic);
         
         // Check if this schema+topic combo already exists

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import request from 'supertest';
-import express from 'express';
-import cors from 'cors';
+import fastify, { type FastifyInstance } from 'fastify';
+import fastifyCors from '@fastify/cors';
 import { EventEmitter } from 'events';
 
 // Mock MQTT Monitor Service
@@ -150,64 +150,59 @@ class MockMQTTMonitorService extends EventEmitter {
 
 // Create test app
 const createTestApp = () => {
-  const app = express();
-  app.use(cors());
-  app.use(express.json());
+  const app = fastify();
+  void app.register(fastifyCors);
   
   const monitor = new MockMQTTMonitorService();
   
   // Health endpoint
-  app.get('/health', (req, res) => {
-    res.json({ status: 'healthy' });
-  });
+  app.get('/health', async () => ({ status: 'healthy' }));
   
   // Ready endpoint
-  app.get('/ready', (req, res) => {
-    res.json({ status: 'ready', monitor: monitor.getStatus().connected });
-  });
+  app.get('/ready', async () => ({ status: 'ready', monitor: monitor.getStatus().connected }));
   
   // Status endpoint
-  app.get('/api/v1/status', (req, res) => {
+  app.get('/api/v1/status', async (_req, reply) => {
     try {
       const status = monitor.getStatus();
-      res.json({ success: true, data: status });
+      return reply.send({ success: true, data: status });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
   
   // Start endpoint
-  app.post('/api/v1/start', async (req, res) => {
+  app.post('/api/v1/start', async (_req, reply) => {
     try {
       await monitor.start();
-      res.json({ success: true, message: 'MQTT monitor started' });
+      return reply.send({ success: true, message: 'MQTT monitor started' });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
   
   // Stop endpoint
-  app.post('/api/v1/stop', async (req, res) => {
+  app.post('/api/v1/stop', async (_req, reply) => {
     try {
       await monitor.stop();
-      res.json({ success: true, message: 'MQTT monitor stopped' });
+      return reply.send({ success: true, message: 'MQTT monitor stopped' });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
   
   // Topic tree endpoint
-  app.get('/api/v1/topic-tree', (req, res) => {
+  app.get('/api/v1/topic-tree', async (_req, reply) => {
     try {
       const tree = monitor.getTopicTree();
-      res.json({ success: true, data: tree });
+      return reply.send({ success: true, data: tree });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
   
   // Topics endpoint
-  app.get('/api/v1/topics', (req, res) => {
+  app.get<{ Querystring: { timeWindow?: string; minutes?: string } }>('/api/v1/topics', async (req, reply) => {
     try {
       const { timeWindow, minutes } = req.query;
       let filterTimestamp: number | null = null;
@@ -230,7 +225,7 @@ const createTestApp = () => {
       
       const topics = monitor.getFlattenedTopics(filterTimestamp);
       
-      res.json({
+      return reply.send({
         success: true,
         count: topics.length,
         data: topics,
@@ -238,38 +233,38 @@ const createTestApp = () => {
         filteredFrom: filterTimestamp ? new Date(filterTimestamp).toISOString() : null
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
   
   // Metrics endpoint
-  app.get('/api/v1/metrics', (req, res) => {
+  app.get('/api/v1/metrics', async (_req, reply) => {
     try {
       const metrics = monitor.getMetrics();
-      res.json({ success: true, data: metrics });
+      return reply.send({ success: true, data: metrics });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
   
   // System stats endpoint
-  app.get('/api/v1/system-stats', (req, res) => {
+  app.get('/api/v1/system-stats', async (_req, reply) => {
     try {
       const stats = monitor.getSystemStats();
-      res.json({ success: true, data: stats });
+      return reply.send({ success: true, data: stats });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
   
   // Stats endpoint (comprehensive)
-  app.get('/api/v1/stats', (req, res) => {
+  app.get('/api/v1/stats', async (_req, reply) => {
     try {
       const status = monitor.getStatus();
       const metrics = monitor.getMetrics();
       const systemStats = monitor.getSystemStats();
       
-      res.json({
+      return reply.send({
         success: true,
         data: {
           status,
@@ -278,36 +273,41 @@ const createTestApp = () => {
         }
       });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
   
   // Sync endpoint
-  app.post('/api/v1/sync', async (req, res) => {
+  app.post('/api/v1/sync', async (_req, reply) => {
     try {
       await monitor.syncToDatabase();
-      res.json({ success: true, message: 'Database sync triggered' });
+      return reply.send({ success: true, message: 'Database sync triggered' });
     } catch (error: any) {
-      res.status(500).json({ success: false, error: error.message });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
   
   // 404 handler
-  app.use((req, res) => {
-    res.status(404).json({ error: 'Not found' });
+  app.setNotFoundHandler((_req, reply) => {
+    reply.status(404).send({ error: 'Not found' });
   });
   
   return { app, monitor };
 };
 
 describe('MQTT Monitor Server Integration Tests', () => {
-  let app: express.Application;
+  let app: FastifyInstance;
   let monitor: MockMQTTMonitorService;
   
-  beforeAll(() => {
+  beforeAll(async () => {
     const result = createTestApp();
     app = result.app;
     monitor = result.monitor;
+    await app.ready();
+  });
+
+  afterAll(async () => {
+    await app.close();
   });
   
   beforeEach(() => {
@@ -324,7 +324,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
   describe('Basic Endpoints', () => {
     describe('GET /health', () => {
       test('should return healthy status', async () => {
-        const response = await request(app).get('/health');
+        const response = await request(app.server).get('/health');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('status', 'healthy');
@@ -333,7 +333,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
     
     describe('GET /ready', () => {
       test('should return readiness status', async () => {
-        const response = await request(app).get('/ready');
+        const response = await request(app.server).get('/ready');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('status', 'ready');
@@ -343,7 +343,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
     
     describe('404 Handler', () => {
       test('should return 404 for unknown routes', async () => {
-        const response = await request(app).get('/nonexistent');
+        const response = await request(app.server).get('/nonexistent');
         
         expect(response.status).toBe(404);
         expect(response.body).toHaveProperty('error', 'Not found');
@@ -354,7 +354,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
   describe('Monitor Control', () => {
     describe('GET /api/v1/status', () => {
       test('should return monitor status', async () => {
-        const response = await request(app).get('/api/v1/status');
+        const response = await request(app.server).get('/api/v1/status');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('success', true);
@@ -367,7 +367,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
         monitor.addTestTopic('sensor/temperature', 10);
         monitor.addTestTopic('sensor/humidity', 5);
         
-        const response = await request(app).get('/api/v1/status');
+        const response = await request(app.server).get('/api/v1/status');
         
         expect(response.body.data.topicCount).toBe(2);
         expect(response.body.data.messageCount).toBe(15);
@@ -376,7 +376,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
     
     describe('POST /api/v1/start', () => {
       test('should start monitor', async () => {
-        const response = await request(app).post('/api/v1/start');
+        const response = await request(app.server).post('/api/v1/start');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('success', true);
@@ -387,7 +387,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
     describe('POST /api/v1/stop', () => {
       test('should stop monitor', async () => {
         await monitor.start();
-        const response = await request(app).post('/api/v1/stop');
+        const response = await request(app.server).post('/api/v1/stop');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('success', true);
@@ -405,7 +405,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
     
     describe('GET /api/v1/topic-tree', () => {
       test('should return hierarchical topic tree', async () => {
-        const response = await request(app).get('/api/v1/topic-tree');
+        const response = await request(app.server).get('/api/v1/topic-tree');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('success', true);
@@ -415,7 +415,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
     
     describe('GET /api/v1/topics', () => {
       test('should return flattened topic list', async () => {
-        const response = await request(app).get('/api/v1/topics');
+        const response = await request(app.server).get('/api/v1/topics');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('success', true);
@@ -424,7 +424,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
       });
       
       test('should filter by time window', async () => {
-        const response = await request(app).get('/api/v1/topics?timeWindow=1h');
+        const response = await request(app.server).get('/api/v1/topics?timeWindow=1h');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('timeWindow', '1h');
@@ -432,14 +432,14 @@ describe('MQTT Monitor Server Integration Tests', () => {
       });
       
       test('should filter by minutes', async () => {
-        const response = await request(app).get('/api/v1/topics?minutes=60');
+        const response = await request(app.server).get('/api/v1/topics?minutes=60');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('filteredFrom');
       });
       
       test('should include topic details', async () => {
-        const response = await request(app).get('/api/v1/topics');
+        const response = await request(app.server).get('/api/v1/topics');
         
         const topic = response.body.data[0];
         expect(topic).toHaveProperty('topic');
@@ -452,7 +452,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
   describe('Metrics & Statistics', () => {
     describe('GET /api/v1/metrics', () => {
       test('should return broker metrics', async () => {
-        const response = await request(app).get('/api/v1/metrics');
+        const response = await request(app.server).get('/api/v1/metrics');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('success', true);
@@ -462,7 +462,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
       });
       
       test('should include message rate arrays', async () => {
-        const response = await request(app).get('/api/v1/metrics');
+        const response = await request(app.server).get('/api/v1/metrics');
         
         expect(response.body.data.messageRate).toHaveProperty('published');
         expect(response.body.data.messageRate).toHaveProperty('received');
@@ -472,7 +472,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
     
     describe('GET /api/v1/system-stats', () => {
       test('should return system statistics', async () => {
-        const response = await request(app).get('/api/v1/system-stats');
+        const response = await request(app.server).get('/api/v1/system-stats');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('success', true);
@@ -482,7 +482,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
     
     describe('GET /api/v1/stats', () => {
       test('should return comprehensive statistics', async () => {
-        const response = await request(app).get('/api/v1/stats');
+        const response = await request(app.server).get('/api/v1/stats');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('success', true);
@@ -492,7 +492,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
       });
       
       test('should include all status fields', async () => {
-        const response = await request(app).get('/api/v1/stats');
+        const response = await request(app.server).get('/api/v1/stats');
         
         expect(response.body.data.status).toHaveProperty('connected');
         expect(response.body.data.status).toHaveProperty('topicCount');
@@ -504,7 +504,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
   describe('Database Operations', () => {
     describe('POST /api/v1/sync', () => {
       test('should trigger database sync', async () => {
-        const response = await request(app).post('/api/v1/sync');
+        const response = await request(app.server).post('/api/v1/sync');
         
         expect(response.status).toBe(200);
         expect(response.body).toHaveProperty('success', true);
@@ -515,7 +515,7 @@ describe('MQTT Monitor Server Integration Tests', () => {
   
   describe('CORS', () => {
     test('should have CORS headers', async () => {
-      const response = await request(app)
+      const response = await request(app.server)
         .get('/api/v1/status')
         .set('Origin', 'http://localhost:3000');
       
@@ -525,13 +525,13 @@ describe('MQTT Monitor Server Integration Tests', () => {
   
   describe('JSON Response Format', () => {
     test('should return JSON responses', async () => {
-      const response = await request(app).get('/api/v1/status');
+      const response = await request(app.server).get('/api/v1/status');
       
       expect(response.headers['content-type']).toMatch(/json/);
     });
     
     test('should have consistent success response structure', async () => {
-      const response = await request(app).get('/api/v1/status');
+      const response = await request(app.server).get('/api/v1/status');
       
       expect(response.body).toHaveProperty('success');
       expect(response.body).toHaveProperty('data');

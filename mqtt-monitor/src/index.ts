@@ -1,5 +1,5 @@
-import express, { Request, Response } from 'express';
-import cors from 'cors';
+import fastify, { type FastifyInstance } from 'fastify';
+import fastifyCors from '@fastify/cors';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import { MQTTMonitorService } from './services/monitor';
@@ -9,85 +9,79 @@ import monitorRoutes from './routes';
 
 dotenv.config();
 
-const app = express();
 const PORT = parseInt(process.env.PORT || '3500');
 const HOST = process.env.HOST || '0.0.0.0';
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Request logging
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.path}`, {
-    ip: req.ip,
-    userAgent: req.get('user-agent')
-  });
-  next();
-});
-
-// Health check endpoint
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({
-    status: 'healthy',
-    service: 'mqtt-monitor',
-    timestamp: new Date().toISOString()
-  });
-});
-
-app.get('/ready', (req: Request, res: Response) => {
-  res.json({
-    status: 'ready',
-    service: 'mqtt-monitor',
-    timestamp: new Date().toISOString()
-  });
-});
 
 // Prometheus metrics endpoint
 let monitorServiceInstance: MQTTMonitorService | null = null;
 
-app.get('/metrics', async (_req: Request, res: Response) => {
-  try {
-    if (!monitorServiceInstance) {
-      res.status(503).send('Service not ready');
-      return;
+async function createApp(): Promise<FastifyInstance> {
+  const app = fastify({ logger: false });
+
+  await app.register(fastifyCors);
+
+  app.addHook('onRequest', async (request) => {
+    logger.info(`${request.method} ${request.url}`, {
+      ip: request.ip,
+      userAgent: request.headers['user-agent']
+    });
+  });
+
+  app.get('/health', async () => ({
+    status: 'healthy',
+    service: 'mqtt-monitor',
+    timestamp: new Date().toISOString()
+  }));
+
+  app.get('/ready', async () => ({
+    status: 'ready',
+    service: 'mqtt-monitor',
+    timestamp: new Date().toISOString()
+  }));
+
+  app.get('/metrics', async (_request, reply) => {
+    try {
+      if (!monitorServiceInstance) {
+        return reply.status(503).send('Service not ready');
+      }
+
+      const metrics = await monitorServiceInstance.getPrometheusMetrics();
+      reply.header('Content-Type', monitorServiceInstance.getPrometheusContentType());
+      return reply.send(metrics);
+    } catch (error: any) {
+      logger.error('Error generating Prometheus metrics', { error: error.message });
+      return reply.status(500).send('Error generating metrics');
     }
-    
-    const metrics = await monitorServiceInstance.getPrometheusMetrics();
-    res.setHeader('Content-Type', monitorServiceInstance.getPrometheusContentType());
-    res.send(metrics);
-  } catch (error: any) {
-    logger.error('Error generating Prometheus metrics', { error: error.message });
-    res.status(500).send('Error generating metrics');
-  }
-});
-
-// API routes
-app.use('/api/v1', monitorRoutes);
-
-// Error handling middleware
-app.use((err: any, req: Request, res: Response, next: any) => {
-  logger.error('Unhandled error', {
-    error: err.message,
-    stack: err.stack,
-    path: req.path,
-    method: req.method
   });
-  
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error'
-  });
-});
 
-// 404 handler
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found'
+  await app.register(monitorRoutes, { prefix: '/api/v1' });
+
+  app.setErrorHandler((error, request, reply) => {
+    const errorDetails = error instanceof Error
+      ? { error: error.message, stack: error.stack }
+      : { error: String(error), stack: undefined };
+
+    logger.error('Unhandled error', {
+      ...errorDetails,
+      path: request.url,
+      method: request.method
+    });
+
+    reply.status(500).send({
+      success: false,
+      error: 'Internal server error'
+    });
   });
-});
+
+  app.setNotFoundHandler((request, reply) => {
+    reply.status(404).send({
+      success: false,
+      error: 'Route not found'
+    });
+  });
+
+  return app;
+}
 
 // Initialize database connection
 async function initializeDatabase(): Promise<Pool> {
@@ -116,6 +110,7 @@ async function initializeDatabase(): Promise<Pool> {
 async function start() {
   try {
     logger.info('Starting MQTT Monitor Service');
+    const app = await createApp();
 
     // Initialize database
     const dbPool = await initializeDatabase();
@@ -150,12 +145,10 @@ async function start() {
     const { setMonitorInstance } = await import('./routes/index.js');
     setMonitorInstance(monitor, dbService, historyService);
 
-    // Start Express server
-    app.listen(PORT, HOST, () => {
-      logger.info(`MQTT Monitor Service listening on ${HOST}:${PORT}`);
-      logger.info(`Health check: http://${HOST}:${PORT}/health`);
-      logger.info(`API documentation: http://${HOST}:${PORT}/api/v1/status`);
-    });
+    await app.listen({ port: PORT, host: HOST });
+    logger.info(`MQTT Monitor Service listening on ${HOST}:${PORT}`);
+    logger.info(`Health check: http://${HOST}:${PORT}/health`);
+    logger.info(`API documentation: http://${HOST}:${PORT}/api/v1/status`);
 
     // Graceful shutdown
     const shutdown = async (signal: string) => {
@@ -167,6 +160,8 @@ async function start() {
       if (monitor) {
         await monitor.stop();
       }
+
+      await app.close();
       
       await dbPool.end();
       

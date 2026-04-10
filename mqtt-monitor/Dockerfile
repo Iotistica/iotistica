@@ -1,12 +1,14 @@
 # Multi-stage build for MQTT Monitor Service
-FROM node:20-alpine AS builder
+FROM node:20-alpine3.22 AS builder
 
 WORKDIR /app
+
+RUN apk upgrade --no-cache
 
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including devDependencies for build)e
+# Install all dependencies needed for the build
 RUN npm ci
 
 # Copy source code
@@ -16,15 +18,17 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine
+FROM node:20-alpine3.22
 
 WORKDIR /app
+
+RUN apk upgrade --no-cache
 
 # Copy package files
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm ci --only=production && \
+RUN npm ci --omit=dev && \
     npm cache clean --force
 
 # Copy built application from builder
