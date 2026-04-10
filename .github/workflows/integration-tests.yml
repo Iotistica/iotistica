@@ -599,7 +599,19 @@ jobs:
             exit 1
           fi
 
-      - name: Verify agent forwards MQTT data to cloud ingestion
+      - name: Verify agent publishes MQTT data to cloud broker
+        run: |
+          echo "Waiting for agent publish-manager success log..."
+          timeout 90 bash -c '
+            until sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -Eq "Published [0-9]+ messages( \(no-op baseline\))?"; do
+              sleep 5
+            done
+          '
+
+          echo "=== Agent publish log excerpt ==="
+          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Published [0-9]+ messages( \(no-op baseline\))?" || true
+
+      - name: Verify ingestion persists MQTT readings to database
         env:
           ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
           AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
@@ -611,7 +623,7 @@ jobs:
             exit 1
           fi
 
-          echo "Waiting for forwarded MQTT readings from agent device $DEVICE_NAME ($DEVICE_UUID)..."
+          echo "Waiting for MQTT readings from device $DEVICE_NAME ($DEVICE_UUID) to be persisted by ingestion..."
 
           read_db_counts() {
             docker compose -f "$COMPOSE_FILE" exec -T postgres \
