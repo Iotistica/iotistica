@@ -88,8 +88,8 @@ jobs:
 
           echo "Waiting for Redis..."
           timeout 60 bash -c '
-            until docker compose -f "$COMPOSE_FILE" exec -T redis redis-cli ping | grep -q PONG; do
-              sleep 2
+            until [ "$(docker inspect --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}" iotistic-redis-e2e 2>/dev/null)" = "healthy" ]; do
+              sleep 3
             done
           '
 
