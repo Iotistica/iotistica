@@ -599,41 +599,53 @@ jobs:
 
           echo "Waiting for forwarded MQTT readings from agent device $DEVICE_NAME ($DEVICE_UUID)..."
 
-          timeout 120 bash -c '
-            until DB_RESULT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -t -A -F "|" -c "
-              SELECT
-                COUNT(*)::int,
-                COUNT(DISTINCT metric_name)::int
-              FROM readings
-              WHERE protocol = ''mqtt''
-                AND COALESCE(extra->>''device_uuid'', extra->>''deviceUuid'') = ''${DEVICE_UUID}''
-                AND time > NOW() - INTERVAL ''10 minutes'';"); do
-              sleep 3
-            done
+          read_db_counts() {
+            docker compose -f "$COMPOSE_FILE" exec -T api node --input-type=module - <<'NODE'
+import { query } from './dist/db/connection.js';
 
+const deviceUuid = process.env.DEVICE_UUID;
+
+if (!deviceUuid) {
+  throw new Error('DEVICE_UUID env var is required');
+}
+
+const result = await query(
+  `SELECT
+     COUNT(*)::int AS reading_count,
+     COUNT(DISTINCT metric_name)::int AS metric_count
+   FROM readings
+   WHERE protocol = $1
+     AND COALESCE(extra->>'device_uuid', extra->>'deviceUuid') = $2
+     AND time > NOW() - INTERVAL '10 minutes'`,
+  ['mqtt', deviceUuid]
+);
+
+const row = result.rows[0] ?? { reading_count: 0, metric_count: 0 };
+console.log(`${row.reading_count}|${row.metric_count}`);
+NODE
+          }
+
+          DEADLINE=$((SECONDS + 120))
+          DB_RESULT=$(read_db_counts)
+          echo "DB_RESULT=$DB_RESULT"
+
+          READING_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f1 | tr -d "[:space:]")
+          METRIC_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f2 | tr -d "[:space:]")
+
+          while { [ "${READING_COUNT:-0}" -lt 2 ] || [ "${METRIC_COUNT:-0}" -lt 2 ]; } && [ "$SECONDS" -lt "$DEADLINE" ]; do
+            sleep 4
+            DB_RESULT=$(read_db_counts)
             echo "DB_RESULT=$DB_RESULT"
-
             READING_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f1 | tr -d "[:space:]")
             METRIC_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f2 | tr -d "[:space:]")
+          done
 
-            until [ "${READING_COUNT:-0}" -ge 2 ] && [ "${METRIC_COUNT:-0}" -ge 2 ]; do
-              sleep 4
-              DB_RESULT=$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -t -A -F "|" -c "
-                SELECT
-                  COUNT(*)::int,
-                  COUNT(DISTINCT metric_name)::int
-                FROM readings
-                WHERE protocol = ''mqtt''
-                  AND COALESCE(extra->>''device_uuid'', extra->>''deviceUuid'') = ''${DEVICE_UUID}''
-                  AND time > NOW() - INTERVAL ''10 minutes'';")
+          if [ "${READING_COUNT:-0}" -lt 2 ] || [ "${METRIC_COUNT:-0}" -lt 2 ]; then
+            echo "FAIL: timed out waiting for forwarded MQTT readings in raw readings table"
+            exit 1
+          fi
 
-              echo "DB_RESULT=$DB_RESULT"
-              READING_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f1 | tr -d "[:space:]")
-              METRIC_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f2 | tr -d "[:space:]")
-            done
-
-            echo "Observed $READING_COUNT MQTT readings across $METRIC_COUNT metrics in raw readings"
-          '
+          echo "Observed $READING_COUNT MQTT readings across $METRIC_COUNT metrics in raw readings"
 
           API_RESULT=$(curl -fsS "http://localhost:4002/api/v1/metrics/latest?deviceUuid=${DEVICE_UUID}&agentUuid=${AGENT_UUID}" \
             -H "Authorization: Bearer $ACCESS_TOKEN")
