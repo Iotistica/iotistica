@@ -27,8 +27,8 @@ interface TopicIdParams {
   topicId: string;
 }
 
-interface WildcardParams {
-  '*': string;
+interface TopicParams {
+  topic: string;
 }
 
 let monitor: MQTTMonitorService | null = null;
@@ -72,6 +72,14 @@ export function setMonitorInstance(monitorInstance: MQTTMonitorService | null, d
   mqttDbService = dbService;
   historyService = history;
   logger.info('Monitor instance injected into routes');
+}
+
+function decodeTopicParam(topic: string): string {
+  try {
+    return decodeURIComponent(topic);
+  } catch {
+    return topic;
+  }
 }
 
 const plugin: FastifyPluginAsync = async (fastify) => {
@@ -196,13 +204,13 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.get<{ Params: WildcardParams }>('/topics/*/schema', async (request, reply) => {
+  fastify.get<{ Params: TopicParams }>('/topics/:topic/schema', async (request, reply) => {
     try {
       if (!monitor) {
         return reply.status(400).send({ success: false, error: 'Monitor not running' });
       }
 
-      const topic = request.params['*'];
+      const topic = decodeTopicParam(request.params.topic);
       const schemaData = monitor.getTopicSchema(topic);
       if (!schemaData) {
         return reply.status(404).send({ success: false, error: 'Topic not found or no schema available' });
@@ -216,7 +224,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         }
       });
     } catch (error: any) {
-      logger.error('Error getting topic schema', { error: error.message, topic: request.params['*'] });
+      logger.error('Error getting topic schema', { error: error.message, topic: request.params.topic });
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
@@ -418,17 +426,17 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.get<{ Params: WildcardParams }>('/database/schema-history/*', async (request, reply) => {
+  fastify.get<{ Params: TopicParams }>('/database/schema-history/:topic', async (request, reply) => {
     try {
       if (!mqttDbService) {
         return reply.status(400).send({ success: false, error: 'Database persistence not enabled' });
       }
 
-      const topic = request.params['*'];
+      const topic = decodeTopicParam(request.params.topic);
       const history = await mqttDbService.getSchemaHistory(topic);
       return reply.send({ success: true, topic, count: history.length, data: history });
     } catch (error: any) {
-      logger.error('Error getting schema history', { error: error.message, topic: request.params['*'] });
+      logger.error('Error getting schema history', { error: error.message, topic: request.params.topic });
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
@@ -476,13 +484,13 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.get<{ Params: WildcardParams; Querystring: TopicActivityQuerystring }>('/topics/*/recent-activity', async (request, reply) => {
+  fastify.get<{ Params: TopicParams; Querystring: TopicActivityQuerystring }>('/topics/:topic/recent-activity', async (request, reply) => {
     try {
       if (!mqttDbService) {
         return reply.status(400).send({ success: false, error: 'Database persistence not enabled' });
       }
 
-      const topic = request.params['*'];
+      const topic = decodeTopicParam(request.params.topic);
       const windowMinutes = request.query.window ? parseInt(request.query.window, 10) : 15;
       const activity = await mqttDbService.getTopicRecentActivity(topic, windowMinutes);
       if (!activity) {
@@ -491,7 +499,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
 
       return reply.send({ success: true, data: activity });
     } catch (error: any) {
-      logger.error('Error getting topic recent activity', { error: error.message, topic: request.params['*'] });
+      logger.error('Error getting topic recent activity', { error: error.message, topic: request.params.topic });
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
