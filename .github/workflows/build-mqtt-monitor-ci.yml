@@ -1,6 +1,6 @@
-name: CI Build & Push MQTT Monitor
+name: CI Build, Test & Push MQTT Monitor
 
-on: 
+on:
   push:
     branches:
       - master
@@ -8,15 +8,34 @@ on:
       - 'mqtt-monitor/**'
       - '.github/workflows/build-mqtt-monitor-ci.yml'
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (commit SHA, tag, or branch)'
+        required: false
+        default: master
+        type: string
+
+concurrency:
+  group: mqtt-monitor-ci
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test & Validate
-    runs-on: [ubuntu-24.04]
-    
+  build:
+    name: Test, Build, Scan & Push
+    runs-on: [arc-runner-set-iotistica-light]
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -25,13 +44,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: mqtt-monitor/package-lock.json
 
-      - name: Install dependencies
+      - name: Install MQTT Monitor dependencies
         working-directory: ./mqtt-monitor
-        run: npm ci
-
-      - name: Run TypeScript compilation
-        working-directory: ./mqtt-monitor
-        run: npm run build
+        run: npm ci --prefer-offline --no-audit
 
       - name: Run unit tests
         working-directory: ./mqtt-monitor
@@ -41,125 +56,29 @@ jobs:
         working-directory: ./mqtt-monitor
         run: npm run test:integration
 
-      - name: Cleanup test artifacts
-        if: always()
-        run: |
-          rm -rf mqtt-monitor/node_modules/.cache || true
-          rm -rf mqtt-monitor/dist || true
+      - name: Build MQTT Monitor
+        working-directory: ./mqtt-monitor
+        run: npm run build
 
-  version:
-    name: Bump Version
-    needs: test
-    runs-on: [ubuntu-24.04]
-    permissions:
-      contents: write
-    outputs:
-      package_version: ${{ steps.bump.outputs.package_version }}
-      sha_short: ${{ steps.bump.outputs.sha_short }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: master
-
-      - name: Bump version in package.json
-        id: bump
+      - name: Calculate commit SHA
+        id: sha
         run: |
-          cd mqtt-monitor
-          
-          # Get current version
-          CURRENT_VERSION=$(jq -r '.version' package.json)
-          echo "Current version: $CURRENT_VERSION"
-          
-          # Bump patch version (e.g., 1.0.0 -> 1.0.1)
-          IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
-          MAJOR="${VERSION_PARTS[0]}"
-          MINOR="${VERSION_PARTS[1]}"
-          PATCH="${VERSION_PARTS[2]}"
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-          
-          echo "New version: $NEW_VERSION"
-          
-          # Update package.json
-          jq --arg v "$NEW_VERSION" '.version = $v' package.json > tmp.json && mv tmp.json package.json
-          
-          # Set outputs
-          echo "package_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          SHA=$(git rev-parse HEAD)
+          SHORT_SHA=${SHA:0:12}
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "Build for commit: $SHA ($SHORT_SHA)"
 
-      - name: Commit and push version bump
+      - name: Display Build Info
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          
-          # Add and commit the version bump
-          git add mqtt-monitor/package.json
-          git commit -m "chore: bump mqtt-monitor version to ${{ steps.bump.outputs.package_version }} [skip ci]"
-          
-          # Retry push with rebase up to 5 times (handles concurrent workflow runs)
-          for i in {1..5}; do
-            echo "Push attempt $i of 5..."
-            
-            # Fetch latest state from remote
-            git fetch origin master
-            
-            # Rebase our commit on top of latest origin/master
-            git -c rebase.autoStash=true rebase origin/master
-            
-            # Try to push
-            if git push origin HEAD:master; then
-              echo "Successfully pushed version bump!"
-              exit 0
-            fi
-            
-            # If push failed, wait before retry
-            if [ $i -lt 5 ]; then
-              echo "Push failed, retrying in 2 seconds..."
-              sleep 2
-            fi
-          done
-          
-          echo "Failed to push after 5 attempts"
-          exit 1
-
-      - name: Display version info
-        run: |
-          echo "## Version Bumped" >> $GITHUB_STEP_SUMMARY
+          echo "## Building Docker Image" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**New Version:** \`${{ steps.bump.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ steps.bump.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-
-  buildx:
-    name: Build & Push to Docker
-    needs: version
-    runs-on: [ubuntu-24.04]
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: master
-
-      - name: Display Version Update
-        run: |
-          echo "## Building Version ${{ needs.version.outputs.package_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms:** \`linux/amd64,linux/arm64\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.sha.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/mqtt-monitor:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/mqtt-monitor:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/mqtt-monitor:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+          echo "- \`iotistic/mqtt-monitor:ci-${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/mqtt-monitor:ci-latest\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Wait for Docker daemon
         run: |
@@ -172,16 +91,11 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
         with:
-          path: /tmp/.buildx-cache
-          key: buildx-mqtt-monitor-v2-${{ github.sha }}
-          restore-keys: |
-            buildx-mqtt-monitor-v2-
+          driver-opts: |
+            image=moby/buildkit:buildx-stable-1
+            network=host
 
-      # Login to Docker Hub (only if tests passed)
       - name: Login to Docker Hub
         if: success()
         uses: docker/login-action@v3
@@ -189,8 +103,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      # Build and push to registry
-      - name: Build & Push final image
+      - name: Build and push image
         id: docker_build
         if: success()
         uses: docker/build-push-action@v5
@@ -198,152 +111,66 @@ jobs:
           context: ./mqtt-monitor
           file: ./mqtt-monitor/Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
+          provenance: false
+          platforms: linux/amd64
+          cache-from: type=gha,scope=mqtt-monitor-ci
+          cache-to: type=gha,scope=mqtt-monitor-ci,mode=min,ignore-error=true
           tags: |
-            iotistic/mqtt-monitor:latest
-            iotistic/mqtt-monitor:${{ needs.version.outputs.sha_short }}
-            iotistic/mqtt-monitor:${{ needs.version.outputs.package_version }}
+            iotistic/mqtt-monitor:ci-${{ steps.sha.outputs.short_sha }}
+            iotistic/mqtt-monitor:ci-latest
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
 
-      - name: Cleanup Docker build artifacts
-        if: always()
-        run: |
-          # Remove dangling images
-          docker image prune -f
-          # Remove build cache
-          rm -rf /tmp/.buildx-cache || true
-          # Clean up Docker builder cache
-          docker buildx prune -f --keep-storage 5GB || true
-
-  report:
-    name: Generate Reports
-    needs: [version, buildx]
-    runs-on: [ubuntu-24.04]
-    if: always()
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Scan MQTT Monitor image with Trivy
+        uses: ./.github/actions/trivy-scan
         with:
-          fetch-depth: 0
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          # Get the previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous tag found, using all commits"
-            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -- mqtt-monitor/)
-          else
-            echo "Generating changelog from $PREV_TAG to HEAD"
-            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges -- mqtt-monitor/)
-          fi
-          
-          # Save to file
-          echo "$COMMITS" > changelog.txt
-          
-          # Save first 20 lines for summary
-          echo "$COMMITS" | head -20 > changelog_summary.txt
+          image-ref: 'iotistic/mqtt-monitor:ci-${{ steps.sha.outputs.short_sha }}'
+          output-file: 'trivy-results.sarif'
+          fail-on-critical: 'true'
+          ignore-file: 'mqtt-monitor/.trivyignore'
 
       - name: Get Docker image size
+        if: always()
         id: image_size
         run: |
-          # Login to Docker Hub to pull the image
-          echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-          
-          # Pull the image (amd64 only for size check)
-          docker pull --platform linux/amd64 iotistic/mqtt-monitor:${{ needs.version.outputs.package_version }}
-          
-          # Get image size
-          SIZE_BYTES=$(docker image inspect iotistic/mqtt-monitor:${{ needs.version.outputs.package_version }} --format='{{.Size}}')
-          SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
-          
+          IMAGE_TAG="iotistic/mqtt-monitor:ci-${{ steps.sha.outputs.short_sha }}"
+
+          docker pull "$IMAGE_TAG" > /dev/null 2>&1 || true
+
+          if docker image inspect "$IMAGE_TAG" > /dev/null 2>&1; then
+            SIZE_BYTES=$(docker image inspect "$IMAGE_TAG" --format='{{.Size}}')
+            SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
+            LAYERS=$(docker image inspect "$IMAGE_TAG" --format='{{len .RootFS.Layers}}')
+          else
+            SIZE_BYTES=0
+            SIZE_MB=0
+            LAYERS=0
+          fi
+
           echo "size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
           echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
-          
-          # Get layer count
-          LAYERS=$(docker image inspect iotistic/mqtt-monitor:${{ needs.version.outputs.package_version }} --format='{{len .RootFS.Layers}}')
           echo "layers=$LAYERS" >> $GITHUB_OUTPUT
 
       - name: Generate Summary Report
+        if: always()
         run: |
           echo "# Build & Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "## Version Information" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Git SHA:** \`${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Platforms:** \`linux/amd64, linux/arm64\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "## Docker Image" >> $GITHUB_STEP_SUMMARY
-          echo "**Size (amd64):** ${{ steps.image_size.outputs.size_mb }} MB" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** ${{ steps.image_size.outputs.size_mb }} MB" >> $GITHUB_STEP_SUMMARY
           echo "**Layers:** ${{ steps.image_size.outputs.layers }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/mqtt-monitor:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/mqtt-monitor:${{ needs.version.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`iotistic/mqtt-monitor:${{ needs.version.outputs.package_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/mqtt-monitor:ci-${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/mqtt-monitor:ci-latest\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "## Changelog (MQTT Monitor)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -s changelog_summary.txt ]; then
-            cat changelog_summary.txt >> $GITHUB_STEP_SUMMARY
-            
-            TOTAL_COMMITS=$(wc -l < changelog.txt)
-            SHOWN_COMMITS=$(wc -l < changelog_summary.txt)
-            if [ $TOTAL_COMMITS -gt $SHOWN_COMMITS ]; then
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "_...and $((TOTAL_COMMITS - SHOWN_COMMITS)) more commits_" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "No mqtt-monitor commits found" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
           echo "All jobs completed successfully! 🎉" >> $GITHUB_STEP_SUMMARY
 
-      - name: Final cleanup
-        if: always()
-        run: |
-          # Remove the pulled image from report job
-          docker rmi iotistic/mqtt-monitor:${{ needs.version.outputs.package_version }} || true
-          # Clean up old Docker images (keep last 3 versions)
-          docker images 'iotistic/mqtt-monitor' --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | \
-            sort -k2 -r | tail -n +4 | awk '{print $1}' | xargs -r docker rmi || true
-          # Remove dangling images
-          docker image prune -f
-          # Clean up workspace artifacts
-          rm -f changelog.txt changelog_summary.txt || true
-
-  trigger-integration-tests:
-    name: Trigger Integration Tests
-    needs: [version, buildx, report]
-    runs-on: [ubuntu-24.04]
-    permissions:
-      actions: write
-      contents: read
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    
-    steps:
-      - name: Trigger integration tests
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'integration-tests.yml',
-              ref: 'master',
-              inputs: {
-                mqtt_monitor_version: '${{ needs.version.outputs.package_version }}'
-              }
-            });
-            
-            console.log('Integration tests triggered with mqtt-monitor version: ${{ needs.version.outputs.package_version }}');
