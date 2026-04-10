@@ -48,7 +48,9 @@ async function main() {
     logger.info('Resolved ingestion runtime profile', {
         requestedProfile: profileConfig.requestedProfile,
         resolvedProfile: profileConfig.resolvedProfile,
+        catalogSource: profileConfig.catalogSource,
         appliedDefaults: profileConfig.appliedDefaults,
+        overriddenKeys: profileConfig.overriddenKeys,
     });
     await bootstrapDatabaseConnection();
     await bootstrapConfig();

@@ -4,10 +4,11 @@
   "description": "Iotistica ingestion worker service",
   "main": "dist/index.js",
   "scripts": {
-    "build": "npm run clean && tsc",
+    "build": "npm run clean && tsc && node -e \"const fs=require('fs');fs.mkdirSync('dist/config',{recursive:true});fs.copyFileSync('src/config/profile-catalog.json','dist/config/profile-catalog.json');\"",
     "watch": "tsc --watch",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "test": "node --require ts-node/register --test test/**/*.test.ts",
     "clean": "node -e \"const fs=require('fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true});\""
   },
   "dependencies": {

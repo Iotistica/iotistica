@@ -1,79 +1,97 @@
+import profileCatalogData from './profile-catalog.json';
+
 export type IngestionProfile = 'batch' | 'balanced' | 'streaming';
+
+const PROFILE_NAMES = ['batch', 'balanced', 'streaming'] as const;
+const PROFILE_ENV_KEYS = [
+  'REDIS_PIPELINE_FLUSH_INTERVAL_MS',
+  'REDIS_INGESTION_STREAM_MAXLEN',
+  'REDIS_IDLE_INGESTION_STREAM_MAXLEN',
+  'REDIS_DLQ_MAXLEN',
+  'REDIS_DEVICE_STREAM_HIGH_WATERMARK_PCT',
+  'REDIS_MEMORY_HIGH_WATERMARK_PCT',
+  'WORKER_COUNT',
+  'BATCH_SIZE',
+  'FLUSH_INTERVAL_MS',
+  'AUTOSCALE_MIN_WORKERS',
+  'AUTOSCALE_MAX_WORKERS',
+  'AUTOSCALE_LAG_TARGET_MS',
+  'AUTOSCALE_LAG_SCALE_UP_MS',
+  'AUTOSCALE_LAG_CRITICAL_MS',
+  'AUTOSCALE_SCALE_DOWN_STABLE_CHECKS',
+  'AUTOSCALE_COOLDOWN_MS',
+  'AUTOSCALE_DB_BLOCK_PCT',
+  'READINGS_BULK_INSERT_MODE',
+  'READINGS_COPY_MIN_ROWS',
+  'READINGS_REALTIME_MAX_ROWS',
+  'READINGS_REALTIME_ROWS_PER_INSERT',
+  'DB_POOL_SIZE',
+  'DB_WAITING_HIGH_WATERMARK',
+  'DB_SATURATION_HIGH_WATERMARK_PCT',
+  'DB_BACKPRESSURE_SLEEP_MS',
+] as const;
+
+type ProfileEnvKey = typeof PROFILE_ENV_KEYS[number];
+type ProfileDefaults = Record<ProfileEnvKey, string>;
+type ProfileCatalog = Record<IngestionProfile, ProfileDefaults>;
+
+const PROFILE_CATALOG_SOURCE = 'src/config/profile-catalog.json';
 
 interface AppliedProfileConfig {
   requestedProfile: string;
   resolvedProfile: IngestionProfile;
   appliedDefaults: string[];
+  overriddenKeys: string[];
+  catalogSource: string;
 }
 
-const PROFILE_DEFAULTS: Record<IngestionProfile, Record<string, string>> = {
-  batch: {
-    REDIS_PIPELINE_FLUSH_INTERVAL_MS: '50',
-    REDIS_INGESTION_STREAM_MAXLEN: '10000',
-    REDIS_IDLE_INGESTION_STREAM_MAXLEN: '1000',
-    WORKER_COUNT: '4',
-    BATCH_SIZE: '500',
-    FLUSH_INTERVAL_MS: '2000',
-    AUTOSCALE_MIN_WORKERS: '2',
-    AUTOSCALE_MAX_WORKERS: '12',
-    AUTOSCALE_LAG_TARGET_MS: '10000',
-    AUTOSCALE_LAG_SCALE_UP_MS: '5000',
-    AUTOSCALE_LAG_CRITICAL_MS: '15000',
-    AUTOSCALE_SCALE_DOWN_STABLE_CHECKS: '12',
-    AUTOSCALE_COOLDOWN_MS: '5000',
-    READINGS_BULK_INSERT_MODE: 'copy',
-    READINGS_REALTIME_MAX_ROWS: '25',
-    READINGS_REALTIME_ROWS_PER_INSERT: '10',
-    DB_POOL_SIZE: '20',
-    DB_WAITING_HIGH_WATERMARK: '5',
-    DB_SATURATION_HIGH_WATERMARK_PCT: '70',
-    DB_BACKPRESSURE_SLEEP_MS: '500',
-  },
-  balanced: {
-    REDIS_PIPELINE_FLUSH_INTERVAL_MS: '10',
-    REDIS_INGESTION_STREAM_MAXLEN: '5000',
-    REDIS_IDLE_INGESTION_STREAM_MAXLEN: '500',
-    WORKER_COUNT: '6',
-    BATCH_SIZE: '100',
-    FLUSH_INTERVAL_MS: '500',
-    AUTOSCALE_MIN_WORKERS: '4',
-    AUTOSCALE_MAX_WORKERS: '16',
-    AUTOSCALE_LAG_TARGET_MS: '5000',
-    AUTOSCALE_LAG_SCALE_UP_MS: '2000',
-    AUTOSCALE_LAG_CRITICAL_MS: '10000',
-    AUTOSCALE_SCALE_DOWN_STABLE_CHECKS: '6',
-    AUTOSCALE_COOLDOWN_MS: '3000',
-    READINGS_BULK_INSERT_MODE: 'copy',
-    READINGS_REALTIME_MAX_ROWS: '50',
-    READINGS_REALTIME_ROWS_PER_INSERT: '25',
-    DB_POOL_SIZE: '24',
-    DB_WAITING_HIGH_WATERMARK: '8',
-    DB_SATURATION_HIGH_WATERMARK_PCT: '80',
-    DB_BACKPRESSURE_SLEEP_MS: '250',
-  },
-  streaming: {
-    REDIS_PIPELINE_FLUSH_INTERVAL_MS: '0',
-    REDIS_INGESTION_STREAM_MAXLEN: '2000',
-    REDIS_IDLE_INGESTION_STREAM_MAXLEN: '250',
-    WORKER_COUNT: '8',
-    BATCH_SIZE: '20',
-    FLUSH_INTERVAL_MS: '100',
-    AUTOSCALE_MIN_WORKERS: '6',
-    AUTOSCALE_MAX_WORKERS: '20',
-    AUTOSCALE_LAG_TARGET_MS: '2000',
-    AUTOSCALE_LAG_SCALE_UP_MS: '1000',
-    AUTOSCALE_LAG_CRITICAL_MS: '5000',
-    AUTOSCALE_SCALE_DOWN_STABLE_CHECKS: '10',
-    AUTOSCALE_COOLDOWN_MS: '2000',
-    READINGS_BULK_INSERT_MODE: 'realtime',
-    READINGS_REALTIME_MAX_ROWS: '100',
-    READINGS_REALTIME_ROWS_PER_INSERT: '10',
-    DB_POOL_SIZE: '30',
-    DB_WAITING_HIGH_WATERMARK: '10',
-    DB_SATURATION_HIGH_WATERMARK_PCT: '85',
-    DB_BACKPRESSURE_SLEEP_MS: '100',
-  },
-};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function validateProfileCatalog(rawCatalog: unknown, source: string): ProfileCatalog {
+  if (!isRecord(rawCatalog)) {
+    throw new Error(`Invalid ingestion profile catalog in ${source}: expected an object at the top level`);
+  }
+
+  const catalog = {} as ProfileCatalog;
+
+  for (const profileName of PROFILE_NAMES) {
+    const rawProfile = rawCatalog[profileName];
+    if (!isRecord(rawProfile)) {
+      throw new Error(`Invalid ingestion profile catalog in ${source}: missing profile \"${profileName}\"`);
+    }
+
+    const defaults = {} as ProfileDefaults;
+
+    for (const key of PROFILE_ENV_KEYS) {
+      const value = rawProfile[key];
+      if (typeof value !== 'string') {
+        throw new Error(`Invalid ingestion profile catalog in ${source}: profile \"${profileName}\" key \"${key}\" must be a string`);
+      }
+
+      defaults[key] = value;
+    }
+
+    for (const key of Object.keys(rawProfile)) {
+      if (!PROFILE_ENV_KEYS.includes(key as ProfileEnvKey)) {
+        throw new Error(`Invalid ingestion profile catalog in ${source}: profile \"${profileName}\" contains unsupported key \"${key}\"`);
+      }
+    }
+
+    catalog[profileName] = defaults;
+  }
+
+  for (const profileName of Object.keys(rawCatalog)) {
+    if (!PROFILE_NAMES.includes(profileName as IngestionProfile)) {
+      throw new Error(`Invalid ingestion profile catalog in ${source}: unsupported profile \"${profileName}\"`);
+    }
+  }
+
+  return catalog;
+}
+
+const PROFILE_DEFAULTS = validateProfileCatalog(profileCatalogData, PROFILE_CATALOG_SOURCE);
 
 function resolveProfile(profile: string | undefined): IngestionProfile {
   const normalized = (profile || 'balanced').trim().toLowerCase();
@@ -83,27 +101,43 @@ function resolveProfile(profile: string | undefined): IngestionProfile {
     case 'streaming':
       return normalized;
     default:
-      return 'balanced';
+      throw new Error(`Unsupported ingestion profile \"${profile}\". Expected one of: ${PROFILE_NAMES.join(', ')}`);
   }
 }
 
-export function applyIngestionProfile(): AppliedProfileConfig {
-  const requestedProfile = process.env.INGESTION_PROFILE || 'balanced';
+export function applyIngestionProfileForEnv(
+  env: NodeJS.ProcessEnv,
+  options?: {
+    requestedProfile?: string;
+    catalog?: ProfileCatalog;
+    catalogSource?: string;
+  },
+): AppliedProfileConfig {
+  const requestedProfile = options?.requestedProfile ?? env.INGESTION_PROFILE ?? 'balanced';
   const resolvedProfile = resolveProfile(requestedProfile);
-  const defaults = PROFILE_DEFAULTS[resolvedProfile];
+  const defaults = (options?.catalog ?? PROFILE_DEFAULTS)[resolvedProfile];
   const appliedDefaults: string[] = [];
+  const overriddenKeys: string[] = [];
 
-  for (const [key, value] of Object.entries(defaults)) {
-    if (process.env[key] === undefined || process.env[key] === '') {
-      process.env[key] = value;
+  for (const key of PROFILE_ENV_KEYS) {
+    if (env[key] === undefined || env[key] === '') {
+      env[key] = defaults[key];
       appliedDefaults.push(key);
+    } else {
+      overriddenKeys.push(key);
     }
   }
 
-  process.env.INGESTION_PROFILE = resolvedProfile;
+  env.INGESTION_PROFILE = resolvedProfile;
   return {
     requestedProfile,
     resolvedProfile,
     appliedDefaults,
+    overriddenKeys,
+    catalogSource: options?.catalogSource ?? PROFILE_CATALOG_SOURCE,
   };
+}
+
+export function applyIngestionProfile(): AppliedProfileConfig {
+  return applyIngestionProfileForEnv(process.env);
 }
