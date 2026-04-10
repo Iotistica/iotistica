@@ -35,6 +35,7 @@ class LruSet {
     }
 }
 class ReadingsService {
+    static VALID_BULK_INSERT_MODES = new Set(['copy', 'insert', 'realtime']);
     static refreshInFlight = null;
     static lastRefreshAttemptAtMs = 0;
     static LOCAL_REFRESH_ATTEMPT_COOLDOWN_MS = 5000;
@@ -54,11 +55,27 @@ class ReadingsService {
         }
     }
     MAX_ROWS_PER_BULK_INSERT = 500;
+    REALTIME_ROWS_PER_INSERT = Math.max(1, Number.isFinite(parseInt(process.env.READINGS_REALTIME_ROWS_PER_INSERT || '25', 10))
+        ? parseInt(process.env.READINGS_REALTIME_ROWS_PER_INSERT || '25', 10)
+        : 25);
     COPY_STAGE_ROWS_PER_BATCH = 5000;
-    BULK_INSERT_MODE = (process.env.READINGS_BULK_INSERT_MODE || 'copy').toLowerCase();
+    BULK_INSERT_MODE = this.resolveBulkInsertMode();
     COPY_MIN_ROWS = Math.max(1, Number.isFinite(parseInt(process.env.READINGS_COPY_MIN_ROWS || '1000', 10))
         ? parseInt(process.env.READINGS_COPY_MIN_ROWS || '1000', 10)
         : 1000);
+    REALTIME_MAX_ROWS = Math.max(1, Number.isFinite(parseInt(process.env.READINGS_REALTIME_MAX_ROWS || '50', 10))
+        ? parseInt(process.env.READINGS_REALTIME_MAX_ROWS || '50', 10)
+        : 50);
+    resolveBulkInsertMode() {
+        const configuredMode = (process.env.READINGS_BULK_INSERT_MODE || 'copy').toLowerCase();
+        if (ReadingsService.VALID_BULK_INSERT_MODES.has(configuredMode)) {
+            return configuredMode;
+        }
+        logger_1.default.warn('Invalid READINGS_BULK_INSERT_MODE configured, defaulting to copy', {
+            configuredMode,
+        });
+        return 'copy';
+    }
     escapeCopyText(value) {
         return value
             .replace(/\\/g, '\\\\')
@@ -273,12 +290,42 @@ class ReadingsService {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING`, [time, agent_uuid, metric_name, value, quality, unit, protocol, JSON.stringify(extra)]);
     }
+    async bulkInsertViaValues(readings, maxRowsPerInsert) {
+        let insertedTotal = 0;
+        const insertClient = await (0, connection_1.getClient)();
+        try {
+            for (let i = 0; i < readings.length; i += maxRowsPerInsert) {
+                const batch = readings.slice(i, i + maxRowsPerInsert);
+                const values = [];
+                const placeholders = [];
+                let paramIndex = 1;
+                batch.forEach((reading) => {
+                    const { agent_uuid, metric_name, value, quality = 'good', unit = null, protocol, extra = {}, extraJson, detectionMethodsJson, time = new Date(), anomaly_score, anomaly_threshold, baseline_samples, detection_methods, } = reading;
+                    placeholders.push(`($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`);
+                    values.push(time, agent_uuid, metric_name, value, quality, unit, protocol, extraJson ?? JSON.stringify(extra), anomaly_score !== undefined ? anomaly_score : null, anomaly_threshold !== undefined ? anomaly_threshold : null, baseline_samples !== undefined ? baseline_samples : null, detectionMethodsJson ?? (detection_methods !== undefined ? JSON.stringify(detection_methods) : null));
+                });
+                const result = await insertClient.query(`INSERT INTO readings (time, agent_uuid, metric_name, value, quality, unit, protocol, extra, anomaly_score, anomaly_threshold, baseline_samples, detection_methods)
+           VALUES ${placeholders.join(', ')}
+           ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING`, values);
+                insertedTotal += result.rowCount || 0;
+            }
+        }
+        finally {
+            insertClient.release();
+        }
+        return insertedTotal;
+    }
     async bulkInsert(readings) {
         if (readings.length === 0)
             return 0;
         let insertedTotal = 0;
         let copySucceeded = false;
-        const copyEnabled = this.BULK_INSERT_MODE === 'copy';
+        const useRealtimeInsertPath = this.BULK_INSERT_MODE === 'realtime'
+            || (this.BULK_INSERT_MODE === 'copy' && readings.length <= this.REALTIME_MAX_ROWS);
+        if (useRealtimeInsertPath) {
+            insertedTotal = await this.bulkInsertViaValues(readings, this.REALTIME_ROWS_PER_INSERT);
+        }
+        const copyEnabled = this.BULK_INSERT_MODE === 'copy' && !useRealtimeInsertPath;
         if (copyEnabled && readings.length >= this.COPY_MIN_ROWS) {
             try {
                 insertedTotal = await this.bulkInsertViaCopy(readings);
@@ -291,28 +338,8 @@ class ReadingsService {
                 });
             }
         }
-        if (!copySucceeded) {
-            const insertClient = await (0, connection_1.getClient)();
-            try {
-                for (let i = 0; i < readings.length; i += this.MAX_ROWS_PER_BULK_INSERT) {
-                    const batch = readings.slice(i, i + this.MAX_ROWS_PER_BULK_INSERT);
-                    const values = [];
-                    const placeholders = [];
-                    let paramIndex = 1;
-                    batch.forEach((reading) => {
-                        const { agent_uuid, metric_name, value, quality = 'good', unit = null, protocol, extra = {}, extraJson, detectionMethodsJson, time = new Date(), anomaly_score, anomaly_threshold, baseline_samples, detection_methods } = reading;
-                        placeholders.push(`($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`);
-                        values.push(time, agent_uuid, metric_name, value, quality, unit, protocol, extraJson ?? JSON.stringify(extra), anomaly_score !== undefined ? anomaly_score : null, anomaly_threshold !== undefined ? anomaly_threshold : null, baseline_samples !== undefined ? baseline_samples : null, detectionMethodsJson ?? (detection_methods !== undefined ? JSON.stringify(detection_methods) : null));
-                    });
-                    const result = await insertClient.query(`INSERT INTO readings (time, agent_uuid, metric_name, value, quality, unit, protocol, extra, anomaly_score, anomaly_threshold, baseline_samples, detection_methods)
-             VALUES ${placeholders.join(', ')}
-             ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING`, values);
-                    insertedTotal += result.rowCount || 0;
-                }
-            }
-            finally {
-                insertClient.release();
-            }
+        if (!copySucceeded && !useRealtimeInsertPath) {
+            insertedTotal = await this.bulkInsertViaValues(readings, this.MAX_ROWS_PER_BULK_INSERT);
         }
         const hasMeaningfulCatalogChange = this.noteCatalogCandidates(readings);
         if (hasMeaningfulCatalogChange && insertedTotal > 0) {

@@ -15,6 +15,8 @@ interface PendingPipelineEntry {
 export interface PipelineOptions {
   /** Number of commands to accumulate before auto-flushing (default: 10) */
   batchSize?: number;
+  /** Idle time before auto-flushing pending commands (default: 50ms, 0 = immediate flush) */
+  flushIntervalMs?: number;
   /**
    * Max OOM retry attempts before giving up (default: 5).
    * Backoff sequence: ~100ms → 200ms → 400ms → 800ms → 1600ms (~3.1 s total).
@@ -40,6 +42,7 @@ export class RedisPipeline {
   private flushTimer: NodeJS.Timeout | null = null;
 
   private readonly batchSize: number;
+  private readonly flushIntervalMs: number;
   private readonly maxOomRetries: number;
   private readonly onPersistentOomFailure?: (droppedCount: number) => void;
 
@@ -48,6 +51,7 @@ export class RedisPipeline {
     opts: PipelineOptions = {},
   ) {
     this.batchSize = opts.batchSize ?? 10;
+    this.flushIntervalMs = Math.max(0, opts.flushIntervalMs ?? 50);
     this.maxOomRetries = opts.maxOomRetries ?? 5;
     this.onPersistentOomFailure = opts.onPersistentOomFailure;
   }
@@ -76,12 +80,17 @@ export class RedisPipeline {
         return;
       }
 
-      // Schedule flush after 50ms if no more commands arrive
+      if (this.flushIntervalMs === 0) {
+        void this.flush().catch(err => reject(err instanceof Error ? err : new Error(String(err))));
+        return;
+      }
+
+      // Schedule flush after the configured idle window if no more commands arrive.
       this.flushTimer = setTimeout(() => {
         this.flush().catch(err =>
           logger.error('Pipeline auto-flush failed', { error: err.message }),
         );
-      }, 50);
+      }, this.flushIntervalMs);
     });
   }
 

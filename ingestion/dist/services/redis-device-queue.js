@@ -122,6 +122,7 @@ class RedisDeviceQueue {
         this.redisStreamHighWatermarkPct = readFloatEnv('REDIS_DEVICE_STREAM_HIGH_WATERMARK_PCT', '0.8');
         this.redisMemoryHighWatermarkPct = parseInt(process.env.REDIS_MEMORY_HIGH_WATERMARK_PCT || '75', 10);
         this.pipeline = new pipeline_1.RedisPipeline(this.redisIngestion, {
+            flushIntervalMs: readIntEnv('REDIS_PIPELINE_FLUSH_INTERVAL_MS', '50'),
             onPersistentOomFailure: (dropped) => {
                 for (let i = 0; i < 5; i++)
                     circuit_breaker_1.circuitBreaker.recordFailure();

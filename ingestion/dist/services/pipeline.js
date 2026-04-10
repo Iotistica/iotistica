@@ -11,11 +11,13 @@ class RedisPipeline {
     count = 0;
     flushTimer = null;
     batchSize;
+    flushIntervalMs;
     maxOomRetries;
     onPersistentOomFailure;
     constructor(redis, opts = {}) {
         this.redis = redis;
         this.batchSize = opts.batchSize ?? 10;
+        this.flushIntervalMs = Math.max(0, opts.flushIntervalMs ?? 50);
         this.maxOomRetries = opts.maxOomRetries ?? 5;
         this.onPersistentOomFailure = opts.onPersistentOomFailure;
     }
@@ -35,9 +37,13 @@ class RedisPipeline {
                 void this.flush().catch(err => reject(err instanceof Error ? err : new Error(String(err))));
                 return;
             }
+            if (this.flushIntervalMs === 0) {
+                void this.flush().catch(err => reject(err instanceof Error ? err : new Error(String(err))));
+                return;
+            }
             this.flushTimer = setTimeout(() => {
                 this.flush().catch(err => logger_1.logger.error('Pipeline auto-flush failed', { error: err.message }));
-            }, 50);
+            }, this.flushIntervalMs);
         });
     }
     async flush() {

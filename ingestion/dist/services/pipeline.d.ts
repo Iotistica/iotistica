@@ -3,6 +3,7 @@ type RedisPipelineHandle = ReturnType<Redis['pipeline']>;
 type PipelineCallback = (pipeline: RedisPipelineHandle) => void;
 export interface PipelineOptions {
     batchSize?: number;
+    flushIntervalMs?: number;
     maxOomRetries?: number;
     onPersistentOomFailure?: (droppedCount: number) => void;
 }
@@ -13,6 +14,7 @@ export declare class RedisPipeline {
     private count;
     private flushTimer;
     private readonly batchSize;
+    private readonly flushIntervalMs;
     private readonly maxOomRetries;
     private readonly onPersistentOomFailure?;
     constructor(redis: Redis, opts?: PipelineOptions);

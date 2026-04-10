@@ -68,6 +68,7 @@ class LruSet {
 }
 
 export class ReadingsService {
+  private static readonly VALID_BULK_INSERT_MODES = new Set(['copy', 'insert', 'realtime']);
   private static refreshInFlight: Promise<void> | null = null;
   private static lastRefreshAttemptAtMs = 0;
   private static readonly LOCAL_REFRESH_ATTEMPT_COOLDOWN_MS = 5000;
@@ -91,14 +92,38 @@ export class ReadingsService {
   // 500 rows × 12 columns = 6 000 bind params per INSERT.
   // Keeps packets small, reduces lock hold time, and improves concurrency.
   private readonly MAX_ROWS_PER_BULK_INSERT = 500;
+  private readonly REALTIME_ROWS_PER_INSERT = Math.max(
+    1,
+    Number.isFinite(parseInt(process.env.READINGS_REALTIME_ROWS_PER_INSERT || '25', 10))
+      ? parseInt(process.env.READINGS_REALTIME_ROWS_PER_INSERT || '25', 10)
+      : 25,
+  );
   private readonly COPY_STAGE_ROWS_PER_BATCH = 5000;
-  private readonly BULK_INSERT_MODE = (process.env.READINGS_BULK_INSERT_MODE || 'copy').toLowerCase();
+  private readonly BULK_INSERT_MODE = this.resolveBulkInsertMode();
   private readonly COPY_MIN_ROWS = Math.max(
     1,
     Number.isFinite(parseInt(process.env.READINGS_COPY_MIN_ROWS || '1000', 10))
       ? parseInt(process.env.READINGS_COPY_MIN_ROWS || '1000', 10)
       : 1000,
   );
+  private readonly REALTIME_MAX_ROWS = Math.max(
+    1,
+    Number.isFinite(parseInt(process.env.READINGS_REALTIME_MAX_ROWS || '50', 10))
+      ? parseInt(process.env.READINGS_REALTIME_MAX_ROWS || '50', 10)
+      : 50,
+  );
+
+  private resolveBulkInsertMode(): 'copy' | 'insert' | 'realtime' {
+    const configuredMode = (process.env.READINGS_BULK_INSERT_MODE || 'copy').toLowerCase();
+    if (ReadingsService.VALID_BULK_INSERT_MODES.has(configuredMode)) {
+      return configuredMode as 'copy' | 'insert' | 'realtime';
+    }
+
+    logger.warn('Invalid READINGS_BULK_INSERT_MODE configured, defaulting to copy', {
+      configuredMode,
+    });
+    return 'copy';
+  }
 
   private escapeCopyText(value: string): string {
     return value
@@ -403,6 +428,71 @@ export class ReadingsService {
     );
   }
 
+  private async bulkInsertViaValues(readings: ReadingInsert[], maxRowsPerInsert: number): Promise<number> {
+    let insertedTotal = 0;
+    const insertClient = await getClient();
+
+    try {
+      for (let i = 0; i < readings.length; i += maxRowsPerInsert) {
+        const batch = readings.slice(i, i + maxRowsPerInsert);
+        const values: unknown[] = [];
+        const placeholders: string[] = [];
+        let paramIndex = 1;
+
+        batch.forEach((reading) => {
+          const {
+            agent_uuid,
+            metric_name,
+            value,
+            quality = 'good',
+            unit = null,
+            protocol,
+            extra = {},
+            extraJson,
+            detectionMethodsJson,
+            time = new Date(),
+            anomaly_score,
+            anomaly_threshold,
+            baseline_samples,
+            detection_methods,
+          } = reading;
+
+          placeholders.push(
+            `($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`
+          );
+
+          values.push(
+            time,
+            agent_uuid,
+            metric_name,
+            value,
+            quality,
+            unit,
+            protocol,
+            extraJson ?? JSON.stringify(extra),
+            anomaly_score !== undefined ? anomaly_score : null,
+            anomaly_threshold !== undefined ? anomaly_threshold : null,
+            baseline_samples !== undefined ? baseline_samples : null,
+            detectionMethodsJson ?? (detection_methods !== undefined ? JSON.stringify(detection_methods) : null),
+          );
+        });
+
+        const result = await insertClient.query(
+          `INSERT INTO readings (time, agent_uuid, metric_name, value, quality, unit, protocol, extra, anomaly_score, anomaly_threshold, baseline_samples, detection_methods)
+           VALUES ${placeholders.join(', ')}
+           ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING`,
+          values,
+        );
+
+        insertedTotal += result.rowCount || 0;
+      }
+    } finally {
+      insertClient.release();
+    }
+
+    return insertedTotal;
+  }
+
   /**
    * Bulk insert readings (more efficient)
    */
@@ -411,8 +501,14 @@ export class ReadingsService {
 
     let insertedTotal = 0;
     let copySucceeded = false;
+    const useRealtimeInsertPath = this.BULK_INSERT_MODE === 'realtime'
+      || (this.BULK_INSERT_MODE === 'copy' && readings.length <= this.REALTIME_MAX_ROWS);
 
-    const copyEnabled = this.BULK_INSERT_MODE === 'copy';
+    if (useRealtimeInsertPath) {
+      insertedTotal = await this.bulkInsertViaValues(readings, this.REALTIME_ROWS_PER_INSERT);
+    }
+
+    const copyEnabled = this.BULK_INSERT_MODE === 'copy' && !useRealtimeInsertPath;
     if (copyEnabled && readings.length >= this.COPY_MIN_ROWS) {
       try {
         insertedTotal = await this.bulkInsertViaCopy(readings);
@@ -425,66 +521,8 @@ export class ReadingsService {
       }
     }
 
-    if (!copySucceeded) {
-      // Default path: compact multi-row INSERT batches — one client for the whole set.
-      const insertClient = await getClient();
-      try {
-        for (let i = 0; i < readings.length; i += this.MAX_ROWS_PER_BULK_INSERT) {
-          const batch = readings.slice(i, i + this.MAX_ROWS_PER_BULK_INSERT);
-          const values: any[] = [];
-          const placeholders: string[] = [];
-          let paramIndex = 1;
-
-          batch.forEach((reading) => {
-            const {
-              agent_uuid,
-              metric_name,
-              value,
-              quality = 'good',
-              unit = null,
-              protocol,
-              extra = {},
-              extraJson,
-              detectionMethodsJson,
-              time = new Date(),
-              anomaly_score,
-              anomaly_threshold,
-              baseline_samples,
-              detection_methods
-            } = reading;
-
-            placeholders.push(
-              `($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`
-            );
-
-            values.push(
-              time,
-              agent_uuid,
-              metric_name,
-              value,
-              quality,
-              unit,
-              protocol,
-              extraJson ?? JSON.stringify(extra),
-              anomaly_score !== undefined ? anomaly_score : null,
-              anomaly_threshold !== undefined ? anomaly_threshold : null,
-              baseline_samples !== undefined ? baseline_samples : null,
-              detectionMethodsJson ?? (detection_methods !== undefined ? JSON.stringify(detection_methods) : null)
-            );
-          });
-
-          const result = await insertClient.query(
-            `INSERT INTO readings (time, agent_uuid, metric_name, value, quality, unit, protocol, extra, anomaly_score, anomaly_threshold, baseline_samples, detection_methods)
-             VALUES ${placeholders.join(', ')}
-             ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING`,
-            values
-          );
-
-          insertedTotal += result.rowCount || 0;
-        }
-      } finally {
-        insertClient.release();
-      }
+    if (!copySucceeded && !useRealtimeInsertPath) {
+      insertedTotal = await this.bulkInsertViaValues(readings, this.MAX_ROWS_PER_BULK_INSERT);
     }
 
     // Refresh only when newly observed catalog dimensions appear in this pod:

@@ -172,6 +172,7 @@ export class RedisDeviceQueue {
     this.redisMemoryHighWatermarkPct = parseInt(process.env.REDIS_MEMORY_HIGH_WATERMARK_PCT || '75', 10);
 
     this.pipeline = new RedisPipeline(this.redisIngestion, {
+      flushIntervalMs: readIntEnv('REDIS_PIPELINE_FLUSH_INTERVAL_MS', '50'),
       onPersistentOomFailure: (dropped) => {
         // Force the circuit open so producers route subsequent writes to disk spool
         // instead of retrying Redis while it remains at maxmemory

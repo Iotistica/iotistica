@@ -22,6 +22,7 @@ export interface ReadingExtra {
     [key: string]: any;
 }
 export declare class ReadingsService {
+    private static readonly VALID_BULK_INSERT_MODES;
     private static refreshInFlight;
     private static lastRefreshAttemptAtMs;
     private static readonly LOCAL_REFRESH_ATTEMPT_COOLDOWN_MS;
@@ -34,9 +35,12 @@ export declare class ReadingsService {
     private static readonly REDIS_CATALOG_LEASE_KEY;
     private static getRedis;
     private readonly MAX_ROWS_PER_BULK_INSERT;
+    private readonly REALTIME_ROWS_PER_INSERT;
     private readonly COPY_STAGE_ROWS_PER_BATCH;
     private readonly BULK_INSERT_MODE;
     private readonly COPY_MIN_ROWS;
+    private readonly REALTIME_MAX_ROWS;
+    private resolveBulkInsertMode;
     private escapeCopyText;
     private copyValue;
     private toCopyLine;
@@ -45,6 +49,7 @@ export declare class ReadingsService {
     private noteCatalogCandidates;
     private refreshMetricCatalog;
     insert(reading: ReadingInsert): Promise<void>;
+    private bulkInsertViaValues;
     bulkInsert(readings: ReadingInsert[]): Promise<number>;
 }
 export declare const readingsService: ReadingsService;
