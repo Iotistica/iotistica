@@ -601,15 +601,15 @@ jobs:
 
       - name: Verify agent publishes MQTT data to cloud broker
         run: |
-          echo "Waiting for agent publish-manager success log..."
+          echo "Waiting for agent real publish-manager success log..."
           timeout 90 bash -c '
-            until sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -Eq "Published [0-9]+ messages( \(no-op baseline\))?"; do
+            until sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Published [0-9]+ messages" | grep -vq "no-op baseline"; do
               sleep 5
             done
           '
 
-          echo "=== Agent publish log excerpt ==="
-          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Published [0-9]+ messages( \(no-op baseline\))?" || true
+          echo "=== Agent real publish log excerpt ==="
+          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Published [0-9]+ messages" | grep -v "no-op baseline" || true
 
       - name: Verify ingestion persists MQTT readings to database
         env:
