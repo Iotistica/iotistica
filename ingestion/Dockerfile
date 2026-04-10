@@ -1,13 +1,17 @@
-FROM node:20-alpine AS deps
+FROM node:20-alpine3.22 AS deps
 WORKDIR /workspace/ingestion
+
+RUN apk upgrade --no-cache
 
 COPY ingestion/package*.json ./
 
-RUN npm ci --only=production && \
+RUN npm ci --omit=dev && \
     npm cache clean --force
 
-FROM node:20-alpine AS builder
+FROM node:20-alpine3.22 AS builder
 WORKDIR /workspace/ingestion
+
+RUN apk upgrade --no-cache
 
 COPY ingestion/package*.json ./
 
@@ -19,10 +23,10 @@ COPY ingestion/src ./src
 
 RUN npm run build
 
-FROM node:20-alpine AS production
+FROM node:20-alpine3.22 AS production
 WORKDIR /app
 
-RUN apk upgrade --no-cache zlib && \
+RUN apk upgrade --no-cache && \
     apk add --no-cache \
     curl \
     tini \
@@ -30,7 +34,7 @@ RUN apk upgrade --no-cache zlib && \
     iptables \
     ip6tables && \
     rm -rf /var/cache/apk/* && \
-    rm -rf /usr/local/lib/node_modules/npm && \
+    rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack && \
     rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 RUN addgroup -S appgroup && \
