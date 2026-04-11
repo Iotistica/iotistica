@@ -259,6 +259,7 @@ export class RedisQueueConsumer {
     ) {
       try {
         if (this.shouldBackoffForDbPressure()) {
+          metrics.dbBackpressureEvents++;
           await new Promise(resolve => setTimeout(resolve, this.config.backpressureSleepMs));
           continue;
         }
@@ -815,6 +816,7 @@ export class RedisQueueConsumer {
       }
     }
     const resolveMs = Date.now() - resolveStart;
+    metrics.recordResolveLatency(resolveMs);
 
     if (allData.length === 0) {
       // All entries were either decode-failures (moved to DLQ) or produced empty payloads.
@@ -836,6 +838,8 @@ export class RedisQueueConsumer {
       const ackStart = Date.now();
       await this.xackBatch(toAck, workerRedis);
       const ackMs = Date.now() - ackStart;
+      metrics.recordAckLatency(ackMs);
+      metrics.recordProcessingLatency(Date.now() - startTime);
       this.messageTracker.markAll(pendingAck.map(e => e.id));
       this.logBatchSuccess(pendingAck, allData, startTime, { resolveMs, ackMs });
     } catch (err: any) {

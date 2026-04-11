@@ -34,6 +34,7 @@ ansible/.env.pi
 # Build outputs
 api/dist/
 agent/dist/
+ingestion/dist/
 admin/dist/
 admin/.next/
 dashboard/build/

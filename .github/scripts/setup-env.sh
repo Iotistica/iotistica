@@ -22,7 +22,6 @@ NODE_ENV=development
 LOG_LEVEL=info
 JWT_SECRET=integration-test-secret
 INGESTION_INTERNAL_URL=http://ingestion:3003
-INTERNAL_AUTH_TOKEN=integration-test-internal-auth-token
 AUTH0_ENABLED=${AUTH0_ENABLED:-false}
 AUTH0_DOMAIN=${AUTH0_DOMAIN:-}
 AUTH0_AUDIENCE=${AUTH0_AUDIENCE:-}

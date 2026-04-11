@@ -15,6 +15,7 @@ async function main(): Promise<void> {
     { bootstrapConfig },
     { bootstrapDatabaseConnection },
     { bootstrapIngestionRedis },
+    { bootstrapRuntimeProfiler },
   ] = await Promise.all([
     import('./utils/logger'),
     import('./server/app'),
@@ -22,6 +23,7 @@ async function main(): Promise<void> {
     import('./bootstrap/config'),
     import('./bootstrap/database'),
     import('./bootstrap/redis'),
+    import('./bootstrap/runtime-profiler'),
   ]);
 
   logger.info('Initializing Iotistica ingestion service...');
@@ -35,6 +37,7 @@ async function main(): Promise<void> {
 
   await bootstrapDatabaseConnection();
   await bootstrapConfig();
+  bootstrapRuntimeProfiler();
 
   const server = createIngestionServer();
   await bootstrapIngestionRedis();

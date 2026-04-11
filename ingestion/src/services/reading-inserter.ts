@@ -53,6 +53,7 @@ export class ReadingInserter {
     const telemetryStart = Date.now();
     await this.updateLastTelemetryAt(deduped, ingestedAt);
     const telemetryMs = Date.now() - telemetryStart;
+    metrics.recordTelemetryLatency(telemetryMs);
 
     logger.debug(`Inserted ${insertedCount} readings (deduped ${allReadings.length - deduped.length})`, {
       insertMs,

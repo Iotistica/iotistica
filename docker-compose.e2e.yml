@@ -178,7 +178,6 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - INGESTION_PROFILE=${INGESTION_PROFILE:-balanced}
-      - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN:-integration-test-internal-auth-token}
       - DB_HOST=${DB_HOST:-postgres}
       - DB_PORT=${DB_PORT:-5432}
       - DB_NAME=${DB_NAME:-iotistic}
