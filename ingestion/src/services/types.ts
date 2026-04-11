@@ -24,8 +24,14 @@ export interface CompressedDeviceEntry {
   contentType: string;
 }
 
+export interface RawDeviceEntry {
+  rawData: string;
+  deviceUuid?: string;
+  deviceName?: string;
+}
+
 export interface RedisDeviceEntry {
   id: string;
-  data: DeviceDataEntry | CompressedDeviceEntry;
+  data: DeviceDataEntry | CompressedDeviceEntry | RawDeviceEntry;
   isCompressed?: boolean;
 }

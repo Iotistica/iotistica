@@ -1,7 +1,7 @@
 import type Redis from 'ioredis';
-import { logger } from '../utils/logger';
+import { logger, pinoLogger } from '../utils/logger';
 import { getPoolStats } from '../db/connection';
-import { DeviceDataEntry, CompressedDeviceEntry, RedisDeviceEntry } from './types';
+import { DeviceDataEntry, CompressedDeviceEntry, RawDeviceEntry, RedisDeviceEntry } from './types';
 import { decompressAndParseDevices } from './decoder';
 import { incrementFailureCount, moveToDLQ, startFailureTrackingPruner } from './dlq';
 import { ReadingInserter } from './reading-inserter';
@@ -43,12 +43,29 @@ export interface WorkerConfig {
   redisMemoryHighWatermarkPct: number;
 }
 
+interface ParsedStreamFields {
+  compressed: boolean;
+  payloadRaw?: string;
+  payloadBase64?: string;
+  payloadPointer?: string;
+  deviceUuid?: string;
+  deviceName?: string;
+  batchId?: string;
+  encoding?: string;
+  contentType?: string;
+  data?: string;
+}
+
+const RESOLVE_ENTRY_CONCURRENCY = 8;
+
 /**
  * Tracks recently processed Redis Stream message IDs to suppress in-process redeliveries.
  * Uses insertion-order eviction to bound memory at ~maxSize × ~20 bytes.
  */
 class RecentMessageTracker {
   private readonly ids = new Set<string>();
+  private readonly queue: string[] = [];
+  private queueHead = 0;
   private readonly maxSize: number;
 
   constructor(maxSize = 50_000) {
@@ -61,17 +78,26 @@ class RecentMessageTracker {
 
   markAll(ids: string[]): void {
     for (const id of ids) {
-      if (this.ids.size >= this.maxSize) {
-        // Evict oldest ~20% (Set preserves insertion order)
-        const toEvict = Math.floor(this.maxSize * 0.2);
-        const iter = this.ids.values();
-        for (let i = 0; i < toEvict; i++) {
-          const { value, done } = iter.next();
-          if (done) break;
-          this.ids.delete(value);
+      if (this.ids.has(id)) {
+        continue;
+      }
+
+      this.ids.add(id);
+      this.queue.push(id);
+
+      if (this.queue.length - this.queueHead > this.maxSize) {
+        const evicted = this.queue[this.queueHead++];
+        if (evicted !== undefined) {
+          this.ids.delete(evicted);
         }
       }
-      this.ids.add(id);
+
+      // Compact occasionally so the backing array does not retain a large
+      // prefix of already-evicted IDs in long-lived workers.
+      if (this.queueHead >= 1024 && this.queueHead * 2 >= this.queue.length) {
+        this.queue.splice(0, this.queueHead);
+        this.queueHead = 0;
+      }
     }
   }
 }
@@ -101,24 +127,121 @@ export class RedisQueueConsumer {
     return id?.substring(0, 8);
   }
 
+  private isDebugEnabled(): boolean {
+    return pinoLogger.isLevelEnabled('debug');
+  }
+
   /**
    * Parse the API-side ingestion timestamp from a Redis Stream entry ID.
    * Stream IDs have the form "<unix-ms>-<sequence>", so the ms component is
    * a free ingestion durability hint that requires no extra stream fields.
    */
   private ingestedAtMs(entryId: string): number {
-    const ms = parseInt(entryId.split('-')[0], 10);
-    return isNaN(ms) ? Date.now() : ms;
+    const dashIndex = entryId.indexOf('-');
+    if (dashIndex <= 0) {
+      return Date.now();
+    }
+
+    const ms = Number(entryId.slice(0, dashIndex));
+    return Number.isNaN(ms) ? Date.now() : ms;
   }
 
   private logEntryError(msg: string, entry: RedisDeviceEntry, err: any): void {
-    const data = entry.data as CompressedDeviceEntry;
+    const data = entry.data as CompressedDeviceEntry | RawDeviceEntry;
     logger.error(msg, {
       messageId: entry.id,
       deviceUuid: this.short(data.deviceUuid),
-      deviceName: data.deviceName,
+      deviceName: data.deviceName ?? 'unknown',
       error: err?.message ?? err,
     });
+  }
+
+  private createUnknownUncompressedEntry(id: string): RedisDeviceEntry {
+    return {
+      id,
+      data: {
+        rawData: '',
+        deviceUuid: 'unknown',
+        deviceName: 'unknown',
+      },
+      isCompressed: false,
+    };
+  }
+
+  private parseStreamFields(fields: string[]): ParsedStreamFields {
+    let compressed = false;
+    let payloadRaw: string | undefined;
+    let payloadBase64: string | undefined;
+    let payloadPointer: string | undefined;
+    let deviceUuid: string | undefined;
+    let deviceName: string | undefined;
+    let batchId: string | undefined;
+    let encoding: string | undefined;
+    let contentType: string | undefined;
+    let data: string | undefined;
+
+    for (let i = 0; i < fields.length; i += 2) {
+      const key = fields[i];
+      const value = fields[i + 1];
+
+      switch (key) {
+        case 'compressed':
+          compressed = value === '1';
+          break;
+        case 'payload':
+          payloadRaw = value;
+          break;
+        case 'payload_b64':
+          payloadBase64 = value;
+          break;
+        case 'payloadPointer':
+          payloadPointer = value;
+          break;
+        case 'deviceUuid':
+          deviceUuid = value;
+          break;
+        case 'deviceName':
+          deviceName = value;
+          break;
+        case 'batchId':
+          batchId = value;
+          break;
+        case 'encoding':
+          encoding = value;
+          break;
+        case 'contentType':
+          contentType = value;
+          break;
+        case 'data':
+          data = value;
+          break;
+      }
+    }
+
+    return {
+      compressed,
+      payloadRaw,
+      payloadBase64,
+      payloadPointer,
+      deviceUuid,
+      deviceName,
+      batchId,
+      encoding,
+      contentType,
+      data,
+    };
+  }
+
+  private decodeCompressedPayload(parsedFields: ParsedStreamFields): Buffer | null {
+    if (parsedFields.payloadBase64) {
+      return Buffer.from(parsedFields.payloadBase64, 'base64');
+    }
+
+    if (!parsedFields.payloadRaw) {
+      return null;
+    }
+
+    return Buffer.from(parsedFields.payloadRaw, 'hex');
   }
 
   /**
@@ -127,11 +250,12 @@ export class RedisQueueConsumer {
    * Strips raw payload bytes before writing to the DLQ stream to avoid bloat.
    */
   private async sendDecodeFailureToDlq(entry: RedisDeviceEntry, reason: string): Promise<void> {
+    const data = entry.data as CompressedDeviceEntry | RawDeviceEntry;
     logger.warn('Moving structurally invalid message to DLQ (decode failure, not a transient error)', {
       messageId: entry.id,
       reason,
-      deviceUuid: this.short((entry.data as CompressedDeviceEntry).deviceUuid),
-      deviceName: (entry.data as CompressedDeviceEntry).deviceName,
+      deviceUuid: this.short(data.deviceUuid),
+      deviceName: data.deviceName ?? 'unknown',
     });
     // Strip binary payloads — they are unrecoverable by definition and can be large.
     // Metadata + error reason is sufficient for operator investigation.
@@ -148,7 +272,9 @@ export class RedisQueueConsumer {
 
   async start(): Promise<void> {
     if (this.isRunning) {
-      logger.debug('Device worker already running');
+      if (this.isDebugEnabled()) {
+        logger.debug('Device worker already running');
+      }
       return;
     }
 
@@ -292,8 +418,9 @@ export class RedisQueueConsumer {
         }
 
         const [, messages] = results[0] as [string, Array<[string, string[]]>];
+        const now = Date.now();
         const lagEstimateMs = messages[0]?.[0]
-          ? Math.max(0, Date.now() - this.ingestedAtMs(messages[0][0]))
+          ? Math.max(0, now - this.ingestedAtMs(messages[0][0]))
           : 0;
         if (lagEstimateMs > 0) {
           this.maybeAutoscale(lagEstimateMs);
@@ -356,29 +483,31 @@ export class RedisQueueConsumer {
         implicitReadPressure ? 'full-read saturation' : null,
       ].filter((reason): reason is string => reason !== null);
       const hasExplicitRedisPressure = streamPressure || memPressure;
-      const logMessage = hasExplicitRedisPressure
-        ? `Redis pressure high (${pressureReasons.join(', ')}) — temporarily increasing batch size`
-        : `Queue read saturation detected (${pressureReasons.join(', ')}) — temporarily increasing batch size`;
-      const logContext = {
-        action: 'autoscale_signal',
-        streamLength: streamLen,
-        effectiveBacklog,
-        streamHighWatermark: streamWatermark,
-        streamUtilizationPct: streamWatermark > 0 ? Math.round((effectiveBacklog / streamWatermark) * 100) : null,
-        memoryUsedMb: Math.round(memUsed / 1024 / 1024),
-        memoryMaxMb: memMax > 0 ? Math.round(memMax / 1024 / 1024) : 'unlimited',
-        memoryUtilizationPct: memMax > 0 ? Math.round(memUsedPct) : null,
-        streamPressure,
-        memPressure,
-        implicitReadPressure,
-        consecutiveFullReads: this.consecutiveFullReads,
-        response: 'increasing batch size to drain stream faster',
-      };
+      if (hasExplicitRedisPressure || this.isDebugEnabled()) {
+        const logMessage = hasExplicitRedisPressure
+          ? `Redis pressure high (${pressureReasons.join(', ')}) — temporarily increasing batch size`
+          : `Queue read saturation detected (${pressureReasons.join(', ')}) — temporarily increasing batch size`;
+        const logContext = {
+          action: 'autoscale_signal',
+          streamLength: streamLen,
+          effectiveBacklog,
+          streamHighWatermark: streamWatermark,
+          streamUtilizationPct: streamWatermark > 0 ? Math.round((effectiveBacklog / streamWatermark) * 100) : null,
+          memoryUsedMb: Math.round(memUsed / 1024 / 1024),
+          memoryMaxMb: memMax > 0 ? Math.round(memMax / 1024 / 1024) : 'unlimited',
+          memoryUtilizationPct: memMax > 0 ? Math.round(memUsedPct) : null,
+          streamPressure,
+          memPressure,
+          implicitReadPressure,
+          consecutiveFullReads: this.consecutiveFullReads,
+          response: 'increasing batch size to drain stream faster',
+        };
 
-      if (hasExplicitRedisPressure) {
-        logger.warn(logMessage, logContext);
-      } else {
-        logger.debug(logMessage, logContext);
+        if (hasExplicitRedisPressure) {
+          logger.warn(logMessage, logContext);
+        } else {
+          logger.debug(logMessage, logContext);
+        }
       }
     }
 
@@ -437,13 +566,15 @@ export class RedisQueueConsumer {
       desiredWorkers > currentWorkers &&
       db.saturationPct >= this.config.dbScaleUpBlockSaturationPct
     ) {
-      logger.debug('Skipping worker scale-up because DB saturation is already high', {
-        lagMs,
-        currentWorkers,
-        requestedWorkers: desiredWorkers,
-        dbSaturationPct: db.saturationPct,
-        dbScaleUpBlockSaturationPct: this.config.dbScaleUpBlockSaturationPct,
-      });
+      if (this.isDebugEnabled()) {
+        logger.debug('Skipping worker scale-up because DB saturation is already high', {
+          lagMs,
+          currentWorkers,
+          requestedWorkers: desiredWorkers,
+          dbSaturationPct: db.saturationPct,
+          dbScaleUpBlockSaturationPct: this.config.dbScaleUpBlockSaturationPct,
+        });
+      }
       return;
     }
 
@@ -465,18 +596,20 @@ export class RedisQueueConsumer {
       }
     }
 
-    logger.debug('Adjusted Redis device worker concurrency based on queue dwell lag', {
-      lagMs,
-      currentWorkers,
-      desiredWorkers,
-      consecutiveBelowTargetLagChecks: this.consecutiveBelowTargetLagChecks,
-      lagScaleDownStableChecks: this.config.lagScaleDownStableChecks,
-      dbSaturationPct: db.saturationPct,
-      cooldownMs: this.config.scaleCooldownMs,
-      targetMs: this.config.lagTargetMs,
-      scaleUpMs: this.config.lagScaleUpMs,
-      criticalMs: this.config.lagCriticalMs,
-    });
+    if (this.isDebugEnabled()) {
+      logger.debug('Adjusted Redis device worker concurrency based on queue dwell lag', {
+        lagMs,
+        currentWorkers,
+        desiredWorkers,
+        consecutiveBelowTargetLagChecks: this.consecutiveBelowTargetLagChecks,
+        lagScaleDownStableChecks: this.config.lagScaleDownStableChecks,
+        dbSaturationPct: db.saturationPct,
+        cooldownMs: this.config.scaleCooldownMs,
+        targetMs: this.config.lagTargetMs,
+        scaleUpMs: this.config.lagScaleUpMs,
+        criticalMs: this.config.lagCriticalMs,
+      });
+    }
   }
 
   private shouldBackoffForDbPressure(): boolean {
@@ -512,38 +645,40 @@ export class RedisQueueConsumer {
     const parseErrors: Array<{ entry: RedisDeviceEntry; reason: string }> = [];
 
     for (const [id, fields] of messages) {
-      const fieldMap: Record<string, string> = {};
-      for (let i = 0; i < fields.length; i += 2) fieldMap[fields[i]] = fields[i + 1];
+      const parsedFields = this.parseStreamFields(fields);
 
-      if (fieldMap.compressed === '1') {
-        const payloadRaw = fieldMap.payload;
-        if (!payloadRaw) {
+      if (parsedFields.compressed) {
+        const payloadBuffer = this.decodeCompressedPayload(parsedFields);
+        if (!payloadBuffer || payloadBuffer.length === 0) {
+          const reason = parsedFields.payloadPointer
+            ? `Compressed payload pointer is not resolvable by this worker: ${parsedFields.payloadPointer}`
+            : 'Missing compressed payload field';
           parseErrors.push({
             entry: {
               id,
               data: {
-                deviceUuid: fieldMap.deviceUuid ?? 'unknown',
-                deviceName: fieldMap.deviceName ?? 'unknown',
-                batchId: fieldMap.batchId ?? '',
+                deviceUuid: parsedFields.deviceUuid ?? 'unknown',
+                deviceName: parsedFields.deviceName ?? 'unknown',
+                batchId: parsedFields.batchId ?? '',
                 compressedPayload: Buffer.alloc(0),
-                contentEncoding: fieldMap.encoding ?? '',
-                contentType: fieldMap.contentType ?? '',
+                contentEncoding: parsedFields.encoding ?? '',
+                contentType: parsedFields.contentType ?? '',
               } as CompressedDeviceEntry,
               isCompressed: true,
             },
-            reason: 'Missing compressed payload field',
+            reason,
           });
           continue;
         }
         entries.push({
           id,
           data: {
-            deviceUuid: fieldMap.deviceUuid,
-            deviceName: fieldMap.deviceName,
-            batchId: fieldMap.batchId,
-            compressedPayload: Buffer.from(payloadRaw, 'binary'),
-            contentEncoding: fieldMap.encoding,
-            contentType: fieldMap.contentType,
+            deviceUuid: parsedFields.deviceUuid,
+            deviceName: parsedFields.deviceName,
+            batchId: parsedFields.batchId,
+            compressedPayload: payloadBuffer,
+            contentEncoding: parsedFields.encoding,
+            contentType: parsedFields.contentType,
           } as CompressedDeviceEntry,
           isCompressed: true,
         });
@@ -552,30 +687,23 @@ export class RedisQueueConsumer {
 
       // Uncompressed path — guard both missing field and malformed JSON so a single
       // corrupt message cannot throw inside .map() and kill the whole batch.
-      if (!fieldMap.data) {
+      if (!parsedFields.data) {
         parseErrors.push({
-          entry: {
-            id,
-            data: { deviceUuid: 'unknown', deviceName: 'unknown', timestamp: new Date().toISOString(), data: null, metadata: {} } as DeviceDataEntry,
-            isCompressed: false,
-          },
+          entry: this.createUnknownUncompressedEntry(id),
           reason: 'Missing data field in uncompressed stream entry',
         });
         continue;
       }
 
-      try {
-        entries.push({ id, data: JSON.parse(fieldMap.data) as DeviceDataEntry, isCompressed: false });
-      } catch (parseErr: any) {
-        parseErrors.push({
-          entry: {
-            id,
-            data: { deviceUuid: 'unknown', deviceName: 'unknown', timestamp: new Date().toISOString(), data: null, metadata: {} } as DeviceDataEntry,
-            isCompressed: false,
-          },
-          reason: `JSON parse failed: ${parseErr?.message ?? 'unknown'} (raw prefix: ${fieldMap.data.substring(0, 200)})`,
-        });
-      }
+      entries.push({
+        id,
+        data: {
+          rawData: parsedFields.data,
+          deviceUuid: 'unknown',
+          deviceName: 'unknown',
+        },
+        isCompressed: false,
+      });
     }
 
     return { entries, parseErrors };
@@ -594,58 +722,35 @@ export class RedisQueueConsumer {
       );
 
       const messages = result[1] as Array<[string, string[]]>;
-      if (messages.length > 0) {
+      if (messages.length > 0 && this.isDebugEnabled()) {
         logger.debug('Claimed stale pending messages', { count: messages.length, minIdleMs });
       }
 
       const parsed: RedisDeviceEntry[] = [];
 
       for (const [id, fields] of messages) {
-        const fieldMap: Record<string, string> = {};
-        for (let i = 0; i < fields.length; i += 2) fieldMap[fields[i]] = fields[i + 1];
+        const parsedFields = this.parseStreamFields(fields);
 
-        if (fieldMap.compressed === '1') {
-          const payloadRaw = fieldMap.payload;
-          if (!payloadRaw) {
+        if (parsedFields.compressed) {
+          const payloadBuffer = this.decodeCompressedPayload(parsedFields);
+          if (!payloadBuffer || payloadBuffer.length === 0) {
+            const reason = parsedFields.payloadPointer
+              ? `Compressed payload pointer is not resolvable by this worker: ${parsedFields.payloadPointer}`
+              : 'Missing compressed payload field (stale PEL claim)';
             await this.sendDecodeFailureToDlq(
               {
                 id,
                 data: {
-                  deviceUuid: fieldMap.deviceUuid ?? 'unknown',
-                  deviceName: fieldMap.deviceName ?? 'unknown',
-                  batchId: fieldMap.batchId ?? '',
+                  deviceUuid: parsedFields.deviceUuid ?? 'unknown',
+                  deviceName: parsedFields.deviceName ?? 'unknown',
+                  batchId: parsedFields.batchId ?? '',
                   compressedPayload: Buffer.alloc(0),
-                  contentEncoding: fieldMap.encoding ?? '',
-                  contentType: fieldMap.contentType ?? '',
+                  contentEncoding: parsedFields.encoding ?? '',
+                  contentType: parsedFields.contentType ?? '',
                 } as CompressedDeviceEntry,
                 isCompressed: true,
               },
-              'Missing compressed payload field (stale PEL claim)',
-            );
-            continue;
-          }
-
-          const payloadBuffer = Buffer.isBuffer(payloadRaw)
-            ? payloadRaw
-            : fieldMap.payload_b64
-              ? Buffer.from(fieldMap.payload_b64, 'base64')
-              : Buffer.from(payloadRaw, 'hex');
-
-          if (payloadBuffer.length === 0) {
-            await this.sendDecodeFailureToDlq(
-              {
-                id,
-                data: {
-                  deviceUuid: fieldMap.deviceUuid ?? 'unknown',
-                  deviceName: fieldMap.deviceName ?? 'unknown',
-                  batchId: fieldMap.batchId ?? '',
-                  compressedPayload: Buffer.alloc(0),
-                  contentEncoding: fieldMap.encoding ?? '',
-                  contentType: fieldMap.contentType ?? '',
-                } as CompressedDeviceEntry,
-                isCompressed: true,
-              },
-              'Empty compressed payload buffer (stale PEL claim)',
+              reason,
             );
             continue;
           }
@@ -653,48 +758,43 @@ export class RedisQueueConsumer {
           parsed.push({
             id,
             data: {
-              deviceUuid: fieldMap.deviceUuid,
-              deviceName: fieldMap.deviceName,
-              batchId: fieldMap.batchId,
+              deviceUuid: parsedFields.deviceUuid,
+              deviceName: parsedFields.deviceName,
+              batchId: parsedFields.batchId,
               compressedPayload: payloadBuffer,
-              contentEncoding: fieldMap.encoding,
-              contentType: fieldMap.contentType,
+              contentEncoding: parsedFields.encoding,
+              contentType: parsedFields.contentType,
             } as CompressedDeviceEntry,
             isCompressed: true,
           });
           continue;
         }
 
-        if (!fieldMap.data) {
+        if (!parsedFields.data) {
           await this.sendDecodeFailureToDlq(
-            {
-              id,
-              data: { deviceUuid: 'unknown', deviceName: 'unknown', timestamp: new Date().toISOString(), data: null, metadata: {} } as DeviceDataEntry,
-              isCompressed: false,
-            },
+            this.createUnknownUncompressedEntry(id),
             'Missing data field in uncompressed stream entry (stale PEL claim)',
           );
           continue;
         }
 
-        try {
-          parsed.push({ id, data: JSON.parse(fieldMap.data) });
-        } catch (parseErr: any) {
-          await this.sendDecodeFailureToDlq(
-            {
-              id,
-              data: { deviceUuid: 'unknown', deviceName: 'unknown', timestamp: new Date().toISOString(), data: null, metadata: {} } as DeviceDataEntry,
-              isCompressed: false,
-            },
-            `JSON parse failed in uncompressed entry: ${parseErr?.message ?? 'unknown'} (raw prefix: ${fieldMap.data?.substring(0, 200) ?? ''})`,
-          );
-        }
+        parsed.push({
+          id,
+          data: {
+            rawData: parsedFields.data,
+            deviceUuid: 'unknown',
+            deviceName: 'unknown',
+          },
+          isCompressed: false,
+        });
       }
 
       return parsed;
     } catch (err: any) {
       if (err.message?.includes('unknown command')) {
-        logger.debug('XAUTOCLAIM not supported (Redis <6.2), skipping stale message recovery');
+        if (this.isDebugEnabled()) {
+          logger.debug('XAUTOCLAIM not supported (Redis <6.2), skipping stale message recovery');
+        }
         return [];
       }
       logger.error('Failed to claim stale messages', { error: err.message });
@@ -704,7 +804,19 @@ export class RedisQueueConsumer {
 
   private async resolveEntryData(entry: RedisDeviceEntry): Promise<DeviceDataEntry[] | null> {
     if (!entry.isCompressed) {
-      const data = entry.data as DeviceDataEntry | DeviceDataEntry[];
+      const data = entry.data as DeviceDataEntry | DeviceDataEntry[] | RawDeviceEntry;
+      if ('rawData' in data) {
+        try {
+          const parsed = JSON.parse(data.rawData) as DeviceDataEntry | DeviceDataEntry[];
+          return Array.isArray(parsed) ? parsed : [parsed];
+        } catch (err: any) {
+          await this.sendDecodeFailureToDlq(
+            entry,
+            `JSON parse failed: ${err?.message ?? 'unknown'} (raw prefix: ${data.rawData.substring(0, 200)})`,
+          );
+          return null;
+        }
+      }
       return Array.isArray(data) ? data : [data];
     }
 
@@ -729,19 +841,52 @@ export class RedisQueueConsumer {
     }
   }
 
+  private async resolveFreshEntries(fresh: RedisDeviceEntry[]): Promise<{
+    pendingAck: RedisDeviceEntry[];
+    allData: DeviceDataEntry[];
+  }> {
+    const pendingAck: RedisDeviceEntry[] = [];
+    const allData: DeviceDataEntry[] = [];
+
+    for (let i = 0; i < fresh.length; i += RESOLVE_ENTRY_CONCURRENCY) {
+      const chunk = fresh.slice(i, i + RESOLVE_ENTRY_CONCURRENCY);
+      const resolvedChunk = await Promise.all(
+        chunk.map(async (entry) => ({
+          entry,
+          data: await this.resolveEntryData(entry),
+        })),
+      );
+
+      for (const resolved of resolvedChunk) {
+        if (resolved.data !== null) {
+          pendingAck.push(resolved.entry);
+          for (let j = 0; j < resolved.data.length; j++) {
+            allData.push(resolved.data[j]);
+          }
+        }
+      }
+    }
+
+    return { pendingAck, allData };
+  }
+
   private logBatchSuccess(
     entries: RedisDeviceEntry[],
     allData: DeviceDataEntry[],
     startTime: number,
+    completedAtMs: number,
     phases?: { resolveMs: number; ackMs: number },
   ): void {
-    const duration = Date.now() - startTime;
-    const now = Date.now();
+    if (!pinoLogger.isLevelEnabled('debug')) {
+      return;
+    }
+
+    const duration = completedAtMs - startTime;
 
     // Compute queue dwell time from the Redis Stream entry IDs (<unix-ms>-<sequence>).
     // maxDwellMs is the most operationally significant value: it shows whether the
     // worker is falling behind on the oldest messages in the batch.
-    const dwellTimes = entries.map(e => now - this.ingestedAtMs(e.id));
+    const dwellTimes = entries.map(e => completedAtMs - this.ingestedAtMs(e.id));
     const maxDwellMs = Math.max(...dwellTimes);
     const avgDwellMs = Math.round(dwellTimes.reduce((a, b) => a + b, 0) / dwellTimes.length);
     metrics.recordDwellLatency(maxDwellMs);
@@ -793,7 +938,9 @@ export class RedisQueueConsumer {
       }
     }
     if (alreadySeenIds.length > 0) {
-      logger.debug('Skipping already-processed message IDs (in-process redelivery)', { count: alreadySeenIds.length });
+      if (this.isDebugEnabled()) {
+        logger.debug('Skipping already-processed message IDs (in-process redelivery)', { count: alreadySeenIds.length });
+      }
     }
     if (fresh.length === 0) {
       // Nothing new to process — ACK the duplicates and exit.
@@ -804,17 +951,8 @@ export class RedisQueueConsumer {
     // pendingAck tracks only entries whose data was successfully decoded and need DB write.
     // Entries where resolveEntryData returns null were decode failures already moved to the
     // DLQ (which performs XACK internally) — must NOT be passed to handleBatchFailures or re-XACK'd.
-    const pendingAck: RedisDeviceEntry[] = [];
-    const allData: DeviceDataEntry[] = [];
-
     const resolveStart = Date.now();
-    for (const entry of fresh) {
-      const data = await this.resolveEntryData(entry);
-      if (data !== null) {
-        pendingAck.push(entry);
-        allData.push(...data);
-      }
-    }
+    const { pendingAck, allData } = await this.resolveFreshEntries(fresh);
     const resolveMs = Date.now() - resolveStart;
     metrics.recordResolveLatency(resolveMs);
 
@@ -825,7 +963,9 @@ export class RedisQueueConsumer {
       await this.xackBatch(toAck, workerRedis);
       if (pendingAck.length > 0) {
         this.messageTracker.markAll(pendingAck.map(e => e.id));
-        logger.debug('ACK\'d entries that decoded to empty data payloads', { count: pendingAck.length });
+        if (this.isDebugEnabled()) {
+          logger.debug('ACK\'d entries that decoded to empty data payloads', { count: pendingAck.length });
+        }
       }
       return;
     }
@@ -838,10 +978,11 @@ export class RedisQueueConsumer {
       const ackStart = Date.now();
       await this.xackBatch(toAck, workerRedis);
       const ackMs = Date.now() - ackStart;
+      const completedAtMs = Date.now();
       metrics.recordAckLatency(ackMs);
-      metrics.recordProcessingLatency(Date.now() - startTime);
+      metrics.recordProcessingLatency(completedAtMs - startTime);
       this.messageTracker.markAll(pendingAck.map(e => e.id));
-      this.logBatchSuccess(pendingAck, allData, startTime, { resolveMs, ackMs });
+      this.logBatchSuccess(pendingAck, allData, startTime, completedAtMs, { resolveMs, ackMs });
     } catch (err: any) {
       // ACK alreadySeen independently — those entries are definitively done regardless of
       // whether this batch's DB insert failed. pendingAck remains in the PEL for retry.
@@ -864,11 +1005,13 @@ export class RedisQueueConsumer {
             entry, err.message, attempts,
           );
         } else {
-          logger.debug('Message retry scheduled', {
-            messageId: entry.id,
-            attempts,
-            maxRetries: this.config.maxRetries,
-          });
+          if (this.isDebugEnabled()) {
+            logger.debug('Message retry scheduled', {
+              messageId: entry.id,
+              attempts,
+              maxRetries: this.config.maxRetries,
+            });
+          }
         }
       } catch (dlqErr: any) {
         logger.error('Failed to handle message failure', { messageId: entry.id, error: dlqErr.message });
