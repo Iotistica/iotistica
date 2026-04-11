@@ -66,6 +66,14 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
   try {
     const startTime = Date.now();
     const resolvedDeviceName = data.deviceName.trim() || 'unknown';
+
+    const unwrapQueuedPayload = (message: any) => {
+      if (message && typeof message === 'object' && message.data && typeof message.data === 'object') {
+        return message.data;
+      }
+
+      return message;
+    };
     
     // Check if this is a batch (from Sensor Publish feature)
     const isBatch = data.data && Array.isArray((data.data as any).messages);
@@ -88,10 +96,12 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
           try {
             // If it's a string, parse it; if it's already an object, use it directly
             const message = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
+            const queuedPayload = unwrapQueuedPayload(message);
+
             return {
               deviceUuid: data.deviceUuid,
-              deviceName: resolvedDeviceName,
-              data: message,
+              deviceName: message.deviceName?.trim?.() || queuedPayload.deviceName?.trim?.() || resolvedDeviceName,
+              data: queuedPayload,
               timestamp: message.timestamp || batch.timestamp || new Date().toISOString(),
               metadata: {
                 ...(data.metadata || {}),
@@ -119,11 +129,12 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
         durationMs: duration
       });
     } else {
+      const queuedPayload = unwrapQueuedPayload(data.data);
       // Single message
       const outcome = await redisDeviceQueue.add([{
         deviceUuid: data.deviceUuid,
         deviceName: resolvedDeviceName,
-        data: data.data,
+        data: queuedPayload,
         timestamp: data.timestamp,
         metadata: data.metadata || {}
       }]);
