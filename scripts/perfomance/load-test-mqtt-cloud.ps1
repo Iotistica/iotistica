@@ -64,6 +64,12 @@
 .PARAMETER MqttInsecureTls
     Skip certificate verification for publish client. Defaults to true.
 
+.PARAMETER BatchSize
+    Maximum messages per agent batch before forcing a publish.
+
+.PARAMETER BatchTimeMs
+    Maximum batch dwell time in milliseconds before forcing a publish.
+
 .PARAMETER ApiDeploymentName
     API deployment used to discover live MQTT runtime credentials. Defaults to demo-iotistic-api.
 
@@ -144,6 +150,8 @@ param(
     [int]    $MqttConnectTimeoutMs = 30000,
     [bool]   $MqttUseTls        = $true,
     [bool]   $MqttInsecureTls   = $true,
+    [int]    $BatchSize         = 200,
+    [int]    $BatchTimeMs       = 0,
     [switch] $UseSyntheticAgents,
     [switch] $RegisterSyntheticAgents,
     [switch] $DisposeAfterRun,
@@ -955,7 +963,7 @@ function Flush-AllBatchesParallel {
     )
 
     $batches = @($PendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 } | ForEach-Object {
-        [pscustomobject]@{ AgentUuid = $_.Key; Topic = $Topics[$_.Key]; Lines = $_.Value.ToArray() }
+        [pscustomobject]@{ AgentUuid = $_.Key; Topic = $Topics[$_.Key]; Messages = $_.Value.ToArray() }
         $_.Value.Clear()
     })
     if ($batches.Count -eq 0) { return }
@@ -966,9 +974,11 @@ function Flush-AllBatchesParallel {
                 agentUuid = $_.AgentUuid
                 topic = $_.Topic
                 payload = (@{
-                    protocol  = 'mqtt'
+                    sensor    = 'load-test'
                     timestamp = (Get-Date).ToUniversalTime().ToString('o')
-                    messages  = $_.Lines
+                    protocol  = 'mqtt'
+                    messages  = $_.Messages
+                    msgId     = New-RequestId
                 } | ConvertTo-Json -Depth 20 -Compress)
             }
         })
@@ -1108,11 +1118,15 @@ try {
         'Time', 'Msgs/Total  Readings/Total', 'rate/stream', 'lag/pending/workers', 'procΔ/insΔ/dropΔ', 'dwellP95/batchP95')
     Write-Host ('-' * 130)
 
-    $batchSize = 200
+    $batchSize = [Math]::Max(1, $BatchSize)
     $roundSize = $batchSize * $AgentCount
     Write-Host "  Flush size  : $roundSize msgs ($batchSize per agent x $AgentCount agents)" -ForegroundColor DarkGray
+    if ($BatchTimeMs -gt 0) {
+        Write-Host "  Flush time  : ${BatchTimeMs}ms max batch age" -ForegroundColor DarkGray
+    }
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $lastPollAt = 0.0
+    $lastFlushAtMs = 0.0
     $delayMs = if ($RatePerSecond -gt 0) { [int](1000.0 / $RatePerSecond) } else { 0 }
     $injected = 0
     $totalPending = 0
@@ -1120,7 +1134,7 @@ try {
 
     $pendingBatches = @{}
     foreach ($uuid in ($selectedAgents.Uuid | Select-Object -Unique)) {
-        $pendingBatches[$uuid] = [System.Collections.Generic.List[string]]::new()
+        $pendingBatches[$uuid] = [System.Collections.Generic.List[object]]::new()
     }
 
     $mqttPublisher = Start-MqttPublisherProcess -BrokerHost $MqttHost -Port $MqttPort -UseTls $MqttUseTls -InsecureTls $MqttInsecureTls -Username $MqttUsername -Password $MqttPassword -CleanSession $MqttCleanSession -KeepAliveSec $MqttKeepAliveSec -ReconnectPeriodMs $MqttReconnectPeriodMs -ConnectTimeoutMs $MqttConnectTimeoutMs -Agents $publisherAgents -ClientIdPrefix $MqttClientIdPrefix
@@ -1128,16 +1142,20 @@ try {
     for ($i = 0; $i -lt $MessageCount; $i++) {
         $agent = $selectedAgents[$i % $AgentCount]
         $payload = Build-EndpointsPayload -AgentUuid $agent.Uuid -AgentName $agent.Name -MetricCount $MetricsPerMessage -BaseTimestamp $runBaseTimestamp -Sequence $i
-        $json = $payload | ConvertTo-Json -Depth 10 -Compress
-        $pendingBatches[$agent.Uuid].Add($json)
+        $pendingBatches[$agent.Uuid].Add($payload)
         $injected++
         $totalPending++
 
-        if ($totalPending -ge $roundSize) {
+        $maxBatchDepth = @($pendingBatches.GetEnumerator() | ForEach-Object { $_.Value.Count } | Measure-Object -Maximum).Maximum
+        $elapsedMs = $stopwatch.Elapsed.TotalMilliseconds
+        $batchAgeExceeded = $BatchTimeMs -gt 0 -and $totalPending -gt 0 -and (($elapsedMs - $lastFlushAtMs) -ge $BatchTimeMs)
+
+        if ($maxBatchDepth -ge $batchSize -or $batchAgeExceeded) {
             $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
             Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'flush start'
             Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -Publisher $mqttPublisher
             $totalPending = 0
+            $lastFlushAtMs = $stopwatch.Elapsed.TotalMilliseconds
 
             $elapsedSec = $stopwatch.Elapsed.TotalSeconds
             Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'flush done'

@@ -5,8 +5,9 @@
 
 .DESCRIPTION
     Discovers the tenant ID from the live Redis stream key, encodes agent UUIDs to
-    base64url (matching the API's MQTT topic format), then fires batched mosquitto_pub
-    calls grouped by agent.  Health metrics are polled identically to load-test-ingestion.ps1.
+    base64url (matching the API's MQTT topic format), then publishes through long-lived
+    mqtt.js sessions grouped by agent. Health metrics are polled identically to
+    load-test-ingestion.ps1.
 
     Topology under test:
       [this script] --MQTT--> iotistic-mosquitto --broker--> iotistic-api (MQTT handler)
@@ -47,6 +48,33 @@
 
 .PARAMETER MqttPort
     External port of the MQTT broker (default: env MOSQUITTO_PORT_EXT or 5883).
+
+.PARAMETER MqttClientIdPrefix
+    Optional client ID prefix. When omitted, uses device_<agentUuid> like the agent default.
+
+.PARAMETER MqttCleanSession
+    MQTT clean session flag. Defaults to true to match the agent's cloud manager default.
+
+.PARAMETER MqttKeepAliveSec
+    MQTT keepalive interval in seconds. Defaults to 60 to match the agent's cloud manager default.
+
+.PARAMETER MqttReconnectPeriodMs
+    MQTT reconnect period in milliseconds. Defaults to 5000 to match the agent's cloud manager default.
+
+.PARAMETER MqttConnectTimeoutMs
+    MQTT connect timeout in milliseconds. Defaults to 30000 to match the agent's cloud manager default.
+
+.PARAMETER MqttUseTls
+    Use MQTTS/TLS for publish. Defaults to false for the local non-TLS broker port.
+
+.PARAMETER MqttInsecureTls
+    Skip certificate verification for publish client. Defaults to true.
+
+.PARAMETER BatchSize
+    Maximum messages per agent batch before forcing a publish.
+
+.PARAMETER BatchTimeMs
+    Maximum batch dwell time in milliseconds before forcing a publish.
 
 .PARAMETER MqttUsername
     MQTT broker username (default: env MQTT_USERNAME or "admin").
@@ -89,6 +117,15 @@ param(
     [string] $JwtToken         = "",
     [string] $MqttHost         = "localhost",
     [int]    $MqttPort         = 0,      # resolved from env / default below
+    [string] $MqttClientIdPrefix = "",
+    [bool]   $MqttCleanSession = $true,
+    [int]    $MqttKeepAliveSec = 60,
+    [int]    $MqttReconnectPeriodMs = 5000,
+    [int]    $MqttConnectTimeoutMs = 30000,
+    [bool]   $MqttUseTls       = $false,
+    [bool]   $MqttInsecureTls  = $true,
+    [int]    $BatchSize        = 200,
+    [int]    $BatchTimeMs      = 0,
     [string] $MqttUsername     = "",
     [string] $MqttPassword     = "",
     [string] $TenantId         = "",
@@ -130,6 +167,23 @@ function Encode-Uuid {
 function Get-DeviceTopic {
     param([string]$EncodedTenant, [string]$EncodedAgent)
     "i/$EncodedTenant/a/$EncodedAgent/endpoints/load-test"
+}
+
+function New-RequestId {
+    [guid]::NewGuid().ToString('N')
+}
+
+function Get-AgentStyleClientId {
+    param(
+        [string]$AgentUuid,
+        [string]$ClientIdPrefix
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ClientIdPrefix)) {
+        return "${ClientIdPrefix}_$AgentUuid"
+    }
+
+    return "device_$AgentUuid"
 }
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -352,9 +406,15 @@ function Write-FlushRow {
 # ─── MQTT message builder ─────────────────────────────────────────────────────
 
 function Build-EndpointsPayload {
-    param([string]$AgentUuid, [string]$AgentName, [int]$MetricCount)
+    param(
+        [string]$AgentUuid,
+        [string]$AgentName,
+        [int]$MetricCount,
+        [datetime]$BaseTimestamp,
+        [int]$Sequence
+    )
 
-    $now = (Get-Date).ToUniversalTime().ToString("o")
+    $timestamp = $BaseTimestamp.AddMilliseconds($Sequence).ToUniversalTime().ToString('o')
     $metricNames = @("temperature","humidity","pressure","vibration","current","voltage","co2","flow","rpm","power")
     $baseValues  = @{
         temperature=23.0; humidity=45.0; pressure=101.3; vibration=5.0
@@ -369,13 +429,13 @@ function Build-EndpointsPayload {
         $name  = $metricNames[($_ - 1) % $metricNames.Length]
         $base  = $baseValues[$name]
         $value = [math]::Round($base + (Get-Random -Minimum -5 -Maximum 5) * 0.1 * $base / 100, 4)
-        @{ metric=$name; value=$value; unit=$units[$name]; quality="good"; timestamp=$now; protocol="mqtt" }
+        @{ metric=$name; value=$value; unit=$units[$name]; quality="good"; timestamp=$timestamp; protocol="mqtt" }
     }
 
     # Payload shape consumed by MQTT handler (handleEndpointsData → handleDeviceData)
     return @{
         deviceName = $AgentName
-        timestamp  = $now
+        timestamp  = $timestamp
         data       = @{
             protocol   = "mqtt"
             readings   = $readings
@@ -385,29 +445,179 @@ function Build-EndpointsPayload {
     }
 }
 
-# ─── MQTT publisher via docker exec mosquitto_pub ────────────────────────────
-#
-# Uses -l (line-per-message from stdin) so a whole agent's batch is a single
-# docker exec call instead of one call per message.  Parallelising across all
-# agents with ForEach-Object -Parallel reduces wall-clock time from
-# O(batches × latency) to O(rounds × latency_per_single_exec).
-
-function Publish-AgentBatch {
+function Read-MqttPublisherMessage {
     param(
-        [string]   $Topic,
-        [string[]] $JsonLines,
-        [string]   $User,
-        [string]   $Pass
+        [pscustomobject]$Publisher,
+        [string]$ExpectedRequestId,
+        [string]$Phase
     )
-    # mosquitto_pub runs inside the iotistic-mosquitto container via docker exec,
-    # so the broker is reachable at 127.0.0.1:1883 (container-internal port).
-    $payload = $JsonLines -join "`n"
-    $result  = $payload | docker exec -i iotistic-mosquitto mosquitto_pub `
-        --host 127.0.0.1 --port 1883 `
-        --username $User --pw $Pass `
-        --topic "$Topic" --qos 1 -l 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "mosquitto_pub failed (topic=$Topic): $result"
+
+    while ($true) {
+        $line = $Publisher.Process.StandardOutput.ReadLine()
+        if ($null -eq $line) {
+            $stderr = $Publisher.Process.StandardError.ReadToEnd()
+            throw "MQTT publisher helper exited during $Phase. $stderr"
+        }
+
+        $message = $line | ConvertFrom-Json
+        if ($message.type -eq 'log') {
+            $color = switch ($message.level) {
+                'error' { 'Red' }
+                'warn' { 'Yellow' }
+                default { 'DarkGray' }
+            }
+
+            Write-Host ("[publisher] {0} ({1})" -f $message.message, $message.clientId) -ForegroundColor $color
+            continue
+        }
+
+        if ($message.type -eq 'ready') {
+            if ($ExpectedRequestId) {
+                continue
+            }
+
+            return $message
+        }
+
+        if ($message.type -eq 'response') {
+            if ($ExpectedRequestId -and $message.requestId -ne $ExpectedRequestId) {
+                continue
+            }
+
+            if (-not $message.ok) {
+                throw "MQTT publisher helper $Phase failed: $($message.error)"
+            }
+
+            return $message
+        }
+    }
+}
+
+function Start-MqttPublisherProcess {
+    param(
+        [string]$BrokerHost,
+        [int]$Port,
+        [bool]$UseTls,
+        [bool]$InsecureTls,
+        [string]$Username,
+        [string]$Password,
+        [bool]$CleanSession,
+        [int]$KeepAliveSec,
+        [int]$ReconnectPeriodMs,
+        [int]$ConnectTimeoutMs,
+        [object[]]$Agents,
+        [string]$ClientIdPrefix
+    )
+
+    $helperPath = Join-Path $PSScriptRoot 'mqtt-persistent-publisher.cjs'
+    $brokerScheme = if ($UseTls) { 'mqtts' } else { 'mqtt' }
+    $config = [ordered]@{
+        brokerUrl = "${brokerScheme}://$BrokerHost`:$Port"
+        username = $Username
+        password = $Password
+        cleanSession = $CleanSession
+        keepAlive = $KeepAliveSec
+        reconnectPeriod = $ReconnectPeriodMs
+        connectTimeout = $ConnectTimeoutMs
+        rejectUnauthorized = -not $InsecureTls
+        agents = @($Agents | ForEach-Object {
+            [ordered]@{
+                agentUuid = $_.Uuid
+                clientId = Get-AgentStyleClientId -AgentUuid $_.Uuid -ClientIdPrefix $ClientIdPrefix
+                topic = $_.Topic
+            }
+        })
+    }
+
+    $configJson = $config | ConvertTo-Json -Depth 10 -Compress
+    $configBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($configJson))
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'node'
+    $startInfo.ArgumentList.Add($helperPath)
+    $startInfo.ArgumentList.Add('--config')
+    $startInfo.ArgumentList.Add($configBase64)
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.WorkingDirectory = (Split-Path $helperPath -Parent)
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $process) {
+        throw 'Failed to start MQTT publisher helper process'
+    }
+
+    $publisher = [pscustomobject]@{
+        Process = $process
+        Writer = $process.StandardInput
+        IsStopped = $false
+    }
+
+    $ready = Read-MqttPublisherMessage -Publisher $publisher -ExpectedRequestId '' -Phase 'startup'
+    Write-Host ("Publisher helper ready with {0} persistent client(s)" -f $ready.clientCount) -ForegroundColor DarkGray
+    return $publisher
+}
+
+function Invoke-MqttPublisherCommand {
+    param(
+        [pscustomobject]$Publisher,
+        [string]$Command,
+        [object]$Payload
+    )
+
+    $requestId = New-RequestId
+    $commandPayload = [ordered]@{
+        command = $Command
+        requestId = $requestId
+    }
+
+    if ($Payload) {
+        foreach ($property in $Payload.PSObject.Properties) {
+            $commandPayload[$property.Name] = $property.Value
+        }
+    }
+
+    $Publisher.Writer.WriteLine(($commandPayload | ConvertTo-Json -Depth 20 -Compress))
+    $Publisher.Writer.Flush()
+    Read-MqttPublisherMessage -Publisher $Publisher -ExpectedRequestId $requestId -Phase $Command
+}
+
+function Stop-MqttPublisherProcess {
+    param([pscustomobject]$Publisher)
+
+    if ($null -eq $Publisher) {
+        return
+    }
+
+    if ($Publisher.IsStopped) {
+        return
+    }
+
+    $Publisher.IsStopped = $true
+
+    try {
+        if (-not $Publisher.Process.HasExited) {
+            Invoke-MqttPublisherCommand -Publisher $Publisher -Command 'shutdown' -Payload ([pscustomobject]@{}) | Out-Null
+        }
+    } finally {
+        try {
+            $Publisher.Writer.Dispose()
+        } catch {
+        }
+
+        try {
+            if (-not $Publisher.Process.HasExited) {
+                $Publisher.Process.WaitForExit(5000) | Out-Null
+            }
+        } catch {
+        }
+
+        try {
+            $Publisher.Process.Dispose()
+        } catch {
+        }
     }
 }
 
@@ -468,6 +678,13 @@ foreach ($uuid in ($agentUuids | Select-Object -Unique)) {
     $agentTopics[$uuid]  = Get-DeviceTopic -EncodedTenant $encodedTenant -EncodedAgent $encodedUuid
 }
 
+$publisherAgents = @($agentTopics.GetEnumerator() | ForEach-Object {
+    [pscustomobject]@{
+        Uuid = $_.Key
+        Topic = $_.Value
+    }
+})
+
 # Acquire JWT token for health polling
 if ($JwtToken) {
     Write-Host "Using provided JWT token." -ForegroundColor Green
@@ -490,7 +707,9 @@ Write-Host "  Messages    : $MessageCount"
 Write-Host "  Agents      : $AgentCount  ($($agentTopics.Count) unique topics)"
 Write-Host "  Metrics/msg : $MetricsPerMessage  ($($MetricsPerMessage * $MessageCount) total readings)"
 Write-Host "  Rate target : $(if ($RatePerSecond -gt 0) { "$RatePerSecond msg/s" } else { "max speed" })"
-Write-Host "  Broker      : $MqttHost`:$MqttPort  user=$MqttUsername"
+Write-Host "  Broker      : $(if ($MqttUseTls) { 'mqtts' } else { 'mqtt' })://$MqttHost`:$MqttPort  user=$MqttUsername"
+Write-Host "  Client IDs  : $(if ([string]::IsNullOrWhiteSpace($MqttClientIdPrefix)) { 'device_<agentUuid>' } else { "$MqttClientIdPrefix`_<agentUuid>" })"
+Write-Host "  Session     : clean=$MqttCleanSession keepalive=${MqttKeepAliveSec}s reconnect=${MqttReconnectPeriodMs}ms timeout=${MqttConnectTimeoutMs}ms"
 Write-Host "  Tenant      : $TenantId  (encoded: $encodedTenant)"
 $sampleTopic = Get-DeviceTopic -EncodedTenant $encodedTenant -EncodedAgent (Encode-Uuid $agentUuids[0])
 Write-Host "  Topic fmt   : $($sampleTopic -replace (Encode-Uuid $agentUuids[0]), '{encodedAgentUuid}')  (e.g. $sampleTopic)"
@@ -498,121 +717,138 @@ $healthPollDesc = if ($JwtToken) { "API health endpoint" } else { "direct ingest
 Write-Host "  Health poll : every ${PollIntervalSec}s — $healthPollDesc"
 Write-Host ""
 
-# ─── Header row ───────────────────────────────────────────────────────────────
-$baselineHealth = if ($JwtToken) { $null } else { Get-IngestionSnapshot }
+$mqttPublisher = $null
 
-Write-Host ("{0,8} | {1,27} | {2,12} | {3,18} | {4,24} | {5,22}" -f `
-    'Time', 'Msgs/Total  Readings/Total', 'rate/stream', 'lag/pending/workers', 'procΔ/insΔ/dropΔ', 'dwellP95/batchP95')
-Write-Host ('-' * 130)
-
-# ─── Injection loop ───────────────────────────────────────────────────────────
-#
-# Strategy: fill messages round-robin across agents up to $batchSize per agent,
-# then flush ALL agents simultaneously with ForEach-Object -Parallel (one docker
-# exec per agent at the same time).  This cuts wall-clock time from
-# O(rounds × AgentCount × exec_latency) to O(rounds × exec_latency).
-#
-# $batchSize controls messages per agent per round.
-# A "round" = $batchSize × $AgentCount total messages.
-
-$batchSize    = 200   # messages per agent per parallel round
-$roundSize    = $batchSize * $AgentCount   # total messages that trigger a flush
-Write-Host "  Flush size  : $roundSize msgs ($batchSize per agent x $AgentCount agents)" -ForegroundColor DarkGray
-$stopwatch    = [System.Diagnostics.Stopwatch]::StartNew()
-$lastPollAt   = 0.0
-$delayMs      = if ($RatePerSecond -gt 0) { [int](1000.0 / $RatePerSecond) } else { 0 }
-$injected     = 0
-$totalPending = 0
-
-# Per-agent pending batch buffers (uuid → List<string>)
-$pendingBatches = @{}
-foreach ($uuid in ($agentUuids | Select-Object -Unique)) {
-    $pendingBatches[$uuid] = [System.Collections.Generic.List[string]]::new()
-}
-
-# Flush all agents in parallel — one docker exec per agent, all concurrent.
-# Snapshots and clears buffers before launching runspaces so the main thread
-# can continue accumulating for the next round immediately after.
 function Flush-AllBatchesParallel {
-    # Snapshot non-empty buffers and clear them
-    $batches = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 } | ForEach-Object {
-        [pscustomobject]@{ Topic = $agentTopics[$_.Key]; Lines = $_.Value.ToArray() }
+    param(
+        [hashtable]$PendingBatches,
+        [hashtable]$Topics,
+        [pscustomobject]$Publisher
+    )
+
+    $batches = @($PendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 } | ForEach-Object {
+        [pscustomobject]@{
+            AgentUuid = $_.Key
+            Topic = $Topics[$_.Key]
+            Messages = $_.Value.ToArray()
+        }
         $_.Value.Clear()
     })
-    if ($batches.Count -eq 0) { return }
 
-    $user = $MqttUsername
-    $pass = $MqttPassword
+    if ($batches.Count -eq 0) {
+        return
+    }
 
-    $batches | ForEach-Object -Parallel {
-        $payload = ($_.Lines -join "`n")
-        $result  = $payload | docker exec -i iotistic-mosquitto mosquitto_pub `
-            --host 127.0.0.1 --port 1883 `
-            --username $using:user --pw $using:pass `
-            --topic $_.Topic --qos 1 -l 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "mosquitto_pub failed (topic=$($_.Topic)): $result"
-        }
-    } -ThrottleLimit 20
+    $payload = [pscustomobject]@{
+        batches = @($batches | ForEach-Object {
+            [ordered]@{
+                agentUuid = $_.AgentUuid
+                topic = $_.Topic
+                payload = (@{
+                    sensor    = 'load-test'
+                    timestamp = (Get-Date).ToUniversalTime().ToString('o')
+                    protocol  = 'mqtt'
+                    messages  = $_.Messages
+                    msgId     = New-RequestId
+                } | ConvertTo-Json -Depth 20 -Compress)
+            }
+        })
+    }
+
+    Invoke-MqttPublisherCommand -Publisher $Publisher -Command 'publish' -Payload $payload | Out-Null
 }
 
-for ($i = 0; $i -lt $MessageCount; $i++) {
-    $uuid    = $agentUuids[$i % $AgentCount]
-    $name    = "agent-" + $uuid.Substring(0, 8)
-    $payload = Build-EndpointsPayload -AgentUuid $uuid -AgentName $name -MetricCount $MetricsPerMessage
-    $json    = $payload | ConvertTo-Json -Depth 10 -Compress
-    $pendingBatches[$uuid].Add($json)
-    $injected++
-    $totalPending++
+try {
+    $baselineHealth = if ($JwtToken) { $null } else { Get-IngestionSnapshot }
 
-    # Flush all agents in parallel when a full round is accumulated
-    if ($totalPending -ge $roundSize) {
-        $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
-        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'flush start'
-        Flush-AllBatchesParallel
-        $totalPending = 0
+    Write-Host ("{0,8} | {1,27} | {2,12} | {3,18} | {4,24} | {5,22}" -f `
+        'Time', 'Msgs/Total  Readings/Total', 'rate/stream', 'lag/pending/workers', 'procΔ/insΔ/dropΔ', 'dwellP95/batchP95')
+    Write-Host ('-' * 130)
+
+    $batchSize    = [Math]::Max(1, $BatchSize)
+    $roundSize    = $batchSize * $AgentCount
+    Write-Host "  Flush size  : $roundSize msgs ($batchSize per agent x $AgentCount agents)" -ForegroundColor DarkGray
+    if ($BatchTimeMs -gt 0) {
+        Write-Host "  Flush time  : ${BatchTimeMs}ms max batch age" -ForegroundColor DarkGray
+    }
+    $stopwatch    = [System.Diagnostics.Stopwatch]::StartNew()
+    $lastPollAt   = 0.0
+    $lastFlushAtMs = 0.0
+    $delayMs      = if ($RatePerSecond -gt 0) { [int](1000.0 / $RatePerSecond) } else { 0 }
+    $injected     = 0
+    $totalPending = 0
+    $runBaseTimestamp = (Get-Date).ToUniversalTime()
+
+    $pendingBatches = @{}
+    foreach ($uuid in ($agentUuids | Select-Object -Unique)) {
+        $pendingBatches[$uuid] = [System.Collections.Generic.List[object]]::new()
+    }
+
+    $mqttPublisher = Start-MqttPublisherProcess -BrokerHost $MqttHost -Port $MqttPort -UseTls $MqttUseTls -InsecureTls $MqttInsecureTls -Username $MqttUsername -Password $MqttPassword -CleanSession $MqttCleanSession -KeepAliveSec $MqttKeepAliveSec -ReconnectPeriodMs $MqttReconnectPeriodMs -ConnectTimeoutMs $MqttConnectTimeoutMs -Agents $publisherAgents -ClientIdPrefix $MqttClientIdPrefix
+
+    for ($i = 0; $i -lt $MessageCount; $i++) {
+        $uuid    = $agentUuids[$i % $AgentCount]
+        $name    = "agent-" + $uuid.Substring(0, 8)
+        $payload = Build-EndpointsPayload -AgentUuid $uuid -AgentName $name -MetricCount $MetricsPerMessage -BaseTimestamp $runBaseTimestamp -Sequence $i
+        $pendingBatches[$uuid].Add($payload)
+        $injected++
+        $totalPending++
+
+        $maxBatchDepth = @($pendingBatches.GetEnumerator() | ForEach-Object { $_.Value.Count } | Measure-Object -Maximum).Maximum
+        $elapsedMs = $stopwatch.Elapsed.TotalMilliseconds
+        $batchAgeExceeded = $BatchTimeMs -gt 0 -and $totalPending -gt 0 -and (($elapsedMs - $lastFlushAtMs) -ge $BatchTimeMs)
+
+        if ($maxBatchDepth -ge $batchSize -or $batchAgeExceeded) {
+            $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
+            Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'flush start'
+            Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -Publisher $mqttPublisher
+            $totalPending = 0
+            $lastFlushAtMs = $stopwatch.Elapsed.TotalMilliseconds
+
+            $elapsedSec = $stopwatch.Elapsed.TotalSeconds
+            Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'flush done'
+
+            if (($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
+                $health = if ($JwtToken) { Get-IngestionHealth -Url $ApiUrl -Token $JwtToken } else { Get-IngestionSnapshot }
+                Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
+                $lastPollAt = $elapsedSec
+            }
+        }
+
+        if ($delayMs -gt 0) { Start-Sleep -Milliseconds $delayMs }
 
         $elapsedSec = $stopwatch.Elapsed.TotalSeconds
-        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'flush done'
-
-        if (($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
+        if ($totalPending -eq 0 -and ($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
             $health = if ($JwtToken) { Get-IngestionHealth -Url $ApiUrl -Token $JwtToken } else { Get-IngestionSnapshot }
             Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
             $lastPollAt = $elapsedSec
         }
     }
 
-    if ($delayMs -gt 0) { Start-Sleep -Milliseconds $delayMs }
-
-    $elapsedSec = $stopwatch.Elapsed.TotalSeconds
-    if ($totalPending -eq 0 -and ($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
-        $health = if ($JwtToken) { Get-IngestionHealth -Url $ApiUrl -Token $JwtToken } else { Get-IngestionSnapshot }
-        Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
-        $lastPollAt = $elapsedSec
+    if ($totalPending -gt 0) {
+        $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
+        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'final flush start'
+        Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -Publisher $mqttPublisher
+        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'final flush done'
+    } else {
+        Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -Publisher $mqttPublisher
     }
-}
 
-if ($totalPending -gt 0) {
-    $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
-    Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'final flush start'
-    Flush-AllBatchesParallel
-    Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'final flush done'
-} else {
-    Flush-AllBatchesParallel  # drain remaining partial batches
-}
+    $stopwatch.Stop()
+    $totalSec     = $stopwatch.Elapsed.TotalSeconds
+    $actualRate   = [math]::Round($MessageCount / $totalSec, 1)
+    $totalReadings = $MessageCount * $MetricsPerMessage
 
-$stopwatch.Stop()
-$totalSec     = $stopwatch.Elapsed.TotalSeconds
-$actualRate   = [math]::Round($MessageCount / $totalSec, 1)
-$totalReadings = $MessageCount * $MetricsPerMessage
-
-Write-Host ""
-Write-Host "=== Injection complete ===" -ForegroundColor Cyan
-Write-Host ("  Injected : {0} messages ({1} readings) in {2:F2}s = {3} msg/s actual" -f `
-    $MessageCount, $totalReadings, $totalSec, $actualRate)
+    Write-Host ""
+    Write-Host "=== Injection complete ===" -ForegroundColor Cyan
+    Write-Host ("  Injected : {0} messages ({1} readings) in {2:F2}s = {3} msg/s actual" -f `
+        $MessageCount, $totalReadings, $totalSec, $actualRate)
 
 # ─── Drain wait ───────────────────────────────────────────────────────────────
 Write-Host ""
+} finally {
+    Stop-MqttPublisherProcess -Publisher $mqttPublisher
+}
 $drainTimeout = [System.Diagnostics.Stopwatch]::StartNew()
 
 if ($JwtToken) {
