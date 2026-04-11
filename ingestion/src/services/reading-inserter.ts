@@ -15,11 +15,15 @@ export class ReadingInserter {
   async insertBatch(data: DeviceDataEntry[]): Promise<void> {
     const ingestedAt = new Date();
     const allReadings: ReadingInsert[] = [];
+    let processedMessageCount = 0;
 
     for (const entry of data) {
       try {
         const protocol = detectProtocol(entry);
         const expanded = expandMessages(entry, protocol, ingestedAt);
+        if (expanded.length > 0) {
+          processedMessageCount++;
+        }
         allReadings.push(...expanded);
       } catch (error: unknown) {
         metrics.messagesFailed++;
@@ -46,7 +50,7 @@ export class ReadingInserter {
     const insertedCount = await this.readingsService.bulkInsert(deduped);
     const insertMs = Date.now() - insertStart;
 
-    metrics.messagesProcessed += deduped.length;
+    metrics.messagesProcessed += processedMessageCount;
     metrics.readingsInserted += insertedCount;
     metrics.recordInsertLatency(insertMs);
 

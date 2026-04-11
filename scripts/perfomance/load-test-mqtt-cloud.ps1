@@ -9,7 +9,8 @@
       - tenant ID comes from the namespace license secret
       - active agent UUIDs come from the app database in CNPG
             - MQTT credentials default to the live API runtime MQTT settings
-            - publish path targets the external broker endpoint used by agents
+            - publish path uses long-lived mqtt.js sessions with agent-style client IDs
+            - publisher connections target the external broker endpoint used by agents
             - health polling scrapes the ingestion deployment directly via its local /metrics endpoint
 
     This keeps the local script intact and provides a cloud-specific workflow for
@@ -69,8 +70,35 @@
 .PARAMETER IngestionDeploymentName
     Ingestion deployment used to scrape live ingestion metrics. Defaults to demo-iotistic-ingestion.
 
+.PARAMETER MqttClientIdPrefix
+    Optional client ID prefix. When omitted, uses device_<agentUuid> like the agent default.
+
+.PARAMETER MqttCleanSession
+    MQTT clean session flag. Defaults to true to match the agent's cloud manager default.
+
+.PARAMETER MqttKeepAliveSec
+    MQTT keepalive interval in seconds. Defaults to 60 to match the agent's cloud manager default.
+
+.PARAMETER MqttReconnectPeriodMs
+    MQTT reconnect period in milliseconds. Defaults to 5000 to match the agent's cloud manager default.
+
+.PARAMETER MqttConnectTimeoutMs
+    MQTT connect timeout in milliseconds. Defaults to 30000 to match the agent's cloud manager default.
+
+.PARAMETER UseSyntheticAgents
+    Generate synthetic agent UUIDs instead of reusing active agents from the database.
+
+.PARAMETER RegisterSyntheticAgents
+    Insert synthetic agents into the agents table for the duration of the test.
+
+.PARAMETER DisposeAfterRun
+    Delete readings and anomalies for synthetic agents after the run, and remove inserted agent rows when applicable.
+
+.PARAMETER TestRunId
+    Optional run identifier used in synthetic agent names for traceability.
+
 .PARAMETER MqttPodName
-    Explicit Mosquitto pod name. When omitted, discovered by label.
+    Retained for backward compatibility. No longer used by the publisher path.
 
 .PARAMETER CnpgNamespace
     CNPG cluster namespace. Defaults to iotistica-cnpg-cl01.
@@ -109,8 +137,17 @@ param(
     [string] $MqttPassword      = "",
     [string] $MqttHost          = "demo-mqtt.iotistica.com",
     [int]    $MqttPort          = 8883,
+    [string] $MqttClientIdPrefix = "",
+    [bool]   $MqttCleanSession  = $true,
+    [int]    $MqttKeepAliveSec  = 60,
+    [int]    $MqttReconnectPeriodMs = 5000,
+    [int]    $MqttConnectTimeoutMs = 30000,
     [bool]   $MqttUseTls        = $true,
     [bool]   $MqttInsecureTls   = $true,
+    [switch] $UseSyntheticAgents,
+    [switch] $RegisterSyntheticAgents,
+    [switch] $DisposeAfterRun,
+    [string] $TestRunId         = "",
     [string] $ApiDeploymentName = "demo-iotistic-api",
     [string] $IngestionDeploymentName = "demo-iotistic-ingestion",
     [string] $MqttPodName       = "",
@@ -123,6 +160,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$script:CnpgResolvedPrimaryPodName = $null
+$script:CnpgResolvedClusterName = $null
 
 function ConvertTo-Base64Url {
     param([byte[]]$Bytes)
@@ -293,23 +333,6 @@ function Get-TenantIdFromLicenseSecret {
     Normalize-TenantId $rawTenantId
 }
 
-function Get-MosquittoPodName {
-    param([string]$SecretNamespace)
-
-    $podName = Invoke-KubectlCapture @(
-        'get', 'pods',
-        '-n', $SecretNamespace,
-        '-l', 'app.kubernetes.io/component=mosquitto',
-        '-o', 'jsonpath={.items[0].metadata.name}'
-    )
-
-    if (-not $podName) {
-        throw "Could not find a Mosquitto pod in namespace '$SecretNamespace'"
-    }
-
-    $podName
-}
-
 function Get-ApiRuntimeEnvValue {
     param(
         [string]$DeploymentName,
@@ -328,26 +351,381 @@ function Get-ApiRuntimeEnvValue {
     return [string]$raw
 }
 
+function Get-CnpgClusterName {
+    if ($script:CnpgResolvedClusterName) {
+        return $script:CnpgResolvedClusterName
+    }
+
+    if ($CnpgPodName -match '^(.*)-\d+$') {
+        $script:CnpgResolvedClusterName = $Matches[1]
+        return $script:CnpgResolvedClusterName
+    }
+
+    $clusterName = Invoke-KubectlCapture @(
+        'get', 'cluster.postgresql.cnpg.io',
+        '-n', $CnpgNamespace,
+        '-o', 'jsonpath={.items[0].metadata.name}'
+    )
+
+    if (-not $clusterName) {
+        throw "Could not determine CNPG cluster name in namespace '$CnpgNamespace'"
+    }
+
+    $script:CnpgResolvedClusterName = $clusterName
+    return $script:CnpgResolvedClusterName
+}
+
+function Get-CnpgWritablePodName {
+    param([switch]$Refresh)
+
+    if (-not $Refresh -and $script:CnpgResolvedPrimaryPodName) {
+        return $script:CnpgResolvedPrimaryPodName
+    }
+
+    $clusterName = Get-CnpgClusterName
+    $primaryPod = Invoke-KubectlCapture @(
+        'get', 'cluster.postgresql.cnpg.io', $clusterName,
+        '-n', $CnpgNamespace,
+        '-o', 'jsonpath={.status.currentPrimary}'
+    )
+
+    if (-not $primaryPod) {
+        $primaryPod = Invoke-KubectlCapture @(
+            'get', 'pods',
+            '-n', $CnpgNamespace,
+            '-l', "cnpg.io/cluster=$clusterName,cnpg.io/instanceRole=primary",
+            '-o', 'jsonpath={.items[0].metadata.name}'
+        )
+    }
+
+    if (-not $primaryPod) {
+        throw "Could not determine writable CNPG primary pod for cluster '$clusterName' in namespace '$CnpgNamespace'"
+    }
+
+    $script:CnpgResolvedPrimaryPodName = $primaryPod
+    return $script:CnpgResolvedPrimaryPodName
+}
+
 function Invoke-CnpgQuery {
     param(
         [string]$Database,
         [string]$Sql
     )
 
-    Invoke-KubectlCapture @(
-        'exec', '-n', $CnpgNamespace, $CnpgPodName,
-        '--', 'psql',
-        '-U', 'postgres',
-        '-d', $Database,
-        '-t', '-A',
-        '-F', '|',
-        '-c', $Sql
-    )
+    $targetPod = Get-CnpgWritablePodName
+
+    try {
+        return Invoke-KubectlCapture @(
+            'exec', '-n', $CnpgNamespace, $targetPod,
+            '--', 'psql',
+            '-U', 'postgres',
+            '-d', $Database,
+            '-t', '-A',
+            '-F', '|',
+            '-c', $Sql
+        )
+    } catch {
+        $message = $_.Exception.Message
+        if ($message -match 'read-only transaction|cannot execute .* in a read-only transaction') {
+            $targetPod = Get-CnpgWritablePodName -Refresh
+            return Invoke-KubectlCapture @(
+                'exec', '-n', $CnpgNamespace, $targetPod,
+                '--', 'psql',
+                '-U', 'postgres',
+                '-d', $Database,
+                '-t', '-A',
+                '-F', '|',
+                '-c', $Sql
+            )
+        }
+
+        throw
+    }
 }
 
-function ConvertTo-PosixSingleQuoted {
+function New-RequestId {
+    [guid]::NewGuid().ToString('N')
+}
+
+function Get-AgentStyleClientId {
+    param(
+        [string]$AgentUuid,
+        [string]$ClientIdPrefix
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ClientIdPrefix)) {
+        return "${ClientIdPrefix}_$AgentUuid"
+    }
+
+    return "device_$AgentUuid"
+}
+
+function ConvertTo-SqlLiteral {
     param([string]$Value)
-    "'" + $Value.Replace("'", "'\''") + "'"
+    if ($null -eq $Value) {
+        return 'NULL'
+    }
+
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function ConvertTo-SqlUuidList {
+    param([string[]]$Values)
+    (@($Values | ForEach-Object { "$(ConvertTo-SqlLiteral $_)::uuid" }) -join ', ')
+}
+
+function ConvertTo-SqlTextList {
+    param([string[]]$Values)
+    (@($Values | ForEach-Object { ConvertTo-SqlLiteral $_ }) -join ', ')
+}
+
+function New-SyntheticAgents {
+    param(
+        [int]$Count,
+        [string]$RunId
+    )
+
+    $agents = @()
+    for ($index = 1; $index -le $Count; $index++) {
+        $agents += [pscustomobject]@{
+            Uuid = [guid]::NewGuid().ToString()
+            Name = ('perf-{0}-{1:d4}' -f $RunId, $index)
+        }
+    }
+
+    return $agents
+}
+
+function Register-SyntheticAgents {
+    param(
+        [string]$Database,
+        [object[]]$Agents,
+        [string]$ClientIdPrefix
+    )
+
+    if ($Agents.Count -eq 0) {
+        return
+    }
+
+    $values = @($Agents | ForEach-Object {
+        $clientId = Get-AgentStyleClientId -AgentUuid $_.Uuid -ClientIdPrefix $ClientIdPrefix
+        "($(ConvertTo-SqlLiteral $_.Uuid)::uuid, $(ConvertTo-SqlLiteral $_.Name), 'virtual', true, 'idle', $(ConvertTo-SqlLiteral $clientId))"
+    })
+
+    $sql = @"
+INSERT INTO agents (uuid, name, type, is_active, status, mqtt_client_id)
+VALUES
+  $($values -join ",`n  ")
+ON CONFLICT (uuid) DO NOTHING;
+"@
+
+    Invoke-CnpgQuery -Database $Database -Sql $sql | Out-Null
+}
+
+function Remove-SyntheticTestData {
+    param(
+        [string]$Database,
+        [object[]]$Agents,
+        [bool]$RemoveAgentRows
+    )
+
+    if ($Agents.Count -eq 0) {
+        return
+    }
+
+    $uuids = @($Agents | ForEach-Object { $_.Uuid } | Select-Object -Unique)
+    $uuidList = ConvertTo-SqlUuidList -Values $uuids
+    $textList = ConvertTo-SqlTextList -Values $uuids
+
+    $deleteAgentRowsSql = if ($RemoveAgentRows) {
+        "DELETE FROM agents WHERE uuid IN ($uuidList);"
+    } else {
+        ''
+    }
+
+    $sql = @"
+DELETE FROM anomaly_events WHERE agent_uuid IN ($textList);
+DELETE FROM readings WHERE agent_uuid IN ($uuidList);
+$deleteAgentRowsSql
+"@
+
+    Invoke-CnpgQuery -Database $Database -Sql $sql | Out-Null
+}
+
+function Read-MqttPublisherMessage {
+    param(
+        [pscustomobject]$Publisher,
+        [string]$ExpectedRequestId,
+        [string]$Phase
+    )
+
+    while ($true) {
+        $line = $Publisher.Process.StandardOutput.ReadLine()
+        if ($null -eq $line) {
+            $stderr = $Publisher.Process.StandardError.ReadToEnd()
+            throw "MQTT publisher helper exited during $Phase. $stderr"
+        }
+
+        $message = $line | ConvertFrom-Json
+        if ($message.type -eq 'log') {
+            $color = switch ($message.level) {
+                'error' { 'Red' }
+                'warn' { 'Yellow' }
+                default { 'DarkGray' }
+            }
+
+            Write-Host ("[publisher] {0} ({1})" -f $message.message, $message.clientId) -ForegroundColor $color
+            continue
+        }
+
+        if ($message.type -eq 'ready') {
+            if ($ExpectedRequestId) {
+                continue
+            }
+
+            return $message
+        }
+
+        if ($message.type -eq 'response') {
+            if ($ExpectedRequestId -and $message.requestId -ne $ExpectedRequestId) {
+                continue
+            }
+
+            if (-not $message.ok) {
+                throw "MQTT publisher helper $Phase failed: $($message.error)"
+            }
+
+            return $message
+        }
+    }
+}
+
+function Start-MqttPublisherProcess {
+    param(
+        [string]$BrokerHost,
+        [int]$Port,
+        [bool]$UseTls,
+        [bool]$InsecureTls,
+        [string]$Username,
+        [string]$Password,
+        [bool]$CleanSession,
+        [int]$KeepAliveSec,
+        [int]$ReconnectPeriodMs,
+        [int]$ConnectTimeoutMs,
+        [object[]]$Agents,
+        [string]$ClientIdPrefix
+    )
+
+    $helperPath = Join-Path $PSScriptRoot 'mqtt-persistent-publisher.cjs'
+    $brokerScheme = if ($UseTls) { 'mqtts' } else { 'mqtt' }
+    $config = [ordered]@{
+        brokerUrl = "${brokerScheme}://$BrokerHost`:$Port"
+        username = $Username
+        password = $Password
+        cleanSession = $CleanSession
+        keepAlive = $KeepAliveSec
+        reconnectPeriod = $ReconnectPeriodMs
+        connectTimeout = $ConnectTimeoutMs
+        rejectUnauthorized = -not $InsecureTls
+        agents = @($Agents | ForEach-Object {
+            [ordered]@{
+                agentUuid = $_.Uuid
+                clientId = Get-AgentStyleClientId -AgentUuid $_.Uuid -ClientIdPrefix $ClientIdPrefix
+                topic = $_.Topic
+            }
+        })
+    }
+
+    $configJson = $config | ConvertTo-Json -Depth 10 -Compress
+    $configBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($configJson))
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'node'
+    $startInfo.ArgumentList.Add($helperPath)
+    $startInfo.ArgumentList.Add('--config')
+    $startInfo.ArgumentList.Add($configBase64)
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.WorkingDirectory = (Split-Path $helperPath -Parent)
+
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $process) {
+        throw 'Failed to start MQTT publisher helper process'
+    }
+
+    $publisher = [pscustomobject]@{
+        Process = $process
+        Writer = $process.StandardInput
+        IsStopped = $false
+    }
+
+    $ready = Read-MqttPublisherMessage -Publisher $publisher -ExpectedRequestId '' -Phase 'startup'
+    Write-Host ("Publisher helper ready with {0} persistent client(s)" -f $ready.clientCount) -ForegroundColor DarkGray
+    return $publisher
+}
+
+function Invoke-MqttPublisherCommand {
+    param(
+        [pscustomobject]$Publisher,
+        [string]$Command,
+        [object]$Payload
+    )
+
+    $requestId = New-RequestId
+    $commandPayload = [ordered]@{
+        command = $Command
+        requestId = $requestId
+    }
+
+    if ($Payload) {
+        foreach ($property in $Payload.PSObject.Properties) {
+            $commandPayload[$property.Name] = $property.Value
+        }
+    }
+
+    $Publisher.Writer.WriteLine(($commandPayload | ConvertTo-Json -Depth 20 -Compress))
+    $Publisher.Writer.Flush()
+    Read-MqttPublisherMessage -Publisher $Publisher -ExpectedRequestId $requestId -Phase $Command
+}
+
+function Stop-MqttPublisherProcess {
+    param([pscustomobject]$Publisher)
+
+    if ($null -eq $Publisher) {
+        return
+    }
+
+    if ($Publisher.IsStopped) {
+        return
+    }
+
+    $Publisher.IsStopped = $true
+
+    try {
+        if (-not $Publisher.Process.HasExited) {
+            Invoke-MqttPublisherCommand -Publisher $Publisher -Command 'shutdown' -Payload ([pscustomobject]@{}) | Out-Null
+        }
+    } finally {
+        try {
+            $Publisher.Writer.Dispose()
+        } catch {
+        }
+
+        try {
+            if (-not $Publisher.Process.HasExited) {
+                $Publisher.Process.WaitForExit(5000) | Out-Null
+            }
+        } catch {
+        }
+
+        try {
+            $Publisher.Process.Dispose()
+        } catch {
+        }
+    }
 }
 
 function Get-PrometheusGaugeValue {
@@ -573,51 +951,30 @@ function Flush-AllBatchesParallel {
     param(
         [hashtable]$PendingBatches,
         [hashtable]$Topics,
-        [string]$User,
-        [string]$Pass,
-        [string]$BrokerHost,
-        [int]$Port,
-        [bool]$UseTls,
-        [bool]$InsecureTls,
-        [string]$PodName,
-        [string]$SecretNamespace
+        [pscustomobject]$Publisher
     )
 
     $batches = @($PendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 } | ForEach-Object {
-        [pscustomobject]@{ Topic = $Topics[$_.Key]; Lines = $_.Value.ToArray() }
+        [pscustomobject]@{ AgentUuid = $_.Key; Topic = $Topics[$_.Key]; Lines = $_.Value.ToArray() }
         $_.Value.Clear()
     })
     if ($batches.Count -eq 0) { return }
 
-    $quotedUser = ConvertTo-PosixSingleQuoted $User
-    $quotedPass = ConvertTo-PosixSingleQuoted $Pass
-    $pod = $PodName
-    $ns = $SecretNamespace
-    $brokerHost = $BrokerHost
-    $port = $Port
-    $useTls = $UseTls
-    $insecureTls = $InsecureTls
+    $payload = [pscustomobject]@{
+        batches = @($batches | ForEach-Object {
+            [ordered]@{
+                agentUuid = $_.AgentUuid
+                topic = $_.Topic
+                payload = (@{
+                    protocol  = 'mqtt'
+                    timestamp = (Get-Date).ToUniversalTime().ToString('o')
+                    messages  = $_.Lines
+                } | ConvertTo-Json -Depth 20 -Compress)
+            }
+        })
+    }
 
-    $batches | ForEach-Object -Parallel {
-        $topic = $_.Topic
-        $batchPayload = @{
-            protocol  = 'mqtt'
-            timestamp = (Get-Date).ToUniversalTime().ToString('o')
-            messages  = $_.Lines
-        } | ConvertTo-Json -Depth 20 -Compress
-
-        $topicQuoted = "'" + $topic.Replace("'", "'\''") + "'"
-        $tlsFlags = if ($using:useTls) {
-            if ($using:insecureTls) { '--insecure' } else { '' }
-        } else {
-            ''
-        }
-        $command = "timeout 30 mosquitto_pub --host $using:brokerHost --port $using:port --username $using:quotedUser --pw $using:quotedPass --topic $topicQuoted --qos 1 $tlsFlags -s"
-        $result = $batchPayload | kubectl exec -i -n $using:ns $using:pod -- sh -lc $command 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "mosquitto_pub failed (topic=$topic): $result"
-        }
-    } -ThrottleLimit 20
+    Invoke-MqttPublisherCommand -Publisher $Publisher -Command 'publish' -Payload $payload | Out-Null
 }
 
 if (-not $TenantId) {
@@ -645,11 +1002,24 @@ if (-not $MqttPassword) {
     $MqttPassword = Get-SecretValue -SecretNamespace $Namespace -SecretName $MqttSecretName -Key 'password'
 }
 
-if (-not $MqttPodName) {
-    $MqttPodName = Get-MosquittoPodName -SecretNamespace $Namespace
+if ($RegisterSyntheticAgents -and -not $UseSyntheticAgents) {
+    throw 'RegisterSyntheticAgents requires UseSyntheticAgents'
+}
+
+if ($DisposeAfterRun -and -not $UseSyntheticAgents) {
+    throw 'DisposeAfterRun is only supported with UseSyntheticAgents to avoid deleting real agent data'
+}
+
+if ($UseSyntheticAgents -and [string]::IsNullOrWhiteSpace($TestRunId)) {
+    $TestRunId = Get-Date -Format 'yyyyMMddHHmmss'
 }
 
 $encodedTenant = Encode-TenantIdForTopic $TenantId
+$resolvedCnpgPodName = Get-CnpgWritablePodName
+
+$parsedAgents = @()
+$selectedAgents = @()
+$syntheticAgentsRegistered = $false
 
 $agentRows = Invoke-CnpgQuery -Database $DatabaseName -Sql @"
 SELECT uuid::text, COALESCE(name, 'agent-' || LEFT(uuid::text, 8))
@@ -659,7 +1029,6 @@ ORDER BY modified_at DESC NULLS LAST, created_at DESC
 LIMIT $AgentCount;
 "@
 
-$parsedAgents = @()
 if ($agentRows) {
     foreach ($row in ($agentRows -split "`n" | Where-Object { $_.Trim() })) {
         $parts = $row.Split('|', 2)
@@ -672,13 +1041,20 @@ if ($agentRows) {
     }
 }
 
-if ($parsedAgents.Count -eq 0) {
-    throw "No active agents found in database '$DatabaseName' via CNPG pod '$CnpgPodName'"
-}
+if ($UseSyntheticAgents) {
+    $selectedAgents = @(New-SyntheticAgents -Count $AgentCount -RunId $TestRunId)
+    if ($RegisterSyntheticAgents) {
+        Register-SyntheticAgents -Database $DatabaseName -Agents $selectedAgents -ClientIdPrefix $MqttClientIdPrefix
+        $syntheticAgentsRegistered = $true
+    }
+} else {
+    if ($parsedAgents.Count -eq 0) {
+        throw "No active agents found in database '$DatabaseName' via CNPG pod '$CnpgPodName'"
+    }
 
-$selectedAgents = @()
-for ($i = 0; $i -lt $AgentCount; $i++) {
-    $selectedAgents += $parsedAgents[$i % $parsedAgents.Count]
+    for ($i = 0; $i -lt $AgentCount; $i++) {
+        $selectedAgents += $parsedAgents[$i % $parsedAgents.Count]
+    }
 }
 
 $agentTopics = @{}
@@ -688,13 +1064,27 @@ foreach ($agent in ($selectedAgents | Group-Object -Property Uuid | ForEach-Obje
     $agentTopics[$agent.Uuid] = Get-DeviceTopic -EncodedTenant $encodedTenant -EncodedAgent (Encode-Uuid $agent.Uuid)
 }
 
+$publisherAgents = @($selectedAgents | Group-Object -Property Uuid | ForEach-Object {
+    $agent = $_.Group[0]
+    [pscustomobject]@{
+        Uuid = $agent.Uuid
+        Name = $agent.Name
+        Topic = $agentTopics[$agent.Uuid]
+    }
+})
+
+$mqttPublisher = $null
+
 Write-Host ''
 Write-Host '=== Iotistica Cloud MQTT Load Test ===' -ForegroundColor Cyan
 Write-Host "  Namespace   : $Namespace"
-Write-Host "  CNPG        : $CnpgNamespace / $CnpgPodName / $DatabaseName"
-Write-Host "  Publisher   : $MqttPodName (exec pod in namespace $Namespace)"
+Write-Host "  CNPG        : $CnpgNamespace / $resolvedCnpgPodName / $DatabaseName"
+Write-Host "  Publisher   : local persistent mqtt.js clients ($($publisherAgents.Count) simulated agents)"
+Write-Host "  Agent mode  : $(if ($UseSyntheticAgents) { if ($RegisterSyntheticAgents) { 'synthetic + registered in DB' } else { 'synthetic only (no DB rows)' } } else { 'reuse active DB agents' })"
 Write-Host "  Broker      : $(if ($MqttUseTls) { 'mqtts' } else { 'mqtt' })://$MqttHost`:$MqttPort"
 Write-Host "  MQTT user   : $MqttUsername"
+Write-Host "  Client IDs  : $(if ([string]::IsNullOrWhiteSpace($MqttClientIdPrefix)) { 'device_<agentUuid>' } else { "$MqttClientIdPrefix`_<agentUuid>" })"
+Write-Host "  Session     : clean=$MqttCleanSession keepalive=${MqttKeepAliveSec}s reconnect=${MqttReconnectPeriodMs}ms timeout=${MqttConnectTimeoutMs}ms"
 Write-Host "  Messages    : $MessageCount"
 Write-Host "  Agents      : $AgentCount  ($($agentTopics.Count) unique topics; $($parsedAgents.Count) discovered)"
 Write-Host "  Metrics/msg : $MetricsPerMessage  ($($MetricsPerMessage * $MessageCount) total readings)"
@@ -704,122 +1094,138 @@ Write-Host "  Tenant      : $TenantId  (encoded: $encodedTenant)"
 $sampleAgent = $selectedAgents[0]
 $sampleTopic = $agentTopics[$sampleAgent.Uuid]
 Write-Host "  Topic fmt   : $($sampleTopic -replace (Encode-Uuid $sampleAgent.Uuid), '{encodedAgentUuid}')  (e.g. $sampleTopic)"
+if ($UseSyntheticAgents) {
+    Write-Host "  Synthetic run: $TestRunId" -ForegroundColor DarkGray
+}
 $healthPollDesc = 'direct ingestion scrape only'
 Write-Host "  Health poll : every ${PollIntervalSec}s — $healthPollDesc"
 Write-Host ''
 
-$baselineHealth = Get-IngestionSnapshot
+try {
+    $baselineHealth = Get-IngestionSnapshot
 
-Write-Host ("{0,8} | {1,27} | {2,12} | {3,18} | {4,24} | {5,22}" -f `
-    'Time', 'Msgs/Total  Readings/Total', 'rate/stream', 'lag/pending/workers', 'procΔ/insΔ/dropΔ', 'dwellP95/batchP95')
-Write-Host ('-' * 130)
+    Write-Host ("{0,8} | {1,27} | {2,12} | {3,18} | {4,24} | {5,22}" -f `
+        'Time', 'Msgs/Total  Readings/Total', 'rate/stream', 'lag/pending/workers', 'procΔ/insΔ/dropΔ', 'dwellP95/batchP95')
+    Write-Host ('-' * 130)
 
-$batchSize = 200
-$roundSize = $batchSize * $AgentCount
-Write-Host "  Flush size  : $roundSize msgs ($batchSize per agent x $AgentCount agents)" -ForegroundColor DarkGray
-$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-$lastPollAt = 0.0
-$delayMs = if ($RatePerSecond -gt 0) { [int](1000.0 / $RatePerSecond) } else { 0 }
-$injected = 0
-$totalPending = 0
-$runBaseTimestamp = (Get-Date).ToUniversalTime()
+    $batchSize = 200
+    $roundSize = $batchSize * $AgentCount
+    Write-Host "  Flush size  : $roundSize msgs ($batchSize per agent x $AgentCount agents)" -ForegroundColor DarkGray
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $lastPollAt = 0.0
+    $delayMs = if ($RatePerSecond -gt 0) { [int](1000.0 / $RatePerSecond) } else { 0 }
+    $injected = 0
+    $totalPending = 0
+    $runBaseTimestamp = (Get-Date).ToUniversalTime()
 
-$pendingBatches = @{}
-foreach ($uuid in ($selectedAgents.Uuid | Select-Object -Unique)) {
-    $pendingBatches[$uuid] = [System.Collections.Generic.List[string]]::new()
-}
+    $pendingBatches = @{}
+    foreach ($uuid in ($selectedAgents.Uuid | Select-Object -Unique)) {
+        $pendingBatches[$uuid] = [System.Collections.Generic.List[string]]::new()
+    }
 
-for ($i = 0; $i -lt $MessageCount; $i++) {
-    $agent = $selectedAgents[$i % $AgentCount]
-    $payload = Build-EndpointsPayload -AgentUuid $agent.Uuid -AgentName $agent.Name -MetricCount $MetricsPerMessage -BaseTimestamp $runBaseTimestamp -Sequence $i
-    $json = $payload | ConvertTo-Json -Depth 10 -Compress
-    $pendingBatches[$agent.Uuid].Add($json)
-    $injected++
-    $totalPending++
+    $mqttPublisher = Start-MqttPublisherProcess -BrokerHost $MqttHost -Port $MqttPort -UseTls $MqttUseTls -InsecureTls $MqttInsecureTls -Username $MqttUsername -Password $MqttPassword -CleanSession $MqttCleanSession -KeepAliveSec $MqttKeepAliveSec -ReconnectPeriodMs $MqttReconnectPeriodMs -ConnectTimeoutMs $MqttConnectTimeoutMs -Agents $publisherAgents -ClientIdPrefix $MqttClientIdPrefix
 
-    if ($totalPending -ge $roundSize) {
-        $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
-        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'flush start'
-        Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -User $MqttUsername -Pass $MqttPassword -BrokerHost $MqttHost -Port $MqttPort -UseTls $MqttUseTls -InsecureTls $MqttInsecureTls -PodName $MqttPodName -SecretNamespace $Namespace
-        $totalPending = 0
+    for ($i = 0; $i -lt $MessageCount; $i++) {
+        $agent = $selectedAgents[$i % $AgentCount]
+        $payload = Build-EndpointsPayload -AgentUuid $agent.Uuid -AgentName $agent.Name -MetricCount $MetricsPerMessage -BaseTimestamp $runBaseTimestamp -Sequence $i
+        $json = $payload | ConvertTo-Json -Depth 10 -Compress
+        $pendingBatches[$agent.Uuid].Add($json)
+        $injected++
+        $totalPending++
+
+        if ($totalPending -ge $roundSize) {
+            $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
+            Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'flush start'
+            Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -Publisher $mqttPublisher
+            $totalPending = 0
+
+            $elapsedSec = $stopwatch.Elapsed.TotalSeconds
+            Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'flush done'
+
+            if (($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
+                $health = Get-IngestionSnapshot
+                Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
+                $lastPollAt = $elapsedSec
+            }
+        }
+
+        if ($delayMs -gt 0) { Start-Sleep -Milliseconds $delayMs }
 
         $elapsedSec = $stopwatch.Elapsed.TotalSeconds
-        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'flush done'
-
-        if (($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
+        if ($totalPending -eq 0 -and ($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
             $health = Get-IngestionSnapshot
             Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
             $lastPollAt = $elapsedSec
         }
     }
 
-    if ($delayMs -gt 0) { Start-Sleep -Milliseconds $delayMs }
-
-    $elapsedSec = $stopwatch.Elapsed.TotalSeconds
-    if ($totalPending -eq 0 -and ($elapsedSec - $lastPollAt) -ge $PollIntervalSec) {
-        $health = Get-IngestionSnapshot
-        Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $elapsedSec
-        $lastPollAt = $elapsedSec
+    if ($totalPending -gt 0) {
+        $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
+        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'final flush start'
     }
-}
+    Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -Publisher $mqttPublisher
 
-if ($totalPending -gt 0) {
-    $flushTopicCount = @($pendingBatches.GetEnumerator() | Where-Object { $_.Value.Count -gt 0 }).Count
-    Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages $totalPending -TopicCount $flushTopicCount -Phase 'final flush start'
-}
-Flush-AllBatchesParallel -PendingBatches $pendingBatches -Topics $agentTopics -User $MqttUsername -Pass $MqttPassword -BrokerHost $MqttHost -Port $MqttPort -UseTls $MqttUseTls -InsecureTls $MqttInsecureTls -PodName $MqttPodName -SecretNamespace $Namespace
+    if ($totalPending -gt 0) {
+        Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'final flush done'
+    }
 
-if ($totalPending -gt 0) {
-    Write-FlushRow -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec $stopwatch.Elapsed.TotalSeconds -PendingMessages 0 -TopicCount $flushTopicCount -Phase 'final flush done'
-}
+    $stopwatch.Stop()
+    $totalSec = $stopwatch.Elapsed.TotalSeconds
+    $actualRate = [math]::Round($MessageCount / $totalSec, 1)
+    $totalReadings = $MessageCount * $MetricsPerMessage
 
-$stopwatch.Stop()
-$totalSec = $stopwatch.Elapsed.TotalSeconds
-$actualRate = [math]::Round($MessageCount / $totalSec, 1)
-$totalReadings = $MessageCount * $MetricsPerMessage
+    Write-Host ''
+    Write-Host '=== Injection complete ===' -ForegroundColor Cyan
+    Write-Host ("  Injected : {0} messages ({1} readings) in {2:F2}s = {3} msg/s actual" -f `
+        $MessageCount, $totalReadings, $totalSec, $actualRate)
 
-Write-Host ''
-Write-Host '=== Injection complete ===' -ForegroundColor Cyan
-Write-Host ("  Injected : {0} messages ({1} readings) in {2:F2}s = {3} msg/s actual" -f `
-    $MessageCount, $totalReadings, $totalSec, $actualRate)
+    Write-Host ''
+    Write-Host 'Waiting for worker to drain stream (lag=0, pending=0)...' -ForegroundColor Yellow
+    $drainTimeout = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($drainTimeout.Elapsed.TotalSeconds -lt 120) {
+        Start-Sleep -Seconds $PollIntervalSec
+        $health = Get-IngestionSnapshot
+        Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec ($totalSec + $drainTimeout.Elapsed.TotalSeconds)
 
-Write-Host ''
-Write-Host 'Waiting for worker to drain stream (lag=0, pending=0)...' -ForegroundColor Yellow
-$drainTimeout = [System.Diagnostics.Stopwatch]::StartNew()
-while ($drainTimeout.Elapsed.TotalSeconds -lt 120) {
-    Start-Sleep -Seconds $PollIntervalSec
-    $health = Get-IngestionSnapshot
-    Write-HealthRow -Health $health -BaselineHealth $baselineHealth -Injected $injected -Total $MessageCount -MetricsPerMessage $MetricsPerMessage -ElapsedSec ($totalSec + $drainTimeout.Elapsed.TotalSeconds)
-
-    if ($health) {
-        $lag = [int](Get-HealthValue -Health $health -Names @('workerLag', 'lagMs', 'maxDwellMs') -Default -1)
-        $pending = [int](Get-HealthValue -Health $health -Names @('pendingMessages') -Default -1)
-        if ($lag -eq 0 -and $pending -eq 0) {
-            Write-Host ''
-            Write-Host 'Worker caught up (lag=0, pending=0).' -ForegroundColor Green
-            break
+        if ($health) {
+            $lag = [int](Get-HealthValue -Health $health -Names @('workerLag', 'lagMs', 'maxDwellMs') -Default -1)
+            $pending = [int](Get-HealthValue -Health $health -Names @('pendingMessages') -Default -1)
+            if ($lag -eq 0 -and $pending -eq 0) {
+                Write-Host ''
+                Write-Host 'Worker caught up (lag=0, pending=0).' -ForegroundColor Green
+                break
+            }
         }
     }
-}
 
-Write-Host ''
-Write-Host '=== Final Stats ===' -ForegroundColor Cyan
-$finalHealth = Get-IngestionSnapshot
-if ($finalHealth) {
-    $processed = Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('messagesProcessed') -Default '?'
-    $inserted = Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('readingsInserted') -Default '?'
-    $dropped = Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('messagesDropped') -Default '?'
-    $lag = Get-HealthValue -Health $finalHealth -Names @('workerLag', 'lagMs', 'maxDwellMs') -Default '?'
-    $pending = Get-HealthValue -Health $finalHealth -Names @('pendingMessages') -Default '?'
-    $dlq = Get-HealthValue -Health $finalHealth -Names @('dlqLength') -Default '?'
-    Write-Host ("  Consumer lag    : {0}  pending: {1}" -f $lag, $pending)
-    Write-Host ("  Processed (run) : {0}" -f $processed)
-    Write-Host ("  Readings (run)  : {0}" -f $inserted)
-    $droppedNumeric = 0
-    try { $droppedNumeric = [int]$dropped } catch { $droppedNumeric = 0 }
-    $droppedColor = if ($droppedNumeric -gt 0) { 'Red' } else { 'Green' }
-    Write-Host ("  Dropped (run)   : {0}" -f $dropped) -ForegroundColor $droppedColor
-    Write-Host ("  DLQ length      : {0}" -f $dlq)
-} else {
-    Write-Host '  Could not retrieve final health snapshot.' -ForegroundColor DarkGray
+    Write-Host ''
+    Write-Host '=== Final Stats ===' -ForegroundColor Cyan
+    $finalHealth = Get-IngestionSnapshot
+    if ($finalHealth) {
+        $processed = Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('messagesProcessed') -Default '?'
+        $inserted = Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('readingsInserted') -Default '?'
+        $dropped = Get-HealthDeltaValue -Health $finalHealth -BaselineHealth $baselineHealth -Names @('messagesDropped') -Default '?'
+        $lag = Get-HealthValue -Health $finalHealth -Names @('workerLag', 'lagMs', 'maxDwellMs') -Default '?'
+        $pending = Get-HealthValue -Health $finalHealth -Names @('pendingMessages') -Default '?'
+        $dlq = Get-HealthValue -Health $finalHealth -Names @('dlqLength') -Default '?'
+        Write-Host ("  Consumer lag    : {0}  pending: {1}" -f $lag, $pending)
+        Write-Host ("  Processed (run) : {0}" -f $processed)
+        Write-Host ("  Readings (run)  : {0}" -f $inserted)
+        $droppedNumeric = 0
+        try { $droppedNumeric = [int]$dropped } catch { $droppedNumeric = 0 }
+        $droppedColor = if ($droppedNumeric -gt 0) { 'Red' } else { 'Green' }
+        Write-Host ("  Dropped (run)   : {0}" -f $dropped) -ForegroundColor $droppedColor
+        Write-Host ("  DLQ length      : {0}" -f $dlq)
+    } else {
+        Write-Host '  Could not retrieve final health snapshot.' -ForegroundColor DarkGray
+    }
+} finally {
+    Stop-MqttPublisherProcess -Publisher $mqttPublisher
+
+    if ($DisposeAfterRun -and $UseSyntheticAgents) {
+        Write-Host ''
+        Write-Host 'Disposing synthetic test data...' -ForegroundColor Yellow
+        Remove-SyntheticTestData -Database $DatabaseName -Agents $selectedAgents -RemoveAgentRows $syntheticAgentsRegistered
+        Write-Host 'Synthetic test data removed.' -ForegroundColor Green
+    }
 }
