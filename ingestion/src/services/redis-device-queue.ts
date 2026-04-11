@@ -355,19 +355,7 @@ export class RedisDeviceQueue {
         // Using XINFO GROUPS is more accurate than XLEN because XLEN counts
         // already-processed entries that haven't been trimmed yet (e.g. after
         // a load test that bypassed the producer's MAXLEN enforcement).
-        let consumerGroupLag = streamLen; // pessimistic fallback
-        try {
-          const rawGroups = await this.redisConsumer.xinfo('GROUPS', this.streamKey) as unknown[];
-          for (const groupData of rawGroups) {
-            const pairs = groupData as (string | number)[];
-            const nameIdx = pairs.indexOf('name');
-            if (nameIdx >= 0 && pairs[nameIdx + 1] === this.consumerGroup) {
-              const lagIdx = pairs.indexOf('lag');
-              if (lagIdx >= 0) consumerGroupLag = pairs[lagIdx + 1] as number;
-              break;
-            }
-          }
-        } catch { /* XINFO GROUPS unsupported or stream absent — keep XLEN fallback */ }
+        const consumerGroupLag = await this.getConsumerGroupLag(streamLen);
         metrics.workerLag = consumerGroupLag;
 
         // Auto-trim: when the queue is fully drained, keep only a small retained tail
@@ -425,6 +413,32 @@ export class RedisDeviceQueue {
     // Run immediately on start, then on interval
     collect();
     this.healthCollector = setInterval(collect, collectInterval);
+  }
+
+  private async getConsumerGroupLag(streamLen: number): Promise<number> {
+    let consumerGroupLag = streamLen;
+
+    try {
+      const rawGroups = await this.redisConsumer.xinfo('GROUPS', this.streamKey) as unknown[];
+      for (const groupData of rawGroups) {
+        const pairs = groupData as (string | number)[];
+        const nameIdx = pairs.indexOf('name');
+        if (nameIdx >= 0 && pairs[nameIdx + 1] === this.consumerGroup) {
+          const lagIdx = pairs.indexOf('lag');
+          if (lagIdx >= 0) {
+            const lagValue = Number(pairs[lagIdx + 1]);
+            if (!Number.isNaN(lagValue)) {
+              consumerGroupLag = lagValue;
+            }
+          }
+          break;
+        }
+      }
+    } catch {
+      // XINFO GROUPS unsupported or stream absent — keep XLEN fallback.
+    }
+
+    return consumerGroupLag;
   }
 
   async getIngestionHealth(): Promise<{
@@ -487,6 +501,7 @@ export class RedisDeviceQueue {
       const pending = await this.redisConsumer.xpending(this.streamKey, this.consumerGroup);
 
       const length = info[1] as number;
+      const workerLag = await this.getConsumerGroupLag(length);
       const firstEntry = info[11] as string[];
       const lastEntry = info[13] as string[];
 
@@ -516,7 +531,7 @@ export class RedisDeviceQueue {
       return {
         // Stream state
         streamLength: length,
-        workerLag: length,
+        workerLag,
         firstEntryId: firstEntry ? firstEntry[0] : null,
         lastEntryId: lastEntry ? lastEntry[0] : null,
         pendingMessages: pending[0] as number,

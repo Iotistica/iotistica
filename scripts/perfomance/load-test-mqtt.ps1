@@ -432,16 +432,13 @@ function Build-EndpointsPayload {
         @{ metric=$name; value=$value; unit=$units[$name]; quality="good"; timestamp=$timestamp; protocol="mqtt" }
     }
 
-    # Payload shape consumed by MQTT handler (handleEndpointsData → handleDeviceData)
+    # Canonical agent-style endpoint message: top-level readings payload.
     return @{
+        protocol   = "mqtt"
+        deviceUuid = $AgentUuid
         deviceName = $AgentName
         timestamp  = $timestamp
-        data       = @{
-            protocol   = "mqtt"
-            readings   = $readings
-            deviceName = $AgentName
-            deviceUuid = $AgentUuid
-        }
+        readings   = $readings
     }
 }
 

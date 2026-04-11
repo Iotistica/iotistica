@@ -1,7 +1,9 @@
+import { getPoolStats } from '../db/connection';
 import { metrics } from './metrics';
 
 export function renderIngestionPrometheusMetrics(): string {
   const lines: string[] = [];
+  const dbPool = getPoolStats();
 
   lines.push('# HELP iotistic_ingestion_stream_length Current number of messages in the ingestion stream backlog');
   lines.push('# TYPE iotistic_ingestion_stream_length gauge');
@@ -59,9 +61,33 @@ export function renderIngestionPrometheusMetrics(): string {
   lines.push('# TYPE iotistic_ingestion_redis_memory_max_bytes gauge');
   lines.push(`iotistic_ingestion_redis_memory_max_bytes ${metrics.redisMemoryMaxBytes}`);
   lines.push('');
-  lines.push('# HELP iotistic_ingestion_batch_latency_p95_ms P95 Redis pipeline flush duration (ms)');
+  lines.push('# HELP iotistic_ingestion_batch_latency_p95_ms P95 producer enqueue duration into the Redis ingestion pipeline (ms)');
   lines.push('# TYPE iotistic_ingestion_batch_latency_p95_ms gauge');
   lines.push(`iotistic_ingestion_batch_latency_p95_ms ${metrics.getBatchLatencyP95()}`);
+  lines.push('');
+  lines.push('# HELP iotistic_ingestion_db_pool_total_connections Total PostgreSQL pool connections currently tracked by the ingestion process');
+  lines.push('# TYPE iotistic_ingestion_db_pool_total_connections gauge');
+  lines.push(`iotistic_ingestion_db_pool_total_connections ${dbPool.total}`);
+  lines.push('');
+  lines.push('# HELP iotistic_ingestion_db_pool_idle_connections Idle PostgreSQL pool connections currently available');
+  lines.push('# TYPE iotistic_ingestion_db_pool_idle_connections gauge');
+  lines.push(`iotistic_ingestion_db_pool_idle_connections ${dbPool.idle}`);
+  lines.push('');
+  lines.push('# HELP iotistic_ingestion_db_pool_active_connections Active PostgreSQL pool connections currently in use');
+  lines.push('# TYPE iotistic_ingestion_db_pool_active_connections gauge');
+  lines.push(`iotistic_ingestion_db_pool_active_connections ${dbPool.active}`);
+  lines.push('');
+  lines.push('# HELP iotistic_ingestion_db_pool_waiting_requests PostgreSQL client requests currently waiting on a pool connection');
+  lines.push('# TYPE iotistic_ingestion_db_pool_waiting_requests gauge');
+  lines.push(`iotistic_ingestion_db_pool_waiting_requests ${dbPool.waiting}`);
+  lines.push('');
+  lines.push('# HELP iotistic_ingestion_db_pool_saturation_pct PostgreSQL pool active connection utilization as a percentage of configured max');
+  lines.push('# TYPE iotistic_ingestion_db_pool_saturation_pct gauge');
+  lines.push(`iotistic_ingestion_db_pool_saturation_pct ${dbPool.saturationPct}`);
+  lines.push('');
+  lines.push('# HELP iotistic_ingestion_db_pool_configured_max Configured maximum PostgreSQL pool size for the ingestion process');
+  lines.push('# TYPE iotistic_ingestion_db_pool_configured_max gauge');
+  lines.push(`iotistic_ingestion_db_pool_configured_max ${dbPool.configuredMax}`);
   lines.push('');
   lines.push('# HELP iotistic_ingestion_insert_latency_p95_ms P95 TimescaleDB batch insert duration (ms)');
   lines.push('# TYPE iotistic_ingestion_insert_latency_p95_ms gauge');

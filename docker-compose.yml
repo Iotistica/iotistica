@@ -195,7 +195,7 @@ services:
         environment:
             - PORT=${INGESTION_PORT:-3003}
             - NODE_ENV=${NODE_ENV:-development}
-            - LOG_LEVEL=${LOG_LEVEL:-debug}
+            - LOG_LEVEL=info
             - INGESTION_PROFILE=${INGESTION_PROFILE:-balanced}
             - REDIS_INGESTION_STREAM_KEY=${REDIS_INGESTION_STREAM_KEY:-tenant:{73eddd385ce8}:agent:devices:ingestion}
             - DB_HOST=${DB_HOST:-postgres}

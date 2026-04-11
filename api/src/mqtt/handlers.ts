@@ -66,14 +66,6 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
   try {
     const startTime = Date.now();
     const resolvedDeviceName = data.deviceName.trim() || 'unknown';
-
-    const unwrapQueuedPayload = (message: any) => {
-      if (message && typeof message === 'object' && message.data && typeof message.data === 'object') {
-        return message.data;
-      }
-
-      return message;
-    };
     
     // Check if this is a batch (from Sensor Publish feature)
     const isBatch = data.data && Array.isArray((data.data as any).messages);
@@ -81,7 +73,7 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
     if (isBatch) {
       // Process batch of messages
       const batch = data.data as any;
-      const messages = batch.messages as (string | object)[];
+      const messages = batch.messages as object[];
       
       logger.info('Handling device batch', {
         deviceUuid: data.deviceUuid.substring(0, 8),
@@ -89,29 +81,28 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
         count: messages.length,
       });
       
-      // Transform all messages to device queue entry format
-      // Handle both JSON strings (legacy) and objects (current format)
+      // Transform canonical agent-style batch messages into device queue entries.
+      // Each message is a direct payload object with top-level readings and timestamp.
       const readings = messages
-        .map((messageData: string | object) => {
-          try {
-            // If it's a string, parse it; if it's already an object, use it directly
-            const message = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
-            const queuedPayload = unwrapQueuedPayload(message);
-
-            return {
-              deviceUuid: data.deviceUuid,
-              deviceName: message.deviceName?.trim?.() || queuedPayload.deviceName?.trim?.() || resolvedDeviceName,
-              data: queuedPayload,
-              timestamp: message.timestamp || batch.timestamp || new Date().toISOString(),
-              metadata: {
-                ...(data.metadata || {}),
-                ...(batch.protocol ? { protocol: batch.protocol } : {}),
-              }
-            };
-          } catch (parseError) {
-            logger.error(`Failed to parse message in batch: ${messageData}`, parseError);
+        .map((message: any) => {
+          if (!message || typeof message !== 'object') {
+            logger.error('Ignoring invalid batch message: expected object payload', {
+              deviceUuid: data.deviceUuid.substring(0, 8),
+              payloadType: typeof message,
+            });
             return null;
           }
+
+          return {
+            deviceUuid: data.deviceUuid,
+            deviceName: message.deviceName?.trim?.() || resolvedDeviceName,
+            data: message,
+            timestamp: message.timestamp || batch.timestamp || new Date().toISOString(),
+            metadata: {
+              ...(data.metadata || {}),
+              ...(batch.protocol ? { protocol: batch.protocol } : {}),
+            }
+          };
         })
         .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       
@@ -129,12 +120,11 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
         durationMs: duration
       });
     } else {
-      const queuedPayload = unwrapQueuedPayload(data.data);
       // Single message
       const outcome = await redisDeviceQueue.add([{
         deviceUuid: data.deviceUuid,
         deviceName: resolvedDeviceName,
-        data: queuedPayload,
+        data: data.data,
         timestamp: data.timestamp,
         metadata: data.metadata || {}
       }]);

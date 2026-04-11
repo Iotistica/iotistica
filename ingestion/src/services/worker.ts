@@ -877,12 +877,6 @@ export class RedisQueueConsumer {
     completedAtMs: number,
     phases?: { resolveMs: number; ackMs: number },
   ): void {
-    if (!pinoLogger.isLevelEnabled('debug')) {
-      return;
-    }
-
-    const duration = completedAtMs - startTime;
-
     // Compute queue dwell time from the Redis Stream entry IDs (<unix-ms>-<sequence>).
     // maxDwellMs is the most operationally significant value: it shows whether the
     // worker is falling behind on the oldest messages in the batch.
@@ -890,6 +884,20 @@ export class RedisQueueConsumer {
     const maxDwellMs = Math.max(...dwellTimes);
     const avgDwellMs = Math.round(dwellTimes.reduce((a, b) => a + b, 0) / dwellTimes.length);
     metrics.recordDwellLatency(maxDwellMs);
+
+    const duration = completedAtMs - startTime;
+
+    logger.info('Inserted batch to DB', {
+      messages: entries.length,
+      readings: allData.length,
+      agents: new Set(allData.map(d => d.deviceUuid)).size,
+      durationMs: duration,
+      maxDwellMs,
+    });
+
+    if (!pinoLogger.isLevelEnabled('debug')) {
+      return;
+    }
 
     const compressedCount = entries.filter(e => e.isCompressed).length;
     logger.debug('Processed device data batch from Redis', {
