@@ -44,7 +44,7 @@ import { DiskSpool } from './disk-spool';
 import { FAILURE_TRACKING_KEY } from './dlq';
 import { RedisPipeline } from './pipeline';
 import { RedisQueueConsumer } from './worker';
-import { RedisQueueProducer } from './producer';
+import { RedisQueueProducer } from './stream-writer';
 import { ReadingInserter } from './reading-inserter';
 
 const DEVICE_WRITER_GROUP_SUFFIX =
