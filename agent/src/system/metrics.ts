@@ -130,9 +130,6 @@ export interface SystemMetrics {
 	// Health checks
 	is_undervolted: boolean;
 
-	// Process info
-	top_processes: ProcessInfo[];
-
 	// Networking
 	network_interfaces: NetworkInterfaceInfo[];
 
@@ -780,10 +777,6 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 	// Collect top processes only if needed (can add 1-5 seconds on slow platforms)
 	// On Windows, default to disabled unless explicitly enabled (it's extremely slow)
 	// On Linux/production, default to enabled (it's fast)
-	const isWindows = process.platform === 'win32';
-	const includeProcesses = process.env.COLLECT_TOP_PROCESSES === 'true' || 
-		(process.env.COLLECT_TOP_PROCESSES !== 'false' && !isWindows);
-	
 	const [
 		cpuUsage,
 		cpuTemp,
@@ -794,7 +787,6 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 		hostname,
 		undervolted,
 		networkInterfaces,
-		topProcesses,
 		extendedMetrics,
 	] = await Promise.all([
 		safe(() => wrapWithTiming('cpuUsage', () => getCpuUsage()), 0),
@@ -806,7 +798,6 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 		safe(() => wrapWithTiming('hostname', () => getHostname()), 'unknown'),
 		safe(() => wrapWithTiming('undervolted', () => isUndervolted()), false),
 		safe(() => wrapWithTiming('networkInterfaces', () => getNetworkInterfaces()), []),
-		includeProcesses ? safe(() => wrapWithTiming('topProcesses', () => getTopProcesses()), []) : Promise.resolve([]),
 		safe(() => wrapWithTiming('extendedMetrics', () => getExtendedMetrics()), undefined),
 	]);
 	
@@ -845,9 +836,6 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 
 		// Health
 		is_undervolted: undervolted,
-
-		// Processes
-		top_processes: topProcesses,
 
 		// Networking
 		network_interfaces: networkInterfaces,

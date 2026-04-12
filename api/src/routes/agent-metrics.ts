@@ -20,7 +20,6 @@
  */
 
 
-import { query } from '../db/connection';
 import {
   AgentModel,
   DeviceMetricsModel,
@@ -37,11 +36,6 @@ type MetricsQuerystring = {
   period?: string;
 };
 
-type ProcessHistoryQuerystring = {
-  limit?: string | number;
-  hours?: string | number;
-};
-
 type NetworkInterfaceRow = {
   name: string;
   type?: string;
@@ -53,11 +47,6 @@ type NetworkInterfaceRow = {
   virtual?: boolean;
   ssid?: string;
   signalLevel?: number;
-};
-
-type ProcessHistoryRow = {
-  top_processes: unknown;
-  recorded_at: Date;
 };
 
 function parseNumericQuery(value: string | number | undefined, fallback: number): number {
@@ -134,38 +123,6 @@ fastify.get<{ Params: AgentUuidParams; Querystring: MetricsQuerystring }>('/agen
 });
 
 /**
- * Get current top processes for device
- * GET /api/v1/agents/:uuid/processes
- */
-fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/processes', async (req, reply) => {
-  try {
-    const { uuid } = req.params;
-
-    // Get device to check if it exists and get latest processes
-    const device = await AgentModel.getByUuid(uuid);
-    if (!device) {
-      return reply.status(404).send({
-        error: 'Device not found',
-        message: `Device ${uuid} not found`
-      });
-    }
-
-    return reply.send({
-      agent_uuid: uuid,
-      top_processes: device.top_processes || [],
-      is_online: device.is_online,
-      last_updated: device.modified_at,
-    });
-  } catch (error: any) {
-    logger.error('Error getting top processes', { error: error.message, stack: error.stack });
-    return reply.status(500).send({
-      error: 'Failed to get top processes',
-      message: error.message
-    });
-  }
-});
-
-/**
  * Get network interfaces for device
  * GET /api/v1/agents/:uuid/network-interfaces
  */
@@ -232,50 +189,6 @@ fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/network-interfaces', asy
     logger.error('Error getting network interfaces', { error: error.message, stack: error.stack });
     return reply.status(500).send({
       error: 'Failed to get network interfaces',
-      message: error.message
-    });
-  }
-});
-
-/**
- * Get historical process metrics for device
- * GET /api/v1/agents/:uuid/processes/history
- */
-fastify.get<{ Params: AgentUuidParams; Querystring: ProcessHistoryQuerystring }>('/agents/:uuid/processes/history', async (req, reply) => {
-  try {
-    const { uuid } = req.params;
-    const limit = parseNumericQuery(req.query.limit, 50);
-    const hours = parseNumericQuery(req.query.hours, 24);
-
-    // Query metrics with process data
-    const result = await query<ProcessHistoryRow>(
-      `SELECT top_processes, recorded_at 
-       FROM agent_metrics 
-       WHERE agent_uuid = $1 
-         AND top_processes IS NOT NULL
-         AND recorded_at >= NOW() - INTERVAL '${hours} hours'
-       ORDER BY recorded_at DESC 
-       LIMIT $2`,
-      [uuid, limit]
-    );
-
-    // Parse JSONB data
-    const history = result.rows.map((row) => ({
-      top_processes: typeof row.top_processes === 'string' 
-        ? JSON.parse(row.top_processes) 
-        : row.top_processes,
-      recorded_at: row.recorded_at,
-    }));
-
-    return reply.send({
-      agent_uuid: uuid,
-      count: history.length,
-      history,
-    });
-  } catch (error: any) {
-    logger.error('Error getting process history', { error: error.message, stack: error.stack });
-    return reply.status(500).send({
-      error: 'Failed to get process history',
       message: error.message
     });
   }

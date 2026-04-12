@@ -8,14 +8,6 @@ export interface SystemMetricsData {
   timestamp: string;
 }
 
-export interface ProcessData {
-  pid: number;
-  name: string;
-  cpu: number;
-  mem: number;
-  command?: string;
-}
-
 export interface NetworkInterfaceData {
   id: string;
   name: string;
@@ -136,7 +128,7 @@ class WebSocketService {
     }
     console.log('[WebSocket] Connecting to:', wsUrl.toString());
 
-    this.createWebSocket(wsUrl.toString(), ['system-info', 'processes', 'history', 'network-interfaces']);
+    this.createWebSocket(wsUrl.toString(), ['system-info', 'history', 'network-interfaces']);
   }
 
   connectGlobal() {

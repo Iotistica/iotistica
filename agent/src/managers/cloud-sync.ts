@@ -108,13 +108,6 @@ interface DeviceStateReport {
 		architecture?: string;
 		agent_version?: string;
 		uptime?: number;
-		top_processes?: Array<{
-			pid: number;
-			name: string;
-			cpu: number;
-			mem: number;
-			command?: string;
-		}>;
 		network_interfaces?: Array<{
 			name: string;
 			ip4: string | null;
@@ -1131,7 +1124,7 @@ export class CloudSync extends EventEmitter {
 				}
 			}
 			
-			// Include metrics only if present (but strip top_processes if queue gets large)
+			// Include metrics only if present
 			if (deviceState.cpu_usage !== undefined) {
 				stripped[uuid].cpu_usage = deviceState.cpu_usage;
 			}
@@ -1153,11 +1146,6 @@ export class CloudSync extends EventEmitter {
 			if (deviceState.uptime !== undefined) {
 				stripped[uuid].uptime = deviceState.uptime;
 			}
-			
-			// Strip top_processes (most verbose: 10 processes × 4 fields = 40 fields per report)
-			// When queue has multiple reports, this becomes huge waste
-			// The API doesn't need historical top_processes - only latest matters
-			// Savings: ~2-5 KB per report depending on process names
 		}
 		
 		return stripped;
@@ -1330,7 +1318,6 @@ export class CloudSync extends EventEmitter {
 			stateReport[deviceInfo.uuid].storage_total = metrics.storage_total ?? undefined;
 			stateReport[deviceInfo.uuid].temperature = metrics.cpu_temp ?? undefined;
 			stateReport[deviceInfo.uuid].uptime = metrics.uptime;
-			stateReport[deviceInfo.uuid].top_processes = metrics.top_processes ?? [];
 			stateReport[deviceInfo.uuid].network_interfaces = metrics.network_interfaces ?? [];
 			
 			// Get IP address from network interfaces (only include if changed)
@@ -1481,7 +1468,6 @@ export class CloudSync extends EventEmitter {
 		reportToSend[deviceInfo.uuid].storage_total = stateReport[deviceInfo.uuid].storage_total;
 		reportToSend[deviceInfo.uuid].temperature = stateReport[deviceInfo.uuid].temperature;
 		reportToSend[deviceInfo.uuid].uptime = stateReport[deviceInfo.uuid].uptime;
-		reportToSend[deviceInfo.uuid].top_processes = stateReport[deviceInfo.uuid].top_processes;
 		reportToSend[deviceInfo.uuid].network_interfaces = stateReport[deviceInfo.uuid].network_interfaces;
 		reportToSend[deviceInfo.uuid].local_ip = stateReport[deviceInfo.uuid].local_ip;
 	}

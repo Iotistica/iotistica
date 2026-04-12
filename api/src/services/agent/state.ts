@@ -271,19 +271,10 @@ export async function processAgentStateReport(
           memory_total: deviceState.memory_total,
           storage_usage: deviceState.storage_usage,
           storage_total: deviceState.storage_total,
-          top_processes: deviceState.top_processes,
           network_interfaces: deviceState.network_interfaces,
         });
       } catch (error) {
         logger.error('Failed to publish agent system metrics', { error: (error as Error).message });
-      }
-
-      // Update latest snapshot in agents table (still needed for quick access)
-      if (deviceState.top_processes) {
-        await query(
-          `UPDATE agents SET top_processes = $1 WHERE uuid = $2`,
-          [JSON.stringify(deviceState.top_processes), uuid]
-        );
       }
 
       // Store network interfaces if provided

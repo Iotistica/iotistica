@@ -3,10 +3,9 @@ import { Cpu, HardDrive, MemoryStick, Network, RefreshCw, AlertTriangle, Bell, I
 import { Card } from "./ui/card";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useSystemMetrics } from "@/contexts/SystemMetricsContext";
-import type { SystemInfoData, ProcessData } from "@/services/websocket";
+import type { SystemInfoData } from "@/services/websocket";
 import { MetricCard } from "./ui/metric-card";
 import { Button } from "./ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
   Select,
   SelectContent,
@@ -78,8 +77,6 @@ export function SystemMetrics({
   // Local state initialized from context
   const [selectedMetric, setSelectedMetric] = useState<'cpu' | 'memory' | 'network'>(persistedMetric);
   const [timePeriod, setTimePeriod] = useState<'30min' | '6h' | '12h' | '24h'>(persistedTimePeriod);
-  const [insightsTab, setInsightsTab] = useState<'telemetry' | 'processes'>('telemetry');
-  
   // Refresh interval state with localStorage persistence
   const [refreshInterval, setRefreshInterval] = useState<number>(() => {
     const saved = localStorage.getItem('systemmetrics-refresh-interval');
@@ -262,7 +259,7 @@ export function SystemMetrics({
     },
   ];
 
-  // Fetch system info and processes from API
+  // Fetch system info from API
   const [systemInfo, setSystemInfo] = useState([
     { label: "Operating System", value: "Unknown" },
     { label: "Architecture", value: "Unknown" },
@@ -272,16 +269,6 @@ export function SystemMetrics({
     { label: "MAC Address", value: "Unknown" },
   ]);
 
-  const [processes, setProcesses] = useState<Array<{
-    pid: number;
-    name: string;
-    cpu: number;
-    mem: number;
-    command?: string;
-  }>>([]);
-  const [processesLoading, setProcessesLoading] = useState(true);
-  const [isProcessesRefreshing, setIsProcessesRefreshing] = useState(false);
-  
   // Incidents state for alerts card
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [incidentsLoading, setIncidentsLoading] = useState(true);
@@ -355,58 +342,9 @@ export function SystemMetrics({
     }
   }, [device.deviceUuid, handleSystemInfo]);
 
-  // Handle processes updates via WebSocket
-  const handleProcesses = useCallback((data: { top_processes: ProcessData[] }) => {
-    if (data.top_processes && Array.isArray(data.top_processes)) {
-      setProcesses(data.top_processes);
-      setProcessesLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     fetchSystemInfo();
   }, [fetchSystemInfo]);
-
-  // Fetch initial processes data from API
-  const fetchProcesses = useCallback(async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(
-        buildApiUrl(`/api/v1/agents/${device.deviceUuid}/processes`),
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      if (!response.ok) {
-        console.error('[Overview] Processes fetch failed:', response.status, response.statusText);
-        setProcessesLoading(false);
-        return;
-      }
-      
-      const data = await response.json();
-      if (data.top_processes && Array.isArray(data.top_processes)) {
-        setProcesses(data.top_processes);
-        setProcessesLoading(false);
-      }
-    } catch (error) {
-      console.error('[Overview] Error fetching processes:', error);
-      setProcessesLoading(false);
-    }
-  }, [device.deviceUuid]);
-
-  // Manual refresh for processes
-  const handleProcessesRefresh = useCallback(async () => {
-    setIsProcessesRefreshing(true);
-    try {
-      await fetchProcesses();
-    } finally {
-      setIsProcessesRefreshing(false);
-    }
-  }, [fetchProcesses]);
 
   // Fetch historical data from API
   const fetchHistoricalData = useCallback(async (period: string) => {
@@ -576,8 +514,6 @@ export function SystemMetrics({
 
   // Subscribe to WebSocket channels (only for online devices)
   const isOnline = device.status === 'online';
-  useWebSocket(device.deviceUuid, 'processes', handleProcesses, isOnline);
-
   // Fetch historical data with HTTP polling (replaces WebSocket approach)
   // Polls at configured interval for all time periods (30min, 6h, 12h, 24h)
   useEffect(() => {
@@ -628,8 +564,6 @@ export function SystemMetrics({
         { label: "IP Address", value: device.ipAddress },
         { label: "MAC Address", value: "Unknown" },
       ]);
-      setProcesses([]);
-      setProcessesLoading(true);
       setCpuHistory([]);
       setMemoryHistory([]);
       setNetworkHistory([]);
@@ -644,11 +578,7 @@ export function SystemMetrics({
     // Update ref for next comparison
     prevDeviceUuidRef.current = device.deviceUuid;
     
-    // Fetch initial processes data (only for online devices)
-    if (device.status !== 'offline') {
-      fetchProcesses();
-    }
-  }, [device.deviceUuid, device.name, device.ipAddress, device.status, fetchProcesses]);
+  }, [device.deviceUuid, device.name, device.ipAddress, device.status]);
 
   // Process chart data to detect service interruptions (gaps)
   const cpuChartData = useMemo(() => detectGaps(cpuHistory), [cpuHistory]);
@@ -681,67 +611,17 @@ export function SystemMetrics({
 
         {/* Main Cards Layout */}
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Telemetry / Top Processes Tabs Card */}
+          {/* System Insights Card */}
           <Card data-testid="system-insights-card" className="p-4 md:p-6 min-w-0">
-            <Tabs value={insightsTab} onValueChange={(value) => setInsightsTab(value as 'telemetry' | 'processes')} className="w-full min-w-0">
+            <div className="w-full min-w-0">
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
                   <h3 className="text-lg text-foreground font-medium mb-1">System Insights</h3>
-                  <p className="text-sm text-muted-foreground">Telemetry and process activity</p>
+                  <p className="text-sm text-muted-foreground">Telemetry</p>
                 </div>
-                <TabsList className="bg-transparent rounded-none p-0 h-auto gap-0">
-                  <TabsTrigger
-                    data-testid="system-insights-tab-telemetry"
-                    value="telemetry"
-                    className="rounded-none border-0 bg-transparent px-3 pb-2 text-sm shadow-none"
-                    style={
-                      insightsTab === 'telemetry'
-                        ? {
-                            color: 'hsl(var(--foreground))',
-                            fontWeight: 700,
-                            textDecoration: 'underline',
-                            textUnderlineOffset: '6px',
-                            textDecorationThickness: '2px',
-                            textDecorationColor: 'hsl(var(--foreground))',
-                          }
-                        : {
-                            color: 'hsl(var(--muted-foreground))',
-                            fontWeight: 400,
-                            textDecoration: 'none',
-                            opacity: 0.8,
-                          }
-                    }
-                  >
-                    Telemetry
-                  </TabsTrigger>
-                  <TabsTrigger
-                    data-testid="system-insights-tab-processes"
-                    value="processes"
-                    className="rounded-none border-0 bg-transparent px-3 pb-2 text-sm shadow-none"
-                    style={
-                      insightsTab === 'processes'
-                        ? {
-                            color: 'hsl(var(--foreground))',
-                            fontWeight: 700,
-                            textDecoration: 'underline',
-                            textUnderlineOffset: '6px',
-                            textDecorationThickness: '2px',
-                            textDecorationColor: 'hsl(var(--foreground))',
-                          }
-                        : {
-                            color: 'hsl(var(--muted-foreground))',
-                            fontWeight: 400,
-                            textDecoration: 'none',
-                            opacity: 0.8,
-                          }
-                    }
-                  >
-                    Top Processes
-                  </TabsTrigger>
-                </TabsList>
               </div>
 
-              <TabsContent value="telemetry" data-testid="system-insights-telemetry" className="mt-0 min-w-0 overflow-y-auto" style={{ height: '350px' }}>
+              <div data-testid="system-insights-telemetry" className="mt-0 min-w-0 overflow-y-auto" style={{ height: '350px' }}>
                 <div className="mb-4 space-y-3">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -970,69 +850,8 @@ export function SystemMetrics({
                     </div>
                   </>
                 )}
-              </TabsContent>
-
-              <TabsContent value="processes" data-testid="system-insights-processes" className="mt-0 min-w-0 overflow-hidden" style={{ height: '350px' }}>
-                <div className="mb-4 flex justify-end">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    onClick={handleProcessesRefresh}
-                    disabled={isProcessesRefreshing || processesLoading}
-                  >
-                    <RefreshCw 
-                      className={`w-4 h-4 ${isProcessesRefreshing ? 'animate-spin' : ''}`}
-                      style={{ 
-                        transform: isProcessesRefreshing ? undefined : 'rotate(0deg)',
-                        transition: isProcessesRefreshing ? undefined : 'none'
-                      }}
-                    />
-                  </Button>
-                </div>
-                {processesLoading ? (
-                  <div className="text-center py-8 text-muted-foreground">Loading processes...</div>
-                ) : processes.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">No process data available</div>
-                ) : (
-                  <div data-testid="processes-table" className="overflow-y-auto overflow-x-auto" style={{maxHeight: '300px'}}>
-                    <table className="w-full table-fixed">
-                      <thead>
-                        <tr className="border-b border-border">
-                          <th className="text-left py-3 px-0 text-sm font-medium text-muted-foreground">Process</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden sm:table-cell">PID</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">CPU %</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden md:table-cell">Memory %</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground hidden lg:table-cell">CPU Usage</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {processes.map((process, index) => (
-                          <tr key={index} className="border-b border-border last:border-0">
-                            <td className="py-3 px-0 text-foreground truncate max-w-[150px]">
-                              {process.name}
-                            </td>
-                            <td className="py-3 px-4 text-muted-foreground hidden sm:table-cell">{process.pid}</td>
-                            <td className="py-3 px-4 text-foreground">{process.cpu.toFixed(1)}%</td>
-                            <td className="py-3 px-4 text-foreground hidden md:table-cell">{process.mem.toFixed(1)}%</td>
-                            <td className="py-3 px-4 hidden lg:table-cell">
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1 bg-muted rounded-full h-2 max-w-[120px]">
-                                  <div
-                                    className="bg-blue-600 h-2 rounded-full transition-all"
-                                    style={{ width: `${Math.min(process.cpu * 5, 100)}%` }}
-                                  />
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
+              </div>
+            </div>
           </Card>
 
           {/* Alerts Card - Condensed view for this agent */}

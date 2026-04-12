@@ -227,7 +227,6 @@ export async function handleAgentState(payload: StateMessage): Promise<void> {
             memory_total: state.memory_total,
             storage_usage: state.storage_usage,
             storage_total: state.storage_total,
-            top_processes: state.top_processes,
             network_interfaces: state.network_interfaces,
           };
           await redisClient.publishAgentMetrics(tenantId, deviceUuid, metrics);

@@ -77,7 +77,7 @@ import {
  */
 
 // String channel names with length limit (prevents memory abuse via huge strings)
-const ChannelSchema = z.enum(['system-info', 'processes', 'history', 'network-interfaces', 'logs', 'shell', 'mqtt-stats', 'mqtt-topics']);
+const ChannelSchema = z.enum(['system-info', 'history', 'network-interfaces', 'logs', 'shell', 'mqtt-stats', 'mqtt-topics']);
 
 // Global channel schema
 const GlobalChannelSchema = z.enum(['mqtt-stats', 'mqtt-topics']);
@@ -331,17 +331,6 @@ export class WebSocketManager {
       }, this.BATCH_FLUSH_INTERVAL_MS);
       this.flushIntervals.set(deviceUuid, interval);
       logger.debug(`Started batch flush interval for device ${deviceUuid.substring(0, 8)}...`);
-    }
-    
-    // Also update processes if present (send immediately, not batched)
-    if (metrics.top_processes) {
-      this.broadcast(deviceUuid, {
-        type: 'processes',
-        deviceUuid,
-        data: { top_processes: metrics.top_processes },
-        timestamp: new Date().toISOString(),
-        source: 'redis',
-      });
     }
     
     // Update network interfaces if present (send immediately, not batched)
@@ -920,9 +909,9 @@ export class WebSocketManager {
       return;
     }
 
-    // For real-time channels (history, processes, network-interfaces, logs), use Redis pub/sub if available
+    // For real-time channels (history, network-interfaces, logs), use Redis pub/sub if available
     // Only fall back to polling if Redis unavailable
-    const redisChannels = ['history', 'processes', 'network-interfaces', 'logs'];
+    const redisChannels = ['history', 'network-interfaces', 'logs'];
     if (redisChannels.includes(channel) && this.redisRealtimeEnabled) {
       logger.debug(`Using Redis pub/sub for real-time updates`);
       // No polling needed - Redis will push updates
@@ -936,9 +925,6 @@ export class WebSocketManager {
     switch (channel) {
       case 'system-info':
         intervalTime = 30000; // 30 seconds
-        break;
-      case 'processes':
-        intervalTime = 60000; // 60 seconds (fallback)
         break;
       case 'history':
         intervalTime = 30000; // 30 seconds (fallback)
@@ -1115,9 +1101,6 @@ export class WebSocketManager {
         case 'system-info':
           data = await this.fetchSystemInfo(deviceUuid);
           break;
-        case 'processes':
-          data = await this.fetchProcesses(deviceUuid);
-          break;
         case 'history':
           data = await this.fetchMetricsHistory(deviceUuid);
           break;
@@ -1157,20 +1140,6 @@ export class WebSocketManager {
       };
     } catch (error) {
       logger.error(' Error fetching system info:', error);
-      return null;
-    }
-  }
-
-  private async fetchProcesses(deviceUuid: string): Promise<any> {
-    try {
-      const device = await AgentModel.getByUuid(deviceUuid);
-      if (!device) return null;
-
-      return {
-        top_processes: device.top_processes || [],
-      };
-    } catch (error) {
-      logger.error(' Error fetching processes:', error);
       return null;
     }
   }

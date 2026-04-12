@@ -17,7 +17,6 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { buildApiUrl } from "@/config/api";
 
 type MetricType = "ram" | "cpu" | "storage" | "temperature" | "network";
 type TimePeriod = "30min" | "6h" | "12h" | "24h";
@@ -102,63 +101,9 @@ export function AnalyticsCard({ deviceName = "Device 1", deviceId, processes = [
   const activeProcesses = processes.length > 0 ? processes : defaultProcesses;
 
   // TODO: Convert to WebSocket for real-time process history
-  // Fetch historical process data from API
+  // Fetch historical process data disabled - using simulated data
   useEffect(() => {
-    // Temporarily disabled - will be replaced with WebSocket implementation
     setUseRealData(false);
-    return;
-    
-    /* Disabled HTTP polling - to be replaced with WebSocket
-    if (!deviceId) {
-      setUseRealData(false);
-      return;
-    }
-
-    const fetchHistoricalData = async () => {
-      try {
-        const hoursMap = { "30min": 1, "6h": 6, "12h": 12, "24h": 24 };
-        const hours = hoursMap[timePeriod];
-        
-        const response = await fetch(
-          buildApiUrl(`/api/v1/agents/${deviceId}/processes/history?hours=${hours}&limit=50`)
-        );
-        const data = await response.json();
-        
-        if (data.history && data.history.length > 0) {
-          // Process historical data into chart format
-          const processed = data.history.reverse().map((entry: any) => {
-            const time = new Date(entry.recorded_at).toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: false
-            });
-            
-            const dataPoint: any = { time };
-            
-            // Add data for each process
-            entry.top_processes.forEach((proc: any) => {
-              dataPoint[proc.name] = selectedMetric === 'cpu' ? proc.cpu : proc.mem;
-            });
-            
-            return dataPoint;
-          });
-          
-          setHistoricalData(processed);
-          setUseRealData(true);
-        } else {
-          setUseRealData(false);
-        }
-      } catch (error) {
-        console.error('Failed to fetch historical process data:', error);
-        setUseRealData(false);
-      }
-    };
-
-    fetchHistoricalData();
-    const interval = setInterval(fetchHistoricalData, 30000); // Refresh every 30 seconds
-
-    return () => clearInterval(interval);
-    */
   }, [deviceId, timePeriod, selectedMetric]);
 
 
