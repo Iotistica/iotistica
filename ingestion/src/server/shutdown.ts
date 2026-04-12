@@ -28,6 +28,14 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
     }
 
     try {
+      const { redisLogQueue } = await import('../services');
+      await redisLogQueue.stopWorker();
+      logger.info('Redis log queue worker stopped');
+    } catch (error) {
+      logger.error('Error stopping Redis log queue worker', { error });
+    }
+
+    try {
       await close();
       logger.info('Database connection closed');
     } catch (error) {

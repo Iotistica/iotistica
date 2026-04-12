@@ -1,0 +1,10 @@
+# Compose override — enables V8 CPU profiling on the ingestion service.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.profile.yml up -d ingestion
+#
+# --cpu-prof cannot be set via NODE_OPTIONS (Node.js security restriction).
+# It must be passed directly on the node command line, which this override does.
+# The .cpuprofile file is written to /tmp inside the container on clean shutdown.
+# Use scripts/profile-ingestion.ps1 to run the full profile → copy → open workflow.
+services:
+  ingestion:
+    command: ["node", "--max-old-space-size=1536", "--cpu-prof", "--cpu-prof-dir=/tmp", "--cpu-prof-interval=1000", "dist/index.js"]

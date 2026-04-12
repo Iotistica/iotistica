@@ -1,0 +1,112 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: ingestion-ops
+    receivers:
+      - uid: ingestion-ops-grafana
+        type: grafana-default-email
+        disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: ingestion-ops
+    group_by: [alertname]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 1h
+
+groups:
+  - orgId: 1
+    name: ingestion-lag
+    folder: Iotistica Alerts
+    interval: 30s
+    rules:
+      - uid: ingestion-dwell-lag-warn
+        title: Ingestion Dwell Lag > 30s
+        condition: B
+        for: 1m
+        noDataState: NoData
+        execErrState: Error
+        annotations:
+          summary: Ingestion queue dwell lag exceeded 30 seconds
+          description: >
+            The P95 dwell latency (time messages sit in Redis before being
+            processed) has been above 30s for at least 1 minute.
+            Workers may be falling behind. Current value: {{ $values.A.Value }}ms
+        labels:
+          severity: warning
+          component: ingestion
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus-local
+            model:
+              expr: max(iotistic_ingestion_dwell_latency_p95_ms)
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: B
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 30000
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: ingestion-dwell-lag-critical
+        title: Ingestion Dwell Lag > 60s (Critical)
+        condition: B
+        for: 1m
+        noDataState: NoData
+        execErrState: Error
+        annotations:
+          summary: Ingestion queue dwell lag exceeded 60 seconds - pipeline is severely backed up
+          description: >
+            The P95 dwell latency has been above 60s for at least 1 minute.
+            The ingestion pipeline is critically backed up. Current value: {{ $values.A.Value }}ms
+        labels:
+          severity: critical
+          component: ingestion
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus-local
+            model:
+              expr: max(iotistic_ingestion_dwell_latency_p95_ms)
+              instant: true
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              refId: B
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params:
+                      - 60000
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - A
+                  reducer:
+                    type: last
+                  type: query

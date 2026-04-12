@@ -196,7 +196,7 @@ services:
             - PORT=${INGESTION_PORT:-3003}
             - NODE_ENV=${NODE_ENV:-development}
             - LOG_LEVEL=info
-            - INGESTION_PROFILE=${INGESTION_PROFILE:-balanced}
+            - INGESTION_PROFILE=${INGESTION_PROFILE:-benchmark}
             - REDIS_INGESTION_STREAM_KEY=${REDIS_INGESTION_STREAM_KEY:-tenant:{73eddd385ce8}:agent:devices:ingestion}
             - DB_HOST=${DB_HOST:-postgres}
             - DB_PORT=${DB_PORT:-30692}
@@ -247,6 +247,11 @@ services:
             - DB_WAITING_HIGH_WATERMARK=${DB_WAITING_HIGH_WATERMARK:-}
             - DB_SATURATION_HIGH_WATERMARK_PCT=${DB_SATURATION_HIGH_WATERMARK_PCT:-}
             - DB_BACKPRESSURE_SLEEP_MS=${DB_BACKPRESSURE_SLEEP_MS:-}
+            - REDIS_LOG_STREAM_KEY=${REDIS_LOG_STREAM_KEY:-tenant:{73eddd385ce8}:device:logs}
+            - LOG_BATCH_SIZE=${LOG_BATCH_SIZE:-50}
+            - LOG_FLUSH_INTERVAL_MS=${LOG_FLUSH_INTERVAL_MS:-5000}
+            - LOG_STREAM_MAXLEN=${LOG_STREAM_MAXLEN:-500000}
+            - LOG_SAMPLING_RATE=${LOG_SAMPLING_RATE:-1.0}
         expose:
             - "3003"
         volumes:

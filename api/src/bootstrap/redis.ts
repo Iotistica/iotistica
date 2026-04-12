@@ -10,7 +10,6 @@ import logger from '../utils/logger';
 import { redisClient } from '../redis/client';
 import { redisFactory } from '../redis/client-factory';
 import { startMetricsBatchWorker } from '../services/agent/metrics-worker';
-import { redisLogQueue } from '../services/telemetry/logs-queue';
 
 /**
  * Flush the Mosquitto go-auth Redis cache (DB 1) on startup.
@@ -82,14 +81,5 @@ export async function bootstrapApiRedis(): Promise<void> {
     logger.info('Metrics batch worker started');
   } catch (error) {
     logger.warn('Failed to start metrics batch worker', { error });
-  }
-
-  // Log queue worker - CRITICAL: logs won't be persisted without it
-  try {
-    await redisLogQueue.startWorker();
-    logger.info('Redis log queue worker started');
-  } catch (error) {
-    logger.error('Failed to start Redis log queue worker', { error });
-    process.exit(1);
   }
 }

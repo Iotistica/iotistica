@@ -1,6 +1,6 @@
 import logger from '../utils/logger';
 import { getRedisClient } from '../redis/client-factory';
-import { redisDeviceQueue } from '../services';
+import { redisDeviceQueue, redisLogQueue } from '../services';
 
 async function connectSharedRedisClient(): Promise<void> {
   const client = getRedisClient();
@@ -42,6 +42,14 @@ export async function bootstrapIngestionRedis(): Promise<void> {
     logger.info('Redis device queue worker started');
   } catch (error) {
     logger.error('Failed to start Redis device queue worker', { error });
+    process.exit(1);
+  }
+
+  try {
+    await redisLogQueue.startWorker();
+    logger.info('Redis log queue worker started');
+  } catch (error) {
+    logger.error('Failed to start Redis log queue worker', { error });
     process.exit(1);
   }
 }
