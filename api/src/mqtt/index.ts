@@ -159,30 +159,36 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     // Handle metrics
     mqttManager.on('metrics', async (data) => {
       try {
-        logger.info('[MQTT] Metrics event received, storing to database', {
+        const { redisDeviceQueue } = await import('../services/telemetry');
+
+        const readings: Array<{ metric: string; value: number }> = [];
+        const addNum = (key: string, val: unknown) => {
+          if (typeof val === 'number') readings.push({ metric: key, value: val });
+        };
+        addNum('cpu_usage', data.cpu_usage);
+        addNum('cpu_temp', data.cpu_temp);
+        addNum('memory_usage', data.memory_usage);
+        addNum('memory_total', data.memory_total);
+        addNum('storage_usage', data.storage_usage);
+        addNum('storage_total', data.storage_total);
+
+        if (readings.length > 0) {
+          await redisDeviceQueue.add([{
+            deviceUuid: data.deviceUuid,
+            deviceName: data.deviceUuid,
+            timestamp: data.timestamp || new Date().toISOString(),
+            metadata: { protocol: 'system' },
+            data: { protocol: 'system', readings },
+          }]);
+        }
+
+        logger.info('[MQTT] Metrics queued for ingestion', {
           deviceUuid: data.deviceUuid?.substring(0, 8) + '...',
-          cpu_usage: data.cpu_usage,
-          memory_usage: data.memory_usage,
-          timestamp: data.timestamp
-        });
-        
-        const { DeviceMetricsModel } = await import('../db/models');
-        await DeviceMetricsModel.record(data.deviceUuid, {
-          cpu_usage: data.cpu_usage,
-          cpu_temp: data.cpu_temp,
-          memory_usage: data.memory_usage,
-          memory_total: data.memory_total,
-          storage_usage: data.storage_usage,
-          storage_total: data.storage_total
-        });
-        
-        logger.info('[MQTT] Metrics stored successfully', {
-          deviceUuid: data.deviceUuid?.substring(0, 8) + '...'
+          count: readings.length,
         });
       } catch (error) {
-        logger.error('Error storing metrics:', {
+        logger.error('Error queuing metrics:', {
           error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
           deviceUuid: data.deviceUuid
         });
       }

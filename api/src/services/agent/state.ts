@@ -15,7 +15,6 @@ import { query } from '../../db/connection';
 import {
   AgentModel,
   DeviceCurrentStateModel,
-  DeviceMetricsModel,
 } from '../../db/models';
 import { EventPublisher, objectsAreEqual } from '../event-sourcing';
 import EventSourcingConfig from '../../events/event-sourcing';
@@ -230,20 +229,42 @@ export async function processAgentStateReport(
       await AgentModel.update(uuid, updateFields);
     }
 
-    // Record metrics if provided
-    // Phase 2: Write to Redis Streams + Pub/Sub in one pass
-    // Background worker will batch process stream metrics
+    // Record metrics if provided - push to shared readings stream (protocol='system')
+    // so that ingestion handles persistence via the same pipeline as sensor data.
     if (
       deviceState.cpu_usage !== undefined ||
       deviceState.memory_usage !== undefined ||
       deviceState.storage_usage !== undefined
     ) {
-      // Import Redis client once for both operations
       try {
+        const { redisDeviceQueue } = await import('../../services/telemetry');
         const { redisClient } = await import('../../redis/client');
         const tenantId = getTenantId();
-        
-        const metrics = {
+
+        // Build numeric readings array (Format 2 — expandFormat2 in readings-normalizer)
+        const readings: Array<{ metric: string; value: number }> = [];
+        const addNum = (key: string, val: unknown) => {
+          if (typeof val === 'number') readings.push({ metric: key, value: val });
+        };
+        addNum('cpu_usage', deviceState.cpu_usage);
+        addNum('cpu_temp', deviceState.cpu_temp);
+        addNum('memory_usage', deviceState.memory_usage);
+        addNum('memory_total', deviceState.memory_total);
+        addNum('storage_usage', deviceState.storage_usage);
+        addNum('storage_total', deviceState.storage_total);
+
+        if (readings.length > 0) {
+          await redisDeviceQueue.add([{
+            deviceUuid: uuid,
+            deviceName: uuid,
+            timestamp: new Date().toISOString(),
+            metadata: { protocol: 'system' },
+            data: { protocol: 'system', readings },
+          }]);
+        }
+
+        // Publish to pub/sub for real-time dashboard distribution
+        await redisClient.publishAgentMetrics(tenantId, uuid, {
           cpu_usage: deviceState.cpu_usage,
           cpu_temp: deviceState.cpu_temp,
           memory_usage: deviceState.memory_usage,
@@ -252,34 +273,11 @@ export async function processAgentStateReport(
           storage_total: deviceState.storage_total,
           top_processes: deviceState.top_processes,
           network_interfaces: deviceState.network_interfaces,
-        };
-        
-        // 1. Add to Redis Stream for batch processing (Phase 2)
-        const streamId = await redisClient.addMetric(tenantId, uuid, metrics);
-        
-        if (!streamId) {
-          // Redis Stream unavailable - fallback to direct write
-          logger.warn(`Redis Stream unavailable, using direct write for ${uuid.substring(0, 8)}...`);
-          await DeviceMetricsModel.record(uuid, metrics);
-        }
-        
-        // 2. Publish to pub/sub for real-time distribution (Phase 1)
-        await redisClient.publishAgentMetrics(tenantId, uuid, metrics);
-        
-      } catch (error) {
-        // Error with Redis - fallback to direct write
-        logger.error('Redis error, using direct PostgreSQL write:', error);
-        await DeviceMetricsModel.record(uuid, {
-          cpu_usage: deviceState.cpu_usage,
-          cpu_temp: deviceState.cpu_temp,
-          memory_usage: deviceState.memory_usage,
-          memory_total: deviceState.memory_total,
-          storage_usage: deviceState.storage_usage,
-          storage_total: deviceState.storage_total,
-          top_processes: deviceState.top_processes,
         });
+      } catch (error) {
+        logger.error('Failed to publish agent system metrics', { error: (error as Error).message });
       }
-      
+
       // Update latest snapshot in agents table (still needed for quick access)
       if (deviceState.top_processes) {
         await query(
@@ -287,7 +285,7 @@ export async function processAgentStateReport(
           [JSON.stringify(deviceState.top_processes), uuid]
         );
       }
-      
+
       // Store network interfaces if provided
       if (deviceState.network_interfaces) {
         await query(

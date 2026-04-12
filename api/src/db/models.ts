@@ -845,15 +845,8 @@ export class DeviceMetricsModel {
     return result.rows;
   }
 
-  /**
-   * Clean old metrics (keep last 30 days)
-   */
-  static async cleanup(daysToKeep: number = 30): Promise<number> {
-    const result = await query(
-      `DELETE FROM agent_metrics 
-       WHERE recorded_at < NOW() - INTERVAL '${daysToKeep} days'`
-    );
-    return result.rowCount || 0;
+  static async cleanup(_daysToKeep?: number): Promise<number> {
+    return 0;
   }
 }
 

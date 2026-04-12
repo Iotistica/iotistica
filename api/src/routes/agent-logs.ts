@@ -26,8 +26,7 @@ import {
 import { logger } from '../utils/logger';
 import deviceAuth from '../middleware/agent-auth';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { redisLogQueue } from '../services/telemetry/logs-queue';
-import { getRemoteIngestionStats } from '../services/telemetry/client';
+import { redisLogQueue } from '../services/telemetry/publisher';
 
 type AgentUuidParams = {
   uuid: string;
@@ -383,18 +382,6 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     }
   });
 
-  fastify.get('/admin/ingestion/stats', { preHandler: [jwtAuth, requireRole('admin')] }, async (_req, reply) => {
-    try {
-      const stats = await getRemoteIngestionStats();
-      return reply.send(stats);
-    } catch (error: any) {
-      logger.error('Error getting device queue stats', { error: error.message });
-      return reply.status(500).send({
-        error: 'Failed to get device queue stats',
-        message: error.message
-      });
-    }
-  });
 };
 
 export default plugin;

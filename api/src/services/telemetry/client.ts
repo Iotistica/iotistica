@@ -60,6 +60,4 @@ export async function getRemoteIngestionHealth<T>(): Promise<T> {
   return requestJson<T>('/api/v1/metrics/ingestion-health');
 }
 
-export async function getRemoteIngestionStats<T>(): Promise<T> {
-  return requestJson<T>('/api/v1/admin/ingestion/stats');
-}
+

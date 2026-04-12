@@ -41,8 +41,9 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
     } catch { /* ignore */ }
 
     try {
-      const { stopMetricsBatchWorker } = await import('../services/agent/metrics-worker');
-      await stopMetricsBatchWorker();
+      const { stopJobsHandler } = await import('../mqtt/handlers');
+      await stopJobsHandler();
+      logger.info('MQTT Jobs Handler stopped');
     } catch { /* ignore */ }
 
     // Redis client
@@ -61,14 +62,8 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
     } catch { /* ignore */ }
 
     try {
-      const { stopJobsHandler } = await import('../mqtt/handlers');
-      await stopJobsHandler();
-      logger.info('MQTT Jobs Handler stopped');
-    } catch { /* ignore */ }
-
-    try {
-      const { redisLogQueue } = await import('../services/telemetry/logs-queue');
-      await redisLogQueue.stopWorker();
+      const { redisLogQueue } = await import('../services/telemetry/publisher');
+      await redisLogQueue.flush();
       logger.info('Redis log queue worker stopped');
     } catch (error) {
       logger.error('Error stopping Redis log queue worker', { error });

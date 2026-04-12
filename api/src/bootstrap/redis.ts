@@ -9,7 +9,6 @@ import Redis from 'ioredis';
 import logger from '../utils/logger';
 import { redisClient } from '../redis/client';
 import { redisFactory } from '../redis/client-factory';
-import { startMetricsBatchWorker } from '../services/agent/metrics-worker';
 
 /**
  * Flush the Mosquitto go-auth Redis cache (DB 1) on startup.
@@ -74,12 +73,4 @@ export async function bootstrapApiRedis(): Promise<void> {
   // Flush go-auth MQTT auth cache so stale DENY entries from the previous
   // container lifecycle do not block MQTT reconnection.
   await flushMqttAuthCache();
-
-  // Metrics batch worker - non-fatal
-  try {
-    await startMetricsBatchWorker();
-    logger.info('Metrics batch worker started');
-  } catch (error) {
-    logger.warn('Failed to start metrics batch worker', { error });
-  }
 }
