@@ -159,6 +159,10 @@ services:
             - CLOUD_API_URL=${CLOUD_API_URL:-http://host.docker.internal:4002}
             # Note: Agent expects IOTISTICA_API, but deployer reads CLOUD_API_URL and passes as IOTISTICA_API
             - MQTT_BROKER_URL_VIRTUAL=${MQTT_BROKER_URL_VIRTUAL:-mqtt://host.docker.internal:5883}
+            # Redis outage disk spool (buffers telemetry to disk when Redis is unavailable)
+            - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-true}
+            - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
+            - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-1000}
         ports:
             - "${API_PORT_EXT:-4002}:3002"
             - "3443:3443"
@@ -166,6 +170,7 @@ services:
             - ./certs:/app/certs:ro
             # Mount kubeconfig for local K8s access (accessible by appuser)
             - ${USERPROFILE}/.kube:/home/appuser/.kube:ro
+            - iotistic-api-spool:/var/lib/iotistic/spool
         healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
             interval: 10s
@@ -219,9 +224,10 @@ services:
             - REDIS_USE_TLS=${REDIS_USE_TLS}
             - REDIS_TLS_ENABLED=${REDIS_TLS_ENABLED}
             - REDIS_TLS_SERVERNAME=${REDIS_TLS_SERVERNAME}
-            - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-true}
-            - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
-            - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-1000}
+            # TimescaleDB outage disk spool (buffers batches to disk when TimescaleDB is unavailable)
+            - INGESTION_SPOOL_ENABLED=${INGESTION_SPOOL_ENABLED:-true}
+            - INGESTION_SPOOL_PATH=${INGESTION_SPOOL_PATH:-/var/lib/iotistic/spool}
+            - INGESTION_SPOOL_MAX_SIZE_MB=${INGESTION_SPOOL_MAX_SIZE_MB:-1000}
             - REDIS_PIPELINE_FLUSH_INTERVAL_MS=${REDIS_PIPELINE_FLUSH_INTERVAL_MS:-}
             - REDIS_INGESTION_STREAM_MAXLEN=${REDIS_INGESTION_STREAM_MAXLEN:-}
             - REDIS_IDLE_INGESTION_STREAM_MAXLEN=${REDIS_IDLE_INGESTION_STREAM_MAXLEN:-}
@@ -880,6 +886,8 @@ volumes:
     iotistic-pg-data:
         driver: local
     iotistic-redis-data:
+        driver: local
+    iotistic-api-spool:
         driver: local
     iotistic-ingestion-spool:
         driver: local

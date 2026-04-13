@@ -13,7 +13,6 @@ async function main(): Promise<void> {
     { createIngestionServer },
     { startIngestionServer },
     { bootstrapConfig },
-    { bootstrapDatabaseConnection },
     { bootstrapIngestionRedis },
     { bootstrapRuntimeProfiler },
   ] = await Promise.all([
@@ -21,7 +20,6 @@ async function main(): Promise<void> {
     import('./server/app'),
     import('./server/lifecycle'),
     import('./bootstrap/config'),
-    import('./bootstrap/database'),
     import('./bootstrap/redis'),
     import('./bootstrap/runtime-profiler'),
   ]);
@@ -35,12 +33,15 @@ async function main(): Promise<void> {
     overriddenKeys: profileConfig.overriddenKeys,
   });
 
-  await bootstrapDatabaseConnection();
   await bootstrapConfig();
   bootstrapRuntimeProfiler();
 
   const server = createIngestionServer();
+
+  // Start Redis worker immediately — it spools to disk if DB is unavailable
+  // and recovers automatically when the DB circuit breaker closes.
   await bootstrapIngestionRedis();
+
   await startIngestionServer(server);
 }
 

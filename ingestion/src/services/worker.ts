@@ -6,6 +6,8 @@ import { decompressAndParseDevices } from './decoder';
 import { incrementFailureCount, moveToDLQ, startFailureTrackingPruner } from './dlq';
 import { ReadingInserter } from './reading-inserter';
 import { metrics } from './metrics';
+import { RedisCircuitBreaker, CircuitState } from './circuit-breaker';
+import { DiskSpool } from './disk-spool';
 
 export interface WorkerConfig {
   streamKey: string;
@@ -54,6 +56,7 @@ interface ParsedStreamFields {
   encoding?: string;
   contentType?: string;
   data?: string;
+  source?: string;
 }
 
 const RESOLVE_ENTRY_CONCURRENCY = 8;
@@ -115,13 +118,21 @@ export class RedisQueueConsumer {
   private readonly retiringWorkerIds = new Set<number>();
   private readonly workerConnections = new Map<number, Redis>();
   private readonly messageTracker = new RecentMessageTracker();
+  private readonly dbCircuitBreaker = new RedisCircuitBreaker();
+  private readonly dbSpool: DiskSpool;
+  private readonly dbSpoolEnabled: boolean;
 
   constructor(
     private readonly redis: Redis,
     private readonly config: WorkerConfig,
     private readonly inserter: ReadingInserter,
     private readonly onReinitialize: () => Promise<void>,
-  ) {}
+  ) {
+    const spoolPath = process.env.INGESTION_SPOOL_PATH || '/var/lib/iotistic/ingestion-db-spool';
+    const spoolMaxSizeMb = parseInt(process.env.INGESTION_SPOOL_MAX_SIZE_MB || '1000', 10);
+    this.dbSpool = new DiskSpool(spoolPath, spoolMaxSizeMb);
+    this.dbSpoolEnabled = process.env.INGESTION_SPOOL_ENABLED === 'true';
+  }
 
   private short(id?: string): string | undefined {
     return id?.substring(0, 8);
@@ -179,6 +190,7 @@ export class RedisQueueConsumer {
     let encoding: string | undefined;
     let contentType: string | undefined;
     let data: string | undefined;
+    let source: string | undefined;
 
     for (let i = 0; i < fields.length; i += 2) {
       const key = fields[i];
@@ -215,6 +227,9 @@ export class RedisQueueConsumer {
         case 'data':
           data = value;
           break;
+        case 'source':
+          source = value || undefined;
+          break;
       }
     }
 
@@ -229,6 +244,7 @@ export class RedisQueueConsumer {
       encoding,
       contentType,
       data,
+      source,
     };
   }
 
@@ -288,11 +304,40 @@ export class RedisQueueConsumer {
       blockTimeMs: this.config.blockTimeMs,
     });
 
+    if (this.dbSpoolEnabled) {
+      this.dbSpool.initialize()
+        .then(() => this.dbSpool.startReplayer(
+          async data => {
+            try {
+              await this.inserter.insertBatch(data);
+              this.dbCircuitBreaker.recordSuccess();
+            } catch (err) {
+              this.dbCircuitBreaker.recordFailure();
+              throw err; // re-throw so disk-spool logs the failure
+            }
+          },
+        ))
+        .then(() => logger.info('DB spool replayer started'))
+        .catch(err => logger.error('Failed to initialize ingestion DB spool', { error: err.message }));
+    } else {
+      logger.info('DB spool disabled (INGESTION_SPOOL_ENABLED != true)');
+    }
+
     startFailureTrackingPruner(this.redis);
 
     for (let i = 0; i < this.desiredWorkerCount; i++) {
       this.spawnWorkerLoop();
     }
+  }
+
+  async getDbSpoolHealth(): Promise<{ spoolingActive: boolean; backlogSize: number; dbCircuitOpen: boolean }> {
+    const dbCircuitOpen = this.dbCircuitBreaker.getState() !== CircuitState.CLOSED;
+    const backlogSize = this.dbSpoolEnabled ? await this.dbSpool.getBacklogCount() : 0;
+    return {
+      spoolingActive: dbCircuitOpen || backlogSize > 0,
+      backlogSize,
+      dbCircuitOpen,
+    };
   }
 
   stop(): void {
@@ -681,6 +726,7 @@ export class RedisQueueConsumer {
             contentType: parsedFields.contentType,
           } as CompressedDeviceEntry,
           isCompressed: true,
+          source: parsedFields.source,
         });
         continue;
       }
@@ -703,6 +749,7 @@ export class RedisQueueConsumer {
           deviceName: 'unknown',
         },
         isCompressed: false,
+        source: parsedFields.source,
       });
     }
 
@@ -766,6 +813,7 @@ export class RedisQueueConsumer {
               contentType: parsedFields.contentType,
             } as CompressedDeviceEntry,
             isCompressed: true,
+            source: parsedFields.source,
           });
           continue;
         }
@@ -786,6 +834,7 @@ export class RedisQueueConsumer {
             deviceName: 'unknown',
           },
           isCompressed: false,
+          source: parsedFields.source,
         });
       }
 
@@ -887,10 +936,9 @@ export class RedisQueueConsumer {
 
     const duration = completedAtMs - startTime;
 
-    logger.info('Inserted batch to DB', {
-      messages: entries.length,
-      readings: allData.length,
-      agents: new Set(allData.map(d => d.deviceUuid)).size,
+    logger.info('Ingested', {
+      count: allData.length,
+      source: [...new Set(entries.map(e => e.source).filter(Boolean))].join(',') || 'unknown',
       durationMs: duration,
       maxDwellMs,
     });
@@ -978,8 +1026,26 @@ export class RedisQueueConsumer {
       return;
     }
 
+    // Short-circuit to disk spool if DB circuit is open (TimescaleDB outage).
+    if (this.dbSpoolEnabled && !this.dbCircuitBreaker.shouldAllowRequest()) {
+      try {
+        await this.dbSpool.spoolToDisk(allData);
+        const toAck = [...alreadySeenIds, ...pendingAck.map(e => e.id)];
+        await this.xackBatch(toAck, workerRedis);
+        this.messageTracker.markAll(pendingAck.map(e => e.id));
+        logger.warn('DB circuit OPEN - spooled batch to disk, ACK\'d messages', { count: allData.length });
+      } catch (spoolErr: any) {
+        await this.xackBatch(alreadySeenIds, workerRedis);
+        logger.error('DB circuit OPEN and spool write failed, batch lost', {
+          count: allData.length, error: spoolErr.message,
+        });
+      }
+      return;
+    }
+
     try {
       await this.inserter.insertBatch(allData);
+      this.dbCircuitBreaker.recordSuccess();
       // XACK only after successful DB write — the core at-least-once guarantee.
       // Merge alreadySeen + pendingAck into one pipeline flush — one RTT covers both.
       const toAck = [...alreadySeenIds, ...pendingAck.map(e => e.id)];
@@ -992,12 +1058,31 @@ export class RedisQueueConsumer {
       this.messageTracker.markAll(pendingAck.map(e => e.id));
       this.logBatchSuccess(pendingAck, allData, startTime, completedAtMs, { resolveMs, ackMs });
     } catch (err: any) {
-      // ACK alreadySeen independently — those entries are definitively done regardless of
-      // whether this batch's DB insert failed. pendingAck remains in the PEL for retry.
-      await this.xackBatch(alreadySeenIds, workerRedis);
-      logger.error('Failed to process device data batch', { count: pendingAck.length, error: err.message });
-      // Only retry entries that actually attempted a DB write — not decode-failures already disposed above
-      await this.handleBatchFailures(pendingAck, err);
+      this.dbCircuitBreaker.recordFailure();
+      if (this.dbSpoolEnabled && this.dbSpool.isEnabled()) {
+        try {
+          await this.dbSpool.spoolToDisk(allData);
+          const toAck = [...alreadySeenIds, ...pendingAck.map(e => e.id)];
+          await this.xackBatch(toAck, workerRedis);
+          this.messageTracker.markAll(pendingAck.map(e => e.id));
+          logger.warn('DB write failed - spooled batch to disk, ACK\'d messages', {
+            count: allData.length, error: err.message,
+          });
+        } catch (spoolErr: any) {
+          // Spool write also failed - fall back to PEL retry path
+          await this.xackBatch(alreadySeenIds, workerRedis);
+          logger.error('DB write failed AND spool write failed - leaving in PEL for retry', {
+            count: pendingAck.length, dbError: err.message, spoolError: spoolErr.message,
+          });
+          await this.handleBatchFailures(pendingAck, err);
+        }
+      } else {
+        // Spool disabled - use existing PEL retry / DLQ path
+        await this.xackBatch(alreadySeenIds, workerRedis);
+        logger.error('Failed to process device data batch', { count: pendingAck.length, error: err.message });
+        // Only retry entries that actually attempted a DB write — not decode-failures already disposed above
+        await this.handleBatchFailures(pendingAck, err);
+      }
     }
   }
 

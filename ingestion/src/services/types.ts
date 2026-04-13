@@ -34,4 +34,6 @@ export interface RedisDeviceEntry {
   id: string;
   data: DeviceDataEntry | CompressedDeviceEntry | RawDeviceEntry;
   isCompressed?: boolean;
+  /** Origin of this batch, parsed from the Redis Stream `source` field. */
+  source?: string;
 }

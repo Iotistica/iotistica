@@ -25,7 +25,6 @@ import {
   AgentModel,
   DeviceTargetStateModel,
   DeviceCurrentStateModel,
-  DeviceMetricsModel,
   DeviceLogsModel,
 } from '../db/models';
 import { validateTargetStateConfigMiddleware } from '../services/provisioning/target-state-config.validator';

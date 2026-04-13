@@ -39,8 +39,6 @@ const POD_IDENTITY: string = (() => {
   return identity;
 })();
 import { metrics } from './metrics';
-import { circuitBreaker, CircuitState } from './circuit-breaker';
-import { DiskSpool } from './disk-spool';
 import { FAILURE_TRACKING_KEY } from './dlq';
 import { RedisPipeline } from './pipeline';
 import { RedisQueueConsumer } from './worker';
@@ -118,7 +116,6 @@ export class RedisDeviceQueue {
   private readonly redisMemoryHighWatermarkPct: number;
 
   private readonly pipeline: RedisPipeline;
-  private readonly diskSpool: DiskSpool;
   private readonly producer: RedisQueueProducer;
   private readonly inserter: ReadingInserter;
   private worker: RedisQueueConsumer | null = null;
@@ -174,37 +171,20 @@ export class RedisDeviceQueue {
     this.pipeline = new RedisPipeline(this.redisIngestion, {
       flushIntervalMs: readIntEnv('REDIS_PIPELINE_FLUSH_INTERVAL_MS', '50'),
       onPersistentOomFailure: (dropped) => {
-        // Force the circuit open so producers route subsequent writes to disk spool
-        // instead of retrying Redis while it remains at maxmemory
-        for (let i = 0; i < 5; i++) circuitBreaker.recordFailure();
         metrics.messagesDropped += dropped;
-        logger.error('Redis OOM: pipeline retries exhausted, circuit forced OPEN', {
+        logger.error('Redis OOM: pipeline retries exhausted, data dropped', {
           dropped, totalDropped: metrics.messagesDropped,
         });
       },
     });
 
-    const spoolPath = process.env.DISK_SPOOL_PATH || '/tmp/iotistic-spool';
-    const spoolMaxSizeMb = parseInt(process.env.DISK_SPOOL_MAX_SIZE_MB || '1000', 10);
-    this.diskSpool = new DiskSpool(spoolPath, spoolMaxSizeMb);
-
     this.producer = new RedisQueueProducer(
       this.redisIngestion,
       this.pipeline,
-      this.diskSpool,
       () => this.streamKey,
       this.maxStreamLength,
     );
     this.inserter = new ReadingInserter();
-
-    if (process.env.DISK_SPOOL_ENABLED === 'true') {
-      this.diskSpool.initialize()
-        .then(() => this.diskSpool.startReplayer(
-          data => this.producer.addInternal(data, true),
-          () => this.producer.isClientReady(),
-        ))
-        .catch(err => logger.error('Failed to initialize disk spool', { error: err.message }));
-    }
 
     this.redisIngestion.on('error', (err) => {
       logger.error('Redis device ingestion connection error', { error: err.message });
@@ -461,11 +441,10 @@ export class RedisDeviceQueue {
     dwellP95Ms: number;
     batchLatP95Ms: number;
   }> {
-    const backlogSize = await this.diskSpool.getBacklogCount();
-    const state = circuitBreaker.getState();
+    const spoolHealth = await this.worker?.getDbSpoolHealth() ?? { spoolingActive: false, backlogSize: 0, dbCircuitOpen: false };
     const lagMs = metrics.maxDwellMs;
     const status: 'healthy' | 'delayed' | 'buffering' | 'offline' =
-      state !== CircuitState.CLOSED || backlogSize > 0
+      spoolHealth.spoolingActive
         ? 'buffering'
         : metrics.redisConnected !== 1
           ? 'offline'
@@ -479,9 +458,9 @@ export class RedisDeviceQueue {
       maxDwellMs: metrics.maxDwellMs,
       workers: metrics.workerCount,
       status,
-      ingestionHealthy: state === CircuitState.CLOSED && metrics.redisConnected === 1,
-      spoolingActive: state !== CircuitState.CLOSED || backlogSize > 0,
-      backlogSize,
+      ingestionHealthy: !spoolHealth.dbCircuitOpen && metrics.redisConnected === 1,
+      spoolingActive: spoolHealth.spoolingActive,
+      backlogSize: spoolHealth.backlogSize,
       workerLag: metrics.workerLag,
       pendingMessages: metrics.pendingMessages,
       streamLength: metrics.streamLength,

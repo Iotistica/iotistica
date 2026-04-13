@@ -596,9 +596,9 @@ class InFlightTtlCache<T> {
       return cached.value;
     }
 
-    if (cached) {
-      this.entries.delete(key);
-    }
+    // Keep stale entry for fallback if the loader fails (DB outage).
+    // It is only removed after a successful load replaces it.
+    const staleValue = cached?.value ?? null;
 
     const pending = this.inFlight.get(key);
     if (pending) {
@@ -677,7 +677,22 @@ class InFlightTtlCache<T> {
             void writeSharedCacheEntry(sharedCache.kind, sharedCache.scopeKey, entry, sharedCache.adapter);
           }
 
+          // Loader succeeded — remove any stale entry and store fresh one
+          if (cached) {
+            this.entries.delete(key);
+          }
           return resolveValue(entry);
+        })
+        .catch((err) => {
+          // Loader failed (DB timeout/down) — return stale cached value if available
+          if (staleValue !== null) {
+            authCacheLogger.warn('MQTT auth loader failed, serving stale cached value', {
+              cacheKey: key,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return staleValue;
+          }
+          throw err;
         })
         .finally(async () => {
           await releaseDistributedLoadLock(distributedLock);

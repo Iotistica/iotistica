@@ -8,7 +8,7 @@ import { pool, query } from '../db/connection';
 import type MqttManager from './manager';
 import type { DeviceDataMessage, StateMessage } from './manager';
 import { processAgentStateReport } from '../services/agent/state';
-import { redisDeviceQueue } from '../services/telemetry';
+import { ingestion } from '../services/telemetry';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
 import { EventPublisher } from '../services/event-sourcing';
 import { getTenantId } from '../redis/tenant-keys';
@@ -107,7 +107,7 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
         .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
       
       // Queue raw parsed data (NO compression - worker handles it if needed)
-      const outcome = await redisDeviceQueue.add(readings);
+      const outcome = await ingestion.add('metrics', readings);
       
       const duration = Date.now() - startTime;
       logger.info('Processed metrics batch', {
@@ -121,7 +121,7 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
       });
     } else {
       // Single message
-      const outcome = await redisDeviceQueue.add([{
+      const outcome = await ingestion.add('metrics', [{
         deviceUuid: data.deviceUuid,
         deviceName: resolvedDeviceName,
         data: data.data,

@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { logger } from '../../utils/logger';
 
 export enum CircuitState {
   CLOSED = 'CLOSED',
@@ -20,7 +20,7 @@ export class RedisCircuitBreaker {
     if (this.state === CircuitState.HALF_OPEN) {
       this.successCount++;
       if (this.successCount >= this.successThreshold) {
-        logger.info('DB circuit breaker CLOSED - connection recovered', {
+        logger.info('Redis circuit breaker CLOSED - connection recovered', {
           previousState: this.state,
           successCount: this.successCount,
         });
@@ -36,13 +36,13 @@ export class RedisCircuitBreaker {
     this.lastFailureTime = Date.now();
 
     if (this.state === CircuitState.CLOSED && this.failureCount >= this.failureThreshold) {
-      logger.error('DB circuit breaker OPEN - switching to disk spool fallback', {
+      logger.error('Redis circuit breaker OPEN - switching to disk spool fallback', {
         failureCount: this.failureCount,
         threshold: this.failureThreshold,
       });
       this.state = CircuitState.OPEN;
     } else if (this.state === CircuitState.HALF_OPEN) {
-      logger.warn('DB circuit breaker OPEN again - recovery failed', { previousState: this.state });
+      logger.warn('Redis circuit breaker OPEN again - recovery failed', { previousState: this.state });
       this.state = CircuitState.OPEN;
     }
   }
@@ -51,7 +51,7 @@ export class RedisCircuitBreaker {
     if (this.state === CircuitState.CLOSED) return true;
     if (this.state === CircuitState.OPEN) {
       if (Date.now() - this.lastFailureTime >= this.timeoutMs) {
-        logger.info('DB circuit breaker HALF_OPEN - probing recovery');
+        logger.info('Redis circuit breaker HALF_OPEN - probing recovery');
         this.state = CircuitState.HALF_OPEN;
         this.failureCount = 0;
         return true;
@@ -72,4 +72,4 @@ export class RedisCircuitBreaker {
   }
 }
 
-export const dbCircuitBreaker = new RedisCircuitBreaker();
+export const circuitBreaker = new RedisCircuitBreaker();

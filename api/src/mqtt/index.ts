@@ -159,7 +159,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     // Handle metrics
     mqttManager.on('metrics', async (data) => {
       try {
-        const { redisDeviceQueue } = await import('../services/telemetry');
+        const { ingestion } = await import('../services/telemetry');
 
         const readings: Array<{ metric: string; value: number }> = [];
         const addNum = (key: string, val: unknown) => {
@@ -173,7 +173,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
         addNum('storage_total', data.storage_total);
 
         if (readings.length > 0) {
-          await redisDeviceQueue.add([{
+          await ingestion.add('system', [{
             deviceUuid: data.deviceUuid,
             deviceName: data.deviceUuid,
             timestamp: data.timestamp || new Date().toISOString(),

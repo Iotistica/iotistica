@@ -5,10 +5,22 @@
  * factory options configured in server/app.ts.
  */
 
+import { createGunzip } from 'zlib';
 import type { FastifyInstance } from 'fastify';
 
 
 export async function applyMiddleware(fastify: FastifyInstance): Promise<void> {
+
+  // Decompress gzip-encoded request bodies before parsing
+  fastify.addHook('preParsing', async (_req, _reply, payload) => {
+    const encoding = _req.headers['content-encoding'];
+    if (encoding === 'gzip') {
+      delete (_req.headers as Record<string, unknown>)['content-encoding'];
+      delete (_req.headers as Record<string, unknown>)['content-length'];
+      return payload.pipe(createGunzip());
+    }
+    return payload;
+  });
 
   // Fastify handles JSON and URL-encoded bodies natively.
   // Body limit: 16MB (handles large compressed log batches)

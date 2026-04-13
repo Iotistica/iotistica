@@ -610,37 +610,6 @@ export class DeviceCurrentStateModel {
  */
 export class DeviceMetricsModel {
   /**
-   * Record device metrics
-   */
-  static async record(deviceUuid: string, metrics: Partial<DeviceMetrics>): Promise<void> {
-    await query(
-      `INSERT INTO agent_metrics (
-        agent_uuid, cpu_usage, cpu_temp, memory_usage, memory_total,
-        storage_usage, storage_total, recorded_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
-      [
-        deviceUuid,
-        metrics.cpu_usage,
-        metrics.cpu_temp,
-        metrics.memory_usage,
-        metrics.memory_total,
-        metrics.storage_usage,
-        metrics.storage_total,
-      ]
-    );
-
-    // Also update device table with latest metrics
-    await AgentModel.update(deviceUuid, {
-      cpu_usage: metrics.cpu_usage,
-      cpu_temp: metrics.cpu_temp,
-      memory_usage: metrics.memory_usage,
-      memory_total: metrics.memory_total,
-      storage_usage: metrics.storage_usage,
-      storage_total: metrics.storage_total,
-    } as Partial<Agent>);
-  }
-
-  /**
    * Get recent metrics for device
    */
   static async getRecent(deviceUuid: string, limit: number = 100): Promise<DeviceMetrics[]> {

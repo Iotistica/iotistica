@@ -27,6 +27,7 @@ import { logger } from '../utils/logger';
 import deviceAuth from '../middleware/agent-auth';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { redisLogQueue } from '../services/telemetry/publisher';
+import { ingestion } from '../services/telemetry';
 
 type AgentUuidParams = {
   uuid: string;
@@ -235,7 +236,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         compressedBytes: finalPayload.length
       });
 
-      redisLogQueue.addCompressed({
+      ingestion.add('logs', {
         deviceUuid: uuid,
         batchId: batchId || `auto-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
         compressedPayload: finalPayload,

@@ -1,10 +1,9 @@
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
-import { logger } from '../utils/logger';
-import { DeviceDataEntry } from './types';
-import { metrics } from './metrics';
-import { dbCircuitBreaker, CircuitState } from './circuit-breaker';
+import { logger } from '../../utils/logger';
+import type { DeviceDataEntry } from './types';
+import { circuitBreaker, CircuitState } from './circuit-breaker';
 
 export class DiskSpool {
   private currentFile: string | null = null;
@@ -22,7 +21,7 @@ export class DiskSpool {
     try {
       if (!fsSync.existsSync(this.spoolPath)) {
         await fs.mkdir(this.spoolPath, { recursive: true });
-        logger.info('Created disk spool directory', { path: this.spoolPath });
+        logger.debug('Created disk spool directory', { path: this.spoolPath });
       }
 
       // Verify the process can actually write to the directory.
@@ -33,7 +32,7 @@ export class DiskSpool {
       await fs.unlink(testFile);
 
       this.enabled = true;
-      logger.info('Disk spool initialized', {
+      logger.debug('Disk spool fallback initialized', {
         path: this.spoolPath,
         maxSizeMb: this.maxSizeMb,
       });
@@ -52,8 +51,8 @@ export class DiskSpool {
     return this.enabled;
   }
 
-  async spoolToDisk(deviceData: DeviceDataEntry[]): Promise<void> {
-    const payload = JSON.stringify(deviceData);
+  async spoolToDisk(deviceData: DeviceDataEntry[], source?: string): Promise<void> {
+    const payload = JSON.stringify({ source: source ?? '', data: deviceData });
     const payloadSize = Buffer.byteLength(payload, 'utf8');
 
     const totalSpoolSize = await this.getTotalSize();
@@ -82,11 +81,11 @@ export class DiskSpool {
 
   /**
    * Start background replayer that drains spool files to Redis when circuit is closed.
-   * The onBatch callback is the queue's add() — provided by the caller to avoid circular deps.
+   * The onBatch callback is the publisher's add() — provided by the caller to avoid circular deps.
    */
-  startReplayer(onBatch: (data: DeviceDataEntry[]) => Promise<unknown>, isReady?: () => boolean): void {
+  startReplayer(onBatch: (data: DeviceDataEntry[], source?: string) => Promise<unknown>, isReady?: () => boolean): void {
     this.replayInterval = setInterval(async () => {
-      if (dbCircuitBreaker.getState() !== CircuitState.CLOSED) return;
+      if (circuitBreaker.getState() !== CircuitState.CLOSED) return;
       // Skip if the underlying Redis client isn't actually connected yet.
       // The circuit can be CLOSED while ioredis is still in reconnecting state,
       // which would cause onBatch → spoolToDisk → unlink(same file) data loss.
@@ -119,8 +118,11 @@ export class DiskSpool {
 
         for (const line of lines) {
           try {
-            const deviceData = JSON.parse(line) as DeviceDataEntry[];
-            await onBatch(deviceData);
+            const parsed = JSON.parse(line);
+            // Support both envelope format {source, data} and legacy bare array
+            const deviceData: DeviceDataEntry[] = Array.isArray(parsed) ? parsed : parsed.data;
+            const source: string | undefined = Array.isArray(parsed) ? undefined : parsed.source || undefined;
+            await onBatch(deviceData, source);
           } catch (err: any) {
             logger.error('Failed to replay spooled batch', { error: err.message });
           }
@@ -133,15 +135,10 @@ export class DiskSpool {
     }, 10000);
   }
 
-  private async getTotalSize(): Promise<number> {
-    try {
-      const files = await fs.readdir(this.spoolPath);
-      const sizes = await Promise.all(
-        files.map(file => fs.stat(path.join(this.spoolPath, file)).then(s => s.size).catch(() => 0)),
-      );
-      return sizes.reduce((total, size) => total + size, 0);
-    } catch {
-      return 0;
+  stopReplayer(): void {
+    if (this.replayInterval) {
+      clearInterval(this.replayInterval);
+      this.replayInterval = null;
     }
   }
 
@@ -150,6 +147,18 @@ export class DiskSpool {
     try {
       const files = await fs.readdir(this.spoolPath);
       return files.filter(f => f.startsWith('spool-')).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async getTotalSize(): Promise<number> {
+    try {
+      const files = await fs.readdir(this.spoolPath);
+      const sizes = await Promise.all(
+        files.map(file => fs.stat(path.join(this.spoolPath, file)).then(s => s.size).catch(() => 0)),
+      );
+      return sizes.reduce((total, size) => total + size, 0);
     } catch {
       return 0;
     }

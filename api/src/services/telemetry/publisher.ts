@@ -18,6 +18,8 @@ import {
   getTenantId,
 } from '../../redis/tenant-keys';
 import type { AddOutcome, DeviceDataEntry } from './types';
+import { circuitBreaker } from './circuit-breaker';
+import { DiskSpool } from './disk-spool';
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -39,11 +41,25 @@ export class DeviceReadingsPublisher {
   private readonly redis: Redis;
   private readonly maxStreamLength: number;
   private tenantId: string;
+  private readonly diskSpool: DiskSpool;
 
   constructor(tenantId?: string) {
     this.redis = getRedisIngestion();
     this.maxStreamLength = parseInt(process.env.REDIS_INGESTION_STREAM_MAXLEN || '10000', 10);
     this.tenantId = tenantId || '';
+
+    const spoolPath = process.env.DISK_SPOOL_PATH || '/tmp/iotistic-spool';
+    const maxSizeMb = parseInt(process.env.DISK_SPOOL_MAX_SIZE_MB || '500', 10);
+    this.diskSpool = new DiskSpool(spoolPath, maxSizeMb);
+
+    if (process.env.DISK_SPOOL_ENABLED === 'true') {
+      this.diskSpool.initialize()
+        .then(() => this.diskSpool.startReplayer(
+          (data, source) => this.add(data, source),
+          () => this.redis.status === 'ready',
+        ))
+        .catch(err => logger.error('Failed to initialize disk spool', { error: err.message }));
+    }
   }
 
   private resolveTenantId(): string {
@@ -54,9 +70,14 @@ export class DeviceReadingsPublisher {
     return agentDevicesIngestionStreamKey(this.resolveTenantId());
   }
 
-  async add(deviceData: DeviceDataEntry[]): Promise<AddOutcome> {
+  async add(deviceData: DeviceDataEntry[], source?: string): Promise<AddOutcome> {
     if (deviceData.length === 0) {
       return 'redis';
+    }
+
+    // Circuit open — Redis is known to be failing, skip attempt and spool directly.
+    if (!circuitBreaker.shouldAllowRequest()) {
+      return this.fallbackToDiskOrDrop(deviceData, source);
     }
 
     try {
@@ -68,8 +89,11 @@ export class DeviceReadingsPublisher {
         '*',
         'data',
         JSON.stringify(deviceData),
+        'source',
+        source ?? '',
       );
 
+      circuitBreaker.recordSuccess();
       logger.debug('Queued device readings for ingestion', {
         count: deviceData.length,
         streamKey: this.streamKey,
@@ -81,6 +105,26 @@ export class DeviceReadingsPublisher {
         count: deviceData.length,
         streamKey: this.streamKey,
         error: message,
+      });
+      circuitBreaker.recordFailure();
+      return this.fallbackToDiskOrDrop(deviceData, source);
+    }
+  }
+
+  private async fallbackToDiskOrDrop(deviceData: DeviceDataEntry[], source?: string): Promise<AddOutcome> {
+    if (!this.diskSpool.isEnabled()) {
+      logger.error('Redis unavailable and disk spool disabled — dropping data', {
+        count: deviceData.length,
+      });
+      return 'dropped';
+    }
+    try {
+      await this.diskSpool.spoolToDisk(deviceData, source);
+      return 'disk';
+    } catch (err: any) {
+      logger.error('Disk spool write failed — dropping data', {
+        count: deviceData.length,
+        error: err.message,
       });
       return 'dropped';
     }
@@ -119,8 +163,17 @@ export class DeviceLogsPublisher {
     return deviceLogsStreamKey(this.resolveTenantId());
   }
 
-  async addCompressed(entry: CompressedLogEntry): Promise<void> {
+  async addCompressed(entry: CompressedLogEntry, source?: string): Promise<void> {
     try {
+      if (!circuitBreaker.shouldAllowRequest()) {
+        logger.warn('Redis circuit open, dropping compressed log batch', {
+          deviceUuid: entry.deviceUuid.substring(0, 8),
+          batchId: entry.batchId,
+          compressedBytes: entry.compressedPayload.length,
+        });
+        return;
+      }
+
       if (this.redis.status !== 'ready' && this.redis.status !== 'connect') {
         logger.error('Redis not ready, dropping compressed log batch', {
           status: this.redis.status,
@@ -146,6 +199,7 @@ export class DeviceLogsPublisher {
           'contentType', entry.contentType,
           'payload_b64', entry.compressedPayload.toString('base64'),
           'payloadSize', entry.compressedPayload.length.toString(),
+          'source', source ?? '',
         );
         return pipeline;
       }).catch(err => {

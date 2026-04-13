@@ -237,7 +237,7 @@ export async function processAgentStateReport(
       deviceState.storage_usage !== undefined
     ) {
       try {
-        const { redisDeviceQueue } = await import('../../services/telemetry');
+        const { ingestion } = await import('../../services/telemetry');
         const { redisClient } = await import('../../redis/client');
         const tenantId = getTenantId();
 
@@ -254,7 +254,7 @@ export async function processAgentStateReport(
         addNum('storage_total', deviceState.storage_total);
 
         if (readings.length > 0) {
-          await redisDeviceQueue.add([{
+          await ingestion.add('system', [{
             deviceUuid: uuid,
             deviceName: uuid,
             timestamp: new Date().toISOString(),

@@ -66,6 +66,7 @@ interface CompressedStreamEntry {
   compressedPayload: Buffer;
   contentEncoding: string;
   contentType: string;
+  source?: string;
 }
 
 export class RedisLogWorker {
@@ -212,6 +213,7 @@ export class RedisLogWorker {
             compressedPayload: Buffer.from(payloadBase64, 'base64'),
             contentEncoding: fieldMap.encoding,
             contentType: fieldMap.contentType,
+            source: fieldMap.source || undefined,
           });
         }
 
@@ -301,9 +303,9 @@ export class RedisLogWorker {
     const allIds = entries.map(e => e.id);
     await this.redisConsumer.xack(this.streamKey, this.consumerGroup, ...allIds);
 
-    logger.info('Inserted log batch to DB', {
-      logs: allLogs.length,
-      agents: logsByDevice.size,
+    logger.info('Ingested', {
+      count: allLogs.length,
+      source: 'logs',
       durationMs: Date.now() - startTime,
     });
   }
