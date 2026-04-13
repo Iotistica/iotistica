@@ -19,7 +19,6 @@ import msgpack from 'msgpackr';
 import { MQTTDatabaseService } from './db';
 import logger from '../utils/logger';
 import { PrometheusExporter } from './prometheus';
-import { IngestionPublisher } from './ingestion-publisher';
 import { isUtf8Buffer } from '../utils/is-utf8';
 
 // Update interval for metrics (milliseconds)
@@ -346,9 +345,6 @@ export class MQTTMonitorService extends EventEmitter {
   // Prometheus exporter
   private prometheusExporter: PrometheusExporter;
 
-  // Ingestion stream publisher
-  private ingestionPublisher: IngestionPublisher;
-
   private static parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
     if (value === undefined) {
       return defaultValue;
@@ -439,7 +435,6 @@ export class MQTTMonitorService extends EventEmitter {
     );
     this.publisher = new EventPublisher(this);
     this.persister = new MessagePersister(this.options, this.dbService);
-    this.ingestionPublisher = new IngestionPublisher();
   }
 
 
@@ -533,9 +528,6 @@ export class MQTTMonitorService extends EventEmitter {
     if (this.options.persistToDatabase && this.dbService) {
       this.startDatabaseSync();
     }
-
-    // Connect ingestion publisher (publishes broker metrics to Redis stream)
-    await this.ingestionPublisher.connect();
     
     // Start event loop lag monitoring for backpressure detection
     this.startEventLoopMonitoring();
@@ -967,8 +959,6 @@ export class MQTTMonitorService extends EventEmitter {
       this.client.end();
       this.client = null;
     }
-
-    await this.ingestionPublisher.disconnect();
 
     this.connected = false;
     logger.info('Stopped');
@@ -1440,23 +1430,6 @@ export class MQTTMonitorService extends EventEmitter {
         throughputOutbound: this.metrics.throughput.current.outbound,
         sysData: this.systemStats
       });
-
-      // Publish broker metrics to ingestion Redis stream
-      await this.ingestionPublisher.publishBrokerMetrics({
-        clients: this.metrics.clients,
-        subscriptions: this.metrics.subscriptions,
-        retainedMessages: this.metrics.retainedMessages,
-        messageRatePublished: this.metrics.messageRate.current.published,
-        messageRateReceived: this.metrics.messageRate.current.received,
-        throughputInboundKBs: this.metrics.throughput.current.inbound,
-        throughputOutboundKBs: this.metrics.throughput.current.outbound,
-        totalMessagesSent: this.metrics.totalMessagesSent,
-        totalMessagesReceived: this.metrics.totalMessagesReceived,
-      });
-
-      if (topicMetricsBatch.length > 0) {
-        await this.ingestionPublisher.publishTopicMetrics(topicMetricsBatch);
-      }
 
       // Batch save schema history (if DB service supports it)
       if (schemaHistoryBatch.length > 0) {
