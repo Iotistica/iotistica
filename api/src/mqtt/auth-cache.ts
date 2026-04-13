@@ -564,12 +564,15 @@ async function invalidateSharedCacheNamespace(): Promise<void> {
 class InFlightTtlCache<T> {
   private readonly entries = new Map<string, CacheEntry<T>>();
   private readonly inFlight = new Map<string, Promise<T>>();
+  private readonly staleWarnedAt = new Map<string, number>();
+  private static readonly STALE_WARN_INTERVAL_MS = 30_000;
 
   constructor(private readonly maxEntries: number) {}
 
   clear(): void {
     this.entries.clear();
     this.inFlight.clear();
+    this.staleWarnedAt.clear();
   }
 
   set(key: string, entry: CacheEntry<T>): void {
@@ -681,15 +684,21 @@ class InFlightTtlCache<T> {
           if (cached) {
             this.entries.delete(key);
           }
+          this.staleWarnedAt.delete(key);
           return resolveValue(entry);
         })
         .catch((err) => {
           // Loader failed (DB timeout/down) — return stale cached value if available
           if (staleValue !== null) {
-            authCacheLogger.warn('MQTT auth loader failed, serving stale cached value', {
-              cacheKey: key,
-              error: err instanceof Error ? err.message : String(err),
-            });
+            const now = Date.now();
+            const lastWarned = this.staleWarnedAt.get(key) ?? 0;
+            if (now - lastWarned >= InFlightTtlCache.STALE_WARN_INTERVAL_MS) {
+              this.staleWarnedAt.set(key, now);
+              authCacheLogger.warn('MQTT auth loader failed, serving stale cached value', {
+                cacheKey: key,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
             return staleValue;
           }
           throw err;
