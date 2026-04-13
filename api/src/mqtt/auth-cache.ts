@@ -100,7 +100,7 @@ const MQTT_AUTH_USER_COLD_START_TIMEOUT_MS = readPositiveIntEnv(
 );
 const MQTT_AUTH_COLD_START_WINDOW_SECONDS = readPositiveIntEnv('MQTT_AUTH_COLD_START_WINDOW_SECONDS', 30);
 const MQTT_AUTH_CACHE_LOG_HITS = /^(1|true|yes)$/i.test(process.env.MQTT_AUTH_CACHE_LOG_HITS ?? 'false');
-const MQTT_AUTH_SHARED_CACHE_ENABLED = /^(1|true|yes)$/i.test(process.env.MQTT_AUTH_SHARED_CACHE_ENABLED ?? 'false');
+const MQTT_AUTH_SHARED_CACHE_ENABLED = !/^(0|false|no)$/i.test(process.env.MQTT_AUTH_SHARED_CACHE_ENABLED ?? 'true');
 const MQTT_AUTH_SHARED_CACHE_PREFIX = process.env.MQTT_AUTH_SHARED_CACHE_PREFIX?.trim() || 'mqtt-auth-cache:v1';
 const MQTT_AUTH_SHARED_CACHE_EPOCH_REFRESH_SECONDS = readPositiveIntEnv('MQTT_AUTH_SHARED_CACHE_EPOCH_REFRESH_SECONDS', 2);
 const MQTT_AUTH_SHARED_LOCK_ENABLED = /^(1|true|yes)$/i.test(process.env.MQTT_AUTH_SHARED_LOCK_ENABLED ?? 'true');
