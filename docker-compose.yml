@@ -671,6 +671,13 @@ services:
             - MQTT_METRICS_UPDATE_INTERVAL=${MQTT_METRICS_UPDATE_INTERVAL:-5000}
             - MQTT_TOPIC_TREE_UPDATE_INTERVAL=${MQTT_TOPIC_TREE_UPDATE_INTERVAL:-5000}
             - MQTT_MAX_PAYLOAD_BYTES=${MQTT_MAX_PAYLOAD_BYTES:-65536}
+            - REDIS_HOST=${REDIS_HOST:-redis}
+            - REDIS_PORT=${REDIS_PORT:-6379}
+            - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
+            - REDIS_INGESTION_STREAM_KEY=${REDIS_INGESTION_STREAM_KEY:-tenant:{73eddd385ce8}:agent:devices:ingestion}
+        depends_on:
+            redis:
+                condition: service_healthy
         networks:
             - iotistica-net
         healthcheck:
