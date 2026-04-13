@@ -1,5 +1,5 @@
 export class DeviceQueueMetrics {
-  // Gauges — updated by the periodic health collector in RedisDeviceQueue
+  // Gauges — updated by the periodic health collector in DeviceIngestionOrchestrator
   streamLength = 0;
   pendingMessages = 0;
   dlqLength = 0;

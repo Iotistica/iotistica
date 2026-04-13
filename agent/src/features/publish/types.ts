@@ -46,10 +46,13 @@ export type DevicePublishConfig = z.infer<typeof DevicePublishConfigSchema> & {
 /**
  * MQTT Connection interface for publishing sensor data
  */
+export type PublishMode = 'direct' | 'buffer-only' | 'recovering';
+
 export interface MqttConnection {
   publish(topic: string, payload: string | Buffer, options?: { qos?: 0 | 1 | 2 }): Promise<void>;
   isConnected(): boolean;
   getMessageIdGenerator?(): any; // Optional for HA deduplication (returns MessageIdGenerator if available)
+  getPublishMode?(): PublishMode;
 }
 
 /**

@@ -20,9 +20,9 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
     }, timeoutMs);
 
     try {
-      const { redisDeviceQueue } = await import('../services');
-      await redisDeviceQueue.stopWorker();
-      logger.info('Redis device queue worker stopped');
+      const { deviceOrchestrator } = await import('../services');
+      await deviceOrchestrator.stopWorker();
+      logger.info('Device ingestion worker stopped');
     } catch (error) {
       logger.error('Error stopping Redis device queue worker', { error });
     }

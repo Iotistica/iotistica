@@ -19,7 +19,7 @@ import {
 import { LogInserter, type LogEntry } from './log-inserter';
 
 /**
- * Stable per-pod identity.  Mirrors the pattern in redis-device-queue.ts.
+ * Stable per-pod identity.  Mirrors the pattern in device-ingestion-orchestrator.ts.
  * Kubernetes sets HOSTNAME to the unique pod name; everywhere else a UUID is used.
  */
 const POD_IDENTITY: string = (() => {
@@ -303,10 +303,18 @@ export class RedisLogWorker {
     const allIds = entries.map(e => e.id);
     await this.redisConsumer.xack(this.streamKey, this.consumerGroup, ...allIds);
 
+    const completedAtMs = Date.now();
+    const dwellTimes = entries.map(e => {
+      const dashIndex = e.id.indexOf('-');
+      const ms = dashIndex > 0 ? Number(e.id.slice(0, dashIndex)) : completedAtMs;
+      return completedAtMs - (Number.isNaN(ms) ? completedAtMs : ms);
+    });
+
     logger.info('Ingested', {
       count: allLogs.length,
       source: 'logs',
-      durationMs: Date.now() - startTime,
+      durationMs: completedAtMs - startTime,
+      maxDwellMs: Math.max(...dwellTimes),
     });
   }
 

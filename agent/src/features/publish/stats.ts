@@ -42,6 +42,7 @@ export class PublishStats {
     info: CompressionInfo,
     deviceName: string,
     logger?: Logger,
+    buffered?: boolean,
   ): void {
     if (!logger) return;
 
@@ -73,9 +74,10 @@ export class PublishStats {
       }
     }
 
+    const verb = buffered ? 'Buffered' : 'Published';
     const label = info.isBaseline
-      ? `Published ${messageCount} messages (no-op baseline)`
-      : `Published ${messageCount} messages`;
+      ? `${verb} ${messageCount} messages (no-op baseline)`
+      : `${verb} ${messageCount} messages`;
 
     logger.info(label, { messages: messageCount, batchBytes, compression: compressionLog });
   }

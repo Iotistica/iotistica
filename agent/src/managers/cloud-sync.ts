@@ -674,6 +674,17 @@ export class CloudSync extends EventEmitter {
 			this.pollErrors = 0; // Reset on success
 			this.pollCircuit.recordSuccess(); // Reset circuit breaker
 			this.connectionMonitor.markSuccess('poll'); // Track success
+
+			// Break buffer-only deadlock: if poll succeeds but we're still in buffer-only
+			// mode (e.g. after Postgres outage), the report path throws CloudTransportBufferedError
+			// which never counts as success or failure — connectionMonitor stays offline forever.
+			// Switching to 'recovering' lets the next report use HTTP fallback and complete the
+			// online transition.
+			if (this.getPublishMode() === 'buffer-only' && !this.connectionMonitor.isOnline()) {
+				this.setPublishMode('recovering', 'poll-success-while-buffering');
+				this.forceNextReport = true;
+				this.requestImmediateReport('poll-success-recovery');
+			}
 		} catch (error) {
 			this.pollErrors = Math.min(this.pollErrors + 1, 10); // Cap at 10
 			

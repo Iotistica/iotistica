@@ -22,7 +22,7 @@ import { DeviceDataEntry, CompressedDeviceEntry, AddOutcome } from './types';
  *      (local dev, Docker Compose, bare-metal) where HOSTNAME may equal the
  *      machine hostname shared by multiple processes.
  *
- * Computed once at module load so all RedisDeviceQueue instances (and the
+ * Computed once at module load so all DeviceIngestionOrchestrator instances (and the
  * initialize() re-entry path) always use the same value, preventing orphaned
  * consumer entries in the Redis consumer group.
  */
@@ -81,7 +81,7 @@ function resolveIngestionStreamKey(streamKey?: string): { ingestionStreamKey: st
   };
 }
 
-export class DeviceIngestionOrchestrator {
+export class Orchestrator {
   private redisIngestion: Redis;
   private redisConsumer: Redis;
 
@@ -568,4 +568,4 @@ export class DeviceIngestionOrchestrator {
   }
 }
 
-export const deviceOrchestrator = new DeviceIngestionOrchestrator();
+export const deviceOrchestrator = new Orchestrator();

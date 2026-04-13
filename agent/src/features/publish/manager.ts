@@ -376,10 +376,11 @@ export class PublishManager extends EventEmitter {
       await this.mqttConnection.publish(topic, payload, { qos: 1 });
       publishConfirmed = true;
 
+      const buffered = this.mqttConnection.getPublishMode?.() !== 'direct';
       const MessageBufferModel = await this.getMessageBufferModel();
       MessageBufferModel.deleteByIds([claimed.id]);
       this.stats.recordPublish(messageCount, batchBytes);
-      this.stats.logPublishSuccess(messageCount, batchBytes, info, endpointName, this.logger);
+      this.stats.logPublishSuccess(messageCount, batchBytes, info, endpointName, this.logger, buffered);
       this.batcher.reset();
     } catch (err) {
       this.logger?.error(`Failed to publish batch from endpoint '${endpointName}'`, err);

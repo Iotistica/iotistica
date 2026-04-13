@@ -1,11 +1,11 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-04-09 14:46:42
-# Agents: 21 to 21
-# Ports: 48501 to 48501
+# Generated: 2026-04-12 23:28:49
+# Agents: 22 to 22
+# Ports: 48502 to 48502
 
 services:
-  agent-21:
-    container_name: cloud-agent-21
+  agent-22:
+    container_name: local-agent-22
     build:
       context: .
       dockerfile: agent/Dockerfile
@@ -20,12 +20,12 @@ services:
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agent-21-data:/app/data
+      - agent-22-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
       - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth
     environment:
-      - DEVICE_API_PORT=48501
-      - IOTISTICA_API=https://demo-api.iotistica.com
+      - DEVICE_API_PORT=48502
+      - IOTISTICA_API=http://localhost:4002
       - NODE_ENV=development
       - MQTT_AUTH_DIR=/app/data/mosquitto-auth
       - MQTT_BROKER_URL=mqtt://localhost:5884
@@ -33,7 +33,7 @@ services:
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=aecd9d34f52546ab33144e5f1c070ab4fcbc1063d40a80cb1a981ab8fad0788a
+      - PROVISIONING_KEY=026504fe3dc5ec2a4a416a328b4a286cb4e128f504abd400b21b09e9b1195f01
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -49,7 +49,7 @@ services:
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
 volumes:
-  agent-21-data:
+  agent-22-data:
     driver: local
 networks:
   iotistic-net:
