@@ -67,33 +67,8 @@
                 </div>
 
                 <!-- Digital Twin -->
-                <div class="solution-item reverse">
-                    <div class="solution-image">
-                        <img src="images/digital_twin_graph.JPG" alt="Digital Twin Visualization">
-                    </div>
-                    <div class="solution-content">
-                        <h3>Digital Twin & Spatial Intelligence</h3>
-                        <p class="solution-benefit">
-                            Visualize your physical infrastructure in 3D. Map IoT devices to actual locations, understand spatial 
-                            relationships, and manage complex building systems with an intuitive graph-based interface.
-                        </p>
-                        <ul class="solution-features">
-                            <li><strong>3D Building Models:</strong> Import IFC files and visualize entire facilities</li>
-                            <li><strong>Device-Space Mapping:</strong> Link sensors to physical rooms, floors, and zones</li>
-                            <li><strong>Relationship Graphs:</strong> See how devices, spaces, and systems interconnect</li>
-                            <li><strong>Smart Navigation:</strong> Quickly find equipment and understand dependencies</li>
-                        </ul>
-                        <div class="tech-stack">
-                            <span class="tech-badge">Neo4j</span>
-                            <span class="tech-badge">Graph Database</span>
-                            <span class="tech-badge">IFC Parser</span>
-                            <span class="tech-badge">3D Visualization</span>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Security -->
-                <div class="solution-item">
+                <div class="solution-item reverse">
                     <div class="solution-image">
                         <img src="images/security.JPG" alt="Security Dashboard">
                     </div>
@@ -143,55 +118,155 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </section>
 
-                <!-- MQTT Broker -->
-                <div class="solution-item">
-                    <div class="solution-image">
-                        <img src="images/mqtt.JPG" alt="MQTT Explorer">
-                    </div>
-                    <div class="solution-content">
-                        <h3>Scalable Message Broker</h3>
-                        <p class="solution-benefit">
-                            Connect thousands of devices with a robust MQTT infrastructure. PostgreSQL-backed ACLs ensure 
-                            only authorized devices can publish or subscribe to specific topics.
-                        </p>
-                        <ul class="solution-features">
-                            <li><strong>High Throughput:</strong> Handle millions of messages per day reliably</li>
-                            <li><strong>Topic Management:</strong> Visualize and manage your entire MQTT topic hierarchy</li>
-                            <li><strong>Granular ACLs:</strong> Control read/write access per device, per topic</li>
-                            <li><strong>QoS Support:</strong> Guaranteed delivery when you need it</li>
-                        </ul>
-                        <div class="tech-stack">
-                            <span class="tech-badge">Mosquitto</span>
-                            <span class="tech-badge">MQTT</span>
-                            <span class="tech-badge">PostgreSQL ACL</span>
-                            <span class="tech-badge">TLS/SSL</span>
+    <!-- Ingestion Performance Section -->
+    <section class="services" style="background: var(--bg-secondary);">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Zero-Loss Data Ingestion</h2>
+                <p class="section-subtitle">
+                    Every reading matters. Our ingestion pipeline is built to capture millions of data points 
+                    without dropping a single one — even under extreme load.
+                </p>
+            </div>
+
+            <div style="max-width: 100%; margin-bottom: 3rem;">
+                <h3 style="font-size: 1.5rem; margin-bottom: 1rem;">Why Zero Matters</h3>
+                <p class="solution-benefit" style="max-width: 100%;">
+                    In industrial monitoring, environmental compliance, and predictive maintenance, data gaps 
+                    create blind spots. Regulations require complete audit trails. Machine learning models need 
+                    continuous data to detect anomalies. Our pipeline guarantees completeness so your decisions 
+                    are based on the full picture — not a best-effort sample.
+                </p>
+                <div style="background: #0d1117; border: 1px solid #30363d; border-radius: 12px; padding: 2rem; margin-top: 1.5rem;">
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; text-align: center;">
+                        <div>
+                            <div style="font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, #00d4aa, #7c3aed); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">0.0%</div>
+                            <div style="color: #8b949e; font-size: 0.85rem; margin-top: 0.25rem;">Data Loss</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, #00d4aa, #7c3aed); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">20K+</div>
+                            <div style="color: #8b949e; font-size: 0.85rem; margin-top: 0.25rem;">Readings / Second</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, #00d4aa, #7c3aed); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">40M+</div>
+                            <div style="color: #8b949e; font-size: 0.85rem; margin-top: 0.25rem;">Readings Verified</div>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- API Usage -->
-                <div class="solution-item reverse">
-                    <div class="solution-image">
-                        <img src="images/api_usage.JPG" alt="API Usage Analytics">
-                    </div>
+            <div class="solutions-list">
+                <div class="solution-item" style="border-bottom: none;">
                     <div class="solution-content">
-                        <h3>API Management & Analytics</h3>
+                        <h3>Built for Scale, Proven at Scale</h3>
                         <p class="solution-benefit">
-                            Track how your platform is being used. Monitor API calls, identify usage patterns, and optimize 
-                            your infrastructure based on real data. Perfect for SaaS platforms with multiple customers.
+                            IoT data is only valuable if it arrives complete. A missed temperature spike, a skipped 
+                            pressure reading, a lost vibration event — any gap can mean a missed alarm or a flawed 
+                            analysis. Our ingestion pipeline is engineered from the ground up for zero data loss, 
+                            processing over 20,000 readings per second with every single value accounted for.
                         </p>
                         <ul class="solution-features">
-                            <li><strong>Usage Metering:</strong> Track API calls per customer for billing</li>
-                            <li><strong>Rate Limiting:</strong> Protect your infrastructure from abuse</li>
-                            <li><strong>Performance Insights:</strong> Identify slow endpoints and optimize</li>
-                            <li><strong>Multi-Tenant Support:</strong> Isolated metrics per customer namespace</li>
+                            <li><strong>Zero-Loss Pipeline:</strong> Verified at 2 million messages and 40 million readings with 0.0% data loss</li>
+                            <li><strong>High Throughput:</strong> Sustained ingestion of 20,000+ readings per second on modest hardware</li>
+                            <li><strong>Stream-Buffered Architecture:</strong> Messages are buffered in-memory streams before database commit, so transient slowdowns never cause drops</li>
+                            <li><strong>Parallel Workers:</strong> Multiple ingestion workers process data concurrently, scaling with your workload</li>
+                            <li><strong>Real-Time and Historical:</strong> Data is queryable instantly for live dashboards and stored efficiently for long-term trend analysis</li>
                         </ul>
-                        <div class="tech-stack">
-                            <span class="tech-badge">REST API</span>
-                            <span class="tech-badge">Stripe Billing</span>
-                            <span class="tech-badge">K8s</span>
-                            <span class="tech-badge">Docker</span>
+                    </div>
+                    <div class="solution-image">
+                        <img src="images/ingestion_perf_dashboard.JPG" alt="Ingestion Performance Dashboard">
+                    </div>
+                </div>
+
+                <div class="solution-item" style="border-bottom: none;">
+                    <div class="solution-content">
+                        <h3>What Makes the Pipeline Fast</h3>
+                        <p class="solution-benefit">
+                            High throughput is not about brute-force hardware — it is the result of careful architectural 
+                            decisions at every stage of the data path. Each component is purpose-built to eliminate 
+                            bottlenecks and keep data flowing under pressure.
+                        </p>
+                        <ul class="solution-features">
+                            <li><strong>COPY-Based Bulk Insert:</strong> Large batches bypass row-by-row INSERT and use PostgreSQL COPY protocol, achieving near-native disk write speeds</li>
+                            <li><strong>Redis Stream Backpressure:</strong> Incoming MQTT messages land in a capped Redis Stream, decoupling broker throughput from database write latency</li>
+                            <li><strong>Parallel Worker Pool:</strong> Multiple independent workers drain the stream concurrently, each with its own database connection — no shared locks, no contention</li>
+                            <li><strong>Adaptive Batching:</strong> Workers accumulate readings and flush at optimal batch sizes, balancing latency against throughput automatically</li>
+                            <li><strong>Connection Pooling:</strong> A dedicated pool of persistent database connections eliminates per-query connection overhead</li>
+                            <li><strong>TimescaleDB Hypertables:</strong> Time-series data lands in automatically partitioned hypertables optimized for append-heavy workloads and fast range queries</li>
+                        </ul>
+                    </div>
+                    <div class="solution-content">
+                        <h3>Key Engineering Decisions</h3>
+                        <p class="solution-benefit">
+                            Performance at this level requires more than fast code. These are the design choices that 
+                            separate a pipeline that survives a demo from one that survives production.
+                        </p>
+                        <ul class="solution-features">
+                            <li><strong>QoS 0 by Design:</strong> Eliminating MQTT acknowledgment overhead doubles effective broker throughput while the stream buffer guarantees no loss downstream</li>
+                            <li><strong>Backpressure Monitoring:</strong> Real-time stream depth metrics feed Grafana dashboards, making saturation visible before it becomes data loss</li>
+                            <li><strong>Graceful Degradation:</strong> If the database slows, the Redis Stream absorbs the burst — workers catch up automatically when capacity returns</li>
+                            <li><strong>Deterministic Testing:</strong> Every load test verifies row-level counts against expected totals, with broker-level message auditing to detect transport-layer gaps</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Cloud K8s Deployment Section -->
+    <section class="services">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Cloud Deployment</h2>
+                <p class="section-subtitle">
+                    Multi-tenant SaaS infrastructure that scales from a single customer to thousands — 
+                    with full namespace isolation and automated provisioning.
+                </p>
+            </div>
+
+            <div class="solutions-list">
+                <div class="solution-item" style="border-bottom: none;">
+                    <div class="solution-content">
+                        <h3>Automated Customer Provisioning</h3>
+                        <p class="solution-benefit">
+                            New customer signs up, pays through Stripe, and gets a fully isolated Kubernetes 
+                            environment deployed automatically — API, dashboard, database, MQTT broker, and 
+                            monitoring stack, all in their own namespace within minutes.
+                        </p>
+                        <ul class="solution-features">
+                            <li><strong>One-Click Deployment:</strong> Stripe checkout triggers Helm-based provisioning — no manual ops, no tickets</li>
+                            <li><strong>Namespace Isolation:</strong> Each customer runs in a dedicated Kubernetes namespace with network policies and resource quotas</li>
+                            <li><strong>Dedicated Databases:</strong> Per-customer PostgreSQL and Redis instances prevent noisy-neighbor issues</li>
+                            <li><strong>License-Gated Features:</strong> RS256-signed JWT tokens control access to premium capabilities per subscription tier</li>
+                            <li><strong>GitOps Managed:</strong> ArgoCD syncs every customer environment from Git — auditable, repeatable, and drift-free</li>
+                        </ul>
+                    </div>
+                    <div class="solution-content">
+                        <h3>Built to Scale</h3>
+                        <p class="solution-benefit">
+                            The platform is designed for horizontal scaling at every layer. Add customers without 
+                            re-architecting. Scale individual tenants without affecting others. Run on any cloud.
+                        </p>
+                        <ul class="solution-features">
+                            <li><strong>Horizontal Pod Autoscaling:</strong> API and ingestion workers scale automatically based on CPU, memory, or custom metrics</li>
+                            <li><strong>Multi-Cloud Ready:</strong> Runs on AKS, EKS, or GKE — Helm charts abstract the underlying provider</li>
+                            <li><strong>Agent Fleet Scaling:</strong> StatefulSet-based agent fleets scale from 10 to 1,000+ simulated devices with predictable resource growth</li>
+                            <li><strong>Tiered Monitoring:</strong> Shared Prometheus for standard plans, dedicated Prometheus + Grafana stack for enterprise customers</li>
+                            <li><strong>Zero-Downtime Upgrades:</strong> Rolling deployments and pod disruption budgets keep customer services online during updates</li>
+                        </ul>
+                        <div class="tech-stack" style="margin-top: 1.5rem;">
+                            <span class="tech-badge">Kubernetes</span>
+                            <span class="tech-badge">Helm</span>
+                            <span class="tech-badge">ArgoCD</span>
+                            <span class="tech-badge">Stripe</span>
+                            <span class="tech-badge">AKS</span>
+                            <span class="tech-badge">Kyverno</span>
+                            <span class="tech-badge">Prometheus</span>
+                            <span class="tech-badge">Grafana</span>
                         </div>
                     </div>
                 </div>

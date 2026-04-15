@@ -51,6 +51,7 @@ const DEFAULTS = {
   Username:            '',
   Password:            '',
   SyntheticAgents:     false,
+  Cleanup:             true,
 };
 
 function parseArgs() {
@@ -109,6 +110,19 @@ function randomUuidV4() {
 
 function dockerExec(container, ...cmd) {
   return execFileSync('docker', ['exec', container, ...cmd], { encoding: 'utf8' }).trim();
+}
+
+function getBrokerPublishCount(username, password) {
+  try {
+    const args = ['exec', 'iotistic-mosquitto', 'mosquitto_sub',
+      '-h', 'localhost', '-p', '1883',
+      '-t', '$SYS/broker/messages/received', '-C', '1', '-W', '12'];
+    if (username) args.push('-u', username);
+    if (password) args.push('-P', password);
+    const out = execFileSync('docker', args, { encoding: 'utf8', timeout: 15000 }).trim();
+    const val = parseInt(out, 10);
+    return isNaN(val) ? null : val;
+  } catch { return null; }
 }
 
 function getTenantIdFromRedis() {
@@ -211,13 +225,12 @@ function printFlushRow(injected, total, mpm, elapsed, pending, topics, phase) {
 // ─── Message building ─────────────────────────────────────────────────────────
 
 function buildPayload(agentUuid, agentName, metricCount, baseTs, seq) {
-  const t   = new Date(baseTs.getTime() + seq).toISOString();
-  let parts = '';
-  for (let r = 1; r <= metricCount; r++) {
-    if (r > 1) parts += ',';
-    parts += `{"metric":"metric-${r}","value":${(Math.random() * 100).toFixed(4)},"unit":"unit","quality":"good","timestamp":"${t}","protocol":"mqtt"}`;
+  const t = new Date(baseTs.getTime() + seq).toISOString();
+  const readings = new Array(metricCount);
+  for (let r = 0; r < metricCount; r++) {
+    readings[r] = `{"metric":"metric-${r + 1}","value":${(Math.random() * 100).toFixed(4)},"unit":"unit","quality":"good","timestamp":"${t}","protocol":"mqtt"}`;
   }
-  return `{"protocol":"mqtt","deviceUuid":"${agentUuid}","deviceName":"${agentName}","timestamp":"${t}","readings":[${parts}]}`;
+  return `{"protocol":"mqtt","deviceUuid":"${agentUuid}","deviceName":"${agentName}","timestamp":"${t}","readings":[${readings.join(',')}]}`;
 }
 
 // ─── MQTT helpers ─────────────────────────────────────────────────────────────
@@ -435,9 +448,11 @@ async function main() {
   // ── State ──────────────────────────────────────────────────────────────────
   const pending   = new Map(agents.map(a => [a.key, []]));
   const baseline  = await getHealth();
+  const brokerBaseline = getBrokerPublishCount(p.MqttUsername, p.MqttPassword);
   const startMs   = Date.now();
   const baseTs    = new Date();
   let injected    = 0;
+  let mqttPublishes = 0;
   let totalPend   = 0;
   let lastPollSec = 0;
   let lastFlushMs = 0;
@@ -461,6 +476,7 @@ async function main() {
       msgs.length = 0;
       work.push({ client, topic: agent.topic, payload });
     }
+    mqttPublishes += work.length;
     for (let i = 0; i < work.length; i += 10) {
       await Promise.all(work.slice(i, i + 10).map(w => publishOne(w.client, w.topic, w.payload, p.MqttQoS)));
       if (i + 10 < work.length) await yieldLoop();
@@ -546,6 +562,7 @@ async function main() {
   // ── Final summary ──────────────────────────────────────────────────────────
   console.log('');
   console.log(clr('=== Final Stats ===', C.cyan));
+  const brokerFinal = getBrokerPublishCount(p.MqttUsername, p.MqttPassword);
   const fin = await getHealth();
   if (fin) {
     const proc = baseline ? (fin.messagesProcessed ?? 0) - (baseline.messagesProcessed ?? 0) : (fin.messagesProcessed ?? '?');
@@ -574,10 +591,51 @@ async function main() {
   } else {
     console.log(clr('  (ingestion metrics unavailable for final stats)', C.gray));
   }
+  const endToEndSec = (Date.now() - startMs) / 1000;
+  const mins = Math.floor(endToEndSec / 60);
+  const secs = (endToEndSec % 60).toFixed(1);
+  console.log(`  Duration        : ${mins > 0 ? `${mins}m ${secs}s` : `${secs}s`}  (inject ${totalSec.toFixed(1)}s + drain ${(endToEndSec - totalSec).toFixed(1)}s)`);
+  if (brokerBaseline != null && brokerFinal != null) {
+    const brokerDelta = brokerFinal - brokerBaseline;
+    console.log(`  MQTT publishes  : ${mqttPublishes.toLocaleString()}`);
+    console.log(`  Broker received : ${brokerDelta.toLocaleString()}  ($SYS counter, ~10s update granularity)`);
+    // $SYS counters update every sys_interval (~10s). At the test's publish rate,
+    // up to 10s of messages may be uncounted. Only flag loss if the gap exceeds
+    // what one sys_interval could explain.
+    const sysIntervalSec = 10;
+    const pubRate = totalSec > 0 ? mqttPublishes / totalSec : 0;
+    const sysMargin = Math.ceil(pubRate * sysIntervalSec);
+    const gap = mqttPublishes - brokerDelta;
+    if (gap > sysMargin) {
+      const realLoss = gap - sysMargin;
+      const lossPct = mqttPublishes > 0 ? ((realLoss / mqttPublishes) * 100).toFixed(1) : '0.0';
+      console.log(clr(`  Transport loss  : ~${realLoss.toLocaleString()} (${lossPct}%) — gap exceeds $SYS timing margin of ${sysMargin}`, C.red));
+    } else {
+      console.log(clr(`  Transport loss  : 0 (gap of ${gap} within $SYS timing margin of ${sysMargin})`, C.green));
+    }
+  } else {
+    console.log(clr('  Broker $SYS stats unavailable', C.yellow));
+  }
   console.log('');
 
   // Close all clients gracefully
   await Promise.all(mqttClients.map(c => new Promise(r => c.end(false, {}, r))));
+
+  // ── Post-test cleanup ────────────────────────────────────────────────────
+  if (p.Cleanup) {
+    console.log(clr('Cleaning up test data...', C.cyan));
+    try {
+      const { execFileSync } = require('child_process');
+      const sql = "TRUNCATE readings, series_latest;";
+      const out = execFileSync('docker', [
+        'exec', 'iotistic-postgres',
+        'psql', '-U', 'postgres', '-d', 'iotistica', '-c', sql
+      ], { encoding: 'utf8', timeout: 30000 }).trim();
+      console.log(clr(`  ${out}`, C.green));
+    } catch (err) {
+      console.log(clr(`  Cleanup failed: ${err.message}`, C.yellow));
+    }
+  }
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
