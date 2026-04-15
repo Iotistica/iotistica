@@ -1,7 +1,7 @@
 import type Redis from 'ioredis';
-import { logger } from '../utils/logger';
+import { logger } from '../../utils/logger';
 import { RedisDeviceEntry } from './types';
-import { hIncrByAndExpire, moveToDlqAtomic } from '../redis/scripts';
+import { hIncrByAndExpire, moveToDlqAtomic } from './redis-scripts';
 
 export const FAILURE_TRACKING_KEY = 'device:failed:attempts';
 

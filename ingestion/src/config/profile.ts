@@ -29,6 +29,11 @@ const PROFILE_ENV_KEYS = [
   'DB_WAITING_HIGH_WATERMARK',
   'DB_SATURATION_HIGH_WATERMARK_PCT',
   'DB_BACKPRESSURE_SLEEP_MS',
+  // Log worker tuning — brought under profile control when logs were added to
+  // the combined ingestion service alongside device-metrics.
+  'LOG_BATCH_SIZE',
+  'LOG_FLUSH_INTERVAL_MS',
+  'LOG_SAMPLING_RATE',
 ] as const;
 
 type ProfileEnvKey = typeof PROFILE_ENV_KEYS[number];

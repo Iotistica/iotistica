@@ -324,7 +324,7 @@
           "refId": "B"
         }
       ],
-      "title": "Test-Aligned Throughput",
+      "title": "Ingestion Throughput (msg/s & rows/s)",
       "type": "timeseries"
     },
     {

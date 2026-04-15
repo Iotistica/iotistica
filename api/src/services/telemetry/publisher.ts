@@ -20,6 +20,7 @@ import {
 import type { AddOutcome, DeviceDataEntry } from './types';
 import { circuitBreaker } from './circuit-breaker';
 import { DiskSpool } from './disk-spool';
+import { RedisPipeline } from './pipeline';
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -42,6 +43,7 @@ export class DeviceReadingsPublisher {
   private readonly maxStreamLength: number;
   private tenantId: string;
   private readonly diskSpool: DiskSpool;
+  private readonly pipeline: RedisPipeline;
 
   constructor(tenantId?: string) {
     this.redis = getRedisIngestion();
@@ -52,10 +54,19 @@ export class DeviceReadingsPublisher {
     const maxSizeMb = parseInt(process.env.DISK_SPOOL_MAX_SIZE_MB || '500', 10);
     this.diskSpool = new DiskSpool(spoolPath, maxSizeMb);
 
+    this.pipeline = new RedisPipeline(this.redis, {
+      onPersistentOomFailure: (dropped) => {
+        // Force the circuit open so subsequent writes route to disk spool
+        // instead of retrying Redis while it remains at maxmemory.
+        for (let i = 0; i < 5; i++) circuitBreaker.recordFailure();
+        logger.error('Redis OOM: pipeline retries exhausted, circuit forced OPEN', { dropped });
+      },
+    });
+
     if (process.env.DISK_SPOOL_ENABLED === 'true') {
       this.diskSpool.initialize()
         .then(() => this.diskSpool.startReplayer(
-          (data, source) => this.add(data, source),
+          (data, source) => this.addInternal(data, true, source),
           () => this.redis.status === 'ready',
         ))
         .catch(err => logger.error('Failed to initialize disk spool', { error: err.message }));
@@ -70,43 +81,68 @@ export class DeviceReadingsPublisher {
     return agentDevicesIngestionStreamKey(this.resolveTenantId());
   }
 
+  private isRedisReady(): boolean {
+    return this.redis.status === 'ready' || this.redis.status === 'connect';
+  }
+
   async add(deviceData: DeviceDataEntry[], source?: string): Promise<AddOutcome> {
+    return this.addInternal(deviceData, false, source);
+  }
+
+  async addInternal(deviceData: DeviceDataEntry[], bypassCircuit: boolean, source?: string): Promise<AddOutcome> {
     if (deviceData.length === 0) {
       return 'redis';
     }
 
     // Circuit open — Redis is known to be failing, skip attempt and spool directly.
-    if (!circuitBreaker.shouldAllowRequest()) {
+    // bypassCircuit=true is used by the disk spool replayer so recovered data is
+    // re-queued even while the circuit probes recovery (HALF_OPEN or just re-opened).
+    if (!bypassCircuit && !circuitBreaker.shouldAllowRequest()) {
+      return this.fallbackToDiskOrDrop(deviceData, source);
+    }
+
+    // Proactive readiness check: avoid queuing into a reconnecting pipeline and
+    // immediately fall back to disk rather than waiting for a pipeline error.
+    if (!this.isRedisReady()) {
+      if (!bypassCircuit) circuitBreaker.recordFailure();
+      logger.debug('Redis not ready, routing to disk spool', {
+        redisStatus: this.redis.status,
+        count: deviceData.length,
+      });
       return this.fallbackToDiskOrDrop(deviceData, source);
     }
 
     try {
-      await this.redis.xadd(
-        this.streamKey,
-        'MAXLEN',
-        '~',
-        this.maxStreamLength,
-        '*',
-        'data',
-        JSON.stringify(deviceData),
-        'source',
-        source ?? '',
-      );
+      const streamKey = this.streamKey;
+      const payload = JSON.stringify(deviceData);
+      await this.pipeline.add(p => {
+        p.xadd(
+          streamKey,
+          'MAXLEN', '~', this.maxStreamLength,
+          '*',
+          'data', payload,
+          'source', source ?? '',
+        );
+      });
 
       circuitBreaker.recordSuccess();
       logger.debug('Queued device readings for ingestion', {
         count: deviceData.length,
-        streamKey: this.streamKey,
+        streamKey,
       });
       return 'redis';
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // OOM after all retries exhausted rejects the pipeline.add() promise;
+      // onPersistentOomFailure has already forced the circuit open.
+      if (!bypassCircuit && !message.includes('OOM')) {
+        circuitBreaker.recordFailure();
+      }
       logger.error('Failed to queue device readings for ingestion', {
         count: deviceData.length,
         streamKey: this.streamKey,
         error: message,
       });
-      circuitBreaker.recordFailure();
       return this.fallbackToDiskOrDrop(deviceData, source);
     }
   }

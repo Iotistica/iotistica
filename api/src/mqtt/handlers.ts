@@ -75,7 +75,7 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
       const batch = data.data as any;
       const messages = batch.messages as object[];
       
-      logger.info('Handling device batch', {
+      logger.debug('Handling device batch', {
         deviceUuid: data.deviceUuid.substring(0, 8),
         deviceName: resolvedDeviceName,
         count: messages.length,
@@ -110,14 +110,14 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
       const outcome = await ingestion.add('metrics', readings);
       
       const duration = Date.now() - startTime;
-      logger.info('Processed metrics batch', {
+      logger.debug('Processed metrics batch', {
         deviceUuid: data.deviceUuid.substring(0, 8),
         deviceName: resolvedDeviceName,
         received: messages.length,
         submitted: readings.length,
         dropped: messages.length - readings.length,
         destination: outcome,
-        durationMs: duration
+        durationMs: duration,
       });
     } else {
       // Single message

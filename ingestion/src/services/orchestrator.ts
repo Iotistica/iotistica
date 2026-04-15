@@ -9,7 +9,7 @@ import {
   consumerGroupName,
   consumerName as makeConsumerName,
   parseAgentDevicesIngestionStreamKey,
-} from '../redis/tenant-keys';
+} from '../redis/keys';
 import { DeviceDataEntry, CompressedDeviceEntry, AddOutcome } from './types';
 
 /**
@@ -170,12 +170,6 @@ export class Orchestrator {
 
     this.pipeline = new RedisPipeline(this.redisIngestion, {
       flushIntervalMs: readIntEnv('REDIS_PIPELINE_FLUSH_INTERVAL_MS', '50'),
-      onPersistentOomFailure: (dropped) => {
-        metrics.messagesDropped += dropped;
-        logger.error('Redis OOM: pipeline retries exhausted, data dropped', {
-          dropped, totalDropped: metrics.messagesDropped,
-        });
-      },
     });
 
     this.producer = new RedisQueueProducer(

@@ -53,12 +53,12 @@ services:
         command: >
             redis-server
             --requirepass ${REDIS_PASSWORD:-local-dev-redis-change-me}
-            --maxmemory 512mb
+            --maxmemory 2gb
             --maxmemory-policy noeviction
             --save ""
             --appendonly no
-        mem_limit: 640m
-        mem_reservation: 512m
+        mem_limit: 2560m
+        mem_reservation: 2048m
         ports:
             - "${REDIS_PORT_EXT:-6379}:6379"
         healthcheck:
@@ -106,7 +106,7 @@ services:
             - DB_NAME=${POSTGRES_DB:-iotistica}
             - DB_USER=${DB_USER:-tsdbadmin}
             - DB_PASSWORD=${DB_PASSWORD:-w2qm8tm693xd3b9v}
-            - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
+            - DB_POOL_SIZE=${DB_POOL_SIZE:-50}
             - DB_SSL=${DB_SSL:-true}
             - DB_SSL_REJECT_UNAUTHORIZED=${DB_SSL_REJECT_UNAUTHORIZED:-false} 
             - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
@@ -163,6 +163,7 @@ services:
             - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-true}
             - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
             - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-1000}
+            - REDIS_INGESTION_STREAM_MAXLEN=${REDIS_INGESTION_STREAM_MAXLEN:-10000}
         ports:
             - "${API_PORT_EXT:-4002}:3002"
             - "3443:3443"
@@ -253,7 +254,7 @@ services:
             - DB_WAITING_HIGH_WATERMARK=${DB_WAITING_HIGH_WATERMARK:-}
             - DB_SATURATION_HIGH_WATERMARK_PCT=${DB_SATURATION_HIGH_WATERMARK_PCT:-}
             - DB_BACKPRESSURE_SLEEP_MS=${DB_BACKPRESSURE_SLEEP_MS:-}
-            - REDIS_LOG_STREAM_KEY=${REDIS_LOG_STREAM_KEY:-tenant:{73eddd385ce8}:device:logs}
+            - REDIS_LOG_STREAM_KEY=${REDIS_LOG_STREAM_KEY:-tenant:{73eddd385ce8}:agent:logs}
             - LOG_BATCH_SIZE=${LOG_BATCH_SIZE:-50}
             - LOG_FLUSH_INTERVAL_MS=${LOG_FLUSH_INTERVAL_MS:-5000}
             - LOG_STREAM_MAXLEN=${LOG_STREAM_MAXLEN:-500000}
@@ -520,126 +521,6 @@ services:
             options:
                 max-size: "5m"
                 max-file: "2"
-    sim-mqtt-2:
-        build:
-            context: ./simulators/mqtt-simulator
-            dockerfile: Dockerfile
-        container_name: sim-mqtt-2
-        restart: unless-stopped
-        environment:
-            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
-            - MQTT_USERNAME=mqtt-user-2
-            - MQTT_PASSWORD=test123
-            - MQTT_CLIENT_ID=mqtt-device-2
-            - MQTT_DEVICE_UUID=253bd0b3-61e0-4109-a490-29f91ddbf381
-            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/DNqINSbhSESmGLu752IprQ/d/LOp5F97ZTY-9wGFDgi_N_Q
-            - MQTT_METRIC_NAMES=pressure,vibration,temperature2
-            - MQTT_METRIC_UNITS=temperature2:C
-            - MQTT_METRIC_BASES=temperature2:26
-            - MQTT_QOS=${MQTT_SIM_QOS:-0}
-            - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
-            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
-            - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
-        depends_on:
-            mosquitto-agent:
-                condition: service_started
-        networks:
-            - iotistica-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-    sim-mqtt-3:
-        build:
-            context: ./simulators/mqtt-simulator
-            dockerfile: Dockerfile
-        container_name: sim-mqtt-3
-        restart: unless-stopped
-        environment:
-            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
-            - MQTT_USERNAME=mqtt-user-3
-            - MQTT_PASSWORD=test123
-            - MQTT_CLIENT_ID=mqtt-device-3
-            - MQTT_DEVICE_UUID=7451b394-efc5-471d-9c4c-8fa13711566c
-            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/kgouTq8yQeeU2CoTzGJRzA
-            - MQTT_METRIC_NAMES=temperature3
-            - MQTT_METRIC_UNITS=temperature3:C
-            - MQTT_METRIC_BASES=temperature3:29
-            - MQTT_QOS=${MQTT_SIM_QOS:-0}
-            - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
-            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
-            - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
-        depends_on:
-            mosquitto-agent:
-                condition: service_started
-        networks:
-            - iotistica-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-    sim-mqtt-4:
-        build:
-            context: ./simulators/mqtt-simulator
-            dockerfile: Dockerfile
-        container_name: sim-mqtt-4
-        restart: unless-stopped
-        environment:
-            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
-            - MQTT_USERNAME=mqtt-user-4
-            - MQTT_PASSWORD=test123
-            - MQTT_CLIENT_ID=mqtt-device-4
-            - MQTT_DEVICE_UUID=9b2e4f1a-3d8c-4e5f-b6a7-2c1d9e8f7a0b
-            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/1T5DMFfqSZuyZZVZXpOWKw/d/LS0AxxzXQq6pWshDUtMylA
-            - MQTT_METRIC_NAMES=co2,noise,lux,wind_speed,power
-            - MQTT_METRIC_UNITS=co2:ppm,noise:dB,lux:lux,wind_speed:m/s,power:W
-            - MQTT_METRIC_BASES=co2:420,noise:55,lux:300,wind_speed:5,power:150
-            - MQTT_QOS=${MQTT_SIM_QOS:-0}
-            - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
-            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
-            - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
-        depends_on:
-            mosquitto-agent:
-                condition: service_started
-        networks:
-            - iotistica-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
-    sim-mqtt-5:
-        build:
-            context: ./simulators/mqtt-simulator
-            dockerfile: Dockerfile
-        container_name: sim-mqtt-5
-        restart: unless-stopped
-        environment:
-            - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
-            - MQTT_USERNAME=mqtt-user-5
-            - MQTT_PASSWORD=test123
-            - MQTT_CLIENT_ID=mqtt-device-5
-            - MQTT_DEVICE_UUID=9b2e4f1a-3d8c-4e5f-b6a7-2c1d9e8f7a0b
-            - MQTT_TOPIC=i/84c49f7b9cb5462c886c02b7ce3003aa/a/GadMRxuNQzmmKewi2KHcDw/d/v80XUbEuQSSjiveZqyQ4cA
-            - MQTT_METRIC_NAMES=co2,noise,lux,wind_speed,power
-            - MQTT_METRIC_UNITS=co2:ppm,noise:dB,lux:lux,wind_speed:m/s,power:W
-            - MQTT_METRIC_BASES=co2:420,noise:55,lux:300,wind_speed:5,power:150
-            - MQTT_QOS=${MQTT_SIM_QOS:-0}
-            - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
-            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
-            - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
-        depends_on:
-            mosquitto-agent:
-                condition: service_started
-        networks:
-            - iotistica-net
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "5m"
-                max-file: "2"
 
     mqtt-monitor:
         build:
@@ -685,47 +566,47 @@ services:
                 max-size: "10m"
                 max-file: "3"
 
-    postoffice:
-        build:
-            context: ./postoffice
-            dockerfile: Dockerfile
-        container_name: iotistic-postoffice
-        restart: unless-stopped
-        expose:
-            - "3300"  # Internal only, accessed via API gateway
-        environment:
-            - NODE_ENV=${NODE_ENV:-development}
-            - PORT=3300
-            - HOST=0.0.0.0
-            - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
-            - EMAIL_FROM=${EMAIL_FROM:-"Iotistica Platform <noreply@iotistica.com>"}
-            - EMAIL_DEBUG=${EMAIL_DEBUG:-false}
-            - BASE_URL=${BASE_URL:-https://iotistica.com}
-            - SMTP_HOST=${SMTP_HOST}
-            - SMTP_PORT=${SMTP_PORT:-587}
-            - SMTP_SECURE=${SMTP_SECURE:-false}
-            - SMTP_USER=${SMTP_USER}
-            - SMTP_PASS=${SMTP_PASS}
-            - REDIS_HOST=${REDIS_HOST:-redis}
-            - REDIS_PORT=${REDIS_PORT:-6379}
-            - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
-            - LOG_LEVEL=${POSTOFFICE_LOG_LEVEL:-info}
-        depends_on:
-            redis:
-                condition: service_healthy
-        networks:
-            - iotistica-net
-        healthcheck:
-            test: ["CMD", "node", "-e", "require('http').get('http://localhost:3300/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 40s
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "10m"
-                max-file: "3"
+    # postoffice:
+    #     build:
+    #         context: ./postoffice
+    #         dockerfile: Dockerfile
+    #     container_name: iotistic-postoffice
+    #     restart: unless-stopped
+    #     expose:
+    #         - "3300"  # Internal only, accessed via API gateway
+    #     environment:
+    #         - NODE_ENV=${NODE_ENV:-development}
+    #         - PORT=3300
+    #         - HOST=0.0.0.0
+    #         - EMAIL_ENABLED=${EMAIL_ENABLED:-true}
+    #         - EMAIL_FROM=${EMAIL_FROM:-"Iotistica Platform <noreply@iotistica.com>"}
+    #         - EMAIL_DEBUG=${EMAIL_DEBUG:-false}
+    #         - BASE_URL=${BASE_URL:-https://iotistica.com}
+    #         - SMTP_HOST=${SMTP_HOST}
+    #         - SMTP_PORT=${SMTP_PORT:-587}
+    #         - SMTP_SECURE=${SMTP_SECURE:-false}
+    #         - SMTP_USER=${SMTP_USER}
+    #         - SMTP_PASS=${SMTP_PASS}
+    #         - REDIS_HOST=${REDIS_HOST:-redis}
+    #         - REDIS_PORT=${REDIS_PORT:-6379}
+    #         - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
+    #         - LOG_LEVEL=${POSTOFFICE_LOG_LEVEL:-info}
+    #     depends_on:
+    #         redis:
+    #             condition: service_healthy
+    #     networks:
+    #         - iotistica-net
+    #     healthcheck:
+    #         test: ["CMD", "node", "-e", "require('http').get('http://localhost:3300/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+    #         interval: 30s
+    #         timeout: 10s
+    #         retries: 3
+    #         start_period: 40s
+    #     logging:
+    #         driver: "json-file"
+    #         options:
+    #             max-size: "10m"
+    #             max-file: "3"
     # wg-server:
     #     build: ./wg-server
     #     container_name: wg-server
@@ -759,52 +640,52 @@ services:
     #     - postgres
 
 
-    nodered:
-        build:
-            context: ./nodered
-            dockerfile: Dockerfile
-        container_name: iotistic-nodered
-        restart: unless-stopped
-        ports:
-            - "${NODERED_PORT_EXT:-1880}:1880"
-        volumes:
-            - ./nodered/data:/data
-        environment:
-            - TZ=America/Toronto
-            - NODE_RED_ENABLE_SAFE_MODE=false
-            - NODE_RED_ENABLE_PROJECTS=false
-            - NODE_RED_REMOTE_STORAGE=${NODE_RED_REMOTE_STORAGE:-true}
-            - NODE_RED_ADMIN_CORS_ORIGIN=${NODE_RED_ADMIN_CORS_ORIGIN:-http://localhost:8080}
-            - IOTISTIC_BASE_URL=${IOTISTIC_BASE_URL:-http://api:3002}
-            - NODERED_BASE_URL=${NODERED_BASE_URL:-http://localhost:1880}
-            - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
-            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
-            - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
-            - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
-            - NODE_RED_AUTH_PROVIDER=auth0-strategy
-            - AUTH0_DOMAIN=${AUTH0_DOMAIN:-auth.iotistica.com}
-            - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
-            - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
-            - AUTH0_AUDIENCE=${NODE_RED_AUTH0_AUDIENCE}
-            - AUTH0_ISSUER=${AUTH0_ISSUER:-https://auth.iotistica.com/}
-            - NODE_RED_AUTH0_CALLBACK_URL=${NODE_RED_AUTH0_CALLBACK_URL:-http://localhost:1880/auth/strategy/callback}
-            - NODE_RED_ENABLE_UI_AUTH=true
-        depends_on:
-            api:
-                condition: service_healthy
-        networks:
-            - iotistica-net
-        healthcheck:
-            test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1880"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 60s
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "10m"
-                max-file: "3"
+    # nodered:
+    #     build:
+    #         context: ./nodered
+    #         dockerfile: Dockerfile
+    #     container_name: iotistic-nodered
+    #     restart: unless-stopped
+    #     ports:
+    #         - "${NODERED_PORT_EXT:-1880}:1880"
+    #     volumes:
+    #         - ./nodered/data:/data
+    #     environment:
+    #         - TZ=America/Toronto
+    #         - NODE_RED_ENABLE_SAFE_MODE=false
+    #         - NODE_RED_ENABLE_PROJECTS=false
+    #         - NODE_RED_REMOTE_STORAGE=${NODE_RED_REMOTE_STORAGE:-true}
+    #         - NODE_RED_ADMIN_CORS_ORIGIN=${NODE_RED_ADMIN_CORS_ORIGIN:-http://localhost:8080}
+    #         - IOTISTIC_BASE_URL=${IOTISTIC_BASE_URL:-http://api:3002}
+    #         - NODERED_BASE_URL=${NODERED_BASE_URL:-http://localhost:1880}
+    #         - IOTISTIC_STORAGE_TOKEN=5317a772-c8dc-b8af-af76-fce09c973db0034da53b-e5e3-1d36-93a7-ec53de09c4af
+    #         - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
+    #         - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
+    #         - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
+    #         - NODE_RED_AUTH_PROVIDER=auth0-strategy
+    #         - AUTH0_DOMAIN=${AUTH0_DOMAIN:-auth.iotistica.com}
+    #         - AUTH0_CLIENT_ID=${AUTH0_CLIENT_ID}
+    #         - AUTH0_CLIENT_SECRET=${AUTH0_CLIENT_SECRET}
+    #         - AUTH0_AUDIENCE=${NODE_RED_AUTH0_AUDIENCE}
+    #         - AUTH0_ISSUER=${AUTH0_ISSUER:-https://auth.iotistica.com/}
+    #         - NODE_RED_AUTH0_CALLBACK_URL=${NODE_RED_AUTH0_CALLBACK_URL:-http://localhost:1880/auth/strategy/callback}
+    #         - NODE_RED_ENABLE_UI_AUTH=true
+    #     depends_on:
+    #         api:
+    #             condition: service_healthy
+    #     networks:
+    #         - iotistica-net
+    #     healthcheck:
+    #         test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1880"]
+    #         interval: 30s
+    #         timeout: 10s
+    #         retries: 3
+    #         start_period: 60s
+    #     logging:
+    #         driver: "json-file"
+    #         options:
+    #             max-size: "10m"
+    #             max-file: "3"
 
     website:
         image: nginx:alpine

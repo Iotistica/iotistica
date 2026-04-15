@@ -1,6 +1,6 @@
-import { logger } from '../utils/logger';
-import { ReadingsService, ReadingInsert } from './readings';
-import { query } from '../db/connection';
+import { logger } from '../../utils/logger';
+import { ReadingsService, ReadingInsert } from './readings.service';
+import { query } from '../../db/connection';
 import { DeviceDataEntry } from './types';
 import { detectProtocol, expandMessages } from './readings-normalizer';
 import { metrics } from './metrics';
@@ -15,15 +15,11 @@ export class ReadingInserter {
   async insertBatch(data: DeviceDataEntry[]): Promise<void> {
     const ingestedAt = new Date();
     const allReadings: ReadingInsert[] = [];
-    let processedMessageCount = 0;
 
     for (const entry of data) {
       try {
         const protocol = detectProtocol(entry);
         const expanded = expandMessages(entry, protocol, ingestedAt);
-        if (expanded.length > 0) {
-          processedMessageCount++;
-        }
         allReadings.push(...expanded);
       } catch (error: unknown) {
         metrics.messagesFailed++;
@@ -50,14 +46,13 @@ export class ReadingInserter {
     const insertedCount = await this.readingsService.bulkInsert(deduped);
     const insertMs = Date.now() - insertStart;
 
-    metrics.messagesProcessed += processedMessageCount;
+    metrics.messagesProcessed += deduped.length;
     metrics.readingsInserted += insertedCount;
     metrics.recordInsertLatency(insertMs);
 
     const telemetryStart = Date.now();
     await this.updateLastTelemetryAt(deduped, ingestedAt);
     const telemetryMs = Date.now() - telemetryStart;
-    metrics.recordTelemetryLatency(telemetryMs);
 
     logger.debug(`Inserted ${insertedCount} readings (deduped ${allReadings.length - deduped.length})`, {
       insertMs,

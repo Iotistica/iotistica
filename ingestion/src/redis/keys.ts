@@ -57,7 +57,7 @@ export function uuidFromMetricsChannel(channel: string): string {
 }
 
 export function deviceLogsStreamKey(tenantId: string): string {
-  return `${tenantPrefix(tenantId)}:device:logs`;
+  return `${tenantPrefix(tenantId)}:agent:logs`;
 }
 
 export function agentDevicesIngestionStreamKey(tenantId: string): string {

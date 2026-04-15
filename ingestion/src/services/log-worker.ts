@@ -15,7 +15,7 @@ import {
   consumerGroupName,
   consumerName as makeConsumerName,
   normalizeTenantId,
-} from '../redis/tenant-keys';
+} from '../redis/keys';
 import { LogInserter, type LogEntry } from './log-inserter';
 
 /**
@@ -39,7 +39,7 @@ interface ResolvedLogStream {
 function resolveLogStreamKey(): ResolvedLogStream {
   const configured = (process.env.REDIS_LOG_STREAM_KEY || '').trim();
   if (configured) {
-    const match = configured.match(/^tenant:\{([^}]+)\}:device:logs$/);
+    const match = configured.match(/^tenant:\{([^}]+)\}:agent:logs$/);
     if (match) {
       return { streamKey: configured, tenantId: normalizeTenantId(match[1]), usedFallback: false };
     }

@@ -115,7 +115,7 @@ this.redisConsumer = new Redis({   // Read-only: XREADGROUP, XACK
 tenant:{tenantId}:agent:devices:ingestion    # Sensor ingestion queue
 tenant:{tenantId}:agent:devices:ready        # Sensor ready queue
 tenant:{tenantId}:agent:devices:dlq          # Dead letter queue for failed sensor writes
-tenant:{tenantId}:device:logs                 # Device logs stream
+tenant:{tenantId}:agent:logs                  # Device logs stream
 tenant:{tenantId}:metrics:{deviceUuid}        # Per-device metrics stream
 ```
 

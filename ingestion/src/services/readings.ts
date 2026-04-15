@@ -254,6 +254,31 @@ export class ReadingsService {
             ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING
           `);
 
+          // Upsert latest values for Prometheus scrape (one row per series)
+          await client.query(`
+            INSERT INTO endpoint_latest (
+              agent_uuid, device_name, metric_name, value, quality, unit, protocol, time
+            )
+            SELECT DISTINCT ON (t.agent_uuid, COALESCE(t.extra->>'deviceName', 'unknown'), t.metric_name)
+              t.agent_uuid,
+              COALESCE(t.extra->>'deviceName', 'unknown'),
+              t.metric_name,
+              t.value,
+              t.quality,
+              t.unit,
+              t.protocol,
+              t.time
+            FROM ${ReadingsService.COPY_TEMP_TABLE_NAME} t
+            ORDER BY t.agent_uuid, COALESCE(t.extra->>'deviceName', 'unknown'), t.metric_name, t.time DESC
+            ON CONFLICT (agent_uuid, device_name, metric_name) DO UPDATE SET
+              value    = EXCLUDED.value,
+              quality  = EXCLUDED.quality,
+              unit     = EXCLUDED.unit,
+              protocol = EXCLUDED.protocol,
+              time     = EXCLUDED.time
+            WHERE EXCLUDED.time >= endpoint_latest.time
+          `);
+
           insertedTotal += insertResult.rowCount || 0;
           await client.query('COMMIT');
         } catch (error) {
@@ -485,12 +510,69 @@ export class ReadingsService {
         );
 
         insertedTotal += result.rowCount || 0;
+
+        // Upsert latest values for Prometheus scrape (one row per series)
+        await this.upsertEndpointLatest(insertClient, batch);
       }
     } finally {
       insertClient.release();
     }
 
     return insertedTotal;
+  }
+
+  /**
+   * Upsert latest value per series into endpoint_latest for Prometheus scrape.
+   * Deduplicates within batch (keeps newest time per series key).
+   */
+  private async upsertEndpointLatest(client: PoolClient, batch: ReadingInsert[]): Promise<void> {
+    // Deduplicate: keep only the newest reading per (agent_uuid, device_name, metric_name)
+    const latest = new Map<string, ReadingInsert>();
+    for (const r of batch) {
+      const deviceName = (r.extra as any)?.deviceName || (r.extra as any)?.device_name || 'unknown';
+      const key = `${r.agent_uuid}\t${deviceName}\t${r.metric_name}`;
+      const existing = latest.get(key);
+      if (!existing || (r.time ?? new Date()) > (existing.time ?? new Date())) {
+        latest.set(key, r);
+      }
+    }
+
+    const rows = [...latest.values()];
+    if (rows.length === 0) return;
+
+    const values: unknown[] = [];
+    const placeholders: string[] = [];
+    let idx = 1;
+
+    for (const r of rows) {
+      const deviceName = (r.extra as any)?.deviceName || (r.extra as any)?.device_name || 'unknown';
+      placeholders.push(
+        `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`
+      );
+      values.push(
+        r.agent_uuid,
+        deviceName,
+        r.metric_name,
+        r.value,
+        r.quality || 'good',
+        r.unit || null,
+        r.protocol,
+        r.time ?? new Date(),
+      );
+    }
+
+    await client.query(
+      `INSERT INTO endpoint_latest (agent_uuid, device_name, metric_name, value, quality, unit, protocol, time)
+       VALUES ${placeholders.join(', ')}
+       ON CONFLICT (agent_uuid, device_name, metric_name) DO UPDATE SET
+         value    = EXCLUDED.value,
+         quality  = EXCLUDED.quality,
+         unit     = EXCLUDED.unit,
+         protocol = EXCLUDED.protocol,
+         time     = EXCLUDED.time
+       WHERE EXCLUDED.time >= endpoint_latest.time`,
+      values,
+    );
   }
 
   /**

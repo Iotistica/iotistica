@@ -512,13 +512,17 @@ function Register-SyntheticAgents {
     )
 
     if ($Agents.Count -eq 0) {
-        return @{
-            protocol   = 'mqtt'
-            deviceUuid = $AgentUuid
-            deviceName = $AgentName
-            timestamp  = $timestamp
-            readings   = $readings
-        }
+        return
+    }
+
+    $values = @($Agents | ForEach-Object {
+        $uuid = ConvertTo-SqlLiteral $_.Uuid
+        $name = ConvertTo-SqlLiteral $_.Name
+        "($uuid::uuid, $name)"
+    })
+
+    $sql = @"
+INSERT INTO agents (uuid, name)
 VALUES
   $($values -join ",`n  ")
 ON CONFLICT (uuid) DO NOTHING;

@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http';
 import { randomUUID } from 'crypto';
 import logger from '../utils/logger';
-import { readingsService, type ReadingExtra } from '../services/readings.service';
+import { readingsService, type ReadingExtra } from '../services/readings';
 import { renderIngestionPrometheusMetrics } from '../services/prometheus';
 
 type InternalReadingInsertPayload = {

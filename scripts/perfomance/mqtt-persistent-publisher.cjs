@@ -22,13 +22,13 @@ function toErrorMessage(error) {
   return String(error);
 }
 
-function createPublishOptions() {
-  return { qos: 1 };
+function createPublishOptions(config) {
+  return { qos: config.qos ?? 1 };
 }
 
-function publishBatch(client, batch) {
+function publishBatch(client, batch, config) {
   return new Promise((resolve, reject) => {
-    client.publish(batch.topic, batch.payload, createPublishOptions(), (error) => {
+    client.publish(batch.topic, batch.payload, createPublishOptions(config), (error) => {
       if (error) {
         reject(error);
         return;
@@ -37,6 +37,30 @@ function publishBatch(client, batch) {
       resolve();
     });
   });
+}
+
+// Yield the event loop so keepalive timers can fire between chunk bursts.
+function yieldEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+// Publish batches in chunks, yielding between each chunk so the MQTT
+// keepalive timers are not starved by a large burst of socket writes.
+async function publishBatchesInChunks(batches, clientsByAgent, config, chunkSize) {
+  for (let i = 0; i < batches.length; i += chunkSize) {
+    const chunk = batches.slice(i, i + chunkSize);
+    await Promise.all(chunk.map((batch) => {
+      const lookupKey = batch.clientKey ?? batch.agentUuid;
+      const entry = clientsByAgent.get(lookupKey);
+      if (!entry) {
+        throw new Error(`Unknown client ${lookupKey}`);
+      }
+      return publishBatch(entry.client, batch, config);
+    }));
+    if (i + chunkSize < batches.length) {
+      await yieldEventLoop();
+    }
+  }
 }
 
 async function closeAllClients(clientsByAgent) {
@@ -172,7 +196,7 @@ async function main() {
 
   for (const agent of config.agents) {
     const connection = await connectAgentClient(config, agent);
-    clientsByAgent.set(agent.agentUuid, connection);
+    clientsByAgent.set(agent.clientKey ?? agent.agentUuid, connection);
   }
 
   writeMessage({
@@ -202,14 +226,9 @@ async function main() {
 
         if (command.command === 'publish') {
           try {
-            await Promise.all(command.batches.map((batch) => {
-              const entry = clientsByAgent.get(batch.agentUuid);
-              if (!entry) {
-                throw new Error(`Unknown agentUuid ${batch.agentUuid}`);
-              }
-
-              return publishBatch(entry.client, batch);
-            }));
+            // Publish in chunks of 10 to avoid starving the event loop
+            // (and thus the MQTT keepalive timer) during large flush bursts.
+            await publishBatchesInChunks(command.batches, clientsByAgent, config, 10);
 
             writeMessage({
               type: 'response',

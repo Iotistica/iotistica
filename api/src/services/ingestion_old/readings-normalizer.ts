@@ -1,11 +1,9 @@
-import { logger } from '../utils/logger';
-import { ReadingInsert } from './readings';
+import { logger } from '../../utils/logger';
+import { ReadingInsert } from './readings.service';
 import { DeviceDataEntry, DeviceIdentity } from './types';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UNKNOWN_DEVICE_NAME = 'unknown';
-// Cache identity extraction per context object (same context reused for all readings in a message).
-const _ctxIdentityCache = new WeakMap<object, DeviceIdentity>();
 const shortId = (id?: string): string | undefined => id?.substring(0, 8);
 const KNOWN_PROTOCOLS = new Set(['modbus', 'opcua', 'snmp', 'can', 'mqtt', 'bacnet', 'system']);
 
@@ -143,24 +141,17 @@ export function buildExtraPayload(
   ingestedAt: Date,
   identityContext?: Record<string, any>,
 ): Record<string, any> {
-  // Avoid the combined object spread: look up identity fields from both sources directly.
-  // payload overrides identityContext (preserving prior spread semantics).
-  let ctxId: DeviceIdentity | undefined;
-  if (identityContext) {
-    ctxId = _ctxIdentityCache.get(identityContext);
-    if (!ctxId) {
-      ctxId = extractDeviceIdentity(identityContext);
-      _ctxIdentityCache.set(identityContext, ctxId);
-    }
-  }
-  const payloadId = payload ? extractDeviceIdentity(payload) : undefined;
+  const combined = { ...(identityContext || {}), ...(payload || {}) };
+  const { endpointUuid, deviceUuid, deviceName } = extractDeviceIdentity(combined);
 
-  return {
-    endpoint_uuid: (payloadId?.endpointUuid ?? ctxId?.endpointUuid) ?? null,
-    device_uuid: (payloadId?.deviceUuid ?? ctxId?.deviceUuid) ?? null,
-    device_name: (payloadId?.deviceName ?? ctxId?.deviceName) ?? null,
+  const extra = {
+    endpoint_uuid: endpointUuid ?? null,
+    device_uuid: deviceUuid ?? null,
+    device_name: deviceName ?? null,
     ingested_at: ingestedAt.toISOString(),
   };
+
+  return extra;
 }
 
 function extractAnomalyFields(reading: any): Partial<ReadingInsert> {

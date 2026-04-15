@@ -1,7 +1,5 @@
 import type Redis from 'ioredis';
 import { logger } from '../utils/logger';
-import { metrics } from './metrics';
-import { backoffDelayMs, sleep } from './retry-utils';
 
 type RedisPipelineHandle = ReturnType<Redis['pipeline']>;
 type PipelineCallback = (pipeline: RedisPipelineHandle) => void;
@@ -17,23 +15,11 @@ export interface PipelineOptions {
   batchSize?: number;
   /** Idle time before auto-flushing pending commands (default: 50ms, 0 = immediate flush) */
   flushIntervalMs?: number;
-  /**
-   * Max OOM retry attempts before giving up (default: 5).
-   * Backoff sequence: ~100ms → 200ms → 400ms → 800ms → 1600ms (~3.1 s total).
-   */
-  maxOomRetries?: number;
-  /** Called with the count of commands permanently dropped after all OOM retries exhausted */
-  onPersistentOomFailure?: (droppedCount: number) => void;
 }
 
 /**
  * Batches multiple XADD calls into a single pipeline flush, reducing round trips.
- * Auto-flushes when batchSize is reached or after a 50ms idle window.
- *
- * When Redis returns OOM errors on individual commands (noeviction policy), the
- * affected commands are retried with exponential backoff + jitter. Only after all
- * retries are exhausted does it call onPersistentOomFailure so callers can open
- * the circuit breaker and route subsequent writes to the disk spool.
+ * Auto-flushes when batchSize is reached or after the configured idle window.
  */
 export class RedisPipeline {
   private pending: RedisPipelineHandle | null = null;
@@ -43,8 +29,6 @@ export class RedisPipeline {
 
   private readonly batchSize: number;
   private readonly flushIntervalMs: number;
-  private readonly maxOomRetries: number;
-  private readonly onPersistentOomFailure?: (droppedCount: number) => void;
 
   constructor(
     private readonly redis: Redis,
@@ -52,8 +36,6 @@ export class RedisPipeline {
   ) {
     this.batchSize = opts.batchSize ?? 10;
     this.flushIntervalMs = Math.max(0, opts.flushIntervalMs ?? 50);
-    this.maxOomRetries = opts.maxOomRetries ?? 5;
-    this.onPersistentOomFailure = opts.onPersistentOomFailure;
   }
 
   /**
@@ -116,22 +98,15 @@ export class RedisPipeline {
       const results = await pipeline.exec() as Array<[Error | null, unknown]> | null;
       const duration = Date.now() - startTime;
 
-      // Detect per-command OOM rejections (noeviction policy) and resolve/reject
-      // the individual command promises so callers only see success after durability.
-      const oomEntries: PendingPipelineEntry[] = [];
       if (results) {
         results.forEach(([err], idx) => {
           const entry = entries[idx];
           if (!entry) return;
           if (!err) {
             entry.resolve();
-            return;
+          } else {
+            entry.reject(err);
           }
-          if (err.message?.includes('OOM')) {
-            oomEntries.push(entry);
-            return;
-          }
-          entry.reject(err);
         });
       } else {
         // Null means pipeline yielded no per-command details; fail safe.
@@ -140,24 +115,7 @@ export class RedisPipeline {
         }
       }
 
-      if (oomEntries.length > 0) {
-        metrics.oomErrors++;
-        logger.warn('Redis OOM on pipeline flush, retrying with backoff', {
-          oomCount: oomEntries.length,
-          successCount: count - oomEntries.length,
-        });
-        const dropped = await this.retryOomFailures(oomEntries, 0);
-        if (dropped > 0) {
-          metrics.messagesDropped += dropped;
-          logger.error('Redis OOM: exhausted retries, commands dropped', {
-            dropped,
-            totalDropped: metrics.messagesDropped,
-          });
-          this.onPersistentOomFailure?.(dropped);
-        }
-      }
-
-      const successCount = count - oomEntries.length;
+      const successCount = results ? results.filter(([err]) => !err).length : 0;
       logger.debug('Flushed device pipeline', {
         operations: successCount,
         totalLatencyMs: duration,
@@ -166,84 +124,13 @@ export class RedisPipeline {
       });
     } catch (err) {
       // Connection-level failure (not per-command) — whole flush failed
-      metrics.messagesDropped += count;
       for (const entry of entries) {
         entry.reject(err instanceof Error ? err : new Error(String(err)));
       }
       logger.error('Device pipeline exec failed', {
         error: err instanceof Error ? err.message : String(err),
         count,
-        totalDropped: metrics.messagesDropped,
       });
     }
-  }
-
-  /**
-   * Retry OOM-failed commands with exponential backoff + jitter.
-   * Returns the number of commands still failing after all retries.
-   */
-  private async retryOomFailures(
-    failedEntries: PendingPipelineEntry[],
-    attempt: number,
-  ): Promise<number> {
-    if (failedEntries.length === 0) return 0;
-
-    if (attempt >= this.maxOomRetries) {
-      for (const entry of failedEntries) {
-        entry.reject(new Error('Redis OOM: exhausted pipeline retries'));
-      }
-      return failedEntries.length;
-    }
-
-    const delay = backoffDelayMs(attempt);
-    metrics.oomRetries += failedEntries.length;
-    logger.debug('OOM retry backoff', {
-      attempt: attempt + 1,
-      maxAttempts: this.maxOomRetries,
-      delayMs: delay,
-      commandCount: failedEntries.length,
-    });
-    await sleep(delay);
-
-    // Rebuild a fresh pipeline from the stored callbacks
-    const retryPipeline = this.redis.pipeline();
-    for (const entry of failedEntries) entry.callback(retryPipeline);
-
-    let results: Array<[Error | null, unknown]> | null = null;
-    try {
-      results = await retryPipeline.exec() as Array<[Error | null, unknown]> | null;
-    } catch {
-      // Connection-level failure during retry — retry all callbacks
-      return this.retryOomFailures(failedEntries, attempt + 1);
-    }
-
-    const stillFailing: PendingPipelineEntry[] = [];
-    if (results) {
-      results.forEach(([err], idx) => {
-        const entry = failedEntries[idx];
-        if (!entry) return;
-        if (!err) {
-          entry.resolve();
-          return;
-        }
-        if (err.message?.includes('OOM')) {
-          stillFailing.push(entry);
-          return;
-        }
-        entry.reject(err);
-      });
-    } else {
-      return this.retryOomFailures(failedEntries, attempt + 1);
-    }
-
-    if (stillFailing.length === 0) {
-      logger.debug('OOM retry succeeded', {
-        attempt: attempt + 1,
-        recoveredCount: failedEntries.length,
-      });
-      return 0;
-    }
-
-    return this.retryOomFailures(stillFailing, attempt + 1);
   }
 }

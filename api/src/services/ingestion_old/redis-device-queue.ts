@@ -1,15 +1,15 @@
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
-import { logger } from '../utils/logger';
-import { getRedisIngestion, getRedisConsumer } from '../redis/client-factory';
+import { logger } from '../../utils/logger';
+import { getRedisIngestion, getRedisConsumer } from '../../redis/client-factory';
 import {
   agentDevicesIngestionStreamKey,
   agentDevicesReadyStreamKey,
   agentDevicesDlqStreamKey,
+  getTenantId,
   consumerGroupName,
   consumerName as makeConsumerName,
-  parseAgentDevicesIngestionStreamKey,
-} from '../redis/tenant-keys';
+} from '../../redis/tenant-keys';
 import { DeviceDataEntry, CompressedDeviceEntry, AddOutcome } from './types';
 
 /**
@@ -39,10 +39,12 @@ const POD_IDENTITY: string = (() => {
   return identity;
 })();
 import { metrics } from './metrics';
+import { circuitBreaker, CircuitState } from './circuit-breaker';
+import { DiskSpool } from './disk-spool';
 import { FAILURE_TRACKING_KEY } from './dlq';
 import { RedisPipeline } from './pipeline';
 import { RedisQueueConsumer } from './worker';
-import { RedisQueueProducer } from './stream-writer';
+import { RedisQueueProducer } from './producer';
 import { ReadingInserter } from './reading-inserter';
 
 const DEVICE_WRITER_GROUP_SUFFIX =
@@ -57,42 +59,17 @@ function readFloatEnv(key: string, fallback: string): number {
   return parseFloat(process.env[key] || fallback);
 }
 
-function resolveIngestionStreamKey(streamKey?: string): { ingestionStreamKey: string; tenantId: string; usedFallback: boolean } {
-  const configuredStreamKey = (streamKey || process.env.REDIS_INGESTION_STREAM_KEY || '').trim();
-  if (configuredStreamKey) {
-    return {
-      ingestionStreamKey: configuredStreamKey,
-      tenantId: parseAgentDevicesIngestionStreamKey(configuredStreamKey).tenantId,
-      usedFallback: false,
-    };
-  }
-
-  const fallbackTenantId = (
-    process.env.INGESTION_TENANT_ID
-    || process.env.DEVELOPMENT_TENANT_ID
-    || process.env.NAMESPACE
-    || 'demo'
-  ).trim();
-
-  return {
-    ingestionStreamKey: agentDevicesIngestionStreamKey(fallbackTenantId),
-    tenantId: fallbackTenantId,
-    usedFallback: true,
-  };
-}
-
-export class DeviceIngestionOrchestrator {
+export class RedisDeviceQueue {
   private redisIngestion: Redis;
   private redisConsumer: Redis;
 
-  private readonly tenantId: string;
-  private readonly ingestionStreamKey: string;
+  private tenantId: string;
   private consumerGroup: string;
   private consumerName: string;
 
-  private get streamKey(): string { return this.ingestionStreamKey; }
-  private get processingStreamKey(): string { return agentDevicesReadyStreamKey(this.tenantId); }
-  private get dlqStreamKey(): string { return agentDevicesDlqStreamKey(this.tenantId); }
+  private get streamKey(): string { return agentDevicesIngestionStreamKey(this.resolveTenantId()); }
+  private get processingStreamKey(): string { return agentDevicesReadyStreamKey(this.resolveTenantId()); }
+  private get dlqStreamKey(): string { return agentDevicesDlqStreamKey(this.resolveTenantId()); }
 
   private readonly maxRetries: number;
   private readonly workerCount: number;
@@ -116,34 +93,34 @@ export class DeviceIngestionOrchestrator {
   private readonly redisMemoryHighWatermarkPct: number;
 
   private readonly pipeline: RedisPipeline;
+  private readonly diskSpool: DiskSpool;
   private readonly producer: RedisQueueProducer;
   private readonly inserter: ReadingInserter;
   private worker: RedisQueueConsumer | null = null;
   private isRunning = false;
   private healthCollector: NodeJS.Timeout | null = null;
 
-  constructor(streamKey?: string) {
+  private resolveTenantId(): string {
+    return this.tenantId || getTenantId();
+  }
+
+  constructor(tenantId?: string) {
     this.redisIngestion = getRedisIngestion();
     this.redisConsumer = getRedisConsumer();
 
-    const resolvedStream = resolveIngestionStreamKey(streamKey);
-    this.ingestionStreamKey = resolvedStream.ingestionStreamKey;
-    this.tenantId = resolvedStream.tenantId;
-
-    if (resolvedStream.usedFallback) {
-      logger.warn('REDIS_INGESTION_STREAM_KEY not set; using temporary fallback ingestion stream key', {
-        tenantId: this.tenantId,
-        ingestionStreamKey: this.ingestionStreamKey,
-      });
+    this.tenantId = tenantId || '';
+    if (this.tenantId) {
+      this.consumerGroup = consumerGroupName(this.tenantId, DEVICE_WRITER_GROUP_SUFFIX);
+      this.consumerName = makeConsumerName(this.tenantId, POD_IDENTITY);
+    } else {
+      this.consumerGroup = DEVICE_WRITER_GROUP_SUFFIX;
+      this.consumerName = POD_IDENTITY;
     }
 
-    this.consumerGroup = consumerGroupName(this.tenantId, DEVICE_WRITER_GROUP_SUFFIX);
-    this.consumerName = makeConsumerName(this.tenantId, POD_IDENTITY);
-
-    this.workerCount = readIntEnv('WORKER_COUNT', '2');
-    this.maxRetries = readIntEnv('MAX_RETRIES', '3');
-    this.batchSize = readIntEnv('BATCH_SIZE', '100');
-    this.blockTimeMs = readIntEnv('FLUSH_INTERVAL_MS', '2000');
+    this.workerCount = readIntEnv('DEVICE_WORKER_COUNT', '2');
+    this.maxRetries = readIntEnv('DEVICE_MAX_RETRIES', '3');
+    this.batchSize = readIntEnv('DEVICE_BATCH_SIZE', '100');
+    this.blockTimeMs = readIntEnv('DEVICE_FLUSH_INTERVAL_MS', '2000');
     this.maxStreamLength = parseInt(process.env.REDIS_INGESTION_STREAM_MAXLEN || '10000', 10);
     this.idleTrimStreamLength = Math.max(
       0,
@@ -153,38 +130,54 @@ export class DeviceIngestionOrchestrator {
       ),
     );
     this.maxDlqLength = parseInt(process.env.REDIS_DLQ_MAXLEN || '1000', 10);
-    this.minWorkers = readIntEnv('AUTOSCALE_MIN_WORKERS', '1');
-    this.maxWorkers = readIntEnv('AUTOSCALE_MAX_WORKERS', '20');
-    this.lagTargetMs = readIntEnv('AUTOSCALE_LAG_TARGET_MS', '10000');
-    this.lagScaleUpMs = readIntEnv('AUTOSCALE_LAG_SCALE_UP_MS', '30000');
-    this.lagCriticalMs = readIntEnv('AUTOSCALE_LAG_CRITICAL_MS', '60000');
-    this.lagScaleDownStableChecks = readIntEnv('AUTOSCALE_SCALE_DOWN_STABLE_CHECKS', '3');
-    this.scaleCooldownMs = readIntEnv('AUTOSCALE_COOLDOWN_MS', '30000');
-    this.dbScaleUpBlockSaturationPct = readIntEnv('AUTOSCALE_DB_BLOCK_PCT', '80');
-    this.dbWaitingHighWatermark = readIntEnv('DB_WAITING_HIGH_WATERMARK', '10');
-    this.dbSaturationHighWatermarkPct = readIntEnv('DB_SATURATION_HIGH_WATERMARK_PCT', '85');
-    this.backpressureSleepMs = readIntEnv('DB_BACKPRESSURE_SLEEP_MS', '250');
+    this.minWorkers = readIntEnv('DEVICE_AUTOSCALE_MIN_WORKERS', '1');
+    this.maxWorkers = readIntEnv('DEVICE_AUTOSCALE_MAX_WORKERS', '20');
+    this.lagTargetMs = readIntEnv('DEVICE_AUTOSCALE_LAG_TARGET_MS', '10000');
+    this.lagScaleUpMs = readIntEnv('DEVICE_AUTOSCALE_LAG_SCALE_UP_MS', '30000');
+    this.lagCriticalMs = readIntEnv('DEVICE_AUTOSCALE_LAG_CRITICAL_MS', '60000');
+    this.lagScaleDownStableChecks = readIntEnv('DEVICE_AUTOSCALE_SCALE_DOWN_STABLE_CHECKS', '3');
+    this.scaleCooldownMs = readIntEnv('DEVICE_AUTOSCALE_COOLDOWN_MS', '30000');
+    this.dbScaleUpBlockSaturationPct = readIntEnv('DEVICE_AUTOSCALE_DB_BLOCK_PCT', '80');
+    this.dbWaitingHighWatermark = readIntEnv('DEVICE_DB_WAITING_HIGH_WATERMARK', '10');
+    this.dbSaturationHighWatermarkPct = readIntEnv('DEVICE_DB_SATURATION_HIGH_WATERMARK_PCT', '85');
+    this.backpressureSleepMs = readIntEnv('DEVICE_DB_BACKPRESSURE_SLEEP_MS', '250');
     // Redis pressure thresholds: fraction of MAXLEN and % of maxmemory that trigger autoscale warning
     this.redisStreamHighWatermarkPct = readFloatEnv('REDIS_DEVICE_STREAM_HIGH_WATERMARK_PCT', '0.8');
     this.redisMemoryHighWatermarkPct = parseInt(process.env.REDIS_MEMORY_HIGH_WATERMARK_PCT || '75', 10);
 
     this.pipeline = new RedisPipeline(this.redisIngestion, {
-      flushIntervalMs: readIntEnv('REDIS_PIPELINE_FLUSH_INTERVAL_MS', '50'),
       onPersistentOomFailure: (dropped) => {
+        // Force the circuit open so producers route subsequent writes to disk spool
+        // instead of retrying Redis while it remains at maxmemory
+        for (let i = 0; i < 5; i++) circuitBreaker.recordFailure();
         metrics.messagesDropped += dropped;
-        logger.error('Redis OOM: pipeline retries exhausted, data dropped', {
+        logger.error('Redis OOM: pipeline retries exhausted, circuit forced OPEN', {
           dropped, totalDropped: metrics.messagesDropped,
         });
       },
     });
 
+    const spoolPath = process.env.DISK_SPOOL_PATH || '/tmp/iotistic-spool';
+    const spoolMaxSizeMb = parseInt(process.env.DISK_SPOOL_MAX_SIZE_MB || '1000', 10);
+    this.diskSpool = new DiskSpool(spoolPath, spoolMaxSizeMb);
+
     this.producer = new RedisQueueProducer(
       this.redisIngestion,
       this.pipeline,
+      this.diskSpool,
       () => this.streamKey,
       this.maxStreamLength,
     );
     this.inserter = new ReadingInserter();
+
+    if (process.env.DISK_SPOOL_ENABLED === 'true') {
+      this.diskSpool.initialize()
+        .then(() => this.diskSpool.startReplayer(
+          data => this.producer.addInternal(data, true),
+          () => this.producer.isClientReady(),
+        ))
+        .catch(err => logger.error('Failed to initialize disk spool', { error: err.message }));
+    }
 
     this.redisIngestion.on('error', (err) => {
       logger.error('Redis device ingestion connection error', { error: err.message });
@@ -215,6 +208,15 @@ export class DeviceIngestionOrchestrator {
    * Create consumer groups (idempotent). Retries with backoff on failure.
    */
   async initialize(): Promise<void> {
+    if (!this.tenantId) {
+      const resolvedTenantId = this.resolveTenantId();
+      this.tenantId = resolvedTenantId;
+      this.consumerGroup = consumerGroupName(resolvedTenantId, DEVICE_WRITER_GROUP_SUFFIX);
+      // Use POD_IDENTITY — must be the same stable value as the constructor used,
+      // otherwise a second call creates a new orphaned consumer in the group.
+      this.consumerName = makeConsumerName(resolvedTenantId, POD_IDENTITY);
+    }
+
     const maxAttempts = 5;
     let lastError: Error | null = null;
 
@@ -335,7 +337,19 @@ export class DeviceIngestionOrchestrator {
         // Using XINFO GROUPS is more accurate than XLEN because XLEN counts
         // already-processed entries that haven't been trimmed yet (e.g. after
         // a load test that bypassed the producer's MAXLEN enforcement).
-        const consumerGroupLag = await this.getConsumerGroupLag(streamLen);
+        let consumerGroupLag = streamLen; // pessimistic fallback
+        try {
+          const rawGroups = await this.redisConsumer.xinfo('GROUPS', this.streamKey) as unknown[];
+          for (const groupData of rawGroups) {
+            const pairs = groupData as (string | number)[];
+            const nameIdx = pairs.indexOf('name');
+            if (nameIdx >= 0 && pairs[nameIdx + 1] === this.consumerGroup) {
+              const lagIdx = pairs.indexOf('lag');
+              if (lagIdx >= 0) consumerGroupLag = pairs[lagIdx + 1] as number;
+              break;
+            }
+          }
+        } catch { /* XINFO GROUPS unsupported or stream absent — keep XLEN fallback */ }
         metrics.workerLag = consumerGroupLag;
 
         // Auto-trim: when the queue is fully drained, keep only a small retained tail
@@ -345,9 +359,6 @@ export class DeviceIngestionOrchestrator {
         const trimTarget = streamFullyDrained
           ? Math.min(this.maxStreamLength, Math.max(0, this.idleTrimStreamLength))
           : this.maxStreamLength;
-        if (streamFullyDrained && (metrics.maxDwellMs !== 0 || metrics.getDwellLatencyP95() !== 0)) {
-          metrics.clearDwellLatency();
-        }
         if (streamFullyDrained && streamLen > trimTarget) {
           await this.redisConsumer.xtrim(this.streamKey, 'MAXLEN', String(trimTarget)).catch(() => {});
           metrics.streamLength = trimTarget;
@@ -395,32 +406,6 @@ export class DeviceIngestionOrchestrator {
     this.healthCollector = setInterval(collect, collectInterval);
   }
 
-  private async getConsumerGroupLag(streamLen: number): Promise<number> {
-    let consumerGroupLag = streamLen;
-
-    try {
-      const rawGroups = await this.redisConsumer.xinfo('GROUPS', this.streamKey) as unknown[];
-      for (const groupData of rawGroups) {
-        const pairs = groupData as (string | number)[];
-        const nameIdx = pairs.indexOf('name');
-        if (nameIdx >= 0 && pairs[nameIdx + 1] === this.consumerGroup) {
-          const lagIdx = pairs.indexOf('lag');
-          if (lagIdx >= 0) {
-            const lagValue = Number(pairs[lagIdx + 1]);
-            if (!Number.isNaN(lagValue)) {
-              consumerGroupLag = lagValue;
-            }
-          }
-          break;
-        }
-      }
-    } catch {
-      // XINFO GROUPS unsupported or stream absent — keep XLEN fallback.
-    }
-
-    return consumerGroupLag;
-  }
-
   async getIngestionHealth(): Promise<{
     lastProcessedTimestamp: number | null;
     lagMs: number;
@@ -441,10 +426,11 @@ export class DeviceIngestionOrchestrator {
     dwellP95Ms: number;
     batchLatP95Ms: number;
   }> {
-    const spoolHealth = await this.worker?.getDbSpoolHealth() ?? { spoolingActive: false, backlogSize: 0, dbCircuitOpen: false };
+    const backlogSize = await this.diskSpool.getBacklogCount();
+    const state = circuitBreaker.getState();
     const lagMs = metrics.maxDwellMs;
     const status: 'healthy' | 'delayed' | 'buffering' | 'offline' =
-      spoolHealth.spoolingActive
+      state !== CircuitState.CLOSED || backlogSize > 0
         ? 'buffering'
         : metrics.redisConnected !== 1
           ? 'offline'
@@ -458,9 +444,9 @@ export class DeviceIngestionOrchestrator {
       maxDwellMs: metrics.maxDwellMs,
       workers: metrics.workerCount,
       status,
-      ingestionHealthy: !spoolHealth.dbCircuitOpen && metrics.redisConnected === 1,
-      spoolingActive: spoolHealth.spoolingActive,
-      backlogSize: spoolHealth.backlogSize,
+      ingestionHealthy: state === CircuitState.CLOSED && metrics.redisConnected === 1,
+      spoolingActive: state !== CircuitState.CLOSED || backlogSize > 0,
+      backlogSize,
       workerLag: metrics.workerLag,
       pendingMessages: metrics.pendingMessages,
       streamLength: metrics.streamLength,
@@ -480,7 +466,6 @@ export class DeviceIngestionOrchestrator {
       const pending = await this.redisConsumer.xpending(this.streamKey, this.consumerGroup);
 
       const length = info[1] as number;
-      const workerLag = await this.getConsumerGroupLag(length);
       const firstEntry = info[11] as string[];
       const lastEntry = info[13] as string[];
 
@@ -510,7 +495,7 @@ export class DeviceIngestionOrchestrator {
       return {
         // Stream state
         streamLength: length,
-        workerLag,
+        workerLag: length,
         firstEntryId: firstEntry ? firstEntry[0] : null,
         lastEntryId: lastEntry ? lastEntry[0] : null,
         pendingMessages: pending[0] as number,
@@ -568,4 +553,4 @@ export class DeviceIngestionOrchestrator {
   }
 }
 
-export const deviceOrchestrator = new DeviceIngestionOrchestrator();
+export const redisDeviceQueue = new RedisDeviceQueue();

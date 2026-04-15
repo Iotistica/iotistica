@@ -16,7 +16,7 @@
  *   tenant:{cust_abc123}:device:*:metrics       (wildcard pattern)
  *   tenant:{cust_abc123}:metrics:uuid-1         (stream key)
  *   tenant:{cust_abc123}:metrics:*              (stream scan pattern)
- *   tenant:{cust_abc123}:device:logs            (log stream key)
+ *   tenant:{cust_abc123}:agent:logs             (log stream key)
  *   tenant:{cust_abc123}:agent:devices:ingestion
  *   tenant:{cust_abc123}:agent:devices:ready
  *   tenant:{cust_abc123}:agent:devices:dlq
@@ -191,7 +191,7 @@ export function uuidFromMetricsChannel(channel: string): string {
  * @param tenantId - Tenant identifier (customerId)
  */
 export function deviceLogsStreamKey(tenantId: string): string {
-  return `${tenantPrefix(tenantId)}:device:logs`;
+  return `${tenantPrefix(tenantId)}:agent:logs`;
 }
 
 // ─── Sensor queue stream keys ─────────────────────────────────────────────────

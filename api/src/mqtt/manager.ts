@@ -1036,27 +1036,29 @@ export class MqttManager extends EventEmitter {
           }
         } else {
           // Message is not compacted (legacy format or compaction disabled)
-          logger.info('Uncompacted message received', {
+          logger.debug('Uncompacted message received', {
             deviceUuid: agentUuid.substring(0, 8),
             messageType,
             subTopic,
             payloadSize: payload.length,
-            uncompactedPayload: JSON.stringify(data).substring(0, 500)
           });
         }
       } else if (messageType === 'endpoints') {
-        // Dictionary manager not initialized, log original message
-        logger.info('Message received (dictionary manager disabled)', {
+        // Dictionary manager not initialized
+        logger.debug('Message received (dictionary manager disabled)', {
           deviceUuid: agentUuid.substring(0, 8),
           messageType,
           subTopic,
           payloadSize: payload.length,
-          payload: JSON.stringify(data).substring(0, 500)
         });
       }
 
-      // HA Deduplication: Check if message has msgId and if we've seen it before
-      if (data && typeof data === 'object' && data.msgId) {
+      // HA Deduplication: Check if message has msgId and if we've seen it before.
+      // Skip for high-throughput 'endpoints' messages — the ingestion pipeline
+      // already handles duplicates via ON CONFLICT DO NOTHING, and per-message
+      // Redis SETNX at 500+ msg/s creates event loop backpressure that causes
+      // Mosquitto to drop QoS 0 messages from its TCP buffer.
+      if (messageType !== 'endpoints' && data && typeof data === 'object' && data.msgId) {
         const isDupe = await isDuplicateMessage(data.msgId);
         if (isDupe) {
           logger.debug('Duplicate message detected, skipping processing', {
