@@ -1,4 +1,4 @@
--- Migration 024: Create series_latest table for O(1) Prometheus scrape reads
+-- Migration 024: Create endpoint_latest table for O(1) Prometheus scrape reads
 --
 -- Replaces the `latest_readings` materialized view as the Prometheus scrape
 -- source. Instead of periodic REFRESH MATERIALIZED VIEW CONCURRENTLY (full
@@ -9,7 +9,7 @@
 -- The materialized view is kept for dashboard consumers that benefit from
 -- its broader column set and 1-hour window refresh semantics.
 
-CREATE TABLE IF NOT EXISTS series_latest (
+CREATE TABLE IF NOT EXISTS endpoint_latest (
   agent_uuid     uuid             NOT NULL,
   device_name    text             NOT NULL DEFAULT 'unknown',
   metric_name    text             NOT NULL,
@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS series_latest (
   PRIMARY KEY (agent_uuid, device_name, metric_name)
 );
 
-CREATE INDEX IF NOT EXISTS idx_series_latest_quality
-  ON series_latest (quality);
+CREATE INDEX IF NOT EXISTS idx_endpoint_latest_quality
+  ON endpoint_latest (quality);
 
-COMMENT ON TABLE series_latest
+COMMENT ON TABLE endpoint_latest
   IS 'Latest reading per (agent, device, metric). Updated inline by ingestion workers via ON CONFLICT upsert. Primary consumer: Prometheus /metrics endpoint.';

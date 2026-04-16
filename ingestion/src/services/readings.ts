@@ -256,7 +256,7 @@ export class ReadingsService {
 
           // Upsert latest values for Prometheus scrape (one row per series)
           await client.query(`
-            INSERT INTO series_latest (
+            INSERT INTO endpoint_latest (
               agent_uuid, device_name, metric_name, value, quality, unit, protocol, time
             )
             SELECT DISTINCT ON (t.agent_uuid, COALESCE(t.extra->>'deviceName', 'unknown'), t.metric_name)
@@ -276,7 +276,7 @@ export class ReadingsService {
               unit     = EXCLUDED.unit,
               protocol = EXCLUDED.protocol,
               time     = EXCLUDED.time
-            WHERE EXCLUDED.time >= series_latest.time
+            WHERE EXCLUDED.time >= endpoint_latest.time
           `);
 
           insertedTotal += insertResult.rowCount || 0;
@@ -512,7 +512,7 @@ export class ReadingsService {
         insertedTotal += result.rowCount || 0;
 
         // Upsert latest values for Prometheus scrape (one row per series)
-        await this.upsertSeriesLatest(insertClient, batch);
+        await this.upsertEndpointLatest(insertClient, batch);
       }
     } finally {
       insertClient.release();
@@ -522,10 +522,10 @@ export class ReadingsService {
   }
 
   /**
-   * Upsert latest value per series into series_latest for Prometheus scrape.
+   * Upsert latest value per series into endpoint_latest for Prometheus scrape.
    * Deduplicates within batch (keeps newest time per series key).
    */
-  private async upsertSeriesLatest(client: PoolClient, batch: ReadingInsert[]): Promise<void> {
+  private async upsertEndpointLatest(client: PoolClient, batch: ReadingInsert[]): Promise<void> {
     // Deduplicate: keep only the newest reading per (agent_uuid, device_name, metric_name)
     const latest = new Map<string, ReadingInsert>();
     for (const r of batch) {
@@ -562,7 +562,7 @@ export class ReadingsService {
     }
 
     await client.query(
-      `INSERT INTO series_latest (agent_uuid, device_name, metric_name, value, quality, unit, protocol, time)
+      `INSERT INTO endpoint_latest (agent_uuid, device_name, metric_name, value, quality, unit, protocol, time)
        VALUES ${placeholders.join(', ')}
        ON CONFLICT (agent_uuid, device_name, metric_name) DO UPDATE SET
          value    = EXCLUDED.value,
@@ -570,7 +570,7 @@ export class ReadingsService {
          unit     = EXCLUDED.unit,
          protocol = EXCLUDED.protocol,
          time     = EXCLUDED.time
-       WHERE EXCLUDED.time >= series_latest.time`,
+       WHERE EXCLUDED.time >= endpoint_latest.time`,
       values,
     );
   }
@@ -605,18 +605,6 @@ export class ReadingsService {
 
     if (!copySucceeded && !useRealtimeInsertPath) {
       insertedTotal = await this.bulkInsertViaValues(readings, this.MAX_ROWS_PER_BULK_INSERT);
-    }
-
-    // Upsert series_latest for non-COPY paths (COPY path handles it inline via temp table)
-    if (!copySucceeded && insertedTotal > 0) {
-      const client = await getClient();
-      try {
-        await this.upsertSeriesLatest(client, readings);
-      } catch (err) {
-        logger.warn('series_latest upsert failed', { error: (err as Error).message });
-      } finally {
-        client.release();
-      }
     }
 
     // Refresh only when newly observed catalog dimensions appear in this pod:
