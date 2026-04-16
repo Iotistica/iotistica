@@ -54,14 +54,13 @@ export class ReadingInserter {
     metrics.readingsInserted += insertedCount;
     metrics.recordInsertLatency(insertMs);
 
-    const telemetryStart = Date.now();
-    await this.updateLastTelemetryAt(deduped, ingestedAt);
-    const telemetryMs = Date.now() - telemetryStart;
-    metrics.recordTelemetryLatency(telemetryMs);
+    // Fire-and-forget: don't block the batch cycle on a secondary UPDATE
+    this.updateLastTelemetryAt(deduped, ingestedAt)
+      .then(telemetryMs => metrics.recordTelemetryLatency(telemetryMs))
+      .catch(err => logger.warn('Background telemetry timestamp update failed', { error: err instanceof Error ? err.message : String(err) }));
 
     logger.debug(`Inserted ${insertedCount} readings (deduped ${allReadings.length - deduped.length})`, {
       insertMs,
-      telemetryMs,
       rows: deduped.length,
     });
     metrics.lastProcessedTimestamp = Date.now();
@@ -71,19 +70,21 @@ export class ReadingInserter {
    * Stamp last_telemetry_at on endpoints rows using the endpoint_uuid from extra.
    * Decouples "data is flowing" from MQTT heartbeat / connectivity events.
    */
-  private async updateLastTelemetryAt(readings: ReadingInsert[], ingestedAt: Date): Promise<void> {
+  private async updateLastTelemetryAt(readings: ReadingInsert[], ingestedAt: Date): Promise<number> {
     const endpointUuids = [...new Set(
       readings
         .map(r => r.extra?.endpoint_uuid as string)
         .filter((uuid): uuid is string => Boolean(uuid)),
     )];
 
-    if (endpointUuids.length === 0) return;
+    if (endpointUuids.length === 0) return 0;
 
+    const start = Date.now();
     const placeholders = endpointUuids.map((_, i) => `$${i + 2}::uuid`).join(', ');
     await query(
       `UPDATE endpoints SET last_telemetry_at = $1::timestamptz WHERE uuid IN (${placeholders})`,
       [ingestedAt.toISOString(), ...endpointUuids],
     );
+    return Date.now() - start;
   }
 }

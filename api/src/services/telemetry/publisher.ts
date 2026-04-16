@@ -41,13 +41,20 @@ export interface CompressedLogEntry {
 export class DeviceReadingsPublisher {
   private readonly redis: Redis;
   private readonly maxStreamLength: number;
+  private readonly streamHighWatermarkPct: number;
   private tenantId: string;
   private readonly diskSpool: DiskSpool;
   private readonly pipeline: RedisPipeline;
 
+  // Stream high-watermark state — updated by background poller, checked on hot path.
+  private streamOverHighWatermark = false;
+  private streamWatermarkPoller: NodeJS.Timeout | null = null;
+  private spoolRerouteCount = 0;  // writes redirected to disk spool due to watermark
+
   constructor(tenantId?: string) {
     this.redis = getRedisIngestion();
     this.maxStreamLength = parseInt(process.env.REDIS_INGESTION_STREAM_MAXLEN || '10000', 10);
+    this.streamHighWatermarkPct = parseFloat(process.env.REDIS_DEVICE_STREAM_HIGH_WATERMARK_PCT || '0.85');
     this.tenantId = tenantId || '';
 
     const spoolPath = process.env.DISK_SPOOL_PATH || '/tmp/iotistic-spool';
@@ -70,6 +77,52 @@ export class DeviceReadingsPublisher {
           () => this.redis.status === 'ready',
         ))
         .catch(err => logger.error('Failed to initialize disk spool', { error: err.message }));
+    }
+
+    // Poll stream depth every 3s. When depth >= maxLen × watermarkPct we stop
+    // writing to Redis and spool to disk instead, preventing silent MAXLEN trim.
+    // The disk spool replayer re-queues data once the stream drains.
+    const pollIntervalMs = parseInt(process.env.STREAM_WATERMARK_POLL_INTERVAL_MS || '3000', 10);
+    this.streamWatermarkPoller = setInterval(() => {
+      this.checkStreamWatermark().catch(() => { /* ignore transient redis errors */ });
+    }, pollIntervalMs);
+    // Allow Node.js to exit even if this timer is still running
+    if (this.streamWatermarkPoller.unref) this.streamWatermarkPoller.unref();
+  }
+
+  private async checkStreamWatermark(): Promise<void> {
+    if (!this.isRedisReady()) return;
+    try {
+      const depth = await this.redis.xlen(this.streamKey);
+      const threshold = Math.floor(this.maxStreamLength * this.streamHighWatermarkPct);
+      const wasOver = this.streamOverHighWatermark;
+      this.streamOverHighWatermark = depth >= threshold;
+
+      if (!wasOver && this.streamOverHighWatermark) {
+        logger.warn('Redis ingestion stream above high-watermark — routing new writes to disk spool', {
+          streamDepth: depth,
+          threshold,
+          maxStreamLength: this.maxStreamLength,
+          watermarkPct: this.streamHighWatermarkPct,
+        });
+      } else if (wasOver && !this.streamOverHighWatermark) {
+        const rerouted = this.spoolRerouteCount;
+        this.spoolRerouteCount = 0;
+        logger.info('Redis ingestion stream drained below high-watermark — resuming Redis writes', {
+          streamDepth: depth,
+          threshold,
+          writesReroutedToDisk: rerouted,
+        });
+      } else if (this.streamOverHighWatermark && this.spoolRerouteCount > 0) {
+        logger.info('Redis ingestion stream still above high-watermark — disk spool active', {
+          streamDepth: depth,
+          threshold,
+          writesReroutedToDiskThisPeriod: this.spoolRerouteCount,
+        });
+        this.spoolRerouteCount = 0;
+      }
+    } catch {
+      // Transient Redis error — leave watermark flag unchanged
     }
   }
 
@@ -98,6 +151,14 @@ export class DeviceReadingsPublisher {
     // bypassCircuit=true is used by the disk spool replayer so recovered data is
     // re-queued even while the circuit probes recovery (HALF_OPEN or just re-opened).
     if (!bypassCircuit && !circuitBreaker.shouldAllowRequest()) {
+      return this.fallbackToDiskOrDrop(deviceData, source);
+    }
+
+    // Stream high-watermark — ingestion is falling behind. Route to disk spool so
+    // XADD MAXLEN trimming cannot silently discard entries. The disk spool replayer
+    // re-queues data automatically once the stream drains below the watermark.
+    if (!bypassCircuit && this.streamOverHighWatermark) {
+      this.spoolRerouteCount++;
       return this.fallbackToDiskOrDrop(deviceData, source);
     }
 
@@ -163,6 +224,13 @@ export class DeviceReadingsPublisher {
         error: err.message,
       });
       return 'dropped';
+    }
+  }
+
+  async destroy(): Promise<void> {
+    if (this.streamWatermarkPoller) {
+      clearInterval(this.streamWatermarkPoller);
+      this.streamWatermarkPoller = null;
     }
   }
 }

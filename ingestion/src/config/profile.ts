@@ -1,8 +1,8 @@
 import profileCatalogData from './profile-catalog.json';
 
-export type IngestionProfile = 'batch' | 'balanced' | 'streaming' | 'benchmark';
+export type IngestionProfile = 'batch' | 'balanced' | 'streaming' | 'benchmark' | 'hp';
 
-const PROFILE_NAMES = ['batch', 'balanced', 'streaming', 'benchmark'] as const;
+const PROFILE_NAMES = ['batch', 'balanced', 'streaming', 'benchmark', 'hp'] as const;
 const PROFILE_ENV_KEYS = [
   'REDIS_PIPELINE_FLUSH_INTERVAL_MS',
   'REDIS_INGESTION_STREAM_MAXLEN',
@@ -105,6 +105,7 @@ function resolveProfile(profile: string | undefined): IngestionProfile {
     case 'balanced':
     case 'streaming':
     case 'benchmark':
+    case 'hp':
       return normalized;
     default:
       throw new Error(`Unsupported ingestion profile \"${profile}\". Expected one of: ${PROFILE_NAMES.join(', ')}`);

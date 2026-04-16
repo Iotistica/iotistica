@@ -59,6 +59,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 
 ENTRYPOINT ["/sbin/tini", "--"]
 
-ENV NODE_OPTIONS="--max-old-space-size=1536"
+ENV NODE_OPTIONS="--max-old-space-size=3072"
 
 CMD ["node", "dist/index.js"]

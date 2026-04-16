@@ -593,7 +593,15 @@ export class RedisQueueConsumer {
     if (lagMs < this.config.lagTargetMs) {
       this.consecutiveBelowTargetLagChecks += 1;
       if (this.consecutiveBelowTargetLagChecks >= this.config.lagScaleDownStableChecks) {
-        desiredWorkers = Math.max(this.config.minWorkers, currentWorkers - 1);
+        // Suppress scale-down when DB is under pressure: high insertP95 means workers are
+        // still valuable even if the stream appears caught up (stream depth = 0 when workers
+        // consume messages immediately but spend a long time waiting for DB commits).
+        const insertP95 = metrics.getInsertLatencyP95();
+        if (insertP95 > this.config.lagTargetMs) {
+          this.consecutiveBelowTargetLagChecks = 0;
+        } else {
+          desiredWorkers = Math.max(this.config.minWorkers, currentWorkers - 1);
+        }
       }
     } else if (lagMs > this.config.lagCriticalMs) {
       this.consecutiveBelowTargetLagChecks = 0;
@@ -929,16 +937,19 @@ export class RedisQueueConsumer {
     // Compute queue dwell time from the Redis Stream entry IDs (<unix-ms>-<sequence>).
     // maxDwellMs is the most operationally significant value: it shows whether the
     // worker is falling behind on the oldest messages in the batch.
-    const dwellTimes = entries.map(e => completedAtMs - this.ingestedAtMs(e.id));
-    const maxDwellMs = Math.max(...dwellTimes);
-    const avgDwellMs = Math.round(dwellTimes.reduce((a, b) => a + b, 0) / dwellTimes.length);
+    let maxDwellMs = 0;
+    let sumDwellMs = 0;
+    for (const entry of entries) {
+      const dwell = completedAtMs - this.ingestedAtMs(entry.id);
+      if (dwell > maxDwellMs) maxDwellMs = dwell;
+      sumDwellMs += dwell;
+    }
     metrics.recordDwellLatency(maxDwellMs);
 
     const duration = completedAtMs - startTime;
 
     logger.info('Ingested', {
       count: allData.length,
-      source: [...new Set(entries.map(e => e.source).filter(Boolean))].join(',') || 'unknown',
       durationMs: duration,
       maxDwellMs,
     });
@@ -947,11 +958,13 @@ export class RedisQueueConsumer {
       return;
     }
 
+    const avgDwellMs = entries.length > 0 ? Math.round(sumDwellMs / entries.length) : 0;
     const compressedCount = entries.filter(e => e.isCompressed).length;
     logger.debug('Processed device data batch from Redis', {
       totalReadings: entries.length,
       compressedEntries: compressedCount,
       legacyEntries: entries.length - compressedCount,
+      source: [...new Set(entries.map(e => e.source).filter(Boolean))].join(',') || 'unknown',
       agents: new Set(allData.map(d => d.deviceUuid)).size,
       devices: new Set(allData.map(d => `${d.deviceUuid}/${d.deviceName}`)).size,
       durationMs: duration,

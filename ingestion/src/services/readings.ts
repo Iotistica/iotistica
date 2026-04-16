@@ -229,13 +229,9 @@ export class ReadingsService {
           `;
 
           const copyStream = client.query(copyFrom(copySql));
-          const batchSeen = new Set<string>();
           await pipeline(
             Readable.from((function* (this: ReadingsService) {
               for (const r of batch) {
-                const key = `${r.agent_uuid}\t${r.metric_name}\t${(r.time ?? new Date()).getTime()}`;
-                if (batchSeen.has(key)) continue;
-                batchSeen.add(key);
                 yield this.toCopyLine(r);
               }
             }).call(this)),
@@ -254,33 +250,16 @@ export class ReadingsService {
             ON CONFLICT (agent_uuid, metric_name, time) DO NOTHING
           `);
 
-          // Upsert latest values for Prometheus scrape (one row per series)
-          await client.query(`
-            INSERT INTO readings_latest (
-              agent_uuid, device_name, metric_name, value, quality, unit, protocol, time
-            )
-            SELECT DISTINCT ON (t.agent_uuid, COALESCE(t.extra->>'deviceName', 'unknown'), t.metric_name)
-              t.agent_uuid,
-              COALESCE(t.extra->>'deviceName', 'unknown'),
-              t.metric_name,
-              t.value,
-              t.quality,
-              t.unit,
-              t.protocol,
-              t.time
-            FROM ${ReadingsService.COPY_TEMP_TABLE_NAME} t
-            ORDER BY t.agent_uuid, COALESCE(t.extra->>'deviceName', 'unknown'), t.metric_name, t.time DESC
-            ON CONFLICT (agent_uuid, device_name, metric_name) DO UPDATE SET
-              value    = EXCLUDED.value,
-              quality  = EXCLUDED.quality,
-              unit     = EXCLUDED.unit,
-              protocol = EXCLUDED.protocol,
-              time     = EXCLUDED.time
-            WHERE EXCLUDED.time >= readings_latest.time
-          `);
-
           insertedTotal += insertResult.rowCount || 0;
           await client.query('COMMIT');
+
+          // Upsert readings_latest OUTSIDE the transaction: no lock held over the readings
+          // insert, and row-level contention on the small latest table is resolved without
+          // blocking the COPY pipeline. Pre-dedup in TypeScript eliminates the DISTINCT ON
+          // sort and JSONB extraction that previously ran inside the hot-path transaction.
+          this.upsertReadingsLatest(batch).catch(err =>
+            logger.warn('Background readings_latest upsert failed', { error: err instanceof Error ? err.message : String(err) }),
+          );
         } catch (error) {
           await client.query('ROLLBACK').catch(() => undefined);
           throw error;
@@ -291,6 +270,71 @@ export class ReadingsService {
     }
 
     return insertedTotal;
+  }
+
+  /**
+   * Upsert the latest reading per series into readings_latest.
+   * Runs OUTSIDE the main COPY transaction to avoid holding the readings lock
+   * during contended row-level upserts on the shared latest table.
+   * Pre-deduplication in TypeScript eliminates the DISTINCT ON sort + JSONB
+   * extraction that previously ran inside the hot-path transaction.
+   */
+  private async upsertReadingsLatest(readings: ReadingInsert[]): Promise<void> {
+    if (readings.length === 0) return;
+
+    // Compute latest reading per (agent_uuid, device_name, metric_name) in O(n).
+    // Uses extra->>'deviceName' (camelCase) to match the previously-used SQL expression.
+    const latestBySeries = new Map<string, ReadingInsert>();
+    for (const r of readings) {
+      const deviceName = (r.extra as any)?.deviceName ?? 'unknown';
+      const key = `${r.agent_uuid}\t${deviceName}\t${r.metric_name}`;
+      const existing = latestBySeries.get(key);
+      if (!existing || (r.time ?? new Date()) >= (existing.time ?? new Date())) {
+        latestBySeries.set(key, r);
+      }
+    }
+
+    // Sort by primary key before chunking so concurrent workers acquire row locks
+    // in a consistent order, preventing deadlocks between overlapping batches.
+    const rows = [...latestBySeries.values()].sort((a, b) => {
+      const aKey = `${a.agent_uuid}\t${(a.extra as any)?.deviceName ?? 'unknown'}\t${a.metric_name}`;
+      const bKey = `${b.agent_uuid}\t${(b.extra as any)?.deviceName ?? 'unknown'}\t${b.metric_name}`;
+      return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+    });
+    const CHUNK = 500; // keep params well under pg's 65535 limit
+
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      const params: unknown[] = [];
+      const valueClauses = chunk.map((r, idx) => {
+        const deviceName = (r.extra as any)?.deviceName ?? 'unknown';
+        const base = idx * 8;
+        params.push(
+          r.agent_uuid,
+          deviceName,
+          r.metric_name,
+          r.value ?? null,
+          r.quality ?? 'good',
+          r.unit ?? null,
+          r.protocol,
+          r.time ?? new Date(),
+        );
+        return `($${base + 1}::uuid, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`;
+      });
+
+      await query(
+        `INSERT INTO readings_latest (agent_uuid, device_name, metric_name, value, quality, unit, protocol, time)
+         VALUES ${valueClauses.join(', ')}
+         ON CONFLICT (agent_uuid, device_name, metric_name) DO UPDATE SET
+           value    = EXCLUDED.value,
+           quality  = EXCLUDED.quality,
+           unit     = EXCLUDED.unit,
+           protocol = EXCLUDED.protocol,
+           time     = EXCLUDED.time
+         WHERE EXCLUDED.time >= readings_latest.time`,
+        params,
+      );
+    }
   }
 
   private noteCatalogCandidates(readings: ReadingInsert[]): boolean {

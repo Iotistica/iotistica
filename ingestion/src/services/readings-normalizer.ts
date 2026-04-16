@@ -217,7 +217,7 @@ function expandFormat1(entry: DeviceDataEntry, protocol: string, ingestedAt: Dat
     message.readings.forEach((reading: any) => {
       const normalized = normalizeReading(
         reading, entry, protocol, ingestedAt,
-        message.timestamp, { ...(entry.data || {}), ...(message || {}) },
+        message.timestamp, message,
       );
       if (normalized) {
         readings.push(normalized);

@@ -62,8 +62,9 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
     } catch { /* ignore */ }
 
     try {
-      const { redisLogQueue } = await import('../services/telemetry/publisher');
+      const { redisLogQueue, redisDeviceQueue } = await import('../services/telemetry/publisher');
       await redisLogQueue.flush();
+      await redisDeviceQueue.destroy();
       logger.info('Redis log queue worker stopped');
     } catch (error) {
       logger.error('Error stopping Redis log queue worker', { error });
