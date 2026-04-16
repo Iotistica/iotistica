@@ -48,7 +48,7 @@ export async function renderEndpointPrometheusMetrics(): Promise<string> {
         WHEN a.is_online IS NOT NULL THEN CASE WHEN a.is_online THEN 1 ELSE 0 END
         ELSE 1
       END AS device_online
-    FROM endpoint_latest el
+    FROM readings_latest el
     LEFT JOIN agents a ON el.agent_uuid = a.uuid
     WHERE el.quality = 'good'
   `);

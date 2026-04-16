@@ -163,7 +163,7 @@ services:
             - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-true}
             - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
             - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-1000}
-            - REDIS_INGESTION_STREAM_MAXLEN=${REDIS_INGESTION_STREAM_MAXLEN:-10000}
+            - REDIS_INGESTION_STREAM_MAXLEN=${REDIS_INGESTION_STREAM_MAXLEN:-50000}
         ports:
             - "${API_PORT_EXT:-4002}:3002"
             - "3443:3443"

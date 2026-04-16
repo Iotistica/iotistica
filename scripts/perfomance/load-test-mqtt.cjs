@@ -52,6 +52,7 @@ const DEFAULTS = {
   Password:            '',
   SyntheticAgents:     false,
   Cleanup:             true,
+  CleanStream:         true,
 };
 
 function parseArgs() {
@@ -136,6 +137,41 @@ function getTenantIdFromRedis() {
   return m[1];
 }
 
+// ─── Redis stream cleanup ────────────────────────────────────────────────────
+
+function cleanRedisStream(tenantId) {
+  const pass     = process.env.REDIS_PASSWORD || '';
+  const streamKey = `tenant:{${tenantId}}:agent:devices:ingestion`;
+  try {
+    const existsOut = dockerExec('iotistic-redis', 'redis-cli', '--no-auth-warning', '-a', pass,
+      'EXISTS', streamKey);
+    if (parseInt(existsOut, 10) === 0) return { cleared: 0, pending: 0 };
+
+    const lenOut = dockerExec('iotistic-redis', 'redis-cli', '--no-auth-warning', '-a', pass,
+      'XLEN', streamKey);
+    const cleared = parseInt(lenOut, 10) || 0;
+
+    // Count PEL across all consumer groups
+    let totalPending = 0;
+    try {
+      const infoOut = dockerExec('iotistic-redis', 'redis-cli', '--no-auth-warning', '-a', pass,
+        'XINFO', 'GROUPS', streamKey);
+      for (const m of (infoOut.match(/pending\s+(\d+)/g) || [])) {
+        totalPending += parseInt(m.match(/\d+/)[0], 10);
+      }
+    } catch { /* ignore */ }
+
+    // DEL removes the stream and all consumer groups; ingestion recreates on next XREADGROUP.
+    dockerExec('iotistic-redis', 'redis-cli', '--no-auth-warning', '-a', pass,
+      'DEL', streamKey);
+
+    return { cleared, pending: totalPending };
+  } catch (err) {
+    console.warn(clr(`  Stream cleanup failed: ${err.message}`, C.yellow));
+    return null;
+  }
+}
+
 function getAgentUuidsFromDb(limit) {
   try {
     const out = dockerExec('iotistic-postgres',
@@ -158,6 +194,9 @@ const METRIC_FIELDS = [
   ['messagesProcessed', 'iotistic_ingestion_messages_processed_total'],
   ['readingsInserted',  'iotistic_ingestion_readings_inserted_total'],
   ['messagesDropped',   'iotistic_ingestion_messages_dropped_total'],
+  ['insertLatP95Ms',    'iotistic_ingestion_insert_latency_p95_ms'],
+  ['dbPoolPct',         'iotistic_ingestion_db_pool_saturation_pct'],
+  ['processingLatP95Ms','iotistic_ingestion_processing_latency_p95_ms'],
 ];
 
 function parseGauge(text, name) {
@@ -195,7 +234,10 @@ function printHealthRow(h, base, injected, total, mpm, elapsed) {
   const proc  = base ? (h.messagesProcessed ?? 0) - (base.messagesProcessed ?? 0) : (h.messagesProcessed ?? '?');
   const ins   = base ? (h.readingsInserted  ?? 0) - (base.readingsInserted  ?? 0) : (h.readingsInserted  ?? '?');
   const drop  = base ? (h.messagesDropped   ?? 0) - (base.messagesDropped   ?? 0) : (h.messagesDropped   ?? '?');
-  const inflight = (Number(h.streamLength) || 0) + (Number(h.pendingMessages) || 0);
+  // Subtract the baseline stream+PEL so leftover entries from a prior run don't
+  // artificially reduce the apparent loss for the current test.
+  const baseInflight = base ? (Number(base.streamLength) || 0) + (Number(base.pendingMessages) || 0) : 0;
+  const inflight = Math.max(0, (Number(h.streamLength) || 0) + (Number(h.pendingMessages) || 0) - baseInflight);
   const lost  = typeof proc === 'number' && injected > 0 ? Math.max(0, injected - proc - inflight) : 0;
   const lossPct = injected > 0 ? ((lost / injected) * 100).toFixed(1) : '0.0';
   const lagC  = Number(lag)  > 20000 ? C.red : Number(lag)  > 5000 ? C.yellow : C.cyan;
@@ -209,7 +251,7 @@ function printHealthRow(h, base, injected, total, mpm, elapsed) {
     `procΔ=${lpad(proc,7)} insΔ=${lpad(ins,7)} dropΔ=` +
     clr(lpad(drop,4), dropC) +
     ` loss=` + clr(`${lpad(lossPct,5)}%`, lossC) +
-    `  dwellP95=${h.dwellP95Ms??'?'}ms batchP95=${h.batchLatP95Ms??'?'}ms\n`
+    `  dwellP95=${h.dwellP95Ms??'?'}ms insertP95=${h.insertLatP95Ms??'?'}ms pool=${h.dbPoolPct??'?'}%\n`
   );
 }
 
@@ -295,6 +337,23 @@ async function main() {
     console.log(clr(`Using tenant ID: ${tenantId}`, C.green));
   }
   const encTenant = encodeHex(tenantId);
+
+  // ── Pre-test stream cleanup ────────────────────────────────────────────────
+  if (p.CleanStream) {
+    process.stdout.write('Cleaning Redis ingestion stream...');
+    const result = cleanRedisStream(tenantId);
+    if (result) {
+      if (result.cleared > 0 || result.pending > 0) {
+        console.log(clr(` cleared ${result.cleared} entries, ${result.pending} PEL`, C.green));
+        // Give ingestion workers time to detect NOGROUP and recreate the consumer group.
+        await new Promise(r => setTimeout(r, 2500));
+      } else {
+        console.log(clr(' already empty', C.gray));
+      }
+    } else {
+      console.log('');
+    }
+  }
 
   // ── Agent UUIDs ────────────────────────────────────────────────────────────
   let agentUuids;
@@ -442,7 +501,7 @@ async function main() {
     console.log(clr(`  Flush interval: ${flushIntMs}ms — ${lbl}`, C.gray));
   }
   console.log('');
-  console.log(`${'Time'.padStart(8)} | ${'Msgs/Total  Readings/Total'.padStart(27)} | ${'rate/stream'.padStart(12)} | ${'lag/pending/workers'.padStart(18)} | ${'procΔ/insΔ/dropΔ'.padStart(24)} | ${'dwellP95/batchP95'.padStart(22)}`);
+  console.log(`${'Time'.padStart(8)} | ${'Msgs/Total  Readings/Total'.padStart(27)} | ${'rate/stream'.padStart(12)} | ${'lag/pending/workers'.padStart(18)} | ${'procΔ/insΔ/dropΔ'.padStart(24)} | ${'dwellP95/insertP95/pool%'.padStart(25)}`);
   console.log('-'.repeat(130));
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -495,13 +554,10 @@ async function main() {
     const ageExceeded = flushIntMs > 0 && (elapsedMs - lastFlushMs) >= flushIntMs;
 
     if (totalPend >= roundSize || ageExceeded) {
-      const nTopics = [...pending.values()].filter(v => v.length > 0).length;
-      printFlushRow(injected, p.MessageCount, p.MetricsPerMessage, elapsedMs / 1000, totalPend, nTopics, 'flush start');
       await flush();
       totalPend   = 0;
       lastFlushMs = Date.now() - startMs;
       const sec   = lastFlushMs / 1000;
-      printFlushRow(injected, p.MessageCount, p.MetricsPerMessage, sec, 0, nTopics, 'flush done');
       if (sec - lastPollSec >= p.PollIntervalSec) {
         const h = await getHealth();
         printHealthRow(h, baseline, injected, p.MessageCount, p.MetricsPerMessage, sec);
@@ -624,16 +680,21 @@ async function main() {
   // ── Post-test cleanup ────────────────────────────────────────────────────
   if (p.Cleanup) {
     console.log(clr('Cleaning up test data...', C.cyan));
+    // DB tables
     try {
-      const { execFileSync } = require('child_process');
       const sql = "TRUNCATE readings, series_latest;";
       const out = execFileSync('docker', [
         'exec', 'iotistic-postgres',
         'psql', '-U', 'postgres', '-d', 'iotistica', '-c', sql
       ], { encoding: 'utf8', timeout: 30000 }).trim();
-      console.log(clr(`  ${out}`, C.green));
+      console.log(clr(`  DB: ${out}`, C.green));
     } catch (err) {
-      console.log(clr(`  Cleanup failed: ${err.message}`, C.yellow));
+      console.log(clr(`  DB cleanup failed: ${err.message}`, C.yellow));
+    }
+    // Redis stream (so next run starts clean)
+    const streamResult = cleanRedisStream(tenantId);
+    if (streamResult) {
+      console.log(clr(`  Stream: cleared ${streamResult.cleared} entries, ${streamResult.pending} PEL`, C.green));
     }
   }
 }

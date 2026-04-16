@@ -256,7 +256,7 @@ export class ReadingsService {
 
           // Upsert latest values for Prometheus scrape (one row per series)
           await client.query(`
-            INSERT INTO endpoint_latest (
+            INSERT INTO readings_latest (
               agent_uuid, device_name, metric_name, value, quality, unit, protocol, time
             )
             SELECT DISTINCT ON (t.agent_uuid, COALESCE(t.extra->>'deviceName', 'unknown'), t.metric_name)
@@ -276,7 +276,7 @@ export class ReadingsService {
               unit     = EXCLUDED.unit,
               protocol = EXCLUDED.protocol,
               time     = EXCLUDED.time
-            WHERE EXCLUDED.time >= endpoint_latest.time
+            WHERE EXCLUDED.time >= readings_latest.time
           `);
 
           insertedTotal += insertResult.rowCount || 0;
@@ -522,7 +522,7 @@ export class ReadingsService {
   }
 
   /**
-   * Upsert latest value per series into endpoint_latest for Prometheus scrape.
+   * Upsert latest value per series into readings_latest for Prometheus scrape.
    * Deduplicates within batch (keeps newest time per series key).
    */
   private async upsertEndpointLatest(client: PoolClient, batch: ReadingInsert[]): Promise<void> {
@@ -562,7 +562,7 @@ export class ReadingsService {
     }
 
     await client.query(
-      `INSERT INTO endpoint_latest (agent_uuid, device_name, metric_name, value, quality, unit, protocol, time)
+      `INSERT INTO readings_latest (agent_uuid, device_name, metric_name, value, quality, unit, protocol, time)
        VALUES ${placeholders.join(', ')}
        ON CONFLICT (agent_uuid, device_name, metric_name) DO UPDATE SET
          value    = EXCLUDED.value,
@@ -570,7 +570,8 @@ export class ReadingsService {
          unit     = EXCLUDED.unit,
          protocol = EXCLUDED.protocol,
          time     = EXCLUDED.time
-       WHERE EXCLUDED.time >= endpoint_latest.time`,
+       WHERE EXCLUDED.time >= readings_latest.time`,
+
       values,
     );
   }
