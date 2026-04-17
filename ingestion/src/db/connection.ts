@@ -102,11 +102,23 @@ pool.on('connect', (client) => {
 const TRANSIENT_PG_CODES = new Set(['57P01', '57P02', '57P03', '08000', '08006', '08001', '08004']);
 const TRANSIENT_NODE_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN']);
 
+// pg-pool internal error messages that have no error code but are always transient.
+// "server conn crashed?" — pool discarded a client mid-query after a TCP drop.
+// "server login has been failing" — pool is in login-retry cooldown after a failover.
+// "Connection terminated unexpectedly" — TCP reset on an idle or active connection.
+const TRANSIENT_MESSAGE_FRAGMENTS = [
+  'server conn crashed',
+  'server login has been failing',
+  'Connection terminated unexpectedly',
+  'connect failed',
+];
+
 function isTransientError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const code = (error as Error & { code?: string }).code;
-  if (!code) return false;
-  return TRANSIENT_PG_CODES.has(code) || TRANSIENT_NODE_CODES.has(code);
+  if (code && (TRANSIENT_PG_CODES.has(code) || TRANSIENT_NODE_CODES.has(code))) return true;
+  const msg = error.message ?? '';
+  return TRANSIENT_MESSAGE_FRAGMENTS.some(fragment => msg.includes(fragment));
 }
 
 function isWriteQuery(text: string): boolean {
@@ -129,7 +141,7 @@ function pgErrorContext(error: unknown): Record<string, unknown> {
 }
 
 export async function query<T = unknown>(text: string, params?: unknown[]): Promise<QueryResult<T>> {
-  const maxAttempts = 3;
+  const maxAttempts = 5;
   const isWrite = isWriteQuery(text);
   const maxQueryPreview = 1000;
   const textPreview = text.length > maxQueryPreview ? `${text.slice(0, maxQueryPreview)}... [truncated ${text.length - maxQueryPreview} chars]` : text;
@@ -139,7 +151,8 @@ export async function query<T = unknown>(text: string, params?: unknown[]): Prom
       return await pool.query<T>(text, params);
     } catch (error) {
       if (isTransientError(error) && attempt < maxAttempts) {
-        const delayMs = attempt * 500;
+        // Exponential backoff: 1s, 2s, 4s, 8s — gives CNPG ~15s to complete failover.
+        const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
         logger.warn('Transient DB error, retrying query...', {
           attempt,
           maxAttempts,
@@ -184,12 +197,27 @@ export async function query<T = unknown>(text: string, params?: unknown[]): Prom
 }
 
 export async function getClient(): Promise<PoolClient> {
-  try {
-    return await pool.connect();
-  } catch (err) {
-    logger.warn('Failed to acquire database client from pool', err);
-    throw new Error('DB connection temporarily unavailable');
+  const maxAttempts = 5;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await pool.connect();
+    } catch (err) {
+      if (isTransientError(err) && attempt < maxAttempts) {
+        const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+        logger.warn('Transient error acquiring DB client, retrying...', {
+          attempt,
+          maxAttempts,
+          retryInMs: delayMs,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      logger.warn('Failed to acquire database client from pool', err);
+      throw new Error('DB connection temporarily unavailable');
+    }
   }
+  throw new Error('DB connection temporarily unavailable');
 }
 
 export async function transaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
