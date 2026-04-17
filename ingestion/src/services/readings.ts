@@ -203,8 +203,6 @@ export class ReadingsService {
     const client = await getClient();
 
     try {
-      await this.ensureCopyTempTable(client);
-
       for (let i = 0; i < readings.length; i += this.COPY_STAGE_ROWS_PER_BATCH) {
         const batch = readings.slice(i, i + this.COPY_STAGE_ROWS_PER_BATCH);
 
@@ -213,6 +211,13 @@ export class ReadingsService {
           // Skip WAL fsync wait on commit — safe for append-only telemetry.
           // Worst case on hard crash: lose the last ~200ms of buffered writes.
           await client.query('SET LOCAL synchronous_commit = off');
+          // Create the staging table inside the transaction so that the CREATE and
+          // subsequent TRUNCATE/COPY are guaranteed to land on the same backend
+          // server connection. PgBouncer (transaction pooling mode) routes each
+          // auto-commit statement independently — calling CREATE TABLE outside a
+          // BEGIN can land on server S1 while the BEGIN block gets server S2, where
+          // the temp table does not exist, causing "relation does not exist".
+          await this.ensureCopyTempTable(client);
           await client.query(`TRUNCATE TABLE ${ReadingsService.COPY_TEMP_TABLE_NAME}`);
 
           const copySql = `
