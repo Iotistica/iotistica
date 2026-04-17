@@ -218,6 +218,9 @@ export class ReadingsService {
 
         try {
           await client.query('BEGIN');
+          // Skip WAL fsync wait on commit — safe for append-only telemetry.
+          // Worst case on hard crash: lose the last ~200ms of buffered writes.
+          await client.query('SET LOCAL synchronous_commit = off');
           await client.query(`TRUNCATE TABLE ${ReadingsService.COPY_TEMP_TABLE_NAME}`);
 
           const copySql = `
@@ -253,13 +256,10 @@ export class ReadingsService {
           insertedTotal += insertResult.rowCount || 0;
           await client.query('COMMIT');
 
-          // Upsert readings_latest OUTSIDE the transaction: no lock held over the readings
-          // insert, and row-level contention on the small latest table is resolved without
-          // blocking the COPY pipeline. Pre-dedup in TypeScript eliminates the DISTINCT ON
-          // sort and JSONB extraction that previously ran inside the hot-path transaction.
-          this.upsertReadingsLatest(batch).catch(err =>
-            logger.warn('Background readings_latest upsert failed', { error: err instanceof Error ? err.message : String(err) }),
-          );
+          // Buffer the latest reading per series — the shared static flusher writes to DB
+          // every READINGS_LATEST_FLUSH_INTERVAL_MS (default 5s) from a single writer,
+          // eliminating cross-worker pool contention and row-lock serialization.
+          ReadingsService.bufferLatest(batch);
         } catch (error) {
           await client.query('ROLLBACK').catch(() => undefined);
           throw error;
@@ -272,69 +272,109 @@ export class ReadingsService {
     return insertedTotal;
   }
 
-  /**
-   * Upsert the latest reading per series into readings_latest.
-   * Runs OUTSIDE the main COPY transaction to avoid holding the readings lock
-   * during contended row-level upserts on the shared latest table.
-   * Pre-deduplication in TypeScript eliminates the DISTINCT ON sort + JSONB
-   * extraction that previously ran inside the hot-path transaction.
-   */
-  private async upsertReadingsLatest(readings: ReadingInsert[]): Promise<void> {
-    if (readings.length === 0) return;
+  // ---------------------------------------------------------------------------
+  // Shared latest-value buffer — all worker instances write here synchronously.
+  // A single background timer drains the buffer to DB (no cross-worker contention).
+  // ---------------------------------------------------------------------------
+  private static readonly latestBuffer = new Map<string, ReadingInsert>();
+  private static latestFlushActive = false;
+  private static latestFlusherStarted = false;
 
-    // Compute latest reading per (agent_uuid, device_name, metric_name) in O(n).
-    // Uses extra->>'deviceName' (camelCase) to match the previously-used SQL expression.
-    const latestBySeries = new Map<string, ReadingInsert>();
+  /**
+   * Buffer the latest reading per series from a completed batch.
+   * Synchronous — no pool connection acquired, no await, safe to call from any worker.
+   */
+  static bufferLatest(readings: ReadingInsert[]): void {
     for (const r of readings) {
       const deviceName = (r.extra as any)?.deviceName ?? 'unknown';
       const key = `${r.agent_uuid}\t${deviceName}\t${r.metric_name}`;
-      const existing = latestBySeries.get(key);
+      const existing = ReadingsService.latestBuffer.get(key);
       if (!existing || (r.time ?? new Date()) >= (existing.time ?? new Date())) {
-        latestBySeries.set(key, r);
+        ReadingsService.latestBuffer.set(key, r);
       }
     }
+  }
 
-    // Sort by primary key before chunking so concurrent workers acquire row locks
-    // in a consistent order, preventing deadlocks between overlapping batches.
-    const rows = [...latestBySeries.values()].sort((a, b) => {
-      const aKey = `${a.agent_uuid}\t${(a.extra as any)?.deviceName ?? 'unknown'}\t${a.metric_name}`;
-      const bKey = `${b.agent_uuid}\t${(b.extra as any)?.deviceName ?? 'unknown'}\t${b.metric_name}`;
-      return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
-    });
-    const CHUNK = 500; // keep params well under pg's 65535 limit
+  /**
+   * Start the background flusher that writes buffered latest values to DB.
+   * Idempotent — safe to call from every ReadingsService constructor.
+   * One timer, one writer, zero cross-worker lock contention.
+   */
+  static startLatestFlusher(): void {
+    if (ReadingsService.latestFlusherStarted) return;
+    ReadingsService.latestFlusherStarted = true;
 
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      const chunk = rows.slice(i, i + CHUNK);
-      const params: unknown[] = [];
-      const valueClauses = chunk.map((r, idx) => {
-        const deviceName = (r.extra as any)?.deviceName ?? 'unknown';
-        const base = idx * 8;
-        params.push(
-          r.agent_uuid,
-          deviceName,
-          r.metric_name,
-          r.value ?? null,
-          r.quality ?? 'good',
-          r.unit ?? null,
-          r.protocol,
-          r.time ?? new Date(),
-        );
-        return `($${base + 1}::uuid, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`;
-      });
+    const intervalMs = parseInt(process.env.READINGS_LATEST_FLUSH_INTERVAL_MS || '5000', 10);
 
-      await query(
-        `INSERT INTO readings_latest (agent_uuid, device_name, metric_name, value, quality, unit, protocol, time)
-         VALUES ${valueClauses.join(', ')}
-         ON CONFLICT (agent_uuid, device_name, metric_name) DO UPDATE SET
-           value    = EXCLUDED.value,
-           quality  = EXCLUDED.quality,
-           unit     = EXCLUDED.unit,
-           protocol = EXCLUDED.protocol,
-           time     = EXCLUDED.time
-         WHERE EXCLUDED.time >= readings_latest.time`,
-        params,
-      );
-    }
+    const flush = async (): Promise<void> => {
+      if (ReadingsService.latestFlushActive) return;
+      if (ReadingsService.latestBuffer.size === 0) return;
+
+      ReadingsService.latestFlushActive = true;
+
+      // Snapshot and clear atomically (JS is single-threaded — safe).
+      // New entries arriving while the DB write is in progress go into the
+      // now-empty buffer and are picked up by the next flush cycle.
+      const snapshot = new Map(ReadingsService.latestBuffer);
+      ReadingsService.latestBuffer.clear();
+
+      try {
+        const rows = [...snapshot.values()].sort((a, b) => {
+          const aKey = `${a.agent_uuid}\t${(a.extra as any)?.deviceName ?? 'unknown'}\t${a.metric_name}`;
+          const bKey = `${b.agent_uuid}\t${(b.extra as any)?.deviceName ?? 'unknown'}\t${b.metric_name}`;
+          return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+        });
+
+        const CHUNK = 500;
+        for (let i = 0; i < rows.length; i += CHUNK) {
+          const chunk = rows.slice(i, i + CHUNK);
+          const params: unknown[] = [];
+          const valueClauses = chunk.map((r, idx) => {
+            const deviceName = (r.extra as any)?.deviceName ?? 'unknown';
+            const base = idx * 8;
+            params.push(
+              r.agent_uuid, deviceName, r.metric_name,
+              r.value ?? null, r.quality ?? 'good', r.unit ?? null,
+              r.protocol, r.time ?? new Date(),
+            );
+            return `($${base + 1}::uuid, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`;
+          });
+          await query(
+            `INSERT INTO readings_latest (agent_uuid, device_name, metric_name, value, quality, unit, protocol, time)
+             VALUES ${valueClauses.join(', ')}
+             ON CONFLICT (agent_uuid, device_name, metric_name) DO UPDATE SET
+               value    = EXCLUDED.value,
+               quality  = EXCLUDED.quality,
+               unit     = EXCLUDED.unit,
+               protocol = EXCLUDED.protocol,
+               time     = EXCLUDED.time
+             WHERE EXCLUDED.time >= readings_latest.time`,
+            params,
+          );
+        }
+
+        logger.debug('Flushed readings_latest buffer', { seriesCount: rows.length });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn('Background readings_latest flush failed — re-merging snapshot', {
+          error: msg,
+          rowCount: snapshot.size,
+        });
+        // Re-merge snapshot: do not overwrite newer entries that arrived during the flush.
+        for (const [key, row] of snapshot) {
+          const existing = ReadingsService.latestBuffer.get(key);
+          if (!existing || (row.time ?? new Date()) >= (existing.time ?? new Date())) {
+            ReadingsService.latestBuffer.set(key, row);
+          }
+        }
+      } finally {
+        ReadingsService.latestFlushActive = false;
+      }
+    };
+
+    const timer = setInterval(flush, intervalMs);
+    if (timer.unref) timer.unref();
+    logger.info('readings_latest background flusher started', { intervalMs });
   }
 
   private noteCatalogCandidates(readings: ReadingInsert[]): boolean {
@@ -556,7 +596,7 @@ export class ReadingsService {
         insertedTotal += result.rowCount || 0;
 
         // Upsert latest values for Prometheus scrape (one row per series)
-        await this.upsertEndpointLatest(insertClient, batch);
+        await this.upsertReadingsLatest(insertClient, batch);
       }
     } finally {
       insertClient.release();
@@ -569,7 +609,7 @@ export class ReadingsService {
    * Upsert latest value per series into readings_latest for Prometheus scrape.
    * Deduplicates within batch (keeps newest time per series key).
    */
-  private async upsertEndpointLatest(client: PoolClient, batch: ReadingInsert[]): Promise<void> {
+  private async upsertReadingsLatest(client: PoolClient, batch: ReadingInsert[]): Promise<void> {
     // Deduplicate: keep only the newest reading per (agent_uuid, device_name, metric_name)
     const latest = new Map<string, ReadingInsert>();
     for (const r of batch) {
@@ -667,3 +707,4 @@ export class ReadingsService {
 }
 
 export const readingsService = new ReadingsService();
+ReadingsService.startLatestFlusher();

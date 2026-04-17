@@ -6,7 +6,7 @@
 
 import { query } from '../../db/connection';
 import logger from '../../utils/logger';
-import { DeviceFlowExtractionService } from './device-flow-extraction.service';
+import { DeviceFlowExtractionService } from './device-flow-extraction';
 
 interface NodeRedFlows {
   flows: any[];

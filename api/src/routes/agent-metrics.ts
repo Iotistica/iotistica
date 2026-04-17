@@ -22,7 +22,7 @@
 
 import {
   AgentModel,
-  DeviceMetricsModel,
+  AgentMetricsModel,
 } from '../db/models';
 import { logger } from '../utils/logger';
 import type { FastifyPluginAsync } from 'fastify'
@@ -104,9 +104,9 @@ fastify.get<{ Params: AgentUuidParams; Querystring: MetricsQuerystring }>('/agen
           minutes = 30;
       }
       
-      metrics = await DeviceMetricsModel.getByTimeRangeMinutes(uuid, minutes, maxPoints);
+      metrics = await AgentMetricsModel.getByTimeRangeMinutes(uuid, minutes, maxPoints);
     } else {
-      metrics = await DeviceMetricsModel.getRecent(uuid, limit);
+      metrics = await AgentMetricsModel.getRecent(uuid, limit);
     }
 
     return reply.send({

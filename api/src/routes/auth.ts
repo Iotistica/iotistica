@@ -9,7 +9,7 @@ import { fetch } from 'undici';
 import { query } from '../db/connection';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import { clearMqttAuthCaches } from '../mqtt/auth-cache';
-import * as authService from '../services/auth/auth.service';
+import * as authService from '../services/auth/auth';
 import logger from '../utils/logger';
 import { hashPassword } from '../utils/secret-hashing';
 

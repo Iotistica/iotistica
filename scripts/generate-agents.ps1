@@ -92,7 +92,7 @@ param(
     [string]$UseMsgpackPoc = "false",
     [string]$UseKeyCompactionPoc = "false",
     [string]$UseDeflateCompression = "false",
-    [string]$EnableHeapProfiling = "true",
+    [string]$EnableHeapProfiling = "false",
     [string]$PipelineFlowsFile = "/app/data/flows/opcua-transform.flows.json",
     
     # Protocol Adapter Configuration

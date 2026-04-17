@@ -15,7 +15,7 @@ import { query } from '../../db/connection';
 import { EventPublisher } from '../event-sourcing';
 import logger from '../../utils/logger';
 import { randomUUID as uuidv4 } from 'crypto';
-import { DeviceTargetStateModel } from '../../db/models';
+import { AgentTargetStateModel } from '../../db/models';
 import type { ModbusDataPoint, OPCUADataPoint, AnomalyDetectionDataPointConfig, AnomalyMetric } from '../../types/target-state';
 import { mqttDeviceTopic } from '../../mqtt/topics';
 import { encodeIfUuid } from '../../mqtt/codec';
@@ -1067,7 +1067,7 @@ export class AgentDeviceSyncService {
   async getEndpoints(deviceUuid: string, protocol?: string): Promise<any[]> {
     try {
       // Get target state to read desired 'enabled' values
-      const targetState = await DeviceTargetStateModel.get(deviceUuid);
+      const targetState = await AgentTargetStateModel.get(deviceUuid);
       const targetSensors: any[] = (targetState?.config as any)?.endpoints || [];
       
       logger.info(`[getEndpoints] Device ${deviceUuid.substring(0, 8)}: Found ${targetSensors.length} agents in target state`);

@@ -63,7 +63,7 @@ export interface Agent {
   modified_at: Date;
 }
 
-export interface DeviceTargetState {
+export interface AgentTargetState {
   id: number;
   agent_uuid: string;
   apps: any;
@@ -90,7 +90,7 @@ export interface DeviceTargetState {
   updated_at: Date;
 }
 
-export interface DeviceCurrentState {
+export interface AgentCurrentState {
   id: number;
   agent_uuid: string;
   apps: any;
@@ -100,7 +100,7 @@ export interface DeviceCurrentState {
   reported_at: Date;
 }
 
-export interface DeviceMetrics {
+export interface AgentMetrics {
   agent_uuid: string;
   cpu_usage?: number;
   cpu_temp?: number;
@@ -425,12 +425,12 @@ export class AgentModel {
 /**
  * Device Target State Model
  */
-export class DeviceTargetStateModel {
+export class AgentTargetStateModel {
   /**
    * Get target state for device
    */
-  static async get(deviceUuid: string): Promise<DeviceTargetState | null> {
-    const result = await query<DeviceTargetState>(
+  static async get(deviceUuid: string): Promise<AgentTargetState | null> {
+    const result = await query<AgentTargetState>(
       'SELECT * FROM agent_target_state WHERE agent_uuid = $1',
       [deviceUuid]
     );
@@ -446,14 +446,14 @@ export class DeviceTargetStateModel {
     apps: any,
     config: any = {},
     needsDeployment: boolean = false // Default to false for initial setup
-  ): Promise<DeviceTargetState> {
+  ): Promise<AgentTargetState> {
     // Ensure device exists (don't auto-create)
     const device = await AgentModel.getOrCreate(deviceUuid);
     if (!device) {
       throw new Error(`Device ${deviceUuid} not found - cannot set target state`);
     }
 
-    const result = await query<DeviceTargetState>(
+    const result = await query<AgentTargetState>(
       `INSERT INTO agent_target_state (agent_uuid, apps, config, version, needs_deployment, updated_at)
        VALUES ($1, $2, $3, 1, $4, CURRENT_TIMESTAMP)
        ON CONFLICT (agent_uuid) DO UPDATE SET
@@ -476,8 +476,8 @@ export class DeviceTargetStateModel {
   static async deploy(
     deviceUuid: string,
     deployedBy: string = 'system'
-  ): Promise<DeviceTargetState> {
-    const result = await query<DeviceTargetState>(
+  ): Promise<AgentTargetState> {
+    const result = await query<AgentTargetState>(
       `UPDATE agent_target_state SET
          version = version + 1,
          needs_deployment = false,
@@ -544,7 +544,7 @@ export class DeviceTargetStateModel {
    */
 
 
-static generateETag(state: DeviceTargetState): string {
+static generateETag(state: AgentTargetState): string {
   const payload = JSON.stringify({
     version: state.version,
     apps: state.apps,
@@ -562,8 +562,8 @@ export class DeviceCurrentStateModel {
   /**
    * Get current state for device
    */
-  static async get(deviceUuid: string): Promise<DeviceCurrentState | null> {
-    const result = await query<DeviceCurrentState>(
+  static async get(deviceUuid: string): Promise<AgentCurrentState | null> {
+    const result = await query<AgentCurrentState>(
       'SELECT * FROM agent_current_state WHERE agent_uuid = $1',
       [deviceUuid]
     );
@@ -579,7 +579,7 @@ export class DeviceCurrentStateModel {
     config?: any,
     systemInfo: any = {},
     version?: number
-  ): Promise<DeviceCurrentState> {
+  ): Promise<AgentCurrentState> {
     // Ensure device exists (don't auto-create)
     const device = await AgentModel.getOrCreate(deviceUuid);
     if (!device) {
@@ -588,7 +588,7 @@ export class DeviceCurrentStateModel {
 
     const configJson = config !== undefined && config !== null ? JSON.stringify(config) : null;
 
-    const result = await query<DeviceCurrentState>(
+    const result = await query<AgentCurrentState>(
       `INSERT INTO agent_current_state (agent_uuid, apps, config, system_info, version, reported_at)
        VALUES ($1, $2, COALESCE($3::jsonb, '{}'::jsonb), $4, $5, CURRENT_TIMESTAMP)
        ON CONFLICT (agent_uuid) DO UPDATE SET
@@ -608,12 +608,12 @@ export class DeviceCurrentStateModel {
 /**
  * Device Metrics Model
  */
-export class DeviceMetricsModel {
+export class AgentMetricsModel {
   /**
    * Get recent metrics for device
    */
-  static async getRecent(deviceUuid: string, limit: number = 100): Promise<DeviceMetrics[]> {
-    const result = await query<DeviceMetrics>(
+  static async getRecent(deviceUuid: string, limit: number = 100): Promise<AgentMetrics[]> {
+    const result = await query<AgentMetrics>(
       `SELECT * FROM agent_metrics 
        WHERE agent_uuid = $1 
        ORDER BY recorded_at DESC 
@@ -626,8 +626,8 @@ export class DeviceMetricsModel {
   /**
    * Get recent metrics since a specific timestamp
    */
-  static async getRecentByTime(deviceUuid: string, sinceTimestamp: string): Promise<DeviceMetrics[]> {
-    const result = await query<DeviceMetrics>(
+  static async getRecentByTime(deviceUuid: string, sinceTimestamp: string): Promise<AgentMetrics[]> {
+    const result = await query<AgentMetrics>(
       `SELECT * FROM agent_metrics 
        WHERE agent_uuid = $1 
        AND recorded_at >= $2
@@ -648,7 +648,7 @@ export class DeviceMetricsModel {
     deviceUuid: string,
     minutes: number,
     maxPoints: number = 60
-  ): Promise<DeviceMetrics[]> {
+  ): Promise<AgentMetrics[]> {
     // Select appropriate table/view based on time range
     let tableName: string;
     let timeColumn: string;
@@ -691,7 +691,7 @@ export class DeviceMetricsModel {
       interval = Math.max(1, Math.ceil(minutes / maxPoints));
     }
     
-    const result = await query<DeviceMetrics>(
+    const result = await query<AgentMetrics>(
       `WITH numbered AS (
         SELECT 
           agent_uuid,
@@ -735,7 +735,7 @@ export class DeviceMetricsModel {
     startTime: Date, 
     endTime: Date,
     maxPoints: number = 60
-  ): Promise<DeviceMetrics[]> {
+  ): Promise<AgentMetrics[]> {
     const totalMinutes = Math.floor((endTime.getTime() - startTime.getTime()) / 60000);
     const interval = Math.max(1, Math.floor(totalMinutes / maxPoints));
     
@@ -774,7 +774,7 @@ export class DeviceMetricsModel {
       cpuTempColumn = 'avg_cpu_temp';
     }
     
-    const result = await query<DeviceMetrics>(
+    const result = await query<AgentMetrics>(
       `WITH numbered AS (
         SELECT 
           agent_uuid,
@@ -813,7 +813,7 @@ export class DeviceMetricsModel {
 /**
  * Device Logs Model
  */
-export class DeviceLogsModel {
+export class AgentLogsModel {
   /**
    * Store device logs in batches to reduce database connection pool pressure
    * 
@@ -937,10 +937,10 @@ export class DeviceLogsModel {
 
 export default {
   AgentModel,
-  DeviceTargetStateModel,
+  AgentTargetStateModel: AgentTargetStateModel,
   DeviceCurrentStateModel,
-  DeviceMetricsModel,
-  DeviceLogsModel,
+  AgentMetricsModel: AgentMetricsModel,
+  AgentLogsModel: AgentLogsModel,
 };
 
 /**

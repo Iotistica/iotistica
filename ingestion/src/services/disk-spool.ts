@@ -32,6 +32,24 @@ export class DiskSpool {
       await fs.writeFile(testFile, '');
       await fs.unlink(testFile);
 
+      // Seed fileIndex from existing files so new files are created at a higher
+      // index than any leftover spool files from a previous run. Without this,
+      // after a restart fileIndex resets to 0 and new spool-1, spool-2... files
+      // sort before spool-N from the previous run, causing the replayer to process
+      // new files in an endless loop while old files are stuck at the back.
+      try {
+        const existing = await fs.readdir(this.spoolPath);
+        const maxIndex = existing
+          .map(f => { const m = f.match(/^spool-(\d+)\.ndjson$/); return m ? parseInt(m[1], 10) : 0; })
+          .reduce((max, n) => Math.max(max, n), 0);
+        if (maxIndex > 0) {
+          this.fileIndex = maxIndex;
+          logger.debug('Seeded spool fileIndex from existing files', { fileIndex: this.fileIndex });
+        }
+      } catch {
+        // Non-fatal — will start from 0
+      }
+
       this.enabled = true;
       logger.info('Disk spool initialized', {
         path: this.spoolPath,
@@ -95,7 +113,11 @@ export class DiskSpool {
       try {
         const files = (await fs.readdir(this.spoolPath))
           .filter(f => f.startsWith('spool-'))
-          .sort();
+          .sort((a, b) => {
+            const ai = parseInt(a.match(/^spool-(\d+)/)?.[1] ?? '0', 10);
+            const bi = parseInt(b.match(/^spool-(\d+)/)?.[1] ?? '0', 10);
+            return ai - bi;
+          });
 
         if (files.length === 0) return;
 
@@ -159,7 +181,11 @@ export class DiskSpool {
     try {
       const files = (await fs.readdir(this.spoolPath))
         .filter(f => f.startsWith('spool-'))
-        .sort();
+        .sort((a, b) => {
+          const ai = parseInt(a.match(/^spool-(\d+)/)?.[1] ?? '0', 10);
+          const bi = parseInt(b.match(/^spool-(\d+)/)?.[1] ?? '0', 10);
+          return ai - bi;
+        });
 
       if (files.length > 0) {
         const oldestFile = path.join(this.spoolPath, files[0]);

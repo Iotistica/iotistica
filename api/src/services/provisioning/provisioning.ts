@@ -13,7 +13,7 @@ import crypto from 'crypto';
 import { query } from '../../db/connection';
 import {
   AgentModel,
-  DeviceTargetStateModel,
+  AgentTargetStateModel,
   Agent,
 } from '../../db/models';
 import {
@@ -22,7 +22,7 @@ import {
   createProvisioningKey,
   ProvisioningKey,
 } from '../../utils/provisioning-keys';
-import { tailscaleService } from '../tailscale.service';
+import { tailscaleService } from '../tailscale';
 import {
   logAuditEvent,
   logProvisioningAttempt,
@@ -40,7 +40,7 @@ import {
 
 import { generateDefaultTargetState } from './default-target-state-generator';
 import logger from '../../utils/logger';
-import { configService }  from './config.service';
+import { configService }  from './config';
 import { virtualAgentDeployer } from './virtual-agent-deployer';
 import { getTenantId } from '../../redis/tenant-keys';
 import { encodeIfUuid } from '../../mqtt/codec';
@@ -813,7 +813,7 @@ export class ProvisioningService {
    * Create default target state for device
    */
   private async createDefaultTargetState(deviceUuid: string, agentVersion?: string, provisioningKeyId?: string): Promise<void> {
-    const targetState = await DeviceTargetStateModel.get(deviceUuid);
+    const targetState = await AgentTargetStateModel.get(deviceUuid);
     if (!targetState) {
       const licenseData = await configService.get('license_data');
       
@@ -870,7 +870,7 @@ export class ProvisioningService {
         });
       }
       
-      await DeviceTargetStateModel.set(deviceUuid, apps, config, false); // Don't need deployment for default state
+      await AgentTargetStateModel.set(deviceUuid, apps, config, false); // Don't need deployment for default state
     }
   }
 

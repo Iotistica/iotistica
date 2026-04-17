@@ -1,4 +1,4 @@
-import { AgentModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
+import { AgentModel, AgentMetricsModel, AgentLogsModel } from '../../db/models';
 
 export const aiTools = [
   {
@@ -110,7 +110,7 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
 
       case 'get_agent_metrics': {
         const hours = args.hours || 24;
-        const metrics = await DeviceMetricsModel.getRecent(args.deviceUuid, hours);
+        const metrics = await AgentMetricsModel.getRecent(args.deviceUuid, hours);
         if (!metrics || metrics.length === 0) {
           return 'No metrics available for this time period';
         }
@@ -131,7 +131,7 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
 
       case 'get_agent_logs': {
         const limit = args.limit || 50;
-        const logs = await DeviceLogsModel.get(args.deviceUuid, {
+        const logs = await AgentLogsModel.get(args.deviceUuid, {
           serviceName: args.serviceName,
           limit,
         });

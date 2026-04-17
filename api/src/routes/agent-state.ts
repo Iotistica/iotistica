@@ -23,9 +23,9 @@
 import crypto from 'crypto';
 import {
   AgentModel,
-  DeviceTargetStateModel,
+  AgentTargetStateModel,
   DeviceCurrentStateModel,
-  DeviceLogsModel,
+  AgentLogsModel,
 } from '../db/models';
 import { validateTargetStateConfigMiddleware } from '../services/provisioning/target-state-config.validator';
 import { EventPublisher, objectsAreEqual } from '../services/event-sourcing';
@@ -295,7 +295,7 @@ fastify.get<{ Params: AgentUuidParams }>('/device/:uuid/state', { preHandler: [d
     }
 
     // Get target state
-    const targetState = await DeviceTargetStateModel.get(uuid);
+    const targetState = await AgentTargetStateModel.get(uuid);
 
     logger.debug('Device polling for target state', { 
       deviceId: uuid.substring(0, 8),
@@ -313,7 +313,7 @@ fastify.get<{ Params: AgentUuidParams }>('/device/:uuid/state', { preHandler: [d
     }
 
     // Generate ETag
-    const etag = DeviceTargetStateModel.generateETag(targetState);
+    const etag = AgentTargetStateModel.generateETag(targetState);
     
     logger.debug('Target state details', {
       deviceId: uuid.substring(0, 8),
@@ -441,7 +441,7 @@ fastify.patch<{ Body: AgentStateReport }>('/device/state', { preHandler: [device
 fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/target-state', { preHandler: [deviceAuth] }, async (req, reply) => {
   try {
     const { uuid } = req.params;
-    const targetState = await DeviceTargetStateModel.get(uuid);
+    const targetState = await AgentTargetStateModel.get(uuid);
 
     // Agent is fetching target state to apply pending changes
 
@@ -504,9 +504,9 @@ fastify.post<{ Params: AgentUuidParams; Body: TargetStateBody }>('/agents/:uuid/
     config = normalizeAnomalyMetricNames(config, uuid);
 
     // Get old state for diff
-    const oldTargetState = await DeviceTargetStateModel.get(uuid);
+    const oldTargetState = await AgentTargetStateModel.get(uuid);
 
-    const targetState = await DeviceTargetStateModel.set(uuid, apps, config || {});
+    const targetState = await AgentTargetStateModel.set(uuid, apps, config || {});
 
     // 🎉 EVENT SOURCING: Publish target state updated event
     await eventPublisher.publish(
@@ -606,10 +606,10 @@ fastify.put<{ Params: AgentUuidParams; Body: TargetStateBody }>('/agents/:uuid/t
     config = normalizeAnomalyMetricNames(config, uuid);
 
     // Get old state for diff
-    const oldTargetState = await DeviceTargetStateModel.get(uuid);
+    const oldTargetState = await AgentTargetStateModel.get(uuid);
 
     // Set needs_deployment = true since config changed
-    const targetState = await DeviceTargetStateModel.set(uuid, apps, config || {}, true);
+    const targetState = await AgentTargetStateModel.set(uuid, apps, config || {}, true);
 
     //EVENT SOURCING: Publish target state updated event
     await eventPublisher.publish(
@@ -700,7 +700,7 @@ fastify.delete<{ Params: AgentUuidParams }>('/agents/:uuid/target-state', { preH
   try {
     const { uuid } = req.params;
 
-    await DeviceTargetStateModel.clear(uuid);
+    await AgentTargetStateModel.clear(uuid);
 
     logger.info('Cleared target state', { deviceId: uuid.substring(0, 8) });
 

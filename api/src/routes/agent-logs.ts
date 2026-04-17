@@ -21,7 +21,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { query } from '../db/connection';
 import {
   AgentModel,
-  DeviceLogsModel,
+  AgentLogsModel,
 } from '../db/models';
 import { logger } from '../utils/logger';
 import deviceAuth from '../middleware/agent-auth';
@@ -325,7 +325,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         filterOptions.since = new Date(from);
       }
 
-      const logs = await DeviceLogsModel.get(uuid, filterOptions);
+      const logs = await AgentLogsModel.get(uuid, filterOptions);
 
       let filteredLogs = logs;
       if (to) {

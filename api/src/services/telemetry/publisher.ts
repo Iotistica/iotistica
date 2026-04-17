@@ -74,7 +74,9 @@ export class DeviceReadingsPublisher {
       this.diskSpool.initialize()
         .then(() => this.diskSpool.startReplayer(
           (data, source) => this.addInternal(data, true, source),
-          () => this.redis.status === 'ready',
+          // Only replay when Redis is connected AND the stream has room — injecting
+          // into a full stream just causes MAXLEN trimming while depth stays at max.
+          () => this.redis.status === 'ready' && !this.streamOverHighWatermark,
         ))
         .catch(err => logger.error('Failed to initialize disk spool', { error: err.message }));
     }

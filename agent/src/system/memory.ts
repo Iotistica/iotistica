@@ -1101,7 +1101,9 @@ export async function healthcheck(
 	if (
 		survivorGrowth &&
 		survivorGrowth.isMonotonic &&
-		survivorGrowth.rate > survivorThreshold
+		survivorGrowth.rate > survivorThreshold &&
+		survivorGrowth.retainedGrowth >= MIN_SURVIVOR_RETAINED_MB &&
+		processUptime() >= MIN_SURVIVOR_UPTIME_SECONDS
 	) {
 		// Survivor leak detected - most reliable signal
 		// Don't log here - caller decides whether to alert

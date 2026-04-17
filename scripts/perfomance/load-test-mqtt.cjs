@@ -21,6 +21,7 @@
 const path         = require('path');
 const fs           = require('fs');
 const { execFileSync } = require('child_process');
+const zlib         = require('zlib');
 const mqtt         = require(path.resolve(__dirname, '../../api/node_modules/mqtt'));
 
 // ─── Defaults & arg parsing ───────────────────────────────────────────────────
@@ -53,6 +54,7 @@ const DEFAULTS = {
   SyntheticAgents:     false,
   Cleanup:             true,
   CleanStream:         true,
+  CompressPayload:     true,
 };
 
 function parseArgs() {
@@ -135,6 +137,38 @@ function getTenantIdFromRedis() {
   const m   = key.match(/tenant:\{([0-9a-f]+)\}/);
   if (!m) throw new Error(`Could not parse tenant ID from key: ${key}`);
   return m[1];
+}
+
+// ─── Spool file cleanup ───────────────────────────────────────────────────────
+
+function cleanSpoolFiles() {
+  try {
+    const out = dockerExec('iotistic-api', 'sh', '-c',
+      'find /var/lib/iotistic/spool -type f 2>/dev/null | wc -l').trim();
+    const count = parseInt(out, 10) || 0;
+    if (count === 0) return { deleted: 0 };
+    dockerExec('iotistic-api', 'sh', '-c',
+      'rm -f /var/lib/iotistic/spool/* 2>/dev/null; true');
+    return { deleted: count };
+  } catch (err) {
+    console.warn(clr(`  Spool cleanup failed: ${err.message}`, C.yellow));
+    return null;
+  }
+}
+
+function cleanIngestionSpoolFiles() {
+  try {
+    const out = dockerExec('iotistic-ingestion', 'sh', '-c',
+      'find /var/lib/iotistic/ingestion-db-spool -type f 2>/dev/null | wc -l').trim();
+    const count = parseInt(out, 10) || 0;
+    if (count === 0) return { deleted: 0 };
+    dockerExec('iotistic-ingestion', 'sh', '-c',
+      'rm -f /var/lib/iotistic/ingestion-db-spool/* 2>/dev/null; true');
+    return { deleted: count };
+  } catch (err) {
+    console.warn(clr(`  Ingestion spool cleanup failed: ${err.message}`, C.yellow));
+    return null;
+  }
 }
 
 // ─── Redis stream cleanup ────────────────────────────────────────────────────
@@ -238,11 +272,11 @@ function printHealthRow(h, base, injected, total, mpm, elapsed) {
   // artificially reduce the apparent loss for the current test.
   const baseInflight = base ? (Number(base.streamLength) || 0) + (Number(base.pendingMessages) || 0) : 0;
   const inflight = Math.max(0, (Number(h.streamLength) || 0) + (Number(h.pendingMessages) || 0) - baseInflight);
-  const lost  = typeof proc === 'number' && injected > 0 ? Math.max(0, injected - proc - inflight) : 0;
-  const lossPct = injected > 0 ? ((lost / injected) * 100).toFixed(1) : '0.0';
+  const untracked  = typeof proc === 'number' && injected > 0 ? Math.max(0, injected - proc - inflight) : 0;
+  const untrackedPct = injected > 0 ? ((untracked / injected) * 100).toFixed(1) : '0.0';
   const lagC  = Number(lag)  > 20000 ? C.red : Number(lag)  > 5000 ? C.yellow : C.cyan;
   const dropC = Number(drop) > 0     ? C.red : C.green;
-  const lossC = lost > 0 ? C.red : C.green;
+  const untrackedC = untracked > 0 ? C.yellow : C.green;
   process.stdout.write(
     `${now()} | msg=${lpad(injected,5)}/${rpad(total,5)} rd=${lpad(injected*mpm,6)}/${rpad(total*mpm,6)} | ` +
     `rate=${lpad(rate,7)}/s | stream=${lpad(h.streamLength??'?',5)} lag=` +
@@ -250,18 +284,9 @@ function printHealthRow(h, base, injected, total, mpm, elapsed) {
     `  pending=${lpad(h.pendingMessages??'?',5)} workers=${lpad(h.workerCount??'?',2)} ` +
     `procΔ=${lpad(proc,7)} insΔ=${lpad(ins,7)} dropΔ=` +
     clr(lpad(drop,4), dropC) +
-    ` loss=` + clr(`${lpad(lossPct,5)}%`, lossC) +
+    ` untracked=` + clr(`${lpad(untrackedPct,5)}%`, untrackedC) +
     `  dwellP95=${h.dwellP95Ms??'?'}ms insertP95=${h.insertLatP95Ms??'?'}ms pool=${h.dbPoolPct??'?'}%\n`
   );
-}
-
-function printFlushRow(injected, total, mpm, elapsed, pending, topics, phase) {
-  const rate = elapsed > 0 ? (injected / elapsed).toFixed(1) : '0';
-  console.log(clr(
-    `${now()} | msg=${lpad(injected,5)}/${rpad(total,5)} rd=${lpad(injected*mpm,6)}/${rpad(total*mpm,6)} | ` +
-    `rate=${lpad(rate,7)}/s | publishing ${lpad(pending,5)} msgs across ${lpad(topics,2)} topics | ${phase}`,
-    C.gray
-  ));
 }
 
 // ─── Message building ─────────────────────────────────────────────────────────
@@ -355,6 +380,38 @@ async function main() {
     }
   }
 
+  // ── Pre-test DB truncate ───────────────────────────────────────────────────
+  process.stdout.write('Truncating readings tables...');
+  try {
+    dockerExec('iotistic-postgres',
+      'psql', '-U', 'postgres', '-d', 'iotistica', '-c',
+      'TRUNCATE readings, readings_latest RESTART IDENTITY CASCADE;');
+    console.log(clr(' done', C.green));
+  } catch (err) {
+    console.warn(clr(` failed: ${err.message}`, C.yellow));
+  }
+
+  // ── Pre-test spool cleanup ─────────────────────────────────────────────────
+  process.stdout.write('Cleaning API spool files...');
+  const spoolResult = cleanSpoolFiles();
+  if (spoolResult) {
+    console.log(spoolResult.deleted > 0
+      ? clr(` deleted ${spoolResult.deleted} file(s)`, C.green)
+      : clr(' already empty', C.gray));
+  } else {
+    console.log('');
+  }
+
+  process.stdout.write('Cleaning ingestion DB spool files...');
+  const ingestionSpoolResult = cleanIngestionSpoolFiles();
+  if (ingestionSpoolResult) {
+    console.log(ingestionSpoolResult.deleted > 0
+      ? clr(` deleted ${ingestionSpoolResult.deleted} file(s)`, C.green)
+      : clr(' already empty', C.gray));
+  } else {
+    console.log('');
+  }
+
   // ── Agent UUIDs ────────────────────────────────────────────────────────────
   let agentUuids;
   if (p.SyntheticAgents) {
@@ -430,6 +487,7 @@ async function main() {
   console.log(`  Rate target : ${p.RatePerSecond > 0 ? `${p.RatePerSecond} msg/s` : 'max speed'}`);
   console.log(`  Broker      : ${p.MqttUseTls ? 'mqtts' : 'mqtt'}://${p.MqttHost}:${p.MqttPort}  user=${p.MqttUsername}`);
   console.log(`  Session     : clean=${p.MqttCleanSession} keepalive=${p.MqttKeepAliveSec}s reconnect=${p.MqttReconnectPeriodMs}ms qos=${p.MqttQoS}${p.MqttQoS === 0 ? '  [fire-and-forget]' : ''}`);
+  console.log(`  Compression : ${p.CompressPayload ? 'deflate (zlib) — API auto-detects' : 'none (raw JSON)'}`);
   console.log(`  Tenant      : ${tenantId}  (encoded: ${encTenant})`);
   console.log(`  Topic fmt   : ${sampleTopic.replace(encodeUuid(agentUuids[0]), '{encodedAgentUuid}')}`);
   console.log(`  Health poll : every ${p.PollIntervalSec}s — ${jwt ? 'API health endpoint' : 'direct ingestion scrape'}`);
@@ -485,6 +543,30 @@ async function main() {
 
   const clientByKey = new Map(agents.map((a, i) => [a.key, mqttClients[i]]));
 
+  // ── Subscriber monitor ─────────────────────────────────────────────────────
+  // Subscribes to all test topics and counts broker deliveries independently of
+  // the API's own subscription. Lets us distinguish broker→subscriber drop
+  // (QoS 0 outbound queue overflow) from downstream loss (Redis / DB path).
+  let subscriberReceived = 0;
+  let subscriberClient = null;
+  const monitorTopic = `i/${encTenant}/a/+/endpoints/load-test`;
+  try {
+    process.stdout.write('Connecting subscriber monitor...');
+    subscriberClient = await connectAgent(brokerUrl, {
+      ...mqttOpts,
+      clientId: `load-test-monitor-${Date.now()}`,
+      reconnectPeriod: 0,
+    });
+    await new Promise((resolve, reject) => {
+      subscriberClient.subscribe(monitorTopic, { qos: 0 }, err => err ? reject(err) : resolve());
+    });
+    subscriberClient.on('message', () => { subscriberReceived++; });
+    console.log(clr(` subscribed to ${monitorTopic}`, C.green));
+  } catch (err) {
+    console.warn(clr(`  Subscriber monitor failed: ${err.message}`, C.yellow));
+    subscriberClient = null;
+  }
+
   // ── Flush timing ───────────────────────────────────────────────────────────
   const batchSize  = Math.max(1, p.BatchSize);
   const roundSize  = batchSize * p.AgentCount;
@@ -515,6 +597,8 @@ async function main() {
   let totalPend   = 0;
   let lastPollSec = 0;
   let lastFlushMs = 0;
+  let lastSpoolCheckMs = 0;
+  let peakSpoolDuringInject = 0;
 
   // ── Flush function ─────────────────────────────────────────────────────────
   // Builds one MQTT publish per agent from its buffered messages, then publishes
@@ -531,8 +615,11 @@ async function main() {
       const msgId   = Math.random().toString(36).slice(2);
       const msgsStr = msgs.join(',');
       // Build payload as a string — avoids JSON.parse/stringify round-trip.
-      const payload = `{"sensor":"load-test","timestamp":"${flushTs}","protocol":"mqtt","messages":[${msgsStr}],"msgId":"${msgId}"}`;
+      const jsonStr = `{"sensor":"load-test","timestamp":"${flushTs}","protocol":"mqtt","messages":[${msgsStr}],"msgId":"${msgId}"}`;
       msgs.length = 0;
+      const payload = p.CompressPayload
+        ? zlib.deflateSync(Buffer.from(jsonStr, 'utf-8'), { level: zlib.constants.Z_DEFAULT_COMPRESSION })
+        : jsonStr;
       work.push({ client, topic: agent.topic, payload });
     }
     mqttPublishes += work.length;
@@ -565,6 +652,22 @@ async function main() {
       }
     }
 
+    // Spool buildup check every 10s — if spool grows during injection the rate exceeds pipeline capacity.
+    if (Date.now() - lastSpoolCheckMs >= 10000) {
+      lastSpoolCheckMs = Date.now();
+      try {
+        const _api = parseInt(dockerExec('iotistic-api', 'sh', '-c',
+          'find /var/lib/iotistic/spool -name "spool-*.ndjson" -type f 2>/dev/null | wc -l').trim(), 10) || 0;
+        const _ing = parseInt(dockerExec('iotistic-ingestion', 'sh', '-c',
+          'find /var/lib/iotistic/ingestion-db-spool -name "spool-*.ndjson" -type f 2>/dev/null | wc -l').trim(), 10) || 0;
+        const _tot = _api + _ing;
+        if (_tot > peakSpoolDuringInject) peakSpoolDuringInject = _tot;
+        if (_tot > 5) {
+          process.stdout.write(clr(`  [spool building: ${_tot} file(s) — rate exceeds pipeline capacity]\n`, C.red));
+        }
+      } catch { /* non-fatal */ }
+    }
+
     // Deadline-based rate limiting (avoids per-message sleep overhead).
     if (p.RatePerSecond > 0) {
       const expected = (i + 1) * 1000 / p.RatePerSecond;
@@ -584,15 +687,7 @@ async function main() {
   }
 
   // Final flush for any remaining buffered messages
-  if (totalPend > 0) {
-    const nTopics = [...pending.values()].filter(v => v.length > 0).length;
-    const sec     = (Date.now() - startMs) / 1000;
-    printFlushRow(injected, p.MessageCount, p.MetricsPerMessage, sec, totalPend, nTopics, 'final flush start');
-    await flush();
-    printFlushRow(injected, p.MessageCount, p.MetricsPerMessage, (Date.now() - startMs) / 1000, 0, nTopics, 'final flush done');
-  } else {
-    await flush();
-  }
+  await flush();
 
   const totalSec = (Date.now() - startMs) / 1000;
   console.log('');
@@ -600,18 +695,86 @@ async function main() {
   console.log(`  Injected : ${p.MessageCount} messages (${p.MessageCount * p.MetricsPerMessage} readings) in ${totalSec.toFixed(2)}s = ${(p.MessageCount / totalSec).toFixed(1)} msg/s actual`);
   console.log('');
 
-  // ── Drain wait ─────────────────────────────────────────────────────────────
-  console.log(clr('Waiting for worker to drain stream (lag=0, pending=0)...', C.yellow));
-  const drainStart = Date.now();
-  while ((Date.now() - drainStart) / 1000 < 120) {
-    await new Promise(r => setTimeout(r, p.PollIntervalSec * 1000));
-    const h   = await getHealth();
-    const ela = totalSec + (Date.now() - drainStart) / 1000;
-    printHealthRow(h, baseline, injected, p.MessageCount, p.MetricsPerMessage, ela);
-    if (h && (h.workerLag ?? -1) === 0 && (h.pendingMessages ?? -1) === 0) {
-      console.log('');
-      console.log(clr('Worker caught up (lag=0, pending=0).', C.green));
-      break;
+  // ── Unified drain wait ─────────────────────────────────────────────────────
+  // Final stats must not be taken until ALL of these are simultaneously true:
+  //   1. Redis stream consumer lag = 0  (no unread messages in stream)
+  //   2. Consumer pending = 0           (no in-flight/unACKed messages)
+  //   3. API spool empty                (no buffered writes waiting for Redis)
+  //   4. Ingestion DB spool empty       (no buffered writes waiting for DB)
+  //
+  // The health snapshot from the tick that satisfies all conditions is reused
+  // directly as `fin` for final stats — no second getHealth() call, no race.
+  //
+  // Timeout: max(10 min, injectTime × 0.5, spoolFiles × 15s)
+  let fin = null;
+  {
+    try {
+      const apiSpoolOut0 = dockerExec('iotistic-api', 'sh', '-c',
+        'find /var/lib/iotistic/spool -name "spool-*.ndjson" -type f 2>/dev/null | wc -l').trim();
+      const ingSpoolOut0 = dockerExec('iotistic-ingestion', 'sh', '-c',
+        'find /var/lib/iotistic/ingestion-db-spool -name "spool-*.ndjson" -type f 2>/dev/null | wc -l').trim();
+      const initialSpool = (parseInt(apiSpoolOut0, 10) || 0) + (parseInt(ingSpoolOut0, 10) || 0);
+      const drainTimeoutMs = Math.max(
+        10 * 60 * 1000,
+        Math.ceil(totalSec * 0.5) * 1000,
+        initialSpool * 15 * 1000,
+      );
+      console.log(clr(
+        `Waiting for stream + spools to fully drain — timeout: ${Math.round(drainTimeoutMs / 60000)}m` +
+        (initialSpool > 0 ? ` (${initialSpool} spool file(s))` : ''),
+        C.yellow,
+      ));
+
+      const drainStart = Date.now();
+      while ((Date.now() - drainStart) < drainTimeoutMs) {
+        await new Promise(r => setTimeout(r, p.PollIntervalSec * 1000));
+
+        const apiOut = dockerExec('iotistic-api', 'sh', '-c',
+          'find /var/lib/iotistic/spool -name "spool-*.ndjson" -type f 2>/dev/null | wc -l').trim();
+        const ingOut = dockerExec('iotistic-ingestion', 'sh', '-c',
+          'find /var/lib/iotistic/ingestion-db-spool -name "spool-*.ndjson" -type f 2>/dev/null | wc -l').trim();
+        const apiSpool = parseInt(apiOut, 10) || 0;
+        const ingSpool = parseInt(ingOut, 10) || 0;
+
+        const h   = await getHealth();
+        const ela = totalSec + (Date.now() - drainStart) / 1000;
+        printHealthRow(h, baseline, injected, p.MessageCount, p.MetricsPerMessage, ela);
+
+        const lag     = h?.workerLag ?? -1;
+        const pending = h?.pendingMessages ?? -1;
+
+        if (apiSpool > 0 || ingSpool > 0) {
+          process.stdout.write(clr(`  [spool] API: ${apiSpool}  ing: ${ingSpool}  lag: ${lag}  pending: ${pending}   \n`, C.yellow));
+        }
+
+        if (apiSpool === 0 && ingSpool === 0 && lag === 0 && pending === 0) {
+          console.log('');
+          console.log(clr('All clear: spools empty, lag=0, pending=0. Capturing final stats.', C.green));
+          fin = h;  // reuse this tick's snapshot — no race between drain and stats
+          break;
+        }
+      }
+
+      if (!fin) {
+        // Drain timed out — take a best-effort snapshot and warn.
+        const apiFinal = parseInt(
+          dockerExec('iotistic-api', 'sh', '-c',
+            'find /var/lib/iotistic/spool -name "spool-*.ndjson" -type f 2>/dev/null | wc -l').trim(), 10) || 0;
+        const ingFinal = parseInt(
+          dockerExec('iotistic-ingestion', 'sh', '-c',
+            'find /var/lib/iotistic/ingestion-db-spool -name "spool-*.ndjson" -type f 2>/dev/null | wc -l').trim(), 10) || 0;
+        fin = await getHealth();
+        console.log('');
+        console.warn(clr(
+          `  WARNING: Drain timed out — API spool: ${apiFinal}, ing spool: ${ingFinal}, ` +
+          `lag: ${fin?.workerLag ?? '?'}, pending: ${fin?.pendingMessages ?? '?'}. ` +
+          `Loss count will be overstated.`,
+          C.red,
+        ));
+      }
+    } catch (err) {
+      console.warn(clr(`  Drain wait failed: ${err && err.message ? err.message : String(err)}`, C.yellow));
+      fin = await getHealth();
     }
   }
 
@@ -619,7 +782,7 @@ async function main() {
   console.log('');
   console.log(clr('=== Final Stats ===', C.cyan));
   const brokerFinal = getBrokerPublishCount(p.MqttUsername, p.MqttPassword);
-  const fin = await getHealth();
+  // fin was captured from the drain tick that confirmed completion.
   if (fin) {
     const proc = baseline ? (fin.messagesProcessed ?? 0) - (baseline.messagesProcessed ?? 0) : (fin.messagesProcessed ?? '?');
     const ins  = baseline ? (fin.readingsInserted  ?? 0) - (baseline.readingsInserted  ?? 0) : (fin.readingsInserted  ?? '?');
@@ -638,6 +801,9 @@ async function main() {
     console.log(`  Readings in DB  : ${actualReadings.toLocaleString()}`);
     console.log(clr(`  Lost readings   : ${lostReadings.toLocaleString()} (${lostPct}%)`, lostReadings > 0 ? C.red : C.green));
     console.log(clr(`  Dropped         : ${drop}`, Number(drop) > 0 ? C.red : C.green));
+    console.log(peakSpoolDuringInject > 5
+      ? clr(`  Peak spool      : ${peakSpoolDuringInject} file(s) during injection — rate exceeded pipeline capacity`, C.red)
+      : clr(`  Peak spool      : ${peakSpoolDuringInject} — pipeline kept up`, C.green));
     console.log(`  DLQ length      : ${fin.dlqLength ?? '?'}`);
     if (Number(fin.dlqLength) > 0) {
       console.log('');
@@ -653,7 +819,7 @@ async function main() {
   console.log(`  Duration        : ${mins > 0 ? `${mins}m ${secs}s` : `${secs}s`}  (inject ${totalSec.toFixed(1)}s + drain ${(endToEndSec - totalSec).toFixed(1)}s)`);
   if (brokerBaseline != null && brokerFinal != null) {
     const brokerDelta = brokerFinal - brokerBaseline;
-    console.log(`  MQTT publishes  : ${mqttPublishes.toLocaleString()}`);
+    console.log(`  MQTT publishes  : ${mqttPublishes.toLocaleString()} msgs  /  ${(mqttPublishes * p.MetricsPerMessage).toLocaleString()} readings`);
     console.log(`  Broker received : ${brokerDelta.toLocaleString()}  ($SYS counter, ~10s update granularity)`);
     // $SYS counters update every sys_interval (~10s). At the test's publish rate,
     // up to 10s of messages may be uncounted. Only flag loss if the gap exceeds
@@ -672,10 +838,43 @@ async function main() {
   } else {
     console.log(clr('  Broker $SYS stats unavailable', C.yellow));
   }
+  if (subscriberClient) {
+    const subLoss         = mqttPublishes - subscriberReceived;
+    const subLossPct      = mqttPublishes > 0 ? ((subLoss / mqttPublishes) * 100).toFixed(1) : '0.0';
+    const subPct          = mqttPublishes > 0 ? ((subscriberReceived / mqttPublishes) * 100).toFixed(1) : '100.0';
+    const subReadings     = subscriberReceived * p.MetricsPerMessage;
+    const subReadingsLost = (mqttPublishes - subscriberReceived) * p.MetricsPerMessage;
+    const subReadingsPct  = mqttPublishes > 0 ? ((subReadings / (mqttPublishes * p.MetricsPerMessage)) * 100).toFixed(1) : '100.0';
+    console.log(`  Subscriber recv : ${subscriberReceived.toLocaleString()} / ${mqttPublishes.toLocaleString()} msgs (${subPct}%)  →  ${subReadings.toLocaleString()} / ${(mqttPublishes * p.MetricsPerMessage).toLocaleString()} readings (${subReadingsPct}%)`);
+    if (subLoss > 0) {
+      console.log(clr(`  Subscriber loss : ${subLoss.toLocaleString()} msgs  /  ${subReadingsLost.toLocaleString()} readings  (${subLossPct}%) — broker→subscriber QoS 0 drop`, C.red));
+    } else {
+      console.log(clr(`  Subscriber loss : 0`, C.green));
+    }
+  }
   console.log('');
 
   // Close all clients gracefully
-  await Promise.all(mqttClients.map(c => new Promise(r => c.end(false, {}, r))));
+  const allClients = [...mqttClients, ...(subscriberClient ? [subscriberClient] : [])];
+  await Promise.all(allClients.map(c => new Promise(r => c.end(false, {}, r))));
+
+  // ── Refresh catalog views with final ingested data ────────────────────────
+  // Skip when Cleanup=true: data is about to be TRUNCATEd, refresh is pointless.
+  if (!p.Cleanup) {
+    process.stdout.write(clr('Refreshing metric catalog views...', C.cyan));
+    const catalogRefreshStart = Date.now();
+    try {
+      execFileSync('docker', [
+        'exec', 'iotistic-postgres',
+        'psql', '-U', 'postgres', '-d', 'iotistica', '-c', 'SELECT refresh_all_catalog_views();'
+      ], { encoding: 'utf8', timeout: 300000 });
+      const catalogMs = Date.now() - catalogRefreshStart;
+      console.log(clr(` done (${(catalogMs / 1000).toFixed(1)}s)`, C.green));
+    } catch (err) {
+      const catalogMs = Date.now() - catalogRefreshStart;
+      console.log(clr(` failed after ${(catalogMs / 1000).toFixed(1)}s: ${err.message}`, C.yellow));
+    }
+  }
 
   // ── Post-test cleanup ────────────────────────────────────────────────────
   if (p.Cleanup) {
@@ -686,7 +885,7 @@ async function main() {
       const out = execFileSync('docker', [
         'exec', 'iotistic-postgres',
         'psql', '-U', 'postgres', '-d', 'iotistica', '-c', sql
-      ], { encoding: 'utf8', timeout: 30000 }).trim();
+      ], { encoding: 'utf8', timeout: 300000 }).trim();
       console.log(clr(`  DB: ${out}`, C.green));
     } catch (err) {
       console.log(clr(`  DB cleanup failed: ${err.message}`, C.yellow));
@@ -694,7 +893,7 @@ async function main() {
     // Redis stream (so next run starts clean)
     const streamResult = cleanRedisStream(tenantId);
     if (streamResult) {
-      console.log(clr(`  Stream: cleared ${streamResult.cleared} entries, ${streamResult.pending} PEL`, C.green));
+      console.log(clr(`  Stream: DEL'd ${streamResult.cleared} entries (ACKed + unACKed), ${streamResult.pending} PEL`, C.green));
     }
   }
 }

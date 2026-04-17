@@ -696,7 +696,7 @@ export async function tenantResolve(
 
     let customerId: string;
     try {
-      const { getTenantIdFromHost } = await import('../services/auth/tenant-resolution.service');
+      const { getTenantIdFromHost } = await import('../services/auth/tenant-resolution');
       customerId = getTenantIdFromHost(request.hostname);
       logger.info('Tenant resolved from hostname', { customerId });
     } catch (error: any) {

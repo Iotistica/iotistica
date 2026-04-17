@@ -15,7 +15,7 @@ import { query } from '../db/connection';
 import { z } from 'zod';
 import {
   AgentModel,
-  DeviceTargetStateModel,
+  AgentTargetStateModel,
   DeviceCurrentStateModel,
 } from '../db/models';
 import {
@@ -25,11 +25,11 @@ import {
 } from '../utils/audit-logger';
 import { EventPublisher } from '../services/event-sourcing';
 import logger from '../utils/logger';
-import { SystemConfig } from '../services/system-config.service';
+import { SystemConfig } from '../services/system-config';
 import deviceAuth from '../middleware/agent-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
 import { virtualAgentDeployer } from '../services/provisioning/virtual-agent-deployer';
-import { provisioningService } from '../services/provisioning/provisioning.service';
+import { provisioningService } from '../services/provisioning/provisioning';
 import { mqttDeviceTopic } from '../mqtt/topics';
 import { getTenantId } from '../redis/tenant-keys';
 import type { FastifyPluginAsync } from 'fastify'
@@ -363,7 +363,7 @@ fastify.get<{ Querystring: AgentsListQuerystring }>('/agents', { preHandler: [jw
     // Enhance with state info
     const enhancedDevices = await Promise.all(
       paginatedDevices.map(async (device) => {
-        const targetState = await DeviceTargetStateModel.get(device.uuid);
+        const targetState = await AgentTargetStateModel.get(device.uuid);
         const currentState = await DeviceCurrentStateModel.get(device.uuid);
         let systemInfo = currentState?.system_info;
 
@@ -474,7 +474,7 @@ fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid', async (req, reply) => 
       });
     }
 
-    const targetState = await DeviceTargetStateModel.get(uuid);
+    const targetState = await AgentTargetStateModel.get(uuid);
     const currentState = await DeviceCurrentStateModel.get(uuid);
 
     reply.send({
@@ -968,7 +968,7 @@ fastify.post<{ Params: AgentUuidParams; Body: CreateAppBody }>('/agents/:uuid/ap
     }
 
     // Get current target state
-    const currentTarget = await DeviceTargetStateModel.get(uuid);
+    const currentTarget = await AgentTargetStateModel.get(uuid);
     const currentApps = currentTarget?.apps || {};
 
     // Generate service IDs for each service
@@ -1022,7 +1022,7 @@ fastify.post<{ Params: AgentUuidParams; Body: CreateAppBody }>('/agents/:uuid/ap
     };
 
     // Update target state
-    await DeviceTargetStateModel.set(uuid, newApps, currentTarget?.config || {});
+    await AgentTargetStateModel.set(uuid, newApps, currentTarget?.config || {});
 
     logger.info('App deployed to device', {
       deviceId: uuid.substring(0, 8),
@@ -1081,7 +1081,7 @@ fastify.patch<{ Params: AgentUuidAppParams; Body: UpdateAppBody }>('/agents/:uui
     }
 
     // Get current target state
-    const currentTarget = await DeviceTargetStateModel.get(uuid);
+    const currentTarget = await AgentTargetStateModel.get(uuid);
     if (!currentTarget) {
       return reply.status(404).send({
         error: 'Not found',
@@ -1141,7 +1141,7 @@ fastify.patch<{ Params: AgentUuidAppParams; Body: UpdateAppBody }>('/agents/:uui
     }
 
     // Save updated state
-    await DeviceTargetStateModel.set(uuid, currentApps, currentTarget.config || {});
+    await AgentTargetStateModel.set(uuid, currentApps, currentTarget.config || {});
 
     logger.info('App updated on device', {
       deviceId: uuid.substring(0, 8),
@@ -1190,7 +1190,7 @@ fastify.delete<{ Params: AgentUuidAppParams }>('/agents/:uuid/apps/:appId', asyn
     }
 
     // Get current target state
-    const currentTarget = await DeviceTargetStateModel.get(uuid);
+    const currentTarget = await AgentTargetStateModel.get(uuid);
     if (!currentTarget) {
       return reply.status(404).send({
         error: 'Not found',
@@ -1213,7 +1213,7 @@ fastify.delete<{ Params: AgentUuidAppParams }>('/agents/:uuid/apps/:appId', asyn
     delete currentApps[appId];
 
     // Save updated state
-    await DeviceTargetStateModel.set(uuid, currentApps, currentTarget.config || {});
+    await AgentTargetStateModel.set(uuid, currentApps, currentTarget.config || {});
 
     logger.info('App removed from device', {
       deviceId: uuid.substring(0, 8),
@@ -1278,7 +1278,7 @@ fastify.post<{ Params: AgentUuidAppParams; Body: DeployedByBody }>('/agents/:uui
     }
 
     // Check if app exists in target state
-    const currentTarget = await DeviceTargetStateModel.get(uuid);
+    const currentTarget = await AgentTargetStateModel.get(uuid);
     if (!currentTarget) {
       return reply.status(404).send({
         error: 'Not found',
@@ -1297,7 +1297,7 @@ fastify.post<{ Params: AgentUuidAppParams; Body: DeployedByBody }>('/agents/:uui
     const appName = currentApps[appId].appName;
 
     // Deploy target state (increments version so device picks up changes)
-    const deployedState = await DeviceTargetStateModel.deploy(uuid, deployedBy);
+    const deployedState = await AgentTargetStateModel.deploy(uuid, deployedBy);
 
     await logAuditEvent({
       eventType: AuditEventType.DEVICE_CONFIG_UPDATE,
@@ -1369,7 +1369,7 @@ fastify.post<{ Params: AgentUuidParams; Body: DeployedByBody }>('/agents/:uuid/d
     }
 
     // Check if there's anything to deploy
-    const currentTarget = await DeviceTargetStateModel.get(uuid);
+    const currentTarget = await AgentTargetStateModel.get(uuid);
     if (!currentTarget) {
       return reply.status(404).send({
         error: 'Not found',
@@ -1386,7 +1386,7 @@ fastify.post<{ Params: AgentUuidParams; Body: DeployedByBody }>('/agents/:uuid/d
     }
 
     // Deploy target state (increments version)
-    const deployedState = await DeviceTargetStateModel.deploy(uuid, deployedBy);
+    const deployedState = await AgentTargetStateModel.deploy(uuid, deployedBy);
 
     await logAuditEvent({
       eventType: AuditEventType.DEVICE_CONFIG_UPDATE,
@@ -1453,7 +1453,7 @@ fastify.post<{ Params: AgentUuidParams }>('/agents/:uuid/deploy/cancel', async (
     }
 
     // Get current target state
-    const currentTarget = await DeviceTargetStateModel.get(uuid);
+    const currentTarget = await AgentTargetStateModel.get(uuid);
     if (!currentTarget) {
       return reply.status(404).send({
         error: 'Not found',

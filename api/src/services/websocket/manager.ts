@@ -50,7 +50,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server as HTTPServer } from 'http';
 import { z } from 'zod';
-import { AgentModel, DeviceMetricsModel, DeviceLogsModel } from '../../db/models';
+import { AgentModel, AgentMetricsModel, AgentLogsModel } from '../../db/models';
 import logger from '../../utils/logger';
 import { fetch } from 'undici';
 import { sessionManager } from '../auth/session-manager';
@@ -1149,7 +1149,7 @@ export class WebSocketManager {
       // Fetch last 30 minutes of data (not 30 rows)
       // This ensures we get the correct number of points based on agent reporting interval
       const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      const metrics = await DeviceMetricsModel.getRecentByTime(deviceUuid, thirtyMinutesAgo);
+      const metrics = await AgentMetricsModel.getRecentByTime(deviceUuid, thirtyMinutesAgo);
 
       logger.debug(`Fetched ${metrics.length} metrics (last 30 min)`);
 
@@ -1259,7 +1259,7 @@ export class WebSocketManager {
   private async fetchLogs(deviceUuid: string, serviceName?: string): Promise<any> {
     try {
       // Fetch latest logs (limit to 50 per poll to avoid overwhelming the client)
-      const logs = await DeviceLogsModel.get(deviceUuid, {
+      const logs = await AgentLogsModel.get(deviceUuid, {
         serviceName,
         limit: 50,
         offset: 0,

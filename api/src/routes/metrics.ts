@@ -20,8 +20,8 @@ import {
   getLatestReadings,
   getTimeseries,
   refreshViews,
-} from '../services/agent/metrics.service';
-import type { TimeRange, Aggregation, RefreshView } from '../services/agent/metrics.service';
+} from '../services/agent/metrics';
+import type { TimeRange, Aggregation, RefreshView } from '../services/agent/metrics';
 import { getRemoteIngestionHealth } from '../services/telemetry/client';
 import type { FastifyPluginAsync } from 'fastify'
 

@@ -31,7 +31,7 @@ import {
 } from '../utils/audit-logger';
 import { EventPublisher } from '../services/event-sourcing';
 import { LicenseValidator } from '../services/auth/license-validator';
-import { provisioningService } from '../services/provisioning/provisioning.service';
+import { provisioningService } from '../services/provisioning/provisioning';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
 import logger from '../utils/logger';
 import type { FastifyPluginAsync } from 'fastify'

@@ -1,11 +1,11 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-04-13 21:19:18
-# Agents: 23 to 23
-# Ports: 48503 to 48503
+# Generated: 2026-04-16 22:09:20
+# Agents: 26 to 26
+# Ports: 48506 to 48506
 
 services:
-  agent-23:
-    container_name: local-agent-23
+  agent-26:
+    container_name: local-agent-26
     build:
       context: .
       dockerfile: agent/Dockerfile
@@ -20,11 +20,11 @@ services:
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agent-23-data:/app/data
+      - agent-26-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
       - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth
     environment:
-      - DEVICE_API_PORT=48503
+      - DEVICE_API_PORT=48506
       - IOTISTICA_API=http://localhost:4002
       - NODE_ENV=development
       - MQTT_AUTH_DIR=/app/data/mosquitto-auth
@@ -33,7 +33,7 @@ services:
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=f2d94abd24c62e8df918704a9ca7a75f8a6e8376910717e52ff4e15163067aec
+      - PROVISIONING_KEY=ae277898d294826b7866af6ce4feffc7ebb0cd0fdf20233b30e96ec67bebd187
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -43,13 +43,13 @@ services:
       - USE_MSGPACK_POC=false
       - USE_KEY_COMPACTION_POC=false
       - USE_DEFLATE_COMPRESSION=false
-      - ENABLE_HEAP_PROFILING=true
+      - ENABLE_HEAP_PROFILING=false
       - PIPELINE_FLOWS_FILE=/app/data/flows/opcua-transform.flows.json
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
 volumes:
-  agent-23-data:
+  agent-26-data:
     driver: local
 networks:
   iotistic-net:
