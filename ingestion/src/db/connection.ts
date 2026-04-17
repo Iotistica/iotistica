@@ -141,7 +141,7 @@ function pgErrorContext(error: unknown): Record<string, unknown> {
 }
 
 export async function query<T = unknown>(text: string, params?: unknown[]): Promise<QueryResult<T>> {
-  const maxAttempts = 5;
+  const maxAttempts = 8;
   const isWrite = isWriteQuery(text);
   const maxQueryPreview = 1000;
   const textPreview = text.length > maxQueryPreview ? `${text.slice(0, maxQueryPreview)}... [truncated ${text.length - maxQueryPreview} chars]` : text;
@@ -151,8 +151,8 @@ export async function query<T = unknown>(text: string, params?: unknown[]): Prom
       return await pool.query<T>(text, params);
     } catch (error) {
       if (isTransientError(error) && attempt < maxAttempts) {
-        // Exponential backoff: 1s, 2s, 4s, 8s — gives CNPG ~15s to complete failover.
-        const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+        // Exponential backoff: 1s, 2s, 4s, 8s, 15s, 15s, 15s — ~60s total budget for CNPG failover.
+        const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
         logger.warn('Transient DB error, retrying query...', {
           attempt,
           maxAttempts,
@@ -197,13 +197,13 @@ export async function query<T = unknown>(text: string, params?: unknown[]): Prom
 }
 
 export async function getClient(): Promise<PoolClient> {
-  const maxAttempts = 5;
+  const maxAttempts = 8;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await pool.connect();
     } catch (err) {
       if (isTransientError(err) && attempt < maxAttempts) {
-        const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+        const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
         logger.warn('Transient error acquiring DB client, retrying...', {
           attempt,
           maxAttempts,
