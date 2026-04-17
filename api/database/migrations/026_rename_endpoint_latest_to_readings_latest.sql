@@ -18,6 +18,24 @@ BEGIN
   END IF;
 END $$;
 
+-- Create table on fresh databases where neither endpoint_latest nor readings_latest exists.
+-- On existing databases the rename above already produced readings_latest, so this is a no-op.
+CREATE TABLE IF NOT EXISTS public.readings_latest (
+    agent_uuid      uuid                     NOT NULL,
+    device_name     text                     NOT NULL DEFAULT 'unknown',
+    metric_name     text                     NOT NULL,
+    value           double precision,
+    quality         text                     NOT NULL DEFAULT 'good',
+    unit            text,
+    protocol        text                     NOT NULL,
+    time            timestamp with time zone NOT NULL,
+    agent_is_online boolean                  NOT NULL DEFAULT true,
+    CONSTRAINT readings_latest_pkey PRIMARY KEY (agent_uuid, device_name, metric_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_readings_latest_quality
+    ON public.readings_latest USING btree (quality);
+
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'readings_latest') THEN
