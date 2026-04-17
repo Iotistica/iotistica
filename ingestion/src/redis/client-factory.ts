@@ -17,6 +17,11 @@ interface RedisClientOptions {
   enableOfflineQueue?: boolean;
   retryStrategy?: (times: number) => number | null;
   reconnectOnError?: (err: Error) => boolean;
+  /**
+   * Override the default commandTimeout (ms). Set to 0 to disable entirely.
+   * Must be disabled for blocking consumer clients that use XREADGROUP BLOCK.
+   */
+  commandTimeout?: number;
 }
 
 class RedisClientFactory {
@@ -63,6 +68,12 @@ class RedisClientFactory {
     const { host, port, username, password, useTls, tlsServerName, useCluster } = this.config;
     const clientType = options.clientType || 'generic';
 
+    // commandTimeout must not apply to blocking consumer clients (XREADGROUP BLOCK N).
+    // If options.commandTimeout is explicitly 0, disable it (undefined = no timeout).
+    const resolvedCommandTimeout = options.commandTimeout === 0
+      ? undefined
+      : (options.commandTimeout ?? 10000);
+
     const redisOptions = {
       username,
       password,
@@ -73,7 +84,7 @@ class RedisClientFactory {
       enableAutoPipelining: true,
       lazyConnect: false,
       connectTimeout: 20000,
-      commandTimeout: 10000,
+      commandTimeout: resolvedCommandTimeout,
       keepAlive: 30000,
       maxLoadingRetryTime: 30000,
       retryStrategy: options.retryStrategy || ((times: number) => {
@@ -145,6 +156,9 @@ class RedisClientFactory {
         clientType: 'consumer',
         maxRetriesPerRequest: 10,
         enableOfflineQueue: true,
+        // commandTimeout: 0 disables the timeout — XREADGROUP BLOCK commands legitimately
+        // hold the connection for blockTimeMs and must not be interrupted by a socket timeout.
+        commandTimeout: 0,
         retryStrategy: (times: number) => Math.min(times * 200, 3000),
       });
     }
