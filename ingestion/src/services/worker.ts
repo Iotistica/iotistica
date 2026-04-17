@@ -950,6 +950,7 @@ export class RedisQueueConsumer {
 
     logger.info('Ingested', {
       count: allData.length,
+      source: 'metrics',
       durationMs: duration,
       maxDwellMs,
     });

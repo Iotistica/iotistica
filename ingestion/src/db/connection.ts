@@ -87,6 +87,18 @@ pool.on('error', (err) => {
   logger.error('Unexpected error on idle database client', err);
 });
 
+// Attach an error handler to every new client the pool creates so that a
+// server-side TCP reset on an idle connection emits a logged warning instead
+// of an unhandled 'error' event that crashes the process.
+pool.on('connect', (client) => {
+  client.on('error', (err) => {
+    logger.warn('Database client connection error (pool will replace)', {
+      error: err.message,
+      code: (err as any).code,
+    });
+  });
+});
+
 const TRANSIENT_PG_CODES = new Set(['57P01', '57P02', '57P03', '08000', '08006', '08001', '08004']);
 const TRANSIENT_NODE_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN']);
 
