@@ -83,13 +83,10 @@ export function getPoolStats(): DbPoolStats {
   };
 }
 
-pool.on('error', (err) => {
-  logger.error('Unexpected error on idle database client', err);
-});
-
-// Attach an error handler to every new client the pool creates so that a
-// server-side TCP reset on an idle connection emits a logged warning instead
-// of an unhandled 'error' event that crashes the process.
+// Attach an error handler to every new client the pool creates.
+// This covers both idle clients (which pg-pool replaces automatically) and
+// active clients (which would otherwise crash the process with an unhandled
+// 'error' event, e.g. on a server-side TCP reset during a query).
 pool.on('connect', (client) => {
   client.on('error', (err) => {
     logger.warn('Database client connection error (pool will replace)', {
@@ -151,7 +148,9 @@ export async function query<T = unknown>(text: string, params?: unknown[]): Prom
       return await pool.query<T>(text, params);
     } catch (error) {
       if (isTransientError(error) && attempt < maxAttempts) {
-        // Exponential backoff: 1s, 2s, 4s, 8s, 15s, 15s, 15s — ~60s total budget for CNPG failover.
+        // Exponential backoff: 1s, 2s, 4s, 8s, 15s, 15s, 15s (~60s total).
+        // Covers both HPA scale-up connection bursts (pg-pool server_login_retry
+        // cooldown ~20s) and HA failover promotion (30–60s).
         const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
         logger.warn('Transient DB error, retrying query...', {
           attempt,
