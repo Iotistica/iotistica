@@ -14,9 +14,9 @@
 import { query } from '../../db/connection';
 import {
   AgentModel,
-  DeviceCurrentStateModel,
+  AgentCurrentStateModel,
 } from '../../db/models';
-import { EventPublisher, objectsAreEqual } from '../event-sourcing';
+import { EventPublisher, objectsAreEqual } from '../audit/event-sourcing';
 import EventSourcingConfig from '../../events/event-sourcing';
 import { deviceSensorSync, syncAgentDevices } from './devices';
 import { getTenantId } from '../../redis/tenant-keys';
@@ -136,7 +136,7 @@ export async function processAgentStateReport(
     }
 
     // Update current state (including version from agent report)
-    await DeviceCurrentStateModel.update(
+    await AgentCurrentStateModel.update(
       uuid,
       deviceState.apps || {},
       deviceState.config,
@@ -174,7 +174,7 @@ export async function processAgentStateReport(
     }
 
     // EVENT SOURCING: Publish current state updated event
-    const oldState = await DeviceCurrentStateModel.get(uuid);
+    const oldState = await AgentCurrentStateModel.get(uuid);
     
     // Use hash comparison for efficient change detection
     const stateChanged = !oldState || !objectsAreEqual(oldState.apps, deviceState.apps);

@@ -3,10 +3,10 @@
  * Application-side implementation for event publishing and consumption
  */
 
-import pool from '../db/connection';
+import pool from '../../db/connection';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
-import EventSourcingConfig from '../events/event-sourcing';
+import EventSourcingConfig from '../../events/event-sourcing';
 
 // ============================================================================
 // TYPE DEFINITIONS

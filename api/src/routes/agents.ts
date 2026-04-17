@@ -16,16 +16,16 @@ import { z } from 'zod';
 import {
   AgentModel,
   AgentTargetStateModel,
-  DeviceCurrentStateModel,
+  AgentCurrentStateModel,
 } from '../db/models';
 import {
   logAuditEvent,
   AuditEventType,
   AuditSeverity
 } from '../utils/audit-logger';
-import { EventPublisher } from '../services/event-sourcing';
+import { EventPublisher } from '../services/audit/event-sourcing';
 import logger from '../utils/logger';
-import { SystemConfig } from '../services/system-config';
+import { SystemConfig } from '../config/system-config';
 import deviceAuth from '../middleware/agent-auth';
 import { jwtAuth } from '../middleware/jwt-auth';
 import { virtualAgentDeployer } from '../services/provisioning/virtual-agent-deployer';
@@ -364,7 +364,7 @@ fastify.get<{ Querystring: AgentsListQuerystring }>('/agents', { preHandler: [jw
     const enhancedDevices = await Promise.all(
       paginatedDevices.map(async (device) => {
         const targetState = await AgentTargetStateModel.get(device.uuid);
-        const currentState = await DeviceCurrentStateModel.get(device.uuid);
+        const currentState = await AgentCurrentStateModel.get(device.uuid);
         let systemInfo = currentState?.system_info;
 
         if (typeof systemInfo === 'string') {
@@ -475,7 +475,7 @@ fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid', async (req, reply) => 
     }
 
     const targetState = await AgentTargetStateModel.get(uuid);
-    const currentState = await DeviceCurrentStateModel.get(uuid);
+    const currentState = await AgentCurrentStateModel.get(uuid);
 
     reply.send({
       device,

@@ -558,7 +558,7 @@ static generateETag(state: AgentTargetState): string {
 /**
  * Device Current State Model
  */
-export class DeviceCurrentStateModel {
+export class AgentCurrentStateModel {
   /**
    * Get current state for device
    */
@@ -938,7 +938,7 @@ export class AgentLogsModel {
 export default {
   AgentModel,
   AgentTargetStateModel: AgentTargetStateModel,
-  DeviceCurrentStateModel,
+  AgentCurrentStateModel: AgentCurrentStateModel,
   AgentMetricsModel: AgentMetricsModel,
   AgentLogsModel: AgentLogsModel,
 };

@@ -29,7 +29,7 @@ import {
   AuditEventType,
   AuditSeverity
 } from '../utils/audit-logger';
-import { EventPublisher } from '../services/event-sourcing';
+import { EventPublisher } from '../services/audit/event-sourcing';
 import { LicenseValidator } from '../services/auth/license-validator';
 import { provisioningService } from '../services/provisioning/provisioning';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';

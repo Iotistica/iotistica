@@ -1,7 +1,7 @@
 import { WebSocket } from 'ws';
 import { z } from 'zod';
 import { createHmac } from 'crypto';
-import { sessionManager } from '../auth/session-manager';
+import { sessionManager } from './session-manager';
 import { query } from '../../db/connection';
 import logger from '../../utils/logger';
 import { mqttDeviceTopic } from '../../mqtt/topics';

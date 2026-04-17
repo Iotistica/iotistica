@@ -17,7 +17,7 @@ import { logger } from '../../utils/logger.js';
 import { AgentModel } from '../../db/models.js';
 import { deviceSensorSync } from '../agent/devices.js';
 
-export interface VirtualDeviceConfig {
+export interface VirtualAgentConfig {
   deviceUuid: string; // Parent agent UUID
   name: string; // Display name (e.g., "Virtual PLC 1")
   protocol: 'modbus' | 'opcua'; // Protocol type
@@ -26,7 +26,7 @@ export interface VirtualDeviceConfig {
   slaveCount?: number; // Number of slave IDs (Modbus) or endpoints (OPC-UA)
 }
 
-export interface VirtualDevice {
+export interface VirtualAgent {
   uuid: string;
   agent_uuid: string;
   name: string;
@@ -57,7 +57,7 @@ export interface VirtualDevice {
   };
 }
 
-export class VirtualDeviceManager {
+export class VirtualAgentManager {
   private k8sConfig?: k8s.KubeConfig;
   private appsApi?: k8s.AppsV1Api;
   private coreApi?: k8s.CoreV1Api;
@@ -106,7 +106,7 @@ export class VirtualDeviceManager {
    * 6. Insert into endpoints table via standard addEndpoint flow
    * 7. If parent is K8s virtual agent, update ResourceQuota and patch Deployment
    */
-  async createVirtualDevice(config: VirtualDeviceConfig): Promise<VirtualDevice> {
+  async createVirtualDevice(config: VirtualAgentConfig): Promise<VirtualAgent> {
     logger.info('[VirtualDeviceManager] Starting virtual device creation', {
       deviceUuid: config.deviceUuid,
       name: config.name,
@@ -389,7 +389,7 @@ export class VirtualDeviceManager {
   /**
    * Get all virtual agents for a parent agent
    */
-  async getVirtualDevices(deviceUuid: string): Promise<VirtualDevice[]> {
+  async getVirtualDevices(deviceUuid: string): Promise<VirtualAgent[]> {
     const result = await query(
       `SELECT uuid, agent_uuid AS agent_uuid, name, protocol, connection, data_points, metadata
        FROM endpoints

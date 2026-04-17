@@ -1,5 +1,5 @@
 import { fetch } from 'undici';
-import logger from '../utils/logger';
+import logger from '../../utils/logger';
 
 interface WireGuardPeerResponse {
   peerId: string;

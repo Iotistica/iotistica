@@ -22,7 +22,7 @@ import {
   createProvisioningKey,
   ProvisioningKey,
 } from '../../utils/provisioning-keys';
-import { tailscaleService } from '../tailscale';
+import { tailscaleService } from '../vpn/tailscale';
 import {
   logAuditEvent,
   logProvisioningAttempt,
@@ -30,7 +30,7 @@ import {
   AuditEventType,
   AuditSeverity
 } from '../../utils/audit-logger';
-import { EventPublisher } from '../event-sourcing';
+import { EventPublisher } from '../audit/event-sourcing';
 import {
   getBrokerConfigForExternalDevice,
   getStandaloneBrokerConfig,
@@ -38,7 +38,7 @@ import {
   formatBrokerConfigForClient
 } from '../../utils/mqtt-broker-config';
 
-import { generateDefaultTargetState } from './default-target-state-generator';
+import { generateDefaultTargetState } from './default-target-state';
 import logger from '../../utils/logger';
 import { configService }  from './config';
 import { virtualAgentDeployer } from './virtual-agent-deployer';

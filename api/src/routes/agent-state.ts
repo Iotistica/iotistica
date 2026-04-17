@@ -24,11 +24,11 @@ import crypto from 'crypto';
 import {
   AgentModel,
   AgentTargetStateModel,
-  DeviceCurrentStateModel,
+  AgentCurrentStateModel,
   AgentLogsModel,
 } from '../db/models';
 import { validateTargetStateConfigMiddleware } from '../services/provisioning/target-state-config.validator';
-import { EventPublisher, objectsAreEqual } from '../services/event-sourcing';
+import { EventPublisher, objectsAreEqual } from '../services/audit/event-sourcing';
 import deviceAuth, { deviceAuthFromBody } from '../middleware/agent-auth';
 import { processAgentStateReport, type AgentStateReport } from '../services/agent/state';
 import logger from '../utils/logger';
@@ -664,7 +664,7 @@ fastify.put<{ Params: AgentUuidParams; Body: TargetStateBody }>('/agents/:uuid/t
 fastify.get<{ Params: AgentUuidParams }>('/agents/:uuid/current-state', async (req, reply) => {
   try {
     const { uuid } = req.params;
-    const currentState = await DeviceCurrentStateModel.get(uuid);
+    const currentState = await AgentCurrentStateModel.get(uuid);
 
     if (!currentState) {
       return reply.status(404).send({

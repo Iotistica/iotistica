@@ -53,7 +53,7 @@ import { z } from 'zod';
 import { AgentModel, AgentMetricsModel, AgentLogsModel } from '../../db/models';
 import logger from '../../utils/logger';
 import { fetch } from 'undici';
-import { sessionManager } from '../auth/session-manager';
+import { sessionManager } from '../remote/session-manager';
 import { agentMetricsPattern, getTenantId, tenantPrefix } from '../../redis/tenant-keys';
 import { verifyToken, type JWTPayload } from '../../middleware/jwt-auth';
 import {
@@ -69,7 +69,7 @@ import {
   ResizeSessionSchema,
   LegacyShellSchema,
   ShellHandler,
-} from './shell';
+} from '../remote/shell';
 
 /**
  * 🔐 Zod Validation Schemas for WebSocket Messages

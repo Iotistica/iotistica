@@ -22,7 +22,7 @@ import { query } from '../db/connection';
 import { deviceSensorSync, prepareEndpointForCreate, type EndpointDeviceConfig } from '../services/agent/devices';
 import { logger } from '../utils/logger';
 import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { VirtualDeviceManager, type VirtualDeviceConfig } from '../services/provisioning/virtual-device-manager';
+import { VirtualAgentManager, type VirtualAgentConfig } from '../services/provisioning/virtual-agent-manager';
 import type { FastifyPluginAsync } from 'fastify'
 
 type AgentUuidParams = {
@@ -125,8 +125,8 @@ function isEndpointProtocol(value: unknown): value is EndpointDeviceConfig['prot
   return typeof value === 'string' && endpointProtocols.includes(value as EndpointDeviceConfig['protocol']);
 }
 
-function isVirtualDeviceProtocol(value: unknown): value is VirtualDeviceConfig['protocol'] {
-  return typeof value === 'string' && virtualDeviceProtocols.includes(value as VirtualDeviceConfig['protocol']);
+function isVirtualDeviceProtocol(value: unknown): value is VirtualAgentConfig['protocol'] {
+  return typeof value === 'string' && virtualDeviceProtocols.includes(value as VirtualAgentConfig['protocol']);
 }
 
 function toEndpointDeviceConfig(config: EndpointConfig): EndpointDeviceConfig {
@@ -160,7 +160,7 @@ function toEndpointDeviceUpdate(config: EndpointConfig): Partial<EndpointDeviceC
 const plugin: FastifyPluginAsync = async (fastify) => {
 
 // Initialize virtual device manager
-const virtualDeviceManager = new VirtualDeviceManager();
+const virtualDeviceManager = new VirtualAgentManager();
 
 /**
  * List all devices for an agent
@@ -695,7 +695,7 @@ fastify.post<{ Params: AgentUuidParams; Body: VirtualDeviceCreateBody }>('/agent
       });
     }
 
-    const virtualDeviceConfig: VirtualDeviceConfig = {
+    const virtualDeviceConfig: VirtualAgentConfig = {
       deviceUuid: uuid,
       name,
       protocol,

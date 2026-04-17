@@ -103,7 +103,7 @@ export async function rotateDeviceApiKey(
 
   // Notify device via MQTT
   if (cfg.notifyDevice) {
-    await notifyDeviceOfRotation(deviceUuid, newApiKey, expiresAt, gracePeriodEnds);
+    await notifyAgentOfRotation(deviceUuid, newApiKey, expiresAt, gracePeriodEnds);
   }
 
   // Schedule auto-revocation of old key
@@ -185,8 +185,8 @@ export async function rotateExpiredKeys(
 /**
  * Notify device of new API key via MQTT
  */
-async function notifyDeviceOfRotation(
-  deviceUuid: string,
+async function notifyAgentOfRotation(
+  agentUuid: string,
   newApiKey: string,
   expiresAt: Date,
   gracePeriodEnds: Date
@@ -194,13 +194,13 @@ async function notifyDeviceOfRotation(
   const mqttManager = getMqttManager();
   
   if (!mqttManager || !mqttManager.isConnected()) {
-    logger.warn('MQTT not available, cannot notify device of rotation', { deviceUuid });
+    logger.warn('MQTT not available, cannot notify device of rotation', { deviceUuid: agentUuid });
     return;
   }
 
   try {
     mqttManager.publish(
-      `device/${deviceUuid}/config/api-key-rotation`,
+      `agent/${agentUuid}/config/api-key-rotation`,
       {
         event: 'api_key_rotated',
         new_api_key: newApiKey,
@@ -211,10 +211,10 @@ async function notifyDeviceOfRotation(
       }
     );
 
-    logger.info('Notified device of key rotation via MQTT', { deviceUuid });
+    logger.info('Notified agent of key rotation via MQTT', { deviceUuid: agentUuid });
   } catch (error) {
-    logger.error('Failed to notify device via MQTT', {
-      deviceUuid,
+    logger.error('Failed to notify agent via MQTT', {
+      deviceUuid: agentUuid,
       error: (error as Error).message
     });
   }
@@ -313,7 +313,7 @@ export async function emergencyRevokeApiKey(
   );
 
   // Notify device immediately
-  await notifyDeviceOfRotation(
+  await notifyAgentOfRotation(
     deviceUuid,
     newApiKey,
     new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
