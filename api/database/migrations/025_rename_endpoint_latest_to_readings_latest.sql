@@ -18,5 +18,10 @@ BEGIN
   END IF;
 END $$;
 
-COMMENT ON TABLE readings_latest
-  IS 'Latest reading per (agent, device, metric). Updated inline by ingestion workers via ON CONFLICT upsert. Primary consumer: Prometheus /metrics endpoint.';
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'readings_latest') THEN
+    COMMENT ON TABLE readings_latest
+      IS 'Latest reading per (agent, device, metric). Updated inline by ingestion workers via ON CONFLICT upsert. Primary consumer: Prometheus /metrics endpoint.';
+  END IF;
+END $$;

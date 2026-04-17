@@ -47,8 +47,8 @@ env:
   APPS: api ingestion dashboard nodered mqtt-monitor
 
 jobs:
-  validate-release:
-    name: Validate release & check images
+  prepare:
+    name: Validate & tag release
     runs-on: [arc-runner-set-iotistica-light]
     outputs:
       release_version: ${{ steps.set_version.outputs.release_version }}
@@ -173,91 +173,45 @@ jobs:
             echo "✅ Tag already exists: $RELEASE (from push trigger)"
             echo "tag_exists=true" >> $GITHUB_OUTPUT
           else
-            echo "Tag does not exist yet: $RELEASE (will be created in create-tag job)"
+            echo "Tag does not exist yet: $RELEASE (will be created by prepare job)"
             echo "tag_exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Summary for step output
+      - name: Create git tag (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
         run: |
-          MODE="${{ github.event.inputs.release_mode || 'final' }}"
           RELEASE="${{ steps.set_version.outputs.release_version }}"
-          TAG_SOURCE="push trigger (tag already exists)"
-          
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG_SOURCE="workflow_dispatch (will be created by create-tag job)"
-          fi
-          
-          MODE_BADGE="🎯 Final Release"
-          
-          if [ "$MODE" = "rc" ]; then
-            # Extract RC number from version tag (e.g., v1.0.134-rc.2 -> 2)
-            RC_NUM=$(echo "$RELEASE" | sed -E 's/.*-rc\.([0-9]+)/\1/' || echo "1")
-            MODE_BADGE="🧪 Release Candidate (RC ${RC_NUM})"
-          fi
-          
-          echo "## Release validation" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release:** \`$RELEASE\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Mode:** $MODE_BADGE" >> $GITHUB_STEP_SUMMARY
-          echo "**Tag Source:** $TAG_SOURCE" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Workflow Sequence" >> $GITHUB_STEP_SUMMARY
-          echo "1. ✅ validate-release: Compute version (\`$RELEASE\`)" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "2. ⏳ create-tag: Create and push git tag" >> $GITHUB_STEP_SUMMARY
-            echo "3. ⏳ promote-images: Pull SHA image and promote to release version" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "2. ⏭️ create-tag: SKIPPED (tag from push trigger)" >> $GITHUB_STEP_SUMMARY
-            echo "3. ⏳ promote-images: Pull SHA image and promote to release version" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "4. ⏳ create-release: Create GitHub Release" >> $GITHUB_STEP_SUMMARY
-          echo "5. ⏳ deploy-to-k8s: Update ArgoCD values" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Services to Promote" >> $GITHUB_STEP_SUMMARY
-          for APP in ${{ env.APPS }}; do
-            echo "- \`iotistic/${APP}\` (will find last built image from ${APP}/**)" >> $GITHUB_STEP_SUMMARY
-          done
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Uses the most recent CI image per app. Warns if any source commits have no image." >> $GITHUB_STEP_SUMMARY
-
-  create-tag:
-    name: Create git tag (for workflow_dispatch)
-    runs-on: [arc-runner-set-iotistica-light]
-    needs: validate-release
-    if: github.event_name == 'workflow_dispatch'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create and push git tag
-        run: |
-          RELEASE="${{ needs.validate-release.outputs.release_version }}"
-          
-          # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Check if tag already exists
           if git rev-parse "$RELEASE" >/dev/null 2>&1; then
             echo "Tag $RELEASE already exists"
           else
-            echo "Creating tag $RELEASE pointing to HEAD"
             git tag -a "$RELEASE" -m "Release $RELEASE"
             git push origin "$RELEASE"
             echo "✅ Tag $RELEASE created and pushed"
           fi
 
-  promote-images:
-    name: Promote images to release version
+      - name: Summary
+        run: |
+          MODE="${{ github.event.inputs.release_mode || 'final' }}"
+          RELEASE="${{ steps.set_version.outputs.release_version }}"
+          MODE_BADGE="Final Release"
+          if [ "$MODE" = "rc" ]; then
+            RC_NUM=$(echo "$RELEASE" | sed -E 's/.*-rc\.([0-9]+)/\1/' || echo "1")
+            MODE_BADGE="Release Candidate (RC ${RC_NUM})"
+          fi
+          echo "## Release: \`$RELEASE\` — $MODE_BADGE" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Services to Promote" >> $GITHUB_STEP_SUMMARY
+          for APP in ${{ env.APPS }}; do
+            echo "- \`iotistic/${APP}\`" >> $GITHUB_STEP_SUMMARY
+          done
+
+  release:
+    name: Promote images, create release & deploy
     runs-on: [arc-runner-set-iotistica-light]
-    needs: [validate-release, create-tag]
-    # create-tag only runs on workflow_dispatch; on push it's skipped
-    # Skipped jobs count as satisfied dependencies, so promote-images will run
-    if: always() && needs.validate-release.result == 'success'
+    needs: [prepare]
+    if: needs.prepare.result == 'success'
     steps:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -269,7 +223,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RELEASE="${{ needs.validate-release.outputs.release_version }}"
+          RELEASE="${{ needs.prepare.outputs.release_version }}"
 
           echo "Release version: $RELEASE"
           echo ""
@@ -341,87 +295,35 @@ jobs:
             echo "- **${APP}**: \`iotistic/${APP}:ci-latest\` (\`${DIGEST:0:19}...\`) → \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
           done
 
-  create-release:
-    name: Create GitHub Release (changelog)
-    needs: [validate-release, promote-images]
-    runs-on: [arc-runner-set-iotistica-light]
-    if: |
-      !cancelled() &&
-      needs.validate-release.result == 'success' &&
-      needs.promote-images.result == 'success'
-    steps:
-      - name: Log execution decision
-        run: |
-          echo "✅ create-release job is RUNNING"
-          echo ""
-          echo "Previous jobs:"
-          echo "  validate-release: ${{ needs.validate-release.result }}"
-          echo "  promote-images: ${{ needs.promote-images.result }}"
-          echo ""
-          echo "✅ Images promoted and ready for release"
-          echo "📝 Now creating GitHub Release object"
-
-      - name: Checkout
+      - name: Checkout (for changelog + deploy)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Generate changelog (simple)
+      - name: Generate changelog
         id: changelog
         run: |
-          RELEASE="${{ needs.validate-release.outputs.release_version }}"
+          RELEASE="${{ needs.prepare.outputs.release_version }}"
           PREV_TAG=$(git tag -l "v*.*.*" --sort=-version:refname | grep -v "^${RELEASE}$" | head -n1 || true)
           if [ -z "$PREV_TAG" ]; then
-            echo "First release or no previous tag found"
             git --no-pager log --pretty=format:"- %s (%h)" --no-merges | head -50 > changelog.txt
           else
             git --no-pager log --pretty=format:"- %s (%h)" --no-merges ${PREV_TAG}..HEAD > changelog.txt
           fi
 
-      - name: Verify git tag exists
-        run: |
-          RELEASE="${{ needs.validate-release.outputs.release_version }}"
-          
-          # Tag should exist from either push trigger or create-tag job
-          if git rev-parse "$RELEASE" >/dev/null 2>&1; then
-            echo "✅ Tag $RELEASE verified to exist"
-          else
-            echo "❌ Tag $RELEASE does not exist"
-            echo "This should not happen - tag should have been created by create-tag job or push trigger"
-            exit 1
-          fi
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.validate-release.outputs.release_version }}
-          name: Release ${{ needs.validate-release.outputs.release_version }}
+          tag_name: ${{ needs.prepare.outputs.release_version }}
+          name: Release ${{ needs.prepare.outputs.release_version }}
           body_path: changelog.txt
           draft: false
-          prerelease: ${{ contains(needs.validate-release.outputs.release_version, '-rc.') }}
+          prerelease: ${{ contains(needs.prepare.outputs.release_version, '-rc.') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  deploy-to-k8s:
-    name: Deploy to Kubernetes (ArgoCD)
-    needs: [validate-release, create-release]
-    runs-on: [arc-runner-set-iotistica-light]
-    if: github.event.inputs.deploy == 'true' && needs.validate-release.result == 'success'
-    steps:
-      - name: Validate deploy inputs
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          CLIENT="${{ github.event.inputs.client_name }}"
-          if [ -z "$CLIENT" ]; then
-            echo "WARNING: client_name is empty — deployment steps will use fallback 'demo' namespace"
-          else
-            echo "Deploy target client: $CLIENT"
-          fi
-
-      - name: Checkout iotistic repository
-        uses: actions/checkout@v4
-
       - name: Checkout iot-k8s repository
+        if: github.event.inputs.deploy == 'true'
         uses: actions/checkout@v4
         with:
           repository: Iotistica/iot-k8s
@@ -430,103 +332,34 @@ jobs:
           token: ${{ secrets.K8S_DEPLOY_PAT || secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: Update ArgoCD values.yaml
+      - name: Update ArgoCD values and push
+        if: github.event.inputs.deploy == 'true'
         run: |
-          RELEASE="${{ needs.validate-release.outputs.release_version }}"
+          RELEASE="${{ needs.prepare.outputs.release_version }}"
           CLIENT="${{ github.event.inputs.client_name || 'demo' }}"
           VALUES_FILE="iot-k8s/charts/iotistica-app/values/${CLIENT}/values.yaml"
-          
-          echo "Updating image tags in ArgoCD values file..."
-          echo "  Release: ${RELEASE}"
-          echo "  Client: ${CLIENT}"
-          echo "  File: ${VALUES_FILE}"
-          
-          # Check if the values file exists
+
           if [ ! -f "$VALUES_FILE" ]; then
-            echo "❌ Error: Values file not found at $VALUES_FILE"
-            echo "Expected path: iot-k8s/charts/iotistica-app/values/{client}/values.yaml"
-            echo ""
-            echo "Available clients:"
-            ls -la "iot-k8s/charts/iotistica-app/values/" 2>/dev/null || echo "  Directory not found"
+            echo "❌ Values file not found: $VALUES_FILE"
+            echo "Available clients:"; ls -la "iot-k8s/charts/iotistica-app/values/" 2>/dev/null || true
             exit 1
           fi
-          
-          # Update image tags using yq (strict, no fallback)
+
           yq eval ".api.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           yq eval ".ingestion.image.repository = \"iotistic/ingestion\"" -i "$VALUES_FILE"
           yq eval ".ingestion.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           yq eval ".dashboard.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           yq eval ".nodered.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
           yq eval ".mqttMonitor.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
-          
-          echo "✅ Updated image tags to ${RELEASE}"
-          echo ""
-          echo "Updated fields:"
-          yq eval ".api.image.tag" "$VALUES_FILE" | sed 's/^/  api.image.tag: /'
-          yq eval ".ingestion.image.repository" "$VALUES_FILE" | sed 's/^/  ingestion.image.repository: /'
-          yq eval ".ingestion.image.tag" "$VALUES_FILE" | sed 's/^/  ingestion.image.tag: /'
-          yq eval ".dashboard.image.tag" "$VALUES_FILE" | sed 's/^/  dashboard.image.tag: /'
-          yq eval ".nodered.image.tag" "$VALUES_FILE" | sed 's/^/  nodered.image.tag: /'
-          yq eval ".mqttMonitor.image.tag" "$VALUES_FILE" | sed 's/^/  mqttMonitor.image.tag: /'
 
-      - name: Commit and push changes
-        run: |
-          RELEASE="${{ needs.validate-release.outputs.release_version }}"
-          CLIENT="${{ github.event.inputs.client_name || 'demo' }}"
-          VALUES_FILE="iot-k8s/charts/iotistica-app/values/${CLIENT}/values.yaml"
-          
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Change to iot-k8s directory
           cd iot-k8s
-          
-          # Configure git for this repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Check if there are changes
           if git diff --quiet; then
-            echo "ℹ️  No changes to commit"
-            cd ..
-            exit 0
+            echo "No changes to commit"
+          else
+            git add "charts/iotistica-app/values/${CLIENT}/values.yaml"
+            git commit -m "chore: bump ${CLIENT} version to ${RELEASE}"
+            git push origin main
+            echo "✅ Pushed version update to ${RELEASE} for client ${CLIENT}"
           fi
-          
-          # Stage, commit, and push changes
-          git add "charts/iotistica-app/values/${CLIENT}/values.yaml"
-          git commit -m "chore: bump ${CLIENT} version to ${RELEASE}"
-          git push origin main
-          
-          cd ..
-          echo "✅ Pushed version update to ${RELEASE}"
-          echo ""
-          echo "ArgoCD will now automatically sync the changes to the cluster"
-
-      - name: Deployment summary
-        if: always()
-        run: |
-          RELEASE="${{ needs.validate-release.outputs.release_version }}"
-          CLIENT="${{ github.event.inputs.client_name || 'demo' }}"
-          
-          echo "## ArgoCD Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release:** \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Client:** \`${CLIENT}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Repository:** Iotistica/iot-k8s" >> $GITHUB_STEP_SUMMARY
-          echo "**Values File:** \`charts/iotistica-app/values/${CLIENT}/values.yaml\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Updated Fields:**" >> $GITHUB_STEP_SUMMARY
-          echo "- \`api.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`ingestion.image.repository\`: \`iotistic/ingestion\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`ingestion.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`dashboard.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`nodered.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`mqttMonitor.image.tag\`: \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Successfully updated ArgoCD values and pushed to iot-k8s repository**" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "ArgoCD will now:" >> $GITHUB_STEP_SUMMARY
-          echo "1. Detect the change in the iot-k8s repository" >> $GITHUB_STEP_SUMMARY
-          echo "2. Sync the new version to the cluster" >> $GITHUB_STEP_SUMMARY
-          echo "3. Roll out the updated application" >> $GITHUB_STEP_SUMMARY
