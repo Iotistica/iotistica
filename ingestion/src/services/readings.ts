@@ -79,7 +79,6 @@ export class ReadingsService {
   private static readonly seenCatalogMetrics = new LruSet(ReadingsService.CATALOG_DISCOVERY_CACHE_MAX);
   private static readonly seenCatalogDeviceMetrics = new LruSet(ReadingsService.CATALOG_DISCOVERY_CACHE_MAX);
   private static readonly COPY_TEMP_TABLE_NAME = 'tmp_readings_ingest';
-  private static readonly COPY_TEMP_TABLE_READY_FLAG = Symbol('copy-temp-table-ready');
   // Shared Redis key: epoch-ms until which the catalog refresh lease is held.
   // Lets every pod skip the DB UPDATE round-trip when another pod already holds the lease.
   private static readonly REDIS_CATALOG_LEASE_KEY = 'catalog:refresh:lease_until_ms';
@@ -178,16 +177,11 @@ export class ReadingsService {
   }
 
   private async ensureCopyTempTable(client: PoolClient): Promise<void> {
-    const trackedClient = client as PoolClient & {
-      [ReadingsService.COPY_TEMP_TABLE_READY_FLAG]?: boolean;
-    };
-
-    if (trackedClient[ReadingsService.COPY_TEMP_TABLE_READY_FLAG]) {
-      return;
-    }
-
-    await client.query(`
-      CREATE TEMP TABLE IF NOT EXISTS ${ReadingsService.COPY_TEMP_TABLE_NAME} (
+    // Always run — pg-pool can silently reconnect the underlying TCP session while
+    // reusing the same PoolClient wrapper object, invalidating any cached flag.
+    // CREATE TEMP TABLE IF NOT EXISTS is idempotent and fast (~1 ms round-trip).
+    await client.query(
+      `CREATE TEMP TABLE IF NOT EXISTS ${ReadingsService.COPY_TEMP_TABLE_NAME} (
         time timestamptz,
         agent_uuid uuid,
         metric_name text,
@@ -200,10 +194,8 @@ export class ReadingsService {
         anomaly_threshold double precision,
         baseline_samples integer,
         detection_methods jsonb
-      )
-    `);
-
-    trackedClient[ReadingsService.COPY_TEMP_TABLE_READY_FLAG] = true;
+      )`,
+    );
   }
 
   private async bulkInsertViaCopy(readings: ReadingInsert[]): Promise<number> {
@@ -541,9 +533,19 @@ export class ReadingsService {
     let insertedTotal = 0;
     const insertClient = await getClient();
 
+    // Sort by primary key before INSERT so all concurrent workers acquire row locks
+    // in the same order — eliminates deadlocks from reverse-order inserts.
+    const sorted = [...readings].sort((a, b) => {
+      const uuidCmp = a.agent_uuid.localeCompare(b.agent_uuid);
+      if (uuidCmp !== 0) return uuidCmp;
+      const metricCmp = a.metric_name.localeCompare(b.metric_name);
+      if (metricCmp !== 0) return metricCmp;
+      return (a.time?.getTime() ?? 0) - (b.time?.getTime() ?? 0);
+    });
+
     try {
-      for (let i = 0; i < readings.length; i += maxRowsPerInsert) {
-        const batch = readings.slice(i, i + maxRowsPerInsert);
+      for (let i = 0; i < sorted.length; i += maxRowsPerInsert) {
+        const batch = sorted.slice(i, i + maxRowsPerInsert);
         const values: unknown[] = [];
         const placeholders: string[] = [];
         let paramIndex = 1;
@@ -621,7 +623,15 @@ export class ReadingsService {
       }
     }
 
-    const rows = [...latest.values()];
+    // Sort by PK so concurrent workers upsert rows in the same order — prevents deadlocks.
+    const rows = [...latest.values()].sort((a, b) => {
+      const uuidCmp = a.agent_uuid.localeCompare(b.agent_uuid);
+      if (uuidCmp !== 0) return uuidCmp;
+      const dn = (r: ReadingInsert) => (r.extra as any)?.deviceName || (r.extra as any)?.device_name || 'unknown';
+      const dnCmp = dn(a).localeCompare(dn(b));
+      if (dnCmp !== 0) return dnCmp;
+      return a.metric_name.localeCompare(b.metric_name);
+    });
     if (rows.length === 0) return;
 
     const values: unknown[] = [];

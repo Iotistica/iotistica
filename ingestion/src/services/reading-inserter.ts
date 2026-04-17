@@ -44,7 +44,15 @@ export class ReadingInserter {
       const key = `${r.agent_uuid}:${r.metric_name}:${(r.time ?? ingestedAt).getTime()}`;
       seen.set(key, r); // last writer wins (most recent re-send is authoritative)
     }
-    const deduped = [...seen.values()];
+    // Sort by PK so all concurrent workers acquire row locks in the same order.
+    // Prevents deadlocks when multiple ingestion pods insert overlapping key sets.
+    const deduped = [...seen.values()].sort((a, b) => {
+      const uuidCmp = a.agent_uuid.localeCompare(b.agent_uuid);
+      if (uuidCmp !== 0) return uuidCmp;
+      const metricCmp = a.metric_name.localeCompare(b.metric_name);
+      if (metricCmp !== 0) return metricCmp;
+      return (a.time?.getTime() ?? 0) - (b.time?.getTime() ?? 0);
+    });
 
     const insertStart = Date.now();
     const insertedCount = await this.readingsService.bulkInsert(deduped);
