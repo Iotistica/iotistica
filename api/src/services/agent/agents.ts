@@ -90,7 +90,7 @@ export async function listAgents(params: ListAgentsParams) {
   const paginatedDevices = filteredDevices.slice(offset, offset + limit);
 
   const enhancedDevices = await Promise.all(
-    paginatedDevices.map(async (device: Record<string, unknown>) => {
+    (paginatedDevices as unknown as Record<string, unknown>[]).map(async (device) => {
       const targetState = await AgentTargetStateModel.get(device.uuid as string);
       const currentState = await AgentCurrentStateModel.get(device.uuid as string);
       let systemInfo = currentState?.system_info;
@@ -417,7 +417,7 @@ export async function registerAgent(params: RegisterAgentParams, actor: ActorInf
         namespace: targetNamespace,
         fleet_uuid: fleet_uuid || undefined,
         metadata,
-        endpoints,
+        endpoints: endpoints as Array<{ protocol: string; [key: string]: unknown }> | undefined,
       },
       actor.ip,
       actor.userAgent
