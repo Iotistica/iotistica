@@ -22,7 +22,7 @@ import {
   createProvisioningKey,
   revokeProvisioningKey,
   listProvisioningKeys
-} from '../utils/provisioning-keys';
+} from '../services/provisioning/provisioning-keys';
 import {
   logAuditEvent,
 

@@ -21,7 +21,7 @@ import {
   incrementProvisioningKeyUsage,
   createProvisioningKey,
   ProvisioningKey,
-} from '../../utils/provisioning-keys';
+} from './provisioning-keys';
 import { tailscaleService } from '../vpn/tailscale';
 import {
   logAuditEvent,

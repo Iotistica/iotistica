@@ -4,14 +4,14 @@
  */
 
 import crypto from 'crypto';
-import { query } from '../db/connection';
-import { logAuditEvent, AuditEventType, AuditSeverity } from './audit-logger';
+import { query } from '../../db/connection';
+import { logAuditEvent, AuditEventType, AuditSeverity } from '../../utils/audit-logger';
 import {
   hashLegacySha256,
   hashMachineSecret,
   hashMachineSecretDigest,
   verifyMachineSecret,
-} from './secret-hashing';
+} from '../../utils/secret-hashing';
 
 export interface ProvisioningKey {
   id: string;

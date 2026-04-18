@@ -61,6 +61,9 @@ const DEFAULTS = {
   RegisterSyntheticAgents: false,
   DisposeAfterRun:         false,
   TestRunId:               '',
+  Cleanup:                 true,
+  CleanStream:             true,
+  RedisSecretName:         'redis-credentials-demo',
   ApiDeploymentName:       'demo-iotistic-api',
   IngestionDeploymentName: 'demo-iotistic-ingestion',
   CnpgNamespace:           'iotistica-cnpg-cl01',
@@ -223,6 +226,20 @@ function cnpgQuery(cnpgNamespace, primaryPod, database, sql) {
   }
 }
 
+// ─── Spool file helpers ─────────────────────────────────────────────────────────
+
+function countCloudSpoolFiles(namespace, deploymentName, spoolPath) {
+  try {
+    const out = kubectlCapture([
+      'exec', '-n', namespace, `deployment/${deploymentName}`, '--',
+      'sh', '-c', `find ${spoolPath} -name "spool-*.ndjson" -type f 2>/dev/null | wc -l`,
+    ]);
+    return parseInt(out, 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 // ─── Ingestion health (via kubectl exec into ingestion deployment) ─────────────
 
 const METRIC_FIELDS = [
@@ -334,6 +351,40 @@ function registerSyntheticAgents(cnpgNamespace, primaryPod, database, agents) {
   cnpgQuery(cnpgNamespace, primaryPod, database,
     `INSERT INTO agents (uuid, name) VALUES\n  ${values}\nON CONFLICT (uuid) DO NOTHING;`
   );
+}
+
+// ─── Redis stream cleanup ────────────────────────────────────────────────────
+
+function cleanRedisStreamCloud(namespace, deploymentName, tenantId, redisPass) {
+  const streamKey = `tenant:{${tenantId}}:agent:devices:ingestion`;
+  const auth      = redisPass ? ['-a', redisPass, '--no-auth-warning'] : [];
+  const exec      = (cmd) => {
+    try {
+      return kubectlCapture(['exec', '-n', namespace, `deployment/${deploymentName}`, '--', 'redis-cli', ...auth, ...cmd]);
+    } catch (err) {
+      throw new Error(`redis-cli ${cmd[0]} failed: ${err.message}`);
+    }
+  };
+  try {
+    const existsOut = exec(['EXISTS', streamKey]);
+    if (parseInt(existsOut, 10) === 0) return { cleared: 0, pending: 0 };
+
+    const cleared = parseInt(exec(['XLEN', streamKey]), 10) || 0;
+
+    let totalPending = 0;
+    try {
+      const infoOut = exec(['XINFO', 'GROUPS', streamKey]);
+      for (const m of (infoOut.match(/pending\s+(\d+)/g) || [])) {
+        totalPending += parseInt(m.match(/\d+/)[0], 10);
+      }
+    } catch { /* ignore */ }
+
+    exec(['DEL', streamKey]);
+    return { cleared, pending: totalPending };
+  } catch (err) {
+    console.warn(clr(`  Stream cleanup failed: ${err.message}`, C.yellow));
+    return null;
+  }
 }
 
 function removeSyntheticTestData(cnpgNamespace, primaryPod, database, agents, removeAgentRows) {
@@ -562,6 +613,37 @@ async function main() {
   console.log(`  Health poll : every ${p.PollIntervalSec}s — ${jwt ? `fetch ${p.ApiUrl}/api/v1/metrics/ingestion-health` : `kubectl exec deployment/${p.IngestionDeploymentName} (no JWT — pass --Username and --Password for faster polling)`}`);
   console.log('');
 
+  // ── Pre-test cleanup ──────────────────────────────────────────────────────
+  if (p.Cleanup) {
+    // Redis stream
+    if (p.CleanStream) {
+      process.stdout.write('Cleaning Redis ingestion stream...');
+      let redisPass = '';
+      try { redisPass = getSecretValue(p.Namespace, p.RedisSecretName, 'password'); } catch { /* optional */ }
+      const result = cleanRedisStreamCloud(p.Namespace, 'redis', tenantId, redisPass);
+      if (result) {
+        if (result.cleared > 0 || result.pending > 0) {
+          console.log(clr(` cleared ${result.cleared} entries, ${result.pending} PEL`, C.green));
+          await new Promise(r => setTimeout(r, 2500));
+        } else {
+          console.log(clr(' already empty', C.gray));
+        }
+      } else {
+        console.log('');
+      }
+    }
+
+    // DB truncate
+    process.stdout.write('Truncating readings tables...');
+    try {
+      cnpgQuery(p.CnpgNamespace, cnpgPrimaryPod, databaseName,
+        'TRUNCATE readings, readings_latest RESTART IDENTITY CASCADE;');
+      console.log(clr(' done', C.green));
+    } catch (err) {
+      console.warn(clr(` failed: ${err.message}`, C.yellow));
+    }
+  }
+
   // ── Connect MQTT clients ───────────────────────────────────────────────────
   const CONNECT_BATCH   = 3;
   const CONNECT_RETRIES = 5;
@@ -748,10 +830,25 @@ async function main() {
   console.log('');
 
   // ── Drain wait ─────────────────────────────────────────────────────────────
-  // Wait until lag=0 and pendingMessages=0 before capturing final stats.
-  // Timeout: max(10 min, injectTime × 0.5)
-  const drainTimeoutMs = Math.max(10 * 60 * 1000, Math.ceil(totalSec * 0.5) * 1000);
-  console.log(clr(`Waiting for stream to fully drain — timeout: ${Math.round(drainTimeoutMs / 60000)}m`, C.yellow));
+  // Wait until lag=0, pendingMessages=0, AND API spool empty before capturing
+  // final stats. Without the spool check the test declares "all clear" while
+  // the API is still replaying buffered files into Redis, understating inserts.
+  // Timeout: max(10 min, injectTime × 0.5, spoolFiles × 15s)
+  const API_SPOOL_PATH        = '/tmp/iotistic-spool';
+  const INGESTION_SPOOL_PATH  = '/var/lib/iotistic/spool';
+  const initialApiSpool       = countCloudSpoolFiles(p.Namespace, p.ApiDeploymentName, API_SPOOL_PATH);
+  const initialIngSpool       = countCloudSpoolFiles(p.Namespace, p.IngestionDeploymentName, INGESTION_SPOOL_PATH);
+  const initialSpool          = initialApiSpool + initialIngSpool;
+  const drainTimeoutMs = Math.max(
+    10 * 60 * 1000,
+    Math.ceil(totalSec * 0.5) * 1000,
+    initialSpool * 15 * 1000,
+  );
+  console.log(clr(
+    `Waiting for stream + spools to fully drain — timeout: ${Math.round(drainTimeoutMs / 60000)}m` +
+    (initialSpool > 0 ? ` (${initialSpool} spool file(s))` : ''),
+    C.yellow,
+  ));
 
   // Require at least DRAIN_MIN_POLLS polls before allowing early exit — prevents
   // a false "all clear" when messages never reached the Redis stream and lag
@@ -763,11 +860,18 @@ async function main() {
   while ((Date.now() - drainStart) < drainTimeoutMs) {
     await new Promise(r => setTimeout(r, p.PollIntervalSec * 1000));
     drainPoll++;
+    const apiSpool = countCloudSpoolFiles(p.Namespace, p.ApiDeploymentName, API_SPOOL_PATH);
+    const ingSpool = countCloudSpoolFiles(p.Namespace, p.IngestionDeploymentName, INGESTION_SPOOL_PATH);
     const h   = await getHealth();
     const ela = totalSec + (Date.now() - drainStart) / 1000;
     printHealthRow(h, baseline, injected, p.MessageCount, p.MetricsPerMessage, ela);
     if ((h?.streamLength ?? 0) > 0) { streamEverNonZero = true; peakStreamLength = Math.max(peakStreamLength, h.streamLength); }
-    if (drainPoll >= DRAIN_MIN_POLLS && (h?.workerLag ?? -1) === 0 && (h?.pendingMessages ?? -1) === 0) {
+    if (apiSpool > 0 || ingSpool > 0) {
+      const lag     = h?.workerLag ?? -1;
+      const pending = h?.pendingMessages ?? -1;
+      process.stdout.write(clr(`  [spool] API: ${apiSpool}  ing: ${ingSpool}  lag: ${lag}  pending: ${pending}   \n`, C.yellow));
+    }
+    if (drainPoll >= DRAIN_MIN_POLLS && apiSpool === 0 && ingSpool === 0 && (h?.workerLag ?? -1) === 0 && (h?.pendingMessages ?? -1) === 0) {
       console.log('');
       if (!streamEverNonZero && injected > 0) {
         console.warn(clr('  WARNING: Stream was never populated during this test run.', C.red));
@@ -775,7 +879,7 @@ async function main() {
         console.warn(clr(`  Check: MQTT topic routing, broker ACLs, and API MQTT subscription for tenant '${tenantId}'.`, C.yellow));
         console.warn(clr(`  Sample topic used: ${sampleTopic}`, C.yellow));
       } else {
-        console.log(clr('All clear: lag=0, pending=0. Capturing final stats.', C.green));
+        console.log(clr('All clear: spools empty, lag=0, pending=0. Capturing final stats.', C.green));
       }
       fin = h;
       break;
@@ -783,10 +887,13 @@ async function main() {
   }
 
   if (!fin) {
+    const apiFinal = countCloudSpoolFiles(p.Namespace, p.ApiDeploymentName, API_SPOOL_PATH);
+    const ingFinal = countCloudSpoolFiles(p.Namespace, p.IngestionDeploymentName, INGESTION_SPOOL_PATH);
     fin = await getHealth();
     console.log('');
     console.warn(clr(
-      `  WARNING: Drain timed out — lag: ${fin?.workerLag ?? '?'}, pending: ${fin?.pendingMessages ?? '?'}. ` +
+      `  WARNING: Drain timed out — API spool: ${apiFinal}, ing spool: ${ingFinal}, ` +
+      `lag: ${fin?.workerLag ?? '?'}, pending: ${fin?.pendingMessages ?? '?'}. ` +
       `Loss count may be overstated.`,
       C.red,
     ));

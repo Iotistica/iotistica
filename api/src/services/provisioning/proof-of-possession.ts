@@ -6,7 +6,7 @@
  */
 
 import * as crypto from 'crypto';
-import logger from './logger';
+import logger from '../../utils/logger';
 
 /**
  * Generate a random challenge for proof-of-possession
