@@ -13,34 +13,35 @@ import { areApiDocsEnabled, setupApiDocs } from '../docs';
 import authRoutes from '../routes/auth';
 import usersRoutes from '../routes/users';
 import invitesRoutes from '../routes/invites';
-import deviceStateRoutes from '../routes/agent-state';
-import deviceLogsRoutes from '../routes/agent-logs';
-import deviceMetricsRoutes from '../routes/agent-metrics';
+import deviceStateRoutes from '../routes/agent/state';
+import deviceLogsRoutes from '../routes/agent/logs';
+import deviceMetricsRoutes from '../routes/agent/metrics';
 import provisioningRoutes from '../routes/provisioning';
-import agentsRoutes from '../routes/agents';
+import agentsRoutes from '../routes/agent/agents';
 import adminRoutes from '../routes/admin';
-import deviceJobsRoutes from '../routes/agent-jobs';
+import deviceJobsRoutes from '../routes/agent/jobs';
 import rotationRoutes from '../routes/rotation';
-import eventsRoutes from '../routes/events';
+import eventsRoutes from '../routes/audit/events';
 import mqttBrokerRoutes from '../mqtt/broker';
 import mqttMetricsRoutes from '../mqtt/metrics';
-import deviceSensorsRoutes from '../routes/agent-devices';
-import deviceTagsRoutes from '../routes/agent-tags';
+import deviceSensorsRoutes from '../routes/agent/devices';
+import deviceTagsRoutes from '../routes/agent/tags';
 import dashboardLayoutsRoutes from '../routes/dashboard-layouts';
 import mosquittoAuthRoutes from '../mqtt/auth';
-import noderedStorageRoutes from '../routes/nodered';
+import noderedStorageRoutes from '../routes/nodered/nodered';
 import metricsRoutes from '../routes/metrics';
 import prometheusRoutes from '../routes/prometheus';
 import anomalyRoutes from '../routes/anomaly';
 import anomalyIncidentsRoutes from '../routes/anomaly-incidents';
 import anomalyAlertsRoutes from '../routes/anomaly-alerts';
 import profileRoutes from '../routes/profiles';
-import aiChatRoutes from '../routes/ai-chat';
-import dashboardAiRoutes from '../routes/dashboard-ai';
+import aiChatRoutes from '../routes/ai/ai-chat';
+import dashboardAiRoutes from '../routes/ai/dashboard-ai';
 import licenseRoutes from '../routes/license';
 import billingRoutes from '../routes/billing';
-import fleetRoutes from '../routes/fleets';
-import readingsRoutes from '../routes/readings';
+import fleetRoutes from '../routes/agent/fleets';
+import brokerMonitorRoutes from '../routes/broker-monitor';
+import readingsRoutes from '../routes/telemetry/readings';
 
 import {
   globalRateLimitOptions,
@@ -159,6 +160,7 @@ export async function mountRoutes(fastify: FastifyInstance): Promise<void> {
       mqttBrokerRoutes,
       deviceTagsRoutes,
       aiChatRoutes,
+      brokerMonitorRoutes,
     ];
     for (const route of standardRoutes) {
       await f.register(route);

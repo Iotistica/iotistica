@@ -1,4 +1,4 @@
-import { SystemConfigModel } from '../../db/models';
+import { SystemConfigModel } from '../config/system-config';
 
 class ConfigService {
   private cache = new Map<string, any>();

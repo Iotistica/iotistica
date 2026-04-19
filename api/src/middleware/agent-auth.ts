@@ -12,7 +12,7 @@
 
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { query } from '../db/connection';
-import { AgentModel } from '../db/models';
+import { AgentModel } from '../services/agent/agents';
 import logger from '../utils/logger';
 import { verifyMachineSecret } from '../utils/secret-hashing';
 

@@ -26,12 +26,12 @@ import {
   AgentTargetStateModel,
   AgentCurrentStateModel,
   AgentLogsModel,
-} from '../db/models';
-import { validateTargetStateConfigMiddleware } from '../services/provisioning/target-state-config.validator';
-import { EventPublisher, objectsAreEqual } from '../services/audit/event-sourcing';
-import deviceAuth, { deviceAuthFromBody } from '../middleware/agent-auth';
-import { processAgentStateReport, type AgentStateReport } from '../services/agent/state';
-import logger from '../utils/logger';
+} from '../../services/agent/agents';
+import { validateTargetStateConfigMiddleware } from '../../services/provisioning/validation';
+import { EventPublisher, objectsAreEqual } from '../../services/audit/event-sourcing';
+import deviceAuth, { deviceAuthFromBody } from '../../middleware/agent-auth';
+import { processAgentStateReport, type AgentStateReport } from '../../services/agent/state';
+import logger from '../../utils/logger';
 import type { FastifyPluginAsync } from 'fastify'
 
 type AgentUuidParams = {

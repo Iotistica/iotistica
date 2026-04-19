@@ -69,13 +69,6 @@ function createServiceProxy(
 }
 
 export async function mountProxies(fastify: FastifyInstance): Promise<void> {
-  const MQTT_MONITOR_URL = process.env.MQTT_MONITOR_URL || 'http://mqtt-monitor:3500';
-  const mqttMountPath = `${API_BASE}/mqtt-monitor`;
-  await fastify.register(async function mqttMonitorProxy(f) {
-    f.addHook('preHandler', jwtAuth);
-    await f.register(createServiceProxy('MQTT Monitor', `${MQTT_MONITOR_URL}/api/v1`, mqttMountPath));
-  }, { prefix: mqttMountPath });
-
   const POSTOFFICE_URL = process.env.POSTOFFICE_URL || 'http://postoffice:3300';
   const postofficeMountPath = `${API_BASE}/postoffice`;
   await fastify.register(

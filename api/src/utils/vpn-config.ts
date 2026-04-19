@@ -5,7 +5,7 @@
  */
 
 import { query } from '../db/connection';
-import { SystemConfig } from '../config/system-config';
+import { SystemConfig } from '../services/config/system-config';
 
 export interface VpnConfig {
   id: number;

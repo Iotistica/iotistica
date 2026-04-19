@@ -14,7 +14,7 @@
 import * as k8s from '@kubernetes/client-node';
 import { query } from '../../db/connection.js';
 import { logger } from '../../utils/logger.js';
-import { AgentModel } from '../../db/models.js';
+import { AgentModel } from '../agent/agents';
 import { deviceSensorSync } from '../agent/devices.js';
 
 export interface VirtualAgentConfig {

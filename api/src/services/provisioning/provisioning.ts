@@ -15,7 +15,7 @@ import {
   AgentModel,
   AgentTargetStateModel,
   Agent,
-} from '../../db/models';
+} from '../agent/agents';
 import {
   validateProvisioningKey,
   incrementProvisioningKeyUsage,

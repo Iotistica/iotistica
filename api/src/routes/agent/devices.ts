@@ -18,11 +18,11 @@
  */
 
 
-import { query } from '../db/connection';
-import { deviceSensorSync, prepareEndpointForCreate, type EndpointDeviceConfig } from '../services/agent/devices';
-import { logger } from '../utils/logger';
-import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { VirtualAgentManager, type VirtualAgentConfig } from '../services/provisioning/virtual-agent-manager';
+import { query } from '../../db/connection';
+import { deviceSensorSync, prepareEndpointForCreate, type EndpointDeviceConfig } from '../../services/agent/devices';
+import { logger } from '../../utils/logger';
+import { jwtAuth, requireRole } from '../../middleware/jwt-auth';
+import { VirtualAgentManager, type VirtualAgentConfig } from '../../services/provisioning/virtual-agent-manager';
 import type { FastifyPluginAsync } from 'fastify'
 
 type AgentUuidParams = {

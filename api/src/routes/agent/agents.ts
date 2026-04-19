@@ -4,10 +4,10 @@
  */
 
 import { z } from 'zod';
-import logger from '../utils/logger';
-import deviceAuth from '../middleware/agent-auth';
-import { jwtAuth } from '../middleware/jwt-auth';
-import * as AgentsService from '../services/agent/agents';
+import logger from '../../utils/logger';
+import deviceAuth from '../../middleware/agent-auth';
+import { jwtAuth } from '../../middleware/jwt-auth';
+import * as AgentsService from '../../services/agent/agents';
 import type { FastifyPluginAsync } from 'fastify';
 
 // ============================================================================

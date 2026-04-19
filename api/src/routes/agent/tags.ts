@@ -4,15 +4,15 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import logger from '../utils/logger';
+import logger from '../../utils/logger';
 import type {
   TagOperationRequest,
   BulkTagOperationRequest,
   DeviceQueryRequest,
   TagDefinitionRequest,
   TagDefinitionUpdateRequest,
-} from '../types/device-tags';
-import * as TagsService from '../services/agent/tags';
+} from '../../types/device-tags';
+import * as TagsService from '../../services/agent/tags';
 
 type AgentUuidParams = { uuid: string };
 type AgentTagParams = { uuid: string; key: string };

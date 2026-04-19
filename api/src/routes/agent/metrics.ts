@@ -23,8 +23,8 @@
 import {
   AgentModel,
   AgentMetricsModel,
-} from '../db/models';
-import { logger } from '../utils/logger';
+} from '../../services/agent/agents';
+import { logger } from '../../utils/logger';
 import type { FastifyPluginAsync } from 'fastify'
 
 type AgentUuidParams = {

@@ -15,7 +15,7 @@ import { query } from '../../db/connection';
 import { EventPublisher } from '../audit/event-sourcing';
 import logger from '../../utils/logger';
 import { randomUUID as uuidv4 } from 'crypto';
-import { AgentTargetStateModel } from '../../db/models';
+import { AgentTargetStateModel } from './agents';
 import type { ModbusDataPoint, OPCUADataPoint, AnomalyDetectionDataPointConfig, AnomalyMetric } from '../../types/target-state';
 import { mqttDeviceTopic } from '../../mqtt/topics';
 import { encodeIfUuid } from '../../mqtt/codec';

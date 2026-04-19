@@ -16,7 +16,7 @@ import crypto from 'crypto';
 import { query } from '../db/connection';
 import {
   AgentModel,
-} from '../db/models';
+} from '../services/agent/agents';
 import {
 
   createProvisioningKey,

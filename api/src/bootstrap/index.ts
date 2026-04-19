@@ -16,6 +16,7 @@ import { bootstrapLicense } from './license';
 import { bootstrapWorkers } from './workers';
 import { bootstrapApiRedis } from './redis';
 import { bootstrapMqtt } from './mqtt';
+import { bootstrapBrokerMonitor } from './broker-monitor';
 
 export async function bootstrap(): Promise<void> {
   logger.info('Initializing Iotistica API service...');
@@ -27,6 +28,7 @@ export async function bootstrap(): Promise<void> {
   await bootstrapWorkers();
   await bootstrapApiRedis();
   bootstrapMqtt();
+  bootstrapBrokerMonitor();
 }
 
 async function fatal(name: string, fn: () => Promise<void>): Promise<void> {

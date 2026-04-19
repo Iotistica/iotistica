@@ -3,7 +3,7 @@
  */
 
 import logger from '../utils/logger';
-import { SystemConfig } from '../config/system-config';
+import { SystemConfig } from '../services/config/system-config';
 
 export async function bootstrapConfig(): Promise<void> {
   await SystemConfig.load();

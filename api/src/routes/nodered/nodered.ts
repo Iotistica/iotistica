@@ -6,10 +6,10 @@
  */
 
 
-import { NodeRedStorageService } from '../services/nodered/nodered-storage';
-import { jwtAuth } from '../middleware/jwt-auth';
-import { query } from '../db/connection';
-import logger from '../utils/logger';
+import { NodeRedStorageService } from '../../services/nodered/nodered-storage';
+import { jwtAuth } from '../../middleware/jwt-auth';
+import { query } from '../../db/connection';
+import logger from '../../utils/logger';
 import type { FastifyPluginAsync } from 'fastify'
 
 const plugin: FastifyPluginAsync = async (fastify) => {

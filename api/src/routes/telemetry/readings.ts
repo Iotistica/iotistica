@@ -6,9 +6,9 @@
 
 import { z } from 'zod';
 
-import { readingsService } from '../services/telemetry/reader';
-import { jwtAuth } from '../middleware/jwt-auth';
-import logger from '../utils/logger';
+import { readingsService } from '../../services/telemetry/reader';
+import { jwtAuth } from '../../middleware/jwt-auth';
+import logger from '../../utils/logger';
 import type { FastifyPluginAsync } from 'fastify'
 
 interface AgentUuidParams {

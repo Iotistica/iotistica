@@ -18,16 +18,16 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { query } from '../db/connection';
+import { query } from '../../db/connection';
 import {
   AgentModel,
   AgentLogsModel,
-} from '../db/models';
-import { logger } from '../utils/logger';
-import deviceAuth from '../middleware/agent-auth';
-import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { redisLogQueue } from '../services/telemetry/publisher';
-import { ingestion } from '../services/telemetry';
+} from '../../services/agent/agents';
+import { logger } from '../../utils/logger';
+import deviceAuth from '../../middleware/agent-auth';
+import { jwtAuth, requireRole } from '../../middleware/jwt-auth';
+import { redisLogQueue } from '../../services/telemetry/publisher';
+import { ingestion } from '../../services/telemetry';
 
 type AgentUuidParams = {
   uuid: string;
@@ -145,7 +145,7 @@ function resolveContentEncoding(body: Buffer, headerValue: string | undefined): 
 
 async function checkBatchIdempotency(deviceUuid: string, batchId: string): Promise<boolean> {
   try {
-    const { redisClient } = await import('../redis/client');
+    const { redisClient } = await import('../../redis/client');
     const client = redisClient.getClient();
     if (!client) {
       logger.warn('Redis client not available for idempotency check');
@@ -166,7 +166,7 @@ async function checkBatchIdempotency(deviceUuid: string, batchId: string): Promi
 
 async function storeBatchId(deviceUuid: string, batchId: string): Promise<void> {
   try {
-    const { redisClient } = await import('../redis/client');
+    const { redisClient } = await import('../../redis/client');
     const client = redisClient.getClient();
     if (!client) {
       logger.warn('Redis client not available for batch storage');

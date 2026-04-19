@@ -4,18 +4,18 @@
  */
 
 
-import { processAIChat } from '../services/ai/chat';
-import { logger } from '../utils/logger';
-import { jwtAuth } from '../middleware/jwt-auth';
+import { processAIChat } from '../../services/ai/chat';
+import { logger } from '../../utils/logger';
+import { jwtAuth } from '../../middleware/jwt-auth';
 import {
   buildDashboardAssistantSummary,
   generateDashboardSuggestions,
   getStrategy,
-} from '../services/ai/dashboard-suggestions';
+} from '../../services/ai/dashboard-suggestions';
 import {
   generateDeviceSuggestions,
   buildDeviceAssistantResponse,
-} from '../services/ai/device-suggestions';
+} from '../../services/ai/device-suggestions';
 import type { FastifyPluginAsync } from 'fastify'
 
 type AssistantMode = 'dashboard' | 'device';

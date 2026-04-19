@@ -33,7 +33,7 @@ export async function checkAgentLimit(_request: FastifyRequest, reply: FastifyRe
   const license = LicenseValidator.getInstance();
   const maxDevices = license.getLicense().features.maxDevices;
 
-  const { AgentModel: AgentModel } = await import('../db/models');
+  const { AgentModel: AgentModel } = await import('../services/agent/agents');
   const agents = await AgentModel.list({ isActive: true });
 
   if (agents.length >= maxDevices) {

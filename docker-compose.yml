@@ -147,7 +147,15 @@ services:
             - REDIS_TLS_SERVERNAME=${REDIS_TLS_SERVERNAME}
             - MODBUS_TCP_HOST=${MODBUS_TCP_HOST:-iotistic-modbus-sim}
             - TAILSCALE_ENABLED=false
-            - MQTT_MONITOR_URL=${MQTT_MONITOR_URL:-http://mqtt-monitor:3500}
+            # Broker Monitor (runs inside api, Redis leader election controls which replica)
+            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
+            - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
+            - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
+            - MQTT_PERSIST_DB=${MQTT_PERSIST_DB:-true}
+            - MQTT_DB_SYNC_INTERVAL=${MQTT_DB_SYNC_INTERVAL:-30000}
+            - MQTT_METRICS_UPDATE_INTERVAL=${MQTT_METRICS_UPDATE_INTERVAL:-5000}
+            - MQTT_TOPIC_TREE_UPDATE_INTERVAL=${MQTT_TOPIC_TREE_UPDATE_INTERVAL:-5000}
+            - MQTT_MAX_PAYLOAD_BYTES=${MQTT_MAX_PAYLOAD_BYTES:-65536}
             - POSTOFFICE_URL=${POSTOFFICE_URL:-http://postoffice:3300}
             - PROVISIONING_API_URL=${PROVISIONING_API_URL:-http://host.docker.internal:3100}
             - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN}
@@ -522,49 +530,8 @@ services:
                 max-size: "5m"
                 max-file: "2"
 
-    mqtt-monitor:
-        build:
-            context: ./mqtt-monitor
-            dockerfile: Dockerfile
-        container_name: iotistic-mqtt-monitor
-        restart: unless-stopped
-        ports:
-            - "${MQTT_MONITOR_PORT_EXT:-3500}:3500"  # Exposed for testing
-        environment:
-            - NODE_ENV=${NODE_ENV:-development}
-            - PORT=3500
-            - HOST=0.0.0.0
-            - LOG_LEVEL=${MQTT_MONITOR_LOG_LEVEL:-info}
-       
-            - DB_HOST=${DB_HOST:-bg4k3yxway.pcwz234dvp.tsdb.cloud.timescale.com}
-            - DB_PORT=${DB_PORT:-30692}
-            - DB_NAME=${DB_NAME:-tsdb}
-            - DB_USER=${DB_USER:-tsdbadmin}
-            - DB_PASSWORD=${DB_PASSWORD:-w2qm8tm693xd3b9v}
-            - DB_POOL_SIZE=10
-            - DB_SSL=true
-            - MQTT_BROKER_URL=mqtt://mosquitto:1883
-            - MQTT_TLS_REJECT_UNAUTHORIZED=${MQTT_TLS_REJECT_UNAUTHORIZED:-false}
-            - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
-            - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
-            - MQTT_PERSIST_DB=${MQTT_PERSIST_DB:-true}
-            - MQTT_DB_SYNC_INTERVAL=${MQTT_DB_SYNC_INTERVAL:-30000}
-            - MQTT_METRICS_UPDATE_INTERVAL=${MQTT_METRICS_UPDATE_INTERVAL:-5000}
-            - MQTT_TOPIC_TREE_UPDATE_INTERVAL=${MQTT_TOPIC_TREE_UPDATE_INTERVAL:-5000}
-            - MQTT_MAX_PAYLOAD_BYTES=${MQTT_MAX_PAYLOAD_BYTES:-65536}
-        networks:
-            - iotistica-net
-        healthcheck:
-            test: ["CMD", "node", "-e", "require('http').get('http://localhost:3500/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-            interval: 30s
-            timeout: 10s
-            retries: 3
-            start_period: 40s
-        logging:
-            driver: "json-file"
-            options:
-                max-size: "10m"
-                max-file: "3"
+    # mqtt-monitor: removed — broker monitoring now runs inside the api service
+    # (Redis leader election ensures only one replica monitors the broker)
 
     # postoffice:
     #     build:

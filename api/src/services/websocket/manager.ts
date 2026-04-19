@@ -50,7 +50,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server as HTTPServer } from 'http';
 import { z } from 'zod';
-import { AgentModel, AgentMetricsModel, AgentLogsModel } from '../../db/models';
+import { AgentModel, AgentMetricsModel, AgentLogsModel } from '../agent/agents';
 import logger from '../../utils/logger';
 import { fetch } from 'undici';
 import { sessionManager } from '../remote/session-manager';

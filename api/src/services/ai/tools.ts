@@ -1,4 +1,4 @@
-import { AgentModel, AgentMetricsModel, AgentLogsModel } from '../../db/models';
+import { AgentModel, AgentMetricsModel, AgentLogsModel } from '../agent/agents';
 
 export const aiTools = [
   {

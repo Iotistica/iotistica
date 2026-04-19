@@ -15,7 +15,7 @@ import { query } from '../../db/connection';
 import {
   AgentModel,
   AgentCurrentStateModel,
-} from '../../db/models';
+} from './agents';
 import { EventPublisher, objectsAreEqual } from '../audit/event-sourcing';
 import EventSourcingConfig from '../../events/event-sourcing';
 import { deviceSensorSync, syncAgentDevices } from './devices';

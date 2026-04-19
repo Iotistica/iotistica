@@ -1,5 +1,6 @@
 import { query } from '../../db/connection';
 import { logger } from '../../utils/logger';
+import { getBrokerMonitorService } from '../broker-monitor/index';
 
 interface ReadingRow {
   agent_uuid: string;
@@ -104,8 +105,23 @@ export async function renderEndpointPrometheusMetrics(): Promise<string> {
   });
 
   const output = `${lines.join('\n')}\n`;
-  cachedOutput = output;
+
+  // Append broker-monitor Prometheus metrics if this replica is the leader
+  const brokerMonitor = getBrokerMonitorService();
+  let finalOutput = output;
+  if (brokerMonitor) {
+    try {
+      const brokerMetrics = await brokerMonitor.getPrometheusMetrics();
+      if (brokerMetrics) {
+        finalOutput = `${output}${brokerMetrics}`;
+      }
+    } catch (err: any) {
+      logger.warn('Failed to collect broker-monitor Prometheus metrics', { error: err.message });
+    }
+  }
+
+  cachedOutput = finalOutput;
   cachedAt = Date.now();
 
-  return output;
+  return finalOutput;
 }

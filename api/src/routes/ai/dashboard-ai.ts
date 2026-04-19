@@ -1,8 +1,8 @@
 ﻿
-import { jwtAuth } from '../middleware/jwt-auth';
-import { query } from '../db/connection';
-import logger from '../utils/logger';
-import { generateDashboardSuggestions, getStrategy } from '../services/ai/dashboard-suggestions';
+import { jwtAuth } from '../../middleware/jwt-auth';
+import { query } from '../../db/connection';
+import logger from '../../utils/logger';
+import { generateDashboardSuggestions, getStrategy } from '../../services/ai/dashboard-suggestions';
 import type { FastifyPluginAsync } from 'fastify'
 
 const plugin: FastifyPluginAsync = async (fastify) => {

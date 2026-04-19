@@ -13,7 +13,7 @@
 
 import * as k8s from '@kubernetes/client-node';
 import logger from '../../utils/logger';
-import { AgentModel } from '../../db/models';
+import { AgentModel } from '../agent/agents';
 
 export interface VirtualAgentConfig {
   deviceUuid: string;

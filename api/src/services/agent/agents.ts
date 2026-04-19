@@ -1,16 +1,801 @@
 import { randomUUID, randomBytes } from 'crypto';
 import * as mqtt from 'mqtt';
 import { query } from '../../db/connection';
-import { AgentModel, AgentTargetStateModel, AgentCurrentStateModel } from '../../db/models';
 import { logAuditEvent, AuditEventType, AuditSeverity } from '../../utils/audit-logger';
 import { EventPublisher } from '../audit/event-sourcing';
 import { logger } from '../../utils/logger';
-import { SystemConfig } from '../../config/system-config';
+import { SystemConfig } from '../config/system-config';
 import { virtualAgentDeployer } from '../provisioning/virtual-agent-deployer';
 import { provisioningService } from '../provisioning/provisioning';
 import { mqttDeviceTopic } from '../../mqtt/topics';
 import { getTenantId } from '../../redis/tenant-keys';
 import { getDefaultBrokerConfig, buildBrokerUrl } from '../../utils/mqtt-broker-config';
+
+// ============================================================================
+// Agent DB Interfaces
+// ============================================================================
+
+export interface Agent {
+  id: number;
+  uuid: string;
+  name?: string;
+  type?: string;
+  provisioning_state?: string;
+  status?: string;
+  is_online: boolean;
+  is_active: boolean;
+  last_connectivity_event?: Date;
+  ip_address?: string;
+  mac_address?: string;
+  location?: string;
+  os_version?: string;
+  agent_version?: string;
+  memory_usage?: number;
+  memory_total?: number;
+  storage_usage?: number;
+  storage_total?: number;
+  cpu_usage?: number;
+  cpu_temp?: number;
+  network_interfaces?: any;
+  device_api_key_hash?: string;
+  fleet_uuid?: string;
+  provisioned_at?: Date;
+  provisioned_by_key_id?: string;
+  mqtt_username?: string;
+  mqtt_broker_id?: number;
+  device_public_key?: string;
+  pop_verified?: boolean;
+  pop_verified_at?: Date;
+  last_challenge?: string;
+  last_challenge_expires_at?: Date;
+  vpn_enabled?: boolean;
+  vpn_username?: string;
+  vpn_password_hash?: string;
+  vpn_last_connected_at?: Date;
+  vpn_ip_address?: string;
+  vpn_bytes_sent?: number;
+  vpn_bytes_received?: number;
+  vpn_config_id?: number;
+  deployment_status?: 'pending' | 'deploying' | 'running' | 'failed' | 'terminated' | null;
+  k8s_namespace?: string | null;
+  k8s_pod_name?: string | null;
+  helm_release_name?: string | null;
+  created_at: Date;
+  modified_at: Date;
+}
+
+export interface AgentTargetState {
+  id: number;
+  agent_uuid: string;
+  apps: any;
+  config: {
+    agent?: {
+      version?: string;
+      update_scheduled_at?: string;
+      update_force?: boolean;
+      update_signature?: string;
+    };
+    endpoints?: any[];
+    intervals?: any;
+    logging?: any;
+    features?: any;
+    protocols?: any;
+    anomaly?: any;
+    [key: string]: any;
+  };
+  version: number;
+  needs_deployment?: boolean;
+  last_deployed_at?: Date;
+  deployed_by?: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface AgentCurrentState {
+  id: number;
+  agent_uuid: string;
+  apps: any;
+  config: any;
+  system_info: any;
+  version?: number;
+  reported_at: Date;
+}
+
+export interface AgentMetrics {
+  agent_uuid: string;
+  cpu_usage?: number;
+  cpu_temp?: number;
+  memory_usage?: number;
+  memory_total?: number;
+  storage_usage?: number;
+  storage_total?: number;
+  recorded_at: Date;
+}
+
+// ============================================================================
+// AgentModel
+// ============================================================================
+
+export class AgentModel {
+  /**
+   * Get or mark device online by UUID.
+   * Does NOT create device if it doesn't exist (prevents empty device records).
+   */
+  static async getOrCreate(uuid: string): Promise<Agent | null> {
+    const existingDevice = await this.getByUuid(uuid);
+
+    if (!existingDevice) {
+      logger.warn('Device does not exist - state polling before registration?', {
+        deviceUuid: uuid.substring(0, 8) + '...',
+        note: 'Device must complete registration before polling state',
+      });
+      return null;
+    }
+
+    const wasOffline = !existingDevice.is_online;
+
+    const isVirtualAgentPending =
+      existingDevice.type === 'virtual' && existingDevice.provisioning_state === 'pending';
+
+    if (isVirtualAgentPending) {
+      return existingDevice;
+    }
+
+    const result = await query<Agent>(
+      `UPDATE agents SET
+         is_online = true,
+         last_connectivity_event = CURRENT_TIMESTAMP
+       WHERE uuid = $1
+       RETURNING *`,
+      [uuid]
+    );
+
+    if (wasOffline && existingDevice) {
+      const offlineDurationMs = Date.now() - new Date(existingDevice.modified_at).getTime();
+      const offlineDurationMin = Math.floor(offlineDurationMs / 1000 / 60);
+
+      if (offlineDurationMin >= 5) {
+        const localPublisher = new EventPublisher('device_connectivity');
+        await localPublisher.publish(
+          'device.online',
+          'agent',
+          uuid,
+          {
+            name: existingDevice.name || 'Unknown',
+            was_offline_at: existingDevice.modified_at,
+            offline_duration_minutes: offlineDurationMin,
+            came_online_at: new Date().toISOString(),
+            reason: 'Device resumed communication',
+          },
+          {
+            metadata: {
+              detection_method: 'heartbeat_received',
+              last_seen: existingDevice.last_connectivity_event,
+            },
+          }
+        );
+
+        await logAuditEvent({
+          eventType: AuditEventType.DEVICE_ONLINE,
+          agentUuid: uuid,
+          severity: AuditSeverity.INFO,
+          details: {
+            deviceName: existingDevice.name || 'Unknown',
+            wasOfflineAt: existingDevice.modified_at,
+            offlineDurationMinutes: offlineDurationMin,
+            cameOnlineAt: new Date().toISOString(),
+          },
+        });
+
+        logger.info('Device came back online', {
+          deviceName: existingDevice.name || uuid.substring(0, 8),
+          deviceUuid: uuid,
+          offlineDurationMinutes: offlineDurationMin,
+          wasOfflineAt: existingDevice.modified_at,
+          cameOnlineAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    return result.rows[0];
+  }
+
+  static async getByUuid(uuid: string): Promise<Agent | null> {
+    const result = await query<Agent>('SELECT * FROM agents WHERE uuid = $1', [uuid]);
+    return result.rows[0] || null;
+  }
+
+  static async list(filters: { isOnline?: boolean; isActive?: boolean } = {}): Promise<Agent[]> {
+    let sql = 'SELECT * FROM agents WHERE 1=1';
+    const params: any[] = [];
+
+    if (filters.isOnline !== undefined) {
+      params.push(filters.isOnline);
+      sql += ` AND is_online = $${params.length}`;
+    }
+
+    if (filters.isActive !== undefined) {
+      params.push(filters.isActive);
+      sql += ` AND is_active = $${params.length}`;
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const result = await query<Agent>(sql, params);
+    return result.rows;
+  }
+
+  static async update(uuid: string, data: Partial<Agent>): Promise<Agent> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined && key !== 'uuid' && key !== 'id') {
+        fields.push(`${key} = $${paramIndex}`);
+        values.push(value);
+        paramIndex++;
+      }
+    });
+
+    values.push(uuid);
+
+    const result = await query<Agent>(
+      `UPDATE agents SET ${fields.join(', ')} WHERE uuid = $${paramIndex} RETURNING *`,
+      values
+    );
+
+    return result.rows[0];
+  }
+
+  static async upsert(uuid: string, data: Partial<Agent>): Promise<Agent> {
+    const insertFields: string[] = ['uuid'];
+    const insertPlaceholders: string[] = ['$1'];
+    const updateFields: string[] = [];
+    const values: any[] = [uuid];
+    let paramIndex = 2;
+
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined && key !== 'uuid' && key !== 'id') {
+        insertFields.push(key);
+        insertPlaceholders.push(`$${paramIndex}`);
+        updateFields.push(`${key} = EXCLUDED.${key}`);
+        values.push(value);
+        paramIndex++;
+      }
+    });
+
+    console.log('[DeviceModel.upsert] About to upsert device:', {
+      uuid: uuid.substring(0, 8) + '...',
+      insertFields,
+      type: data.type,
+      is_online: data.is_online,
+      status: data.status,
+      deployment_status: data.deployment_status,
+      provisioning_state: data.provisioning_state,
+    });
+
+    const result = await query<Agent>(
+      `INSERT INTO agents (${insertFields.join(', ')})
+       VALUES (${insertPlaceholders.join(', ')})
+       ON CONFLICT (uuid) DO UPDATE SET
+         ${updateFields.join(', ')}
+       RETURNING *`,
+      values
+    );
+
+    console.log('[DeviceModel.upsert] Device upserted, returned values:', {
+      uuid: result.rows[0].uuid.substring(0, 8) + '...',
+      id: result.rows[0].id,
+      is_online: result.rows[0].is_online,
+      status: result.rows[0].status,
+      deployment_status: result.rows[0].deployment_status,
+      provisioning_state: result.rows[0].provisioning_state,
+    });
+
+    return result.rows[0];
+  }
+
+  static async markOffline(uuid: string): Promise<void> {
+    await query('UPDATE agents SET is_online = false WHERE uuid = $1', [uuid]);
+  }
+
+  static async delete(uuid: string): Promise<void> {
+    await query('DELETE FROM agents WHERE uuid = $1', [uuid]);
+  }
+
+  static async storeChallenge(uuid: string, challenge: string, expiresAt: Date): Promise<void> {
+    await query(
+      `UPDATE agents
+       SET last_challenge = $1, last_challenge_expires_at = $2
+       WHERE uuid = $3`,
+      [challenge, expiresAt, uuid]
+    );
+  }
+
+  static async markPopVerified(uuid: string): Promise<void> {
+    await query(
+      `UPDATE agents
+       SET pop_verified = true,
+           pop_verified_at = CURRENT_TIMESTAMP,
+           last_challenge = NULL,
+           last_challenge_expires_at = NULL
+       WHERE uuid = $1`,
+      [uuid]
+    );
+  }
+
+  static async recordAuthMethod(uuid: string, method: 'pop' | 'bcrypt'): Promise<void> {
+    await query(
+      `UPDATE agents
+       SET last_auth_method = $1,
+           last_auth_at = CURRENT_TIMESTAMP
+       WHERE uuid = $2`,
+      [method, uuid]
+    );
+  }
+
+  static async getPublicKey(uuid: string): Promise<string | null> {
+    const result = await query<{ device_public_key: string }>(
+      'SELECT device_public_key FROM agents WHERE uuid = $1',
+      [uuid]
+    );
+    return result.rows[0]?.device_public_key || null;
+  }
+
+  static async setPublicKey(uuid: string, publicKey: string): Promise<void> {
+    const result = await query(
+      `UPDATE agents
+       SET device_public_key = $1
+       WHERE uuid = $2 AND device_public_key IS NULL`,
+      [publicKey, uuid]
+    );
+
+    if (result.rowCount === 0) {
+      throw new Error('Public key already set - cannot update (requires reprovisioning)');
+    }
+  }
+}
+
+// ============================================================================
+// AgentTargetStateModel
+// ============================================================================
+
+export class AgentTargetStateModel {
+  static async get(deviceUuid: string): Promise<AgentTargetState | null> {
+    const result = await query<AgentTargetState>(
+      'SELECT * FROM agent_target_state WHERE agent_uuid = $1',
+      [deviceUuid]
+    );
+    return result.rows[0] || null;
+  }
+
+  static async set(
+    deviceUuid: string,
+    apps: any,
+    config: any = {},
+    needsDeployment: boolean = false
+  ): Promise<AgentTargetState> {
+    const device = await AgentModel.getOrCreate(deviceUuid);
+    if (!device) {
+      throw new Error(`Device ${deviceUuid} not found - cannot set target state`);
+    }
+
+    const result = await query<AgentTargetState>(
+      `INSERT INTO agent_target_state (agent_uuid, apps, config, version, needs_deployment, updated_at)
+       VALUES ($1, $2, $3, 1, $4, CURRENT_TIMESTAMP)
+       ON CONFLICT (agent_uuid) DO UPDATE SET
+         apps = $2,
+         config = $3,
+         needs_deployment = $4,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [deviceUuid, JSON.stringify(apps), JSON.stringify(config), needsDeployment]
+    );
+
+    return result.rows[0];
+  }
+
+  static async deploy(
+    deviceUuid: string,
+    deployedBy: string = 'system'
+  ): Promise<AgentTargetState> {
+    const result = await query<AgentTargetState>(
+      `UPDATE agent_target_state SET
+         version = version + 1,
+         needs_deployment = false,
+         last_deployed_at = CURRENT_TIMESTAMP,
+         deployed_by = $2,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE agent_uuid = $1
+       RETURNING *`,
+      [deviceUuid, deployedBy]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error(`Device ${deviceUuid} has no target state to deploy`);
+    }
+
+    const deployedState = result.rows[0];
+
+    if (deployedState.config?.endpoints) {
+      // Lazy import to avoid circular dependency with devices.ts
+      const { AgentDeviceSyncService } = await import('./devices');
+      const syncService = new AgentDeviceSyncService();
+      const existingSensors = await query(
+        'SELECT uuid, name FROM endpoints WHERE agent_uuid = $1',
+        [deviceUuid]
+      );
+      const existingUuids = new Set(
+        existingSensors.rows.map((row: any) => row.uuid).filter(Boolean)
+      );
+      const existingNames = new Set(existingSensors.rows.map((row: any) => row.name));
+
+      const newEndpoints = deployedState.config.endpoints.filter((endpoint: any) => {
+        if (endpoint.uuid && existingUuids.has(endpoint.uuid)) return false;
+        if (endpoint.name && existingNames.has(endpoint.name)) return false;
+        return true;
+      });
+
+      if (newEndpoints.length > 0) {
+        await syncService.syncConfigToTable(
+          deviceUuid,
+          newEndpoints,
+          deployedState.version,
+          deployedBy
+        );
+      }
+    }
+
+    return deployedState;
+  }
+
+  static async clear(deviceUuid: string): Promise<void> {
+    await query(
+      `UPDATE agent_target_state SET apps = '{}', config = '{}', updated_at = CURRENT_TIMESTAMP
+       WHERE agent_uuid = $1`,
+      [deviceUuid]
+    );
+  }
+
+  static generateETag(state: AgentTargetState): string {
+    const payload = JSON.stringify({
+      version: state.version,
+      apps: state.apps,
+      config: state.config,
+    });
+    return require('crypto').createHash('sha1').update(payload).digest('hex');
+  }
+}
+
+// ============================================================================
+// AgentCurrentStateModel
+// ============================================================================
+
+export class AgentCurrentStateModel {
+  static async get(deviceUuid: string): Promise<AgentCurrentState | null> {
+    const result = await query<AgentCurrentState>(
+      'SELECT * FROM agent_current_state WHERE agent_uuid = $1',
+      [deviceUuid]
+    );
+    return result.rows[0] || null;
+  }
+
+  static async update(
+    deviceUuid: string,
+    apps: any,
+    config?: any,
+    systemInfo: any = {},
+    version?: number
+  ): Promise<AgentCurrentState> {
+    const device = await AgentModel.getOrCreate(deviceUuid);
+    if (!device) {
+      throw new Error(`Device ${deviceUuid} not found - cannot update current state`);
+    }
+
+    const configJson = config !== undefined && config !== null ? JSON.stringify(config) : null;
+
+    const result = await query<AgentCurrentState>(
+      `INSERT INTO agent_current_state (agent_uuid, apps, config, system_info, version, reported_at)
+       VALUES ($1, $2, COALESCE($3::jsonb, '{}'::jsonb), $4, $5, CURRENT_TIMESTAMP)
+       ON CONFLICT (agent_uuid) DO UPDATE SET
+         apps = $2,
+         config = CASE WHEN $3 IS NOT NULL THEN $3::jsonb ELSE agent_current_state.config END,
+         system_info = $4,
+         version = $5,
+         reported_at = CURRENT_TIMESTAMP
+       RETURNING *`,
+      [deviceUuid, JSON.stringify(apps), configJson, JSON.stringify(systemInfo), version || 0]
+    );
+
+    return result.rows[0];
+  }
+}
+
+// ============================================================================
+// AgentMetricsModel
+// ============================================================================
+
+export class AgentMetricsModel {
+  static async getRecent(deviceUuid: string, limit: number = 100): Promise<AgentMetrics[]> {
+    const result = await query<AgentMetrics>(
+      `SELECT * FROM agent_metrics
+       WHERE agent_uuid = $1
+       ORDER BY recorded_at DESC
+       LIMIT $2`,
+      [deviceUuid, limit]
+    );
+    return result.rows;
+  }
+
+  static async getRecentByTime(
+    deviceUuid: string,
+    sinceTimestamp: string
+  ): Promise<AgentMetrics[]> {
+    const result = await query<AgentMetrics>(
+      `SELECT * FROM agent_metrics
+       WHERE agent_uuid = $1
+       AND recorded_at >= $2
+       ORDER BY recorded_at ASC`,
+      [deviceUuid, sinceTimestamp]
+    );
+    return result.rows;
+  }
+
+  static async getByTimeRangeMinutes(
+    deviceUuid: string,
+    minutes: number,
+    maxPoints: number = 60
+  ): Promise<AgentMetrics[]> {
+    let tableName: string;
+    let timeColumn: string;
+    let cpuUsageColumn: string;
+    let memoryUsageColumn: string;
+    let storageUsageColumn: string;
+    let cpuTempColumn: string;
+
+    if (minutes <= 30) {
+      tableName = 'agent_metrics';
+      timeColumn = 'recorded_at';
+      cpuUsageColumn = 'cpu_usage';
+      memoryUsageColumn = 'memory_usage';
+      storageUsageColumn = 'storage_usage';
+      cpuTempColumn = 'cpu_temp';
+    } else if (minutes <= 360) {
+      tableName = 'agent_metrics_5min';
+      timeColumn = 'bucket';
+      cpuUsageColumn = 'avg_cpu_usage';
+      memoryUsageColumn = 'avg_memory_usage';
+      storageUsageColumn = 'avg_storage_usage';
+      cpuTempColumn = 'avg_cpu_temp';
+    } else {
+      tableName = 'agent_metrics_hourly';
+      timeColumn = 'bucket';
+      cpuUsageColumn = 'avg_cpu_usage';
+      memoryUsageColumn = 'avg_memory_usage';
+      storageUsageColumn = 'avg_storage_usage';
+      cpuTempColumn = 'avg_cpu_temp';
+    }
+
+    let interval: number;
+    if (tableName === 'agent_metrics_hourly') {
+      interval = 1;
+    } else {
+      interval = Math.max(1, Math.ceil(minutes / maxPoints));
+    }
+
+    const result = await query<AgentMetrics>(
+      `WITH numbered AS (
+        SELECT
+          agent_uuid,
+          ${timeColumn} as recorded_at,
+          ${cpuUsageColumn} as cpu_usage,
+          ${memoryUsageColumn} as memory_usage,
+          ${storageUsageColumn} as storage_usage,
+          ${cpuTempColumn} as cpu_temperature,
+          ROW_NUMBER() OVER (ORDER BY ${timeColumn}) as rn
+        FROM ${tableName}
+        WHERE agent_uuid = $1
+          AND ${timeColumn} >= NOW() - INTERVAL '1 minute' * $2
+          AND ${timeColumn} <= NOW()
+      )
+      SELECT
+        agent_uuid,
+        recorded_at,
+        ROUND(cpu_usage::numeric, 1) as cpu_usage,
+        ROUND(memory_usage::numeric, 0) as memory_usage,
+        ROUND(storage_usage::numeric, 0) as storage_usage,
+        ROUND(cpu_temperature::numeric, 1) as cpu_temperature
+      FROM numbered
+      WHERE ($3 = 1 OR rn % $3 = 1)
+      ORDER BY recorded_at ASC`,
+      [deviceUuid, minutes, interval]
+    );
+
+    return result.rows;
+  }
+
+  static async getByTimeRange(
+    deviceUuid: string,
+    startTime: Date,
+    endTime: Date,
+    maxPoints: number = 60
+  ): Promise<AgentMetrics[]> {
+    const totalMinutes = Math.floor((endTime.getTime() - startTime.getTime()) / 60000);
+    const interval = Math.max(1, Math.floor(totalMinutes / maxPoints));
+
+    let tableName: string;
+    let timeColumn: string;
+    let cpuUsageColumn: string;
+    let memoryUsageColumn: string;
+    let storageUsageColumn: string;
+    let cpuTempColumn: string;
+
+    if (totalMinutes <= 30) {
+      tableName = 'agent_metrics';
+      timeColumn = 'recorded_at';
+      cpuUsageColumn = 'cpu_usage';
+      memoryUsageColumn = 'memory_usage';
+      storageUsageColumn = 'storage_usage';
+      cpuTempColumn = 'cpu_temp';
+    } else if (totalMinutes <= 360) {
+      tableName = 'agent_metrics_5min';
+      timeColumn = 'bucket';
+      cpuUsageColumn = 'avg_cpu_usage';
+      memoryUsageColumn = 'avg_memory_usage';
+      storageUsageColumn = 'avg_storage_usage';
+      cpuTempColumn = 'avg_cpu_temp';
+    } else {
+      tableName = 'agent_metrics_hourly';
+      timeColumn = 'bucket';
+      cpuUsageColumn = 'avg_cpu_usage';
+      memoryUsageColumn = 'avg_memory_usage';
+      storageUsageColumn = 'avg_storage_usage';
+      cpuTempColumn = 'avg_cpu_temp';
+    }
+
+    const result = await query<AgentMetrics>(
+      `WITH numbered AS (
+        SELECT
+          agent_uuid,
+          ${timeColumn} as recorded_at,
+          ${cpuUsageColumn} as cpu_usage,
+          ${memoryUsageColumn} as memory_usage,
+          ${storageUsageColumn} as storage_usage,
+          ${cpuTempColumn} as cpu_temperature,
+          ROW_NUMBER() OVER (ORDER BY ${timeColumn}) as rn
+        FROM ${tableName}
+        WHERE agent_uuid = $1
+          AND ${timeColumn} >= ($2::timestamptz AT TIME ZONE 'UTC')::timestamp
+          AND ${timeColumn} <= ($3::timestamptz AT TIME ZONE 'UTC')::timestamp
+      )
+      SELECT
+        agent_uuid,
+        recorded_at,
+        cpu_usage,
+        memory_usage,
+        storage_usage,
+        cpu_temperature
+      FROM numbered
+      WHERE rn % $4 = 1
+      ORDER BY recorded_at ASC`,
+      [deviceUuid, startTime.toISOString(), endTime.toISOString(), interval]
+    );
+
+    return result.rows;
+  }
+
+  static async cleanup(_daysToKeep?: number): Promise<number> {
+    return 0;
+  }
+}
+
+// ============================================================================
+// AgentLogsModel
+// ============================================================================
+
+export class AgentLogsModel {
+  static async store(
+    deviceUuid: string,
+    logs: Array<{
+      serviceName?: string;
+      timestamp?: Date;
+      message: string;
+      level?: string;
+      isSystem?: boolean;
+      isStderr?: boolean;
+      meta?: Record<string, any> | null;
+    }>,
+    batchSize: number = 500
+  ): Promise<void> {
+    if (logs.length === 0) return;
+
+    const batches: typeof logs[] = [];
+    for (let i = 0; i < logs.length; i += batchSize) {
+      batches.push(logs.slice(i, i + batchSize));
+    }
+
+    await Promise.all(
+      batches.map(async (batch) => {
+        const values: any[] = [];
+        const placeholders: string[] = [];
+
+        batch.forEach((log, index) => {
+          const offset = index * 8;
+          placeholders.push(
+            `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`
+          );
+          values.push(
+            deviceUuid,
+            log.serviceName || null,
+            log.timestamp || new Date(),
+            log.message,
+            log.level || 'info',
+            log.isSystem || false,
+            log.isStderr || false,
+            log.meta ? JSON.stringify(log.meta) : null
+          );
+        });
+
+        await query(
+          `INSERT INTO agent_logs (agent_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta)
+           VALUES ${placeholders.join(', ')}`,
+          values
+        );
+      })
+    );
+  }
+
+  static async get(
+    deviceUuid: string,
+    options: {
+      serviceName?: string;
+      limit?: number;
+      offset?: number;
+      since?: Date;
+    } = {}
+  ): Promise<any[]> {
+    let sql = 'SELECT * FROM agent_logs WHERE agent_uuid = $1';
+    const params: any[] = [deviceUuid];
+    let paramIndex = 2;
+
+    if (options.serviceName) {
+      sql += ` AND service_name = $${paramIndex}`;
+      params.push(options.serviceName);
+      paramIndex++;
+    }
+
+    if (options.since) {
+      sql += ` AND timestamp >= $${paramIndex}`;
+      params.push(options.since);
+      paramIndex++;
+    }
+
+    sql += ' ORDER BY timestamp DESC';
+
+    if (options.limit) {
+      sql += ` LIMIT $${paramIndex}`;
+      params.push(options.limit);
+      paramIndex++;
+    }
+
+    if (options.offset) {
+      sql += ` OFFSET $${paramIndex}`;
+      params.push(options.offset);
+    }
+
+    const result = await query(sql, params);
+    return result.rows;
+  }
+
+  static async cleanup(daysToKeep: number = 7): Promise<number> {
+    const result = await query(
+      `DELETE FROM agent_logs
+       WHERE created_at < NOW() - INTERVAL '${daysToKeep} days'`
+    );
+    return result.rowCount || 0;
+  }
+}
 
 const log = logger.child({ module: 'agents-service' });
 const eventPublisher = new EventPublisher();

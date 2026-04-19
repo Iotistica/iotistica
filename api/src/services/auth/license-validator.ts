@@ -6,7 +6,7 @@
 
 import { importSPKI, jwtVerify } from 'jose';
 import fs from 'fs';
-import { SystemConfigModel } from '../../db/models';
+import { SystemConfigModel } from '../config/system-config';
 import logger from '../../utils/logger';
 
 export interface LicenseData {

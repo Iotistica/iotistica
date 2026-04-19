@@ -1,26 +1,66 @@
-/**
- * Global System Configuration Manager
- *
- * Dynamic key-value configuration manager for the system_config table.
- * Provides in-memory caching with lazy loading and pattern-based access.
- *
- * Usage:
- *   await SystemConfig.load();  // Load on startup
- *
- *   // Simple key-value
- *   const value = await SystemConfig.get('some.setting');
- *   await SystemConfig.set('some.setting', { foo: 'bar' });
- *
- *   // Pattern matching
- *   const allMqtt = await SystemConfig.getByPattern('mqtt.brokers.*');
- *
- *   // Convenience methods
- *   const broker = await SystemConfig.getMqttBroker(1);
- *   const vpn = await SystemConfig.getVpnConfig(1);
- */
+import { query } from '../../db/connection';
+import logger from '../../utils/logger';
 
-import { SystemConfigModel } from '../db/models';
-import logger from '../utils/logger';
+// ---------------------------------------------------------------------------
+// SystemConfigModel — raw DB layer
+// ---------------------------------------------------------------------------
+
+export class SystemConfigModel {
+  static async get<T = any>(key: string): Promise<T | null> {
+    const result = await query<{ value: T }>(
+      'SELECT value FROM system_config WHERE key = $1',
+      [key]
+    );
+    return result.rows[0]?.value || null;
+  }
+
+  static async set(key: string, value: any): Promise<void> {
+    await query(
+      `INSERT INTO system_config (key, value, updated_at)
+       VALUES ($1, $2, CURRENT_TIMESTAMP)
+       ON CONFLICT (key) DO UPDATE SET
+         value = $2,
+         updated_at = CURRENT_TIMESTAMP`,
+      [key, JSON.stringify(value)]
+    );
+  }
+
+  static async delete(key: string): Promise<void> {
+    await query('DELETE FROM system_config WHERE key = $1', [key]);
+  }
+
+  static async getAll(): Promise<Record<string, any>> {
+    const result = await query<{ key: string; value: any }>(
+      'SELECT key, value FROM system_config'
+    );
+    return result.rows.reduce(
+      (acc, row) => {
+        acc[row.key] = row.value;
+        return acc;
+      },
+      {} as Record<string, any>
+    );
+  }
+
+  static async getByPattern<T = any>(
+    pattern: string
+  ): Promise<Array<{ key: string; value: T }>> {
+    const result = await query<{ key: string; value: T }>(
+      'SELECT key, value FROM system_config WHERE key LIKE $1',
+      [pattern]
+    );
+    return result.rows;
+  }
+
+  static async has(key: string): Promise<boolean> {
+    const result = await query('SELECT 1 FROM system_config WHERE key = $1', [key]);
+    return result.rows.length > 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SystemConfigManager — caching service layer
+// ---------------------------------------------------------------------------
 
 class SystemConfigManager {
   private static instance: SystemConfigManager;

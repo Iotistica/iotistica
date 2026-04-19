@@ -5,9 +5,9 @@
 import { randomUUID } from 'crypto';
 import type { FastifyPluginAsync } from 'fastify';
 
-import { query } from '../db/connection';
-import { jwtAuth } from '../middleware/jwt-auth';
-import logger from '../utils/logger';
+import { query } from '../../db/connection';
+import { jwtAuth } from '../../middleware/jwt-auth';
+import logger from '../../utils/logger';
 
 type JsonObject = Record<string, unknown>;
 

@@ -6,10 +6,10 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import deviceAuth from '../middleware/agent-auth';
-import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { logger } from '../utils/logger';
-import * as JobsService from '../services/agent/jobs';
+import deviceAuth from '../../middleware/agent-auth';
+import { jwtAuth, requireRole } from '../../middleware/jwt-auth';
+import { logger } from '../../utils/logger';
+import * as JobsService from '../../services/agent/jobs';
 
 type TemplateListQuerystring = {
   category?: string;
