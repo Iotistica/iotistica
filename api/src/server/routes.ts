@@ -42,6 +42,7 @@ import billingRoutes from '../routes/billing';
 import fleetRoutes from '../routes/agent/fleets';
 import brokerMonitorRoutes from '../routes/broker-monitor';
 import readingsRoutes from '../routes/telemetry/readings';
+import queryRoutes from '../routes/telemetry/query';
 
 import {
   globalRateLimitOptions,
@@ -172,6 +173,7 @@ export async function mountRoutes(fastify: FastifyInstance): Promise<void> {
     await f.register(dashboardAiRoutes, { prefix: PATHS.dashboard });
     await f.register(metricsRoutes, { prefix: PATHS.metricsCatalog });
     await f.register(readingsRoutes, { prefix: PATHS.readings });
+    await f.register(queryRoutes, { prefix: PATHS.readings });
     await f.register(anomalyRoutes, { prefix: PATHS.anomaly });
 
   }, { prefix: API_BASE });
