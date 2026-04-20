@@ -4,9 +4,10 @@
  */
 
 import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { from as copyFrom } from 'pg-copy-streams';
-import { pool, query } from '../db/connection';
-import logger from '../utils/logger';
+import { getClient, query } from '../db/connection';
+import { logger } from '../utils/logger';
 
 export interface LogEntry {
   deviceUuid: string;
@@ -33,7 +34,7 @@ export class LogInserter {
   }
 
   private async insertBatchCopy(logs: LogEntry[]): Promise<void> {
-    const client = await pool.connect();
+    const client = await getClient();
 
     try {
       const csvData = logs.map(log => {
@@ -57,13 +58,11 @@ export class LogInserter {
       }).join('\n');
 
       const stream = Readable.from([csvData]);
-      const copyStream = (client as Parameters<typeof copyFrom>[0] & { query: (s: ReturnType<typeof copyFrom>) => NodeJS.WritableStream }).query(
+      const copyStream = client.query(
         copyFrom(`COPY agent_logs (agent_uuid, service_name, timestamp, message, level, is_system, is_stderr, meta) FROM STDIN WITH (FORMAT text, DELIMITER E'\\t', NULL '\\N')`)
       );
 
-      await new Promise<void>((resolve, reject) => {
-        stream.pipe(copyStream).on('finish', resolve).on('error', reject);
-      });
+      await pipeline(stream, copyStream as NodeJS.WritableStream);
     } finally {
       client.release();
     }
