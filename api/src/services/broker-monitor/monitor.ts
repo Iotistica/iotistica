@@ -19,7 +19,7 @@ import msgpack from 'msgpackr';
 import { MQTTDatabaseService } from './db';
 import logger from '../../utils/logger';
 import { PrometheusExporter } from './prometheus';
-import { isUtf8Buffer } from './is-utf8';
+import { isUtf8Buffer } from '../../utils/is-utf8';
 
 // Update interval for metrics (milliseconds)
 const METRICS_UPDATE_INTERVAL = parseInt(process.env.MQTT_METRICS_UPDATE_INTERVAL || '5000');

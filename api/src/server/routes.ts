@@ -30,7 +30,7 @@ import dashboardLayoutsRoutes from '../routes/dashboard-layouts';
 import mosquittoAuthRoutes from '../mqtt/auth';
 import noderedStorageRoutes from '../routes/nodered/nodered';
 import metricsRoutes from '../routes/telemetry/metrics';
-import prometheusRoutes from '../routes/prometheus';
+import prometheusRoutes from '../routes/telemetry/prometheus';
 import anomalyRoutes from '../routes/anomaly';
 import anomalyIncidentsRoutes from '../routes/anomaly-incidents';
 import anomalyAlertsRoutes from '../routes/anomaly-alerts';

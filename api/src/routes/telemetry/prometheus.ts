@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 
-import { renderEndpointPrometheusMetrics } from '../services/telemetry/prometheus';
-import { logger } from '../utils/logger';
+import { renderEndpointPrometheusMetrics } from '../../services/telemetry/prometheus';
+import { logger } from '../../utils/logger';
 
 const plugin: FastifyPluginAsync = async (fastify) => {
   fastify.get('/metrics', async (_req, reply) => {
