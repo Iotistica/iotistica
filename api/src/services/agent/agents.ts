@@ -6,7 +6,7 @@ import { EventPublisher } from '../audit/event-sourcing';
 import { logger } from '../../utils/logger';
 import { SystemConfig } from '../config/system-config';
 import { virtualAgentDeployer } from '../provisioning/virtual-agent-deployer';
-import { provisioningService } from '../provisioning/provisioning';
+import { provisioningService } from '../provisioning/register';
 import { mqttDeviceTopic } from '../../mqtt/topics';
 import { getTenantId } from '../../redis/tenant-keys';
 import { getDefaultBrokerConfig, buildBrokerUrl } from '../../utils/mqtt-broker-config';

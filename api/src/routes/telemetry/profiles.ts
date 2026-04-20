@@ -12,10 +12,10 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 
-import { query } from '../db/connection';
-import { validateApiKey } from '../middleware/api-key-auth';
-import { jwtAuth } from '../middleware/jwt-auth';
-import { logger } from '../utils/logger';
+import { query } from '../../db/connection';
+import { validateApiKey } from '../../middleware/api-key-auth';
+import { jwtAuth } from '../../middleware/jwt-auth';
+import { logger } from '../../utils/logger';
 
 interface ProfileRecord {
   profile_name: string;

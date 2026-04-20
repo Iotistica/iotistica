@@ -11,11 +11,11 @@ import {
   emergencyRevokeApiKey,
   getDeviceRotationStatus,
   getDeviceRotationHistory
-} from '../services/auth/api-key-rotation';
-import { deviceAuth } from '../middleware/agent-auth';
-import { jwtAuth } from '../middleware/jwt-auth';
-import { isAdminOrOwner } from '../middleware/permissions';
-import logger from '../utils/logger';
+} from '../../services/auth/api-key-rotation';
+import { deviceAuth } from '../../middleware/agent-auth';
+import { jwtAuth } from '../../middleware/jwt-auth';
+import { isAdminOrOwner } from '../../middleware/permissions';
+import logger from '../../utils/logger';
 import type { FastifyPluginAsync } from 'fastify'
 
 interface DeviceUuidParams {

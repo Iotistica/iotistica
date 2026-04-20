@@ -11,8 +11,8 @@
  */
 
 import { z } from 'zod';
-import { jwtAuth } from '../middleware/jwt-auth';
-import logger from '../utils/logger';
+import { jwtAuth } from '../../middleware/jwt-auth';
+import logger from '../../utils/logger';
 import {
 
   getAgents,
@@ -20,9 +20,9 @@ import {
   getLatestReadings,
   getTimeseries,
   refreshViews,
-} from '../services/agent/metrics';
-import type { TimeRange, Aggregation, RefreshView } from '../services/agent/metrics';
-import { getRemoteIngestionHealth } from '../services/telemetry/client';
+} from '../../services/agent/metrics';
+import type { TimeRange, Aggregation, RefreshView } from '../../services/agent/metrics';
+import { getRemoteIngestionHealth } from '../../services/telemetry/client';
 import type { FastifyPluginAsync } from 'fastify'
 
 const plugin: FastifyPluginAsync = async (fastify) => {

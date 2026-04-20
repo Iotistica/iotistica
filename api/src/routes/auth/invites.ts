@@ -22,8 +22,8 @@ import {
   jwtAuth,
   jwtValidate,
   requireRole,
-} from '../middleware/jwt-auth';
-import { logger } from '../utils/logger';
+} from '../../middleware/jwt-auth';
+import { logger } from '../../utils/logger';
 
 interface InviteCreateBody {
   email?: string;

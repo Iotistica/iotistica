@@ -4,10 +4,10 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { LicenseValidator } from '../services/auth/license-validator';
-import { AgentModel } from '../services/agent/agents';
-import { logger } from '../utils/logger';
-import { jwtAuth, requireRole } from '../middleware/jwt-auth';
+import { LicenseValidator } from '../../services/auth/license-validator';
+import { AgentModel } from '../../services/agent/agents';
+import { logger } from '../../utils/logger';
+import { jwtAuth, requireRole } from '../../middleware/jwt-auth';
 
 const plugin: FastifyPluginAsync = async (fastify) => {
   /**

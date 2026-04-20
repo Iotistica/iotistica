@@ -4,12 +4,12 @@
  * Handles CRUD operations for dashboard users with role-based permissions
  */
 
-import { query } from '../db/connection';
-import { jwtAuth, requireRole } from '../middleware/jwt-auth';
-import { ROLE_PERMISSIONS, ROLES, type Role, UserWithPermissions } from '../types/permissions';
-import { logger } from '../utils/logger';
+import { query } from '../../db/connection';
+import { jwtAuth, requireRole } from '..//../middleware/jwt-auth';
+import { ROLE_PERMISSIONS, ROLES, type Role, UserWithPermissions } from '../../types/permissions';
+import { logger } from '../../utils/logger';
 import type { FastifyPluginAsync } from 'fastify'
-import { hashPassword } from '../utils/secret-hashing';
+import { hashPassword } from '../../utils/secret-hashing';
 
 interface UserIdParams {
   id: string;
