@@ -58,7 +58,7 @@ export async function stopJobsHandler(): Promise<void> {
 }
 
 /**
- * Handle incoming endpoint data
+ * Handle incoming device data
  * Queue raw parsed data to Redis Stream (FAST - no compression!)
  * Supports both single messages and batches
  */
@@ -67,7 +67,7 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
     const startTime = Date.now();
     const resolvedDeviceName = data.deviceName.trim() || 'unknown';
     
-    // Check if this is a batch (from Sensor Publish feature)
+    // Check if this is a batch (from Device Publish feature)
     const isBatch = data.data && Array.isArray((data.data as any).messages);
     
     if (isBatch) {
@@ -130,7 +130,7 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
       }]);
       
       const duration = Date.now() - startTime;
-      logger.debug('Processed endpoints data', {
+      logger.debug('Processed device data', {
         deviceUuid: data.deviceUuid.substring(0, 8),
         deviceName: resolvedDeviceName,
         destination: outcome,
@@ -139,7 +139,7 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
     }
 
   } catch (error) {
-    logger.error('Failed to queue endpoints data:', error);
+    logger.error('Failed to queue device data:', error);
     throw error;
   }
 }

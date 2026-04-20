@@ -16,7 +16,7 @@ import { z } from 'zod';
 import type { FastifyPluginAsync } from 'fastify';
 import { jwtAuth } from '../../middleware/jwt-auth';
 import logger from '../../utils/logger';
-import { executeAdvancedQuery } from '../../services/telemetry/query';
+import { executeQuery, type AdvancedQueryInput } from '../../services/telemetry/query';
 
 // ── Validation schemas ────────────────────────────────────────────────────────
 
@@ -95,7 +95,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const results = await executeAdvancedQuery(body);
+      const results = await executeQuery(body as AdvancedQueryInput);
 
       return reply.send({
         query_count: body.queries.length,

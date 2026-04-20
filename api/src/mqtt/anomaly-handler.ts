@@ -113,14 +113,6 @@ export interface Incident {
 	status: 'open' | 'active' | 'resolved';
 }
 
-/**
- * Alert routing configuration
- */
-interface AlertRoute {
-	severity: 'info' | 'warning' | 'critical';
-	channels: ('database' | 'log')[];
-	minAffectedDevices?: number;
-}
 
 /**
  * Anomaly Event Handler - Cloud Correlation

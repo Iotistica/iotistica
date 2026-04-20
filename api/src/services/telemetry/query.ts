@@ -390,7 +390,7 @@ export async function executeSubQuery(
 
 // ── Public entry point ────────────────────────────────────────────────────────
 
-export async function executeAdvancedQuery(
+export async function executeQuery(
   input: AdvancedQueryInput,
 ): Promise<(SubQueryResult | PercentileSubQueryResult)[][]> {
   const start = parseTime(input.start);

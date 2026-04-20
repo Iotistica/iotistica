@@ -21,77 +21,6 @@ import { CloudDictionaryManager } from './dictionary';
 import { mqttDevicePattern, parseMqttTopic } from './topics';
 import { getTenantId } from '../redis/tenant-keys';
 
-/**
- * Deserialize MQTT payload - auto-detects DEFLATE, msgpack, or JSON format
- * @param message - Buffer or string payload
- * @returns Deserialized data object
- */
-function deserializePayload(message: Buffer | string): any {
-  let buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
-  
-  // Check for DEFLATE compression first (zlib header: 0x78 0x9C or 0x78 0x01 or 0x78 0xDA)
-  if (buffer.length >= 2) {
-    const firstByte = buffer[0];
-    const secondByte = buffer[1];
-    
-    // DEFLATE magic bytes: 0x78 followed by 0x01, 0x5E, 0x9C, 0xDA (different compression levels)
-    if (firstByte === 0x78 && (secondByte === 0x01 || secondByte === 0x5E || secondByte === 0x9C || secondByte === 0xDA)) {
-      try {
-        logger.debug('DEFLATE-compressed payload detected, decompressing', {
-          originalSize: buffer.length,
-          header: [firstByte, secondByte]
-        });
-        
-        // Decompress using zlib.inflateSync
-        buffer = zlib.inflateSync(buffer);
-        
-        logger.debug('DEFLATE decompression successful', {
-          compressedSize: message.length,
-          decompressedSize: buffer.length,
-          ratio: `${(((message.length - buffer.length) / message.length) * 100).toFixed(1)}%`
-        });
-      } catch (error) {
-        logger.warn('DEFLATE decompression failed, treating as raw payload', {
-          error: error instanceof Error ? error.message : String(error)
-        });
-        // Continue with original buffer if decompression fails
-        buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
-      }
-    }
-  }
-  
-  // Try MessagePack first (binary marker detection)
-  if (buffer.length > 0) {
-    const firstByte = buffer[0];
-    // MessagePack markers: fixarray (0x90-0x9f), array16/32 (0xdc-0xdd), fixmap (0x80-0x8f)
-    if ((firstByte >= 0x90 && firstByte <= 0x9f) || 
-        firstByte === 0xdc || firstByte === 0xdd ||
-        (firstByte >= 0x80 && firstByte <= 0x8f)) {
-      try {
-        return msgpack.decode(buffer);
-      } catch {
-        // Fall through to JSON if msgpack decode fails
-      }
-    }
-  }
-  
-  // Try JSON parsing
-  const str = buffer.toString('utf-8');
-  try {
-    return JSON.parse(str);
-  } catch (error) {
-    logger.warn('Failed to decode MQTT payload as JSON', {
-      payloadSize: buffer.length,
-      firstBytesHex: buffer.subarray(0, 8).toString('hex'),
-      utf8Preview: str.substring(0, 120),
-      error: error instanceof Error ? error.message : String(error),
-    });
-
-    // Return raw message if both msgpack and JSON fail
-    return message;
-  }
-}
-
 export interface MqttConfig {
   brokerUrl: string;
   clientId?: string;
@@ -965,6 +894,65 @@ export class MqttManager extends EventEmitter {
   }
 
   /**
+   * Deserialize MQTT payload - auto-detects DEFLATE, msgpack, or JSON format
+   */
+  private deserializePayload(message: Buffer | string): any {
+    let buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+    // Check for DEFLATE compression first (zlib header: 0x78 0x9C or 0x78 0x01 or 0x78 0xDA)
+    if (buffer.length >= 2) {
+      const firstByte = buffer[0];
+      const secondByte = buffer[1];
+      // DEFLATE magic bytes: 0x78 followed by 0x01, 0x5E, 0x9C, 0xDA (different compression levels)
+      if (firstByte === 0x78 && (secondByte === 0x01 || secondByte === 0x5E || secondByte === 0x9C || secondByte === 0xDA)) {
+        try {
+          logger.debug('DEFLATE-compressed payload detected, decompressing', {
+            originalSize: buffer.length,
+            header: [firstByte, secondByte]
+          });
+          buffer = zlib.inflateSync(buffer);
+          logger.debug('DEFLATE decompression successful', {
+            compressedSize: message.length,
+            decompressedSize: buffer.length,
+            ratio: `${(((message.length - buffer.length) / message.length) * 100).toFixed(1)}%`
+          });
+        } catch (error) {
+          logger.warn('DEFLATE decompression failed, treating as raw payload', {
+            error: error instanceof Error ? error.message : String(error)
+          });
+          buffer = Buffer.isBuffer(message) ? message : Buffer.from(message);
+        }
+      }
+    }
+    // Try MessagePack first (binary marker detection)
+    if (buffer.length > 0) {
+      const firstByte = buffer[0];
+      // MessagePack markers: fixarray (0x90-0x9f), array16/32 (0xdc-0xdd), fixmap (0x80-0x8f)
+      if ((firstByte >= 0x90 && firstByte <= 0x9f) ||
+          firstByte === 0xdc || firstByte === 0xdd ||
+          (firstByte >= 0x80 && firstByte <= 0x8f)) {
+        try {
+          return msgpack.decode(buffer);
+        } catch {
+          // Fall through to JSON
+        }
+      }
+    }
+    // Try JSON parsing
+    const str = buffer.toString('utf-8');
+    try {
+      return JSON.parse(str);
+    } catch (error) {
+      logger.warn('Failed to decode MQTT payload as JSON', {
+        payloadSize: buffer.length,
+        firstBytesHex: buffer.subarray(0, 8).toString('hex'),
+        utf8Preview: str.substring(0, 120),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return message;
+    }
+  }
+
+  /**
    * Handle incoming MQTT messages
    */
   private async handleMessage(topic: string, payload: Buffer): Promise<void> {
@@ -983,7 +971,7 @@ export class MqttManager extends EventEmitter {
       
 
       // Parse payload (auto-detects msgpack or JSON) - pass Buffer directly
-      let data: any = deserializePayload(payload);
+      let data: any = this.deserializePayload(payload);
 
       // Dictionary expansion: Check if message is compacted and expand it
       if (messageType === 'endpoints' && this.cloudDictionaryManager) {

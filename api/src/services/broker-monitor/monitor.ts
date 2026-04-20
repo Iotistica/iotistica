@@ -1219,7 +1219,7 @@ export class MQTTMonitorService extends EventEmitter {
 
     try {
       const topicsToUpdate = Array.from(this.persister.getPending());
-      logger.info(`syncToDatabase: ${topicsToUpdate.length} topics pending for topic/schema updates`);
+      logger.debug(`syncToDatabase: ${topicsToUpdate.length} topics pending for topic/schema updates`);
       const topicRecords: any[] = [];
       const schemaHistoryBatch: any[] = [];
       const topicMetricsBatch: any[] = [];
@@ -1237,7 +1237,7 @@ export class MQTTMonitorService extends EventEmitter {
         });
       };
       collectTopics(this.topicTree);
-      logger.info(`Found ${allTopics.length} total topics for metrics collection`);
+      logger.debug(`Found ${allTopics.length} total topics for metrics collection`);
 
       for (const topic of topicsToUpdate) {
         const parts = topic.split('/');
@@ -1339,7 +1339,7 @@ export class MQTTMonitorService extends EventEmitter {
           }
         }
         
-        logger.info(`Synced ${topicRecords.length} topics to database`);
+        logger.debug(`Synced ${topicRecords.length} topics to database`);
       }
 
       await this.dbService.saveBrokerStats({
@@ -1372,7 +1372,7 @@ export class MQTTMonitorService extends EventEmitter {
       }
 
       if (topicMetricsBatch.length > 0) {
-        logger.info(`Saving ${topicMetricsBatch.length} topic metrics to database`);
+        logger.debug(`Saving ${topicMetricsBatch.length} topic metrics to database`);
         if (typeof this.dbService.saveTopicMetricsBatch === 'function') {
           await this.dbService.saveTopicMetricsBatch(topicMetricsBatch)
             .catch((err: any) => logger.error('Failed to batch save topic metrics', { 
@@ -1422,6 +1422,8 @@ export class MQTTMonitorService extends EventEmitter {
   }
 
   private startEventLoopMonitoring(): void {
+    // Reset baseline to now so the first tick doesn't measure startup delay as lag
+    this.lastEventLoopCheck = Date.now();
     this.eventLoopLagInterval = setInterval(() => {
       const now = Date.now();
       const lag = now - this.lastEventLoopCheck - 1000; // Expected 1s interval
