@@ -714,7 +714,7 @@ services:
             - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
             - GF_USERS_ALLOW_SIGN_UP=false
             - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:${GRAFANA_PORT_EXT:-30001}}
-            - GF_INSTALL_PLUGINS=
+            - GF_INSTALL_PLUGINS=simpod-json-datasource
         depends_on:
             prometheus:
                 condition: service_healthy

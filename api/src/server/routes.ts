@@ -43,6 +43,7 @@ import fleetRoutes from '../routes/agent/fleets';
 import brokerMonitorRoutes from '../routes/broker-monitor';
 import readingsRoutes from '../routes/telemetry/readings';
 import queryRoutes from '../routes/telemetry/query';
+import grafanaRoutes from '../routes/grafana/index';
 
 import {
   globalRateLimitOptions,
@@ -72,6 +73,7 @@ const PATHS = {
   metricsCatalog:     '/metrics',
   readings:           '/readings',
   anomaly:            '/anomaly',
+  grafana:            '/grafana',
 } as const;
 
 export async function mountRoutes(fastify: FastifyInstance): Promise<void> {
@@ -175,6 +177,7 @@ export async function mountRoutes(fastify: FastifyInstance): Promise<void> {
     await f.register(readingsRoutes, { prefix: PATHS.readings });
     await f.register(queryRoutes, { prefix: PATHS.readings });
     await f.register(anomalyRoutes, { prefix: PATHS.anomaly });
+    await f.register(grafanaRoutes, { prefix: PATHS.grafana });
 
   }, { prefix: API_BASE });
 }
