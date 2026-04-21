@@ -198,6 +198,102 @@ const grafanaPlugin: FastifyPluginAsync = async (fastify) => {
   );
 
   // -------------------------------------------------------------------------
+  // Variable endpoints — return [{text, value}] for Infinity variable queries
+  // -------------------------------------------------------------------------
+
+  // GET /variable/agents
+  fastify.get(
+    '/variable/agents',
+    { preHandler: [jwtAuth] },
+    async (_req, reply) => {
+      try {
+        const result = await query<{ uuid: string; name: string }>(
+          `SELECT uuid::text AS uuid,
+                  COALESCE(NULLIF(name, ''), 'Agent ' || left(uuid::text, 8)) AS name
+           FROM agents
+           ORDER BY name
+           LIMIT $1`,
+          [SEARCH_ROW_LIMIT]
+        );
+        const rows = result.rows.map(r => ({ text: r.name, value: r.uuid }));
+        logger.info('grafana GET /variable/agents', { count: rows.length, rows });
+        return reply.send(rows);
+      } catch (err) {
+        logger.error('grafana GET /variable/agents error', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return reply.status(500).send({ error: 'Internal error' });
+      }
+    }
+  );
+
+  // GET /variable/devices?agentId=<uuid>
+  fastify.get<{ Querystring: { agentId?: string } }>(
+    '/variable/devices',
+    { preHandler: [jwtAuth] },
+    async (req, reply) => {
+      const agentParsed = uuidSchema.safeParse(req.query.agentId);
+      if (!agentParsed.success) return reply.send([]);
+      try {
+        const result = await query<{ device_uuid: string; device_name: string }>(
+          `SELECT DISTINCT
+                  device_uuid::text                                                         AS device_uuid,
+                  COALESCE(NULLIF(device_name, ''), 'Unknown')                             AS device_name
+           FROM endpoint_devices
+           WHERE agent_uuid = $1
+             AND device_uuid IS NOT NULL
+           ORDER BY device_name
+           LIMIT $2`,
+          [agentParsed.data, SEARCH_ROW_LIMIT]
+        );
+        return reply.send(result.rows.map(r => ({ text: r.device_name, value: r.device_uuid })));
+      } catch (err) {
+        logger.error('grafana GET /variable/devices error', {
+          agentId: req.query.agentId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return reply.status(500).send({ error: 'Internal error' });
+      }
+    }
+  );
+
+  // GET /variable/metrics?deviceId=<uuid>&agentId=<uuid>
+  fastify.get<{ Querystring: { deviceId?: string; agentId?: string } }>(
+    '/variable/metrics',
+    { preHandler: [jwtAuth] },
+    async (req, reply) => {
+      const deviceParsed = uuidSchema.safeParse(req.query.deviceId);
+      if (!deviceParsed.success) return reply.send([]);
+      const agentParsed = req.query.agentId ? uuidSchema.safeParse(req.query.agentId) : null;
+      if (agentParsed && !agentParsed.success) return reply.send([]);
+      try {
+        const sqlParams: unknown[] = [deviceParsed.data, SEARCH_ROW_LIMIT];
+        let agentFilter = '';
+        if (agentParsed?.success) {
+          sqlParams.push(agentParsed.data);
+          agentFilter = ` AND agent_uuid = $${sqlParams.length}`;
+        }
+        const result = await query<{ metric_name: string }>(
+          `SELECT DISTINCT metric_name
+           FROM metric_catalog
+           WHERE device_uuid = $1
+             ${agentFilter}
+           ORDER BY metric_name
+           LIMIT $2`,
+          sqlParams
+        );
+        return reply.send(result.rows.map(r => ({ text: r.metric_name, value: r.metric_name })));
+      } catch (err) {
+        logger.error('grafana GET /variable/metrics error', {
+          deviceId: req.query.deviceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return reply.status(500).send({ error: 'Internal error' });
+      }
+    }
+  );
+
+  // -------------------------------------------------------------------------
   // GET /agents/:agentId/devices — devices under a specific agent
   // -------------------------------------------------------------------------
   fastify.get<{ Params: { agentId: string } }>(
@@ -291,6 +387,102 @@ const grafanaPlugin: FastifyPluginAsync = async (fastify) => {
       } catch (err) {
         logger.error('grafana GET /devices/:deviceId/metrics error', {
           deviceId: req.params.deviceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return reply.status(500).send({ error: 'Internal error' });
+      }
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // GET /devices?agentId=<uuid> — devices for an agent (query-param variant,
+  // avoids double-slash when Infinity substitutes an empty template variable)
+  // -------------------------------------------------------------------------
+  fastify.get<{ Querystring: { agentId?: string } }>(
+    '/devices',
+    { preHandler: [jwtAuth] },
+    async (req, reply) => {
+      const agentParsed = uuidSchema.safeParse(req.query.agentId);
+      if (!agentParsed.success) {
+        return reply.send([]);
+      }
+      try {
+        const result = await query<{
+          device_uuid: string;
+          device_name: string;
+          protocol: string;
+          metric_count: number;
+          last_seen: string;
+        }>(
+          `SELECT DISTINCT
+                  device_uuid::text                                                         AS device_uuid,
+                  COALESCE(NULLIF(device_name, ''), 'Unknown')                             AS device_name,
+                  protocol,
+                  COALESCE(metric_count, 0)::int                                           AS metric_count,
+                  last_seen
+           FROM endpoint_devices
+           WHERE agent_uuid = $1
+             AND device_uuid IS NOT NULL
+           ORDER BY device_name
+           LIMIT $2`,
+          [agentParsed.data, SEARCH_ROW_LIMIT]
+        );
+        return reply.send(result.rows);
+      } catch (err) {
+        logger.error('grafana GET /devices error', {
+          agentId: req.query.agentId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return reply.status(500).send({ error: 'Internal error' });
+      }
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // GET /metrics?deviceId=<uuid>&agentId=<uuid> — metrics (query-param variant)
+  // -------------------------------------------------------------------------
+  fastify.get<{ Querystring: { deviceId?: string; agentId?: string } }>(
+    '/metrics',
+    { preHandler: [jwtAuth] },
+    async (req, reply) => {
+      const deviceParsed = uuidSchema.safeParse(req.query.deviceId);
+      if (!deviceParsed.success) {
+        return reply.send([]);
+      }
+      const agentParsed = req.query.agentId
+        ? uuidSchema.safeParse(req.query.agentId)
+        : null;
+      if (agentParsed && !agentParsed.success) {
+        return reply.send([]);
+      }
+      try {
+        const sqlParams: unknown[] = [deviceParsed.data, SEARCH_ROW_LIMIT];
+        let agentFilter = '';
+        if (agentParsed?.success) {
+          sqlParams.push(agentParsed.data);
+          agentFilter = ` AND agent_uuid = $${sqlParams.length}`;
+        }
+        const result = await query<{
+          metric_name: string;
+          unit: string | null;
+          protocol: string;
+          last_seen: string;
+        }>(
+          `SELECT DISTINCT metric_name,
+                  COALESCE(NULLIF(unit, ''), NULL) AS unit,
+                  protocol,
+                  last_seen
+           FROM metric_catalog
+           WHERE device_uuid = $1
+             ${agentFilter}
+           ORDER BY metric_name
+           LIMIT $2`,
+          sqlParams
+        );
+        return reply.send(result.rows);
+      } catch (err) {
+        logger.error('grafana GET /metrics error', {
+          deviceId: req.query.deviceId,
           error: err instanceof Error ? err.message : String(err),
         });
         return reply.status(500).send({ error: 'Internal error' });

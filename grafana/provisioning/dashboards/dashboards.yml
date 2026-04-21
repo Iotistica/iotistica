@@ -4,9 +4,9 @@
 apiVersion: 1
 
 providers:
-  - name: 'Iotistic Dashboards'
+  - name: 'Iotistica Dashboards'
     orgId: 1
-    folder: 'Iotistic'
+    folder: 'Iotistica'
     type: file
     disableDeletion: false
     updateIntervalSeconds: 10

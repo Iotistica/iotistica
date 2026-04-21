@@ -1,0 +1,413 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "title": "Agent Device Metrics",
+  "description": "Live telemetry from IoT agents and their devices. Use the variables to drill down by agent, device, and metric.",
+  "tags": ["iotistica", "devices", "metrics"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "uid": "iotistica-agent-device-metrics",
+  "templating": {
+    "list": [
+      {
+        "name": "agent",
+        "label": "Agent",
+        "type": "query",
+        "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "hide": 0,
+        "definition": "/api/v1/grafana/variable/agents",
+        "query": {
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/variable/agents",
+          "url_options": { "method": "GET", "data": "" },
+          "format": "table",
+          "root_selector": "",
+          "columns": [
+            { "selector": "text", "text": "__text__", "type": "string" },
+            { "selector": "value", "text": "__value__", "type": "string" }
+          ]
+        },
+        "current": {}
+      },
+      {
+        "name": "device",
+        "label": "Device",
+        "type": "query",
+        "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+        "refresh": 1,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "hide": 0,
+        "definition": "/api/v1/grafana/variable/devices",
+        "query": {
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/variable/devices",
+          "url_options": { "method": "GET", "data": "", "params": "agentId=${agent}" },
+          "format": "table",
+          "root_selector": "",
+          "columns": [
+            { "selector": "text", "text": "__text__", "type": "string" },
+            { "selector": "value", "text": "__value__", "type": "string" }
+          ]
+        },
+        "current": {}
+      },
+      {
+        "name": "metric",
+        "label": "Metric",
+        "type": "query",
+        "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+        "refresh": 1,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "hide": 0,
+        "definition": "/api/v1/grafana/variable/metrics",
+        "query": {
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/variable/metrics",
+          "url_options": { "method": "GET", "data": "", "params": "deviceId=${device}&agentId=${agent}" },
+          "format": "table",
+          "root_selector": "",
+          "columns": [
+            { "selector": "text", "text": "__text__", "type": "string" },
+            { "selector": "value", "text": "__value__", "type": "string" }
+          ]
+        },
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Device Overview",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "title": "Devices under Agent",
+      "type": "table",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": { "show": false }
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "device_uuid" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "metric_count" },
+            "properties": [{ "id": "displayName", "value": "Metrics" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "device_name" },
+            "properties": [{ "id": "displayName", "value": "Device" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/devices",
+          "url_options": { "method": "GET", "data": "", "params": "agentId=${agent}" },
+          "format": "table",
+          "columns": [
+            { "selector": "device_name", "text": "device_name", "type": "string" },
+            { "selector": "protocol", "text": "protocol", "type": "string" },
+            { "selector": "metric_count", "text": "metric_count", "type": "number" },
+            { "selector": "last_seen", "text": "last_seen", "type": "timestamp" }
+          ],
+          "root_selector": ""
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Available Metrics",
+      "type": "table",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": { "show": false }
+      },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "metric_name" },
+            "properties": [{ "id": "displayName", "value": "Metric" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/metrics",
+          "url_options": { "method": "GET", "data": "", "params": "deviceId=${device}&agentId=${agent}" },
+          "format": "table",
+          "columns": [
+            { "selector": "metric_name", "text": "metric_name", "type": "string" },
+            { "selector": "unit", "text": "unit", "type": "string" },
+            { "selector": "protocol", "text": "protocol", "type": "string" },
+            { "selector": "last_seen", "text": "last_seen", "type": "timestamp" }
+          ],
+          "root_selector": ""
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "row",
+      "title": "Time Series",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }
+    },
+    {
+      "id": 5,
+      "title": "${metric}",
+      "type": "timeseries",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "showPoints": "never",
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/timeseries",
+          "url_options": {
+            "method": "GET",
+            "data": "",
+            "params": "deviceId=${device}&metric=${metric}&agentId=${agent}&from=${__from:date:iso}&to=${__to:date:iso}"
+          },
+          "format": "timeseries",
+          "timestamp_column": "time",
+          "timestamp_format": "2006-01-02T15:04:05Z07:00",
+          "value_column": "value",
+          "columns": [
+            { "selector": "time", "text": "Time", "type": "timestamp" },
+            { "selector": "value", "text": "Value", "type": "number" }
+          ],
+          "root_selector": ""
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Current Value",
+      "type": "stat",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 20 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/timeseries",
+          "url_options": {
+            "method": "GET",
+            "data": "",
+            "params": "deviceId=${device}&metric=${metric}&agentId=${agent}&from=${__from:date:iso}&to=${__to:date:iso}"
+          },
+          "format": "timeseries",
+          "timestamp_column": "time",
+          "timestamp_format": "2006-01-02T15:04:05Z07:00",
+          "value_column": "value",
+          "columns": [
+            { "selector": "time", "text": "Time", "type": "timestamp" },
+            { "selector": "value", "text": "Value", "type": "number" }
+          ],
+          "root_selector": ""
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Min",
+      "type": "stat",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 20 },
+      "options": {
+        "reduceOptions": { "calcs": ["min"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/timeseries",
+          "url_options": {
+            "method": "GET",
+            "data": "",
+            "params": "deviceId=${device}&metric=${metric}&agentId=${agent}&from=${__from:date:iso}&to=${__to:date:iso}"
+          },
+          "format": "timeseries",
+          "timestamp_column": "time",
+          "timestamp_format": "2006-01-02T15:04:05Z07:00",
+          "value_column": "value",
+          "columns": [
+            { "selector": "time", "text": "Time", "type": "timestamp" },
+            { "selector": "value", "text": "Value", "type": "number" }
+          ],
+          "root_selector": ""
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Max",
+      "type": "stat",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 20 },
+      "options": {
+        "reduceOptions": { "calcs": ["max"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "red" } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/timeseries",
+          "url_options": {
+            "method": "GET",
+            "data": "",
+            "params": "deviceId=${device}&metric=${metric}&agentId=${agent}&from=${__from:date:iso}&to=${__to:date:iso}"
+          },
+          "format": "timeseries",
+          "timestamp_column": "time",
+          "timestamp_format": "2006-01-02T15:04:05Z07:00",
+          "value_column": "value",
+          "columns": [
+            { "selector": "time", "text": "Time", "type": "timestamp" },
+            { "selector": "value", "text": "Value", "type": "number" }
+          ],
+          "root_selector": ""
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Avg",
+      "type": "stat",
+      "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "iotistica-infinity" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 20 },
+      "options": {
+        "reduceOptions": { "calcs": ["mean"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "fixed", "fixedColor": "purple" } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "type": "json",
+          "source": "url",
+          "url": "/api/v1/grafana/timeseries",
+          "url_options": {
+            "method": "GET",
+            "data": "",
+            "params": "deviceId=${device}&metric=${metric}&agentId=${agent}&from=${__from:date:iso}&to=${__to:date:iso}"
+          },
+          "format": "timeseries",
+          "timestamp_column": "time",
+          "timestamp_format": "2006-01-02T15:04:05Z07:00",
+          "value_column": "value",
+          "columns": [
+            { "selector": "time", "text": "Time", "type": "timestamp" },
+            { "selector": "value", "text": "Value", "type": "number" }
+          ],
+          "root_selector": ""
+        }
+      ]
+    }
+  ]
+}

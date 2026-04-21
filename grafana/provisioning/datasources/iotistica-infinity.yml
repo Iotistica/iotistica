@@ -12,3 +12,6 @@ datasources:
       base_url: "http://api:3002"
       allowedHosts:
         - "api:3002"
+      httpHeaderName1: "X-Grafana-Internal"
+    secureJsonData:
+      httpHeaderValue1: "true"
