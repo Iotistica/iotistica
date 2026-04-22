@@ -163,7 +163,7 @@ api:
     SecretName: "sql-credentials-client-{{CLIENT_ID}}"
   dbInit:
     enabled: true
-    adminSecretName: "cnpg-admin-credentials"   # billing superuser in this namespace
+    adminSecretName: "provisioning-db-credentials-cnpg"   # billing superuser in this namespace
     pgHost: "iotistica-cnpg-cl01-rw.iotistica-cnpg-cl01.svc.cluster.local"
     pgPort: "5432"
   mqtt:
