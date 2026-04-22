@@ -159,10 +159,14 @@ services:
       SKIP_ARGOCD_STATUS_CHECK: ${SKIP_ARGOCD_STATUS_CHECK:-false}
       ARGOCD_TEST_CLIENT_ID: ${ARGOCD_TEST_CLIENT_ID:-}  # For testing: use existing app (e.g., db949acf)
       
+      # API migrations path (used by create-template-db script)
+      API_MIGRATIONS_PATH: /app/api-migrations
     volumes:
       - ./keys:/app/keys
       # Git repository cache (GitOps operations)
       - gitops_repo_cache:/tmp/iot-k8s-main
+      # API migrations for template database creation
+      - ../api/database/migrations:/app/api-migrations:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -190,7 +194,7 @@ services:
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_DB: 0
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-local-dev-redis-change-me}
       REDIS_CLUSTER: ${REDIS_CLUSTER:-false}
       REDIS_TLS: ${REDIS_TLS:-false}
       REDIS_USE_TLS: ${REDIS_USE_TLS:-false}
@@ -275,10 +279,14 @@ services:
       
       # Legacy Helm deployment
       SIMULATE_K8S_DEPLOYMENT: ${SIMULATE_K8S_DEPLOYMENT:-true}
+      # API migrations path (used by create-template-db script)
+      API_MIGRATIONS_PATH: /app/api-migrations
     volumes:
       - ./keys:/app/keys
       # Git repository cache (shared with API)
       - gitops_repo_cache:/tmp/iot-k8s-main
+      # API migrations for template database creation
+      - ../api/database/migrations:/app/api-migrations:ro
     depends_on:
       postgres:
         condition: service_healthy

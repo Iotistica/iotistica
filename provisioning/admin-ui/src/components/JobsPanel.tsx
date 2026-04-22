@@ -13,11 +13,13 @@ const JOB_STATE_CLASSES: Record<string, string> = {
 
 interface JobsPanelProps {
   customerId: string;
+  refreshTrigger?: number;
 }
 
-export default function JobsPanel({ customerId }: JobsPanelProps) {
+export default function JobsPanel({ customerId, refreshTrigger = 0 }: JobsPanelProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [manualRefresh, setManualRefresh] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function fetchJobs() {
@@ -31,10 +33,8 @@ export default function JobsPanel({ customerId }: JobsPanelProps) {
     }
   }
 
-  useEffect(() => {
-    fetchJobs();
-
-    // Poll every 3 s while any job is active or waiting
+  function startPolling() {
+    if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = setInterval(async () => {
       const data = await getCustomerJobs(customerId).catch(() => ({ jobs: [] as Job[] }));
       setJobs(data.jobs);
@@ -44,21 +44,32 @@ export default function JobsPanel({ customerId }: JobsPanelProps) {
         intervalRef.current = null;
       }
     }, 3000);
+  }
+
+  useEffect(() => {
+    fetchJobs();
+    startPolling();
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [customerId]);
-
-  if (loading) {
-    return <p className="text-sm text-gray-500">Loading jobs...</p>;
-  }
-
-  if (jobs.length === 0) {
-    return <p className="text-sm text-gray-500">No jobs found for this customer.</p>;
-  }
+  }, [customerId, refreshTrigger, manualRefresh]);
 
   return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-base font-medium text-gray-900">Deployment Jobs</h2>
+        <button
+          onClick={() => setManualRefresh((n: number) => n + 1)}
+          disabled={loading}
+          className="text-sm text-gray-500 hover:text-gray-800 border border-gray-200 rounded-md px-2.5 py-1 hover:bg-gray-50 transition-colors disabled:opacity-40"
+        >
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+      {jobs.length === 0 ? (
+        <p className="text-sm text-gray-500">{loading ? 'Loading jobs...' : 'No jobs found for this customer.'}</p>
+      ) : (
     <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
         <thead>
@@ -106,6 +117,8 @@ export default function JobsPanel({ customerId }: JobsPanelProps) {
           ))}
         </tbody>
       </table>
+    </div>
+      )}
     </div>
   );
 }

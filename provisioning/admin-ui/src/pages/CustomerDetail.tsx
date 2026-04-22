@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   deleteCustomer,
@@ -31,6 +31,7 @@ export default function CustomerDetail() {
   const [actionMsg, setActionMsg] = useState('');
   const [actionError, setActionError] = useState('');
   const [confirming, setConfirming] = useState<'provision' | 'deprovision' | 'delete' | null>(null);
+  const [jobRefresh, setJobRefresh] = useState(0);
 
   useEffect(() => {
     if (!id) return;
@@ -70,6 +71,7 @@ export default function CustomerDetail() {
     try {
       const result = await provisionCustomer(id);
       setActionMsg(`Deployment job queued (${result.jobId}). Watch jobs below.`);
+      setJobRefresh((n: number) => n + 1);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed');
     }
@@ -83,6 +85,7 @@ export default function CustomerDetail() {
     try {
       const result = await deprovisionCustomer(id);
       setActionMsg(`Deprovision job queued (${result.jobId}).`);
+      setJobRefresh((n: number) => n + 1);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed');
     }
@@ -203,7 +206,7 @@ export default function CustomerDetail() {
                 <input
                   type="text"
                   value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setCompanyName(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -212,7 +215,7 @@ export default function CustomerDetail() {
                 <input
                   type="text"
                   value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => setFullName(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -285,8 +288,7 @@ export default function CustomerDetail() {
 
       {/* Jobs panel */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h2 className="text-base font-medium text-gray-900 mb-4">Deployment Jobs</h2>
-        <JobsPanel customerId={customer.customer_id} />
+        <JobsPanel customerId={customer.customer_id} refreshTrigger={jobRefresh} />
       </div>
     </div>
   );

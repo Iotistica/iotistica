@@ -1127,6 +1127,16 @@ export class PostgresProvisioningService {
       await adminClient.end().catch(() => undefined);
     }
 
+    // Install required extensions in the template database before running migrations.
+    // CREATE DATABASE ... TEMPLATE template0 produces a bare database with no extensions,
+    // so timescaledb and pgcrypto must be created here (as superuser / CREATEDB role)
+    // before any migration DDL that references them is applied.
+    await this.runScriptInDatabase(
+      templateName,
+      `CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;`
+    );
+
     // Apply the schema script inside the template database when provided
     if (schemaScriptSql) {
       await this.runScriptInDatabase(templateName, schemaScriptSql);

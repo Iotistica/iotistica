@@ -4,16 +4,33 @@
 # Global configuration
 global:
   namespace: client-{{CLIENT_ID}}
+  logTenant: client-{{CLIENT_ID}}
 redis:
-  enabled: false
-  tls: false     # No TLS for port 10000
+  enabled: true
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  serviceType: ClusterIP
+  port: 6379
+  maxMemory: 1536mb
+  maxMemoryPolicy: noeviction
+  tls: false
   tlsServerName: ""
-  cluster: false # Azure Redis is NOT in cluster mode (Basic/Standard tier)
+  cluster: false
   auth:
     enabled: true
     existingSecret: ""
     password: ""
     passwordKey: password
+  resources:
+    requests:
+      cpu: 100m
+      memory: 1Gi
+    limits:
+      cpu: 250m
+      memory: 2Gi
 # Mosquitto MQTT broker
 mosquitto:
   enabled: true
@@ -50,7 +67,12 @@ mosquitto:
     allowAnonymous: false
     hasher: bcrypt
     hasherCost: 10
+    httpTimeoutSeconds: 10
     logLevel: info
+    cache:
+      authSeconds: 600
+      aclSeconds: 600
+      jitterSeconds: 30
   # Persistence for message queues
   persistence:
     enabled: true
@@ -58,8 +80,8 @@ mosquitto:
 # Choose between local (self-hosted Mosquitto) or cloud (HiveMQ, AWS IoT Core)
 mqttBroker:
   protocol: mqtt
-  #  host: "mqtt2.iotistica.com"
-  host: "client-{{CLIENT_ID}}-iotistic-mosquitto.client-{{CLIENT_ID}}.svc.cluster.local"
+  useInternalService: true
+  host: ""
   port: 1883
   useTls: false
   verifyCertificate: false
@@ -96,7 +118,11 @@ api:
     NODE_ENV: production
     LOG_LEVEL: info
     DB_POOL_SIZE: "20" # Increased for large fleet deployments (100+ agents)
-    DB_SSL: "false" # Internal K8s PostgreSQL does not support SSL
+    DB_IDLE_TIMEOUT_MS: "10000"
+    DB_CONNECTION_TIMEOUT_MS: "15000"
+    DB_STATEMENT_TIMEOUT_MS: "45000"
+    DB_APPLICATION_NAME: "iotistic-api-client-{{CLIENT_ID}}"
+    DB_SSL: "true"
     DB_SSL_REJECT_UNAUTHORIZED: "false"
     DB_SKIP_MIGRATIONS: "true" # Database schema pre-initialized by provisioning service
     AI_PROVIDER: "openai"
@@ -105,6 +131,23 @@ api:
     AZURE_OPENAI_API_VERSION: "2024-08-01-preview"
     MQTT_PERSIST_TO_DB: "true"
     MQTT_DB_SYNC_INTERVAL: "10000"
+    MQTT_AUTH_CACHE_TTL_SECONDS: "300"
+    MQTT_AUTH_USER_CACHE_TTL_SECONDS: "300"
+    MQTT_AUTH_DENY_CACHE_TTL_SECONDS: "5"
+    MQTT_AUTH_CACHE_MAX_ENTRIES: "20000"
+    MQTT_AUTH_LOADER_TIMEOUT_MS: "100"
+    MQTT_AUTH_USER_LOADER_TIMEOUT_MS: "500"
+    MQTT_AUTH_COLD_START_TIMEOUT_MS: "500"
+    MQTT_AUTH_USER_COLD_START_TIMEOUT_MS: "500"
+    MQTT_AUTH_COLD_START_WINDOW_SECONDS: "30"
+    MQTT_AUTH_WARMUP_USER_LIMIT: "100"
+    MQTT_AUTH_CACHE_LOG_HITS: "false"
+    MQTT_AUTH_SHARED_CACHE_ENABLED: "true"
+    MQTT_AUTH_SHARED_CACHE_EPOCH_REFRESH_SECONDS: "2"
+    MQTT_AUTH_SHARED_LOCK_ENABLED: "true"
+    MQTT_AUTH_SHARED_LOCK_TIMEOUT_MS: "250"
+    MQTT_AUTH_SHARED_LOCK_WAIT_TIMEOUT_MS: "125"
+    MQTT_AUTH_SHARED_LOCK_POLL_INTERVAL_MS: "15"
     MQTT_MONITOR_ENABLED: "true"
     LOG_COMPRESSION: "true"
     VPN_ENABLED: "false"
@@ -112,6 +155,9 @@ api:
     VIRTUAL_AGENT_CPU_REQUEST: "50m"
     JWT_ACCESS_TOKEN_EXPIRY: "15m"
     JWT_REFRESH_TOKEN_EXPIRY: "7d"
+    DISK_SPOOL_ENABLED: "true"
+    DISK_SPOOL_PATH: "/tmp/iotistic-spool"
+    DISK_SPOOL_MAX_SIZE_MB: "1000"
   sql:
     # Reference existing Kubernetes secret (recommended for production)
     SecretName: "sql-credentials-client-{{CLIENT_ID}}"
@@ -143,6 +189,59 @@ api:
     scrapeTimeout: 10s
     labels: {} # Additional labels for ServiceMonitor (match your Prometheus selector)
     relabelings: [] # Optional metric relabeling
+# Ingestion service
+ingestion:
+  enabled: true
+  image:
+    repository: iotistic/ingestion
+    tag: "{{RELEASE_VERSION}}"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 3003
+  serviceType: ClusterIP
+  resources:
+    requests:
+      cpu: 300m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  spoolPersistence:
+    enabled: false
+    accessMode: ReadWriteOnce
+    size: 10Gi
+    storageClassName: default
+  streamKeyResolver:
+    enabled: true
+    licenseSecretName: "api-license-credentials-client-{{CLIENT_ID}}"
+    licenseSecretKey: "key"
+  profile: batch
+  profileOverrides: {}
+  runtimeEnv:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    DB_IDLE_TIMEOUT_MS: "10000"
+    DB_CONNECTION_TIMEOUT_MS: "20000"
+    DB_STATEMENT_TIMEOUT_MS: "45000"
+    DB_APPLICATION_NAME: "iotistic-ingestion-client-{{CLIENT_ID}}"
+    DB_SSL: "true"
+    DB_SSL_REJECT_UNAUTHORIZED: "false"
+    DISK_SPOOL_ENABLED: "true"
+    DISK_SPOOL_PATH: "/var/lib/iotistic/spool"
+    DISK_SPOOL_MAX_SIZE_MB: "1000"
+    REDIS_PROCESSING_STREAM_MAXLEN: "100000"
+  monitoring:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    relabelings: []
 # Dashboard UI
 dashboard:
   enabled: true
@@ -180,37 +279,6 @@ dashboard:
       memory: 256Mi
   env:
     NODE_ENV: production
-# MQTT Monitor service
-mqttMonitor:
-  enabled: true
-  image:
-    repository: iotistic/mqtt-monitor
-    tag: latest
-    pullPolicy: IfNotPresent
-  replicas: 1
-  port: 3500
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 200m
-      memory: 256Mi
-  env:
-    NODE_ENV: development
-    LOG_LEVEL: info
-    DB_POOL_SIZE: "10"
-    MQTT_PERSIST_DB: "true"
-    MQTT_DB_SYNC_INTERVAL: "30000"
-    MQTT_METRICS_UPDATE_INTERVAL: "5000"
-    MQTT_TOPIC_TREE_UPDATE_INTERVAL: "5000"
-  # MQTT credentials (should match mosquitto credentials)
-  # SECURITY: For production, reference the same secret as API service
-  # See api.mqtt configuration above for security options
-  mqtt:
-    # Reference existing Kubernetes secret (recommended for production)
-    existingSecret: "mqtt-credentials-client-{{CLIENT_ID}}"
-
 
 # Node-RED - Visual flow automation
 nodered:
