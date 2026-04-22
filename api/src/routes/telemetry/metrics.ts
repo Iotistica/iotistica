@@ -22,7 +22,7 @@ import {
   refreshViews,
 } from '../../services/agent/metrics';
 import type { TimeRange, Aggregation, RefreshView } from '../../services/agent/metrics';
-import { getRemoteIngestionHealth } from '../../services/telemetry/client';
+import { query } from '../../db/connection';
 import type { FastifyPluginAsync } from 'fastify'
 
 const plugin: FastifyPluginAsync = async (fastify) => {
@@ -159,13 +159,27 @@ fastify.get<{ Querystring: LatestQuerystring }>('/latest', { preHandler: [jwtAut
 });
 
 // ---------------------------------------------------------------------------
-// GET /ingestion-health  — live pipeline health for chart freshness awareness
+// GET /ingestion-health  — pipeline freshness derived from DB last-write time
+// No inter-service call: the DB already reflects whether ingestion is working.
 // ---------------------------------------------------------------------------
 fastify.get('/ingestion-health', { preHandler: [jwtAuth] }, async (req, reply) => {
   const requestId = req.id || 'unknown';
   try {
-    const health = await getRemoteIngestionHealth();
-    return reply.send(health);
+    const result = await query<{ last_ts: Date | null }>(
+      'SELECT MAX(time) AS last_ts FROM readings_latest',
+    );
+    const lastTs = result.rows[0]?.last_ts ?? null;
+    const lastProcessedTimestamp = lastTs ? lastTs.getTime() : null;
+    const STALE_MS = 5 * 60 * 1000; // 5 min
+    const ingestionHealthy = lastProcessedTimestamp === null
+      ? true  // no data yet — treat as healthy (new tenant)
+      : (Date.now() - lastProcessedTimestamp) < STALE_MS;
+    return reply.send({
+      lastProcessedTimestamp,
+      ingestionHealthy,
+      spoolingActive: false,
+      backlogSize: 0,
+    });
   } catch (error: unknown) {
     logger.error('Error getting ingestion health', {
       requestId,
