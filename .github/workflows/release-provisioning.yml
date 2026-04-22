@@ -37,6 +37,7 @@ jobs:
     runs-on: [arc-runner-set-iotistica-light]
     outputs:
       release_version: ${{ steps.set_version.outputs.release_version }}
+      docker_tag: ${{ steps.set_version.outputs.docker_tag }}
     steps:
       - name: Checkout repository (full)
         uses: actions/checkout@v4
@@ -52,8 +53,10 @@ jobs:
 
           if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/provisioning-v* ]]; then
             RELEASE="${GITHUB_REF#refs/tags/}"
-            echo "Tag push detected: $RELEASE"
+            DOCKER_TAG="${RELEASE#provisioning-}"
+            echo "Tag push detected: $RELEASE (docker tag: $DOCKER_TAG)"
             echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
+            echo "docker_tag=$DOCKER_TAG" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -98,7 +101,10 @@ jobs:
           fi
 
           echo "Release version: $RELEASE"
+          DOCKER_TAG="${RELEASE#provisioning-}"
+          echo "Docker tag: $DOCKER_TAG"
           echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
+          echo "docker_tag=$DOCKER_TAG" >> $GITHUB_OUTPUT
 
       - name: Create git tag (workflow_dispatch only)
         if: github.event_name == 'workflow_dispatch'
@@ -142,8 +148,10 @@ jobs:
         run: |
           set -euo pipefail
           RELEASE="${{ needs.prepare.outputs.release_version }}"
+          DOCKER_TAG="${{ needs.prepare.outputs.docker_tag }}"
 
           echo "Release version: $RELEASE"
+          echo "Docker tag: $DOCKER_TAG"
           echo ""
 
           # ── Phase 1: Freeze point ────────────────────────────────────────────
@@ -168,19 +176,19 @@ jobs:
 
           # ── Phase 2: Promote to versioned release tag ────────────────────────
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "Phase 2: Promoting to $RELEASE"
+          echo "Phase 2: Promoting to $DOCKER_TAG"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           for APP in ${{ env.APPS }}; do
             DIGEST="${DIGESTS[$APP]}"
             docker buildx imagetools create \
-              -t "${DOCKER_ORG}/${APP}:${RELEASE}" \
+              -t "${DOCKER_ORG}/${APP}:${DOCKER_TAG}" \
               "${DOCKER_ORG}/${APP}@${DIGEST}"
-            echo "✅ $APP: ${DIGEST:0:19}... → ${RELEASE}"
+            echo "✅ $APP: ${DIGEST:0:19}... → ${DOCKER_TAG}"
           done
           echo ""
 
           # ── Phase 3: Tag as 'latest' for final releases ───────────────────────
-          if [[ "$RELEASE" != *"-rc."* ]]; then
+          if [[ "$DOCKER_TAG" != *"-rc."* ]]; then
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "Phase 3: Tagging as 'latest'"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -196,12 +204,12 @@ jobs:
 
           echo "## Image Promotion Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release:** \`$RELEASE\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** \`$DOCKER_TAG\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Promoted Images" >> $GITHUB_STEP_SUMMARY
           for APP in ${{ env.APPS }}; do
             DIGEST="${DIGESTS[$APP]}"
-            echo "- **${APP}**: \`ci-latest\` (\`${DIGEST:0:19}...\`) → \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- **${APP}**: \`ci-latest\` (\`${DIGEST:0:19}...\`) → \`${DOCKER_TAG}\`" >> $GITHUB_STEP_SUMMARY
           done
 
       - name: Checkout repository (for changelog)
@@ -242,6 +250,7 @@ jobs:
       - name: Update provisioning chart image tags and push
         run: |
           RELEASE="${{ needs.prepare.outputs.release_version }}"
+          DOCKER_TAG="${{ needs.prepare.outputs.docker_tag }}"
           VALUES_FILE="iot-k8s/charts/provisioning/values.yaml"
 
           if [ ! -f "$VALUES_FILE" ]; then
@@ -249,27 +258,27 @@ jobs:
             exit 1
           fi
 
-          yq eval ".api.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
+          yq eval ".api.image.tag = \"${DOCKER_TAG}\"" -i "$VALUES_FILE"
           yq eval ".api.image.pullPolicy = \"IfNotPresent\"" -i "$VALUES_FILE"
-          yq eval ".worker.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
+          yq eval ".worker.image.tag = \"${DOCKER_TAG}\"" -i "$VALUES_FILE"
           yq eval ".worker.image.pullPolicy = \"IfNotPresent\"" -i "$VALUES_FILE"
 
           cd iot-k8s
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if git diff --quiet; then
-            echo "No changes to commit — tags already at $RELEASE"
+            echo "No changes to commit — tags already at $DOCKER_TAG"
           else
             git add "charts/provisioning/values.yaml"
-            git commit -m "chore: bump provisioning to ${RELEASE}"
+            git commit -m "chore: bump provisioning to ${DOCKER_TAG}"
             git push origin main
-            echo "✅ Pushed provisioning version update to ${RELEASE}"
+            echo "✅ Pushed provisioning version update to ${DOCKER_TAG}"
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## iot-k8s Chart Updated" >> $GITHUB_STEP_SUMMARY
           echo "**File:** \`charts/provisioning/values.yaml\`" >> $GITHUB_STEP_SUMMARY
-          echo "**api.image.tag:** \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**worker.image.tag:** \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**api.image.tag:** \`${DOCKER_TAG}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**worker.image.tag:** \`${DOCKER_TAG}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "ArgoCD will automatically sync the provisioning application." >> $GITHUB_STEP_SUMMARY
