@@ -67,7 +67,10 @@ export function authenticateAdmin(
   }
 
   // Constant-time comparison to prevent timing attacks
-  if (!crypto.timingSafeEqual(Buffer.from(token), Buffer.from(adminToken))) {
+  // timingSafeEqual requires equal-length buffers; mismatched length always means invalid token
+  const tokenBuf = Buffer.from(token);
+  const adminBuf = Buffer.from(adminToken);
+  if (tokenBuf.length !== adminBuf.length || !crypto.timingSafeEqual(tokenBuf, adminBuf)) {
     return res.status(401).json({ error: 'Invalid admin token' });
   }
 
