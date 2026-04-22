@@ -668,6 +668,49 @@ export class PostgresProvisioningService {
   }
 
   /**
+   * Generate app-user credentials for a CNPG-managed database.
+   *
+   * The database is created by the CNPG Database CR written to git, and the
+   * app role is created by the db-init Helm hook on first ArgoCD sync.
+   * This method only generates the credentials that will be stored in 1Password
+   * and consumed by those automated steps — no DDL is executed.
+   *
+   * The CNPG pooler host/port are read from env vars:
+   *   CNPG_POOLER_HOST  (default: iotistica-cnpg-cl01-pooler-rw.iotistica-cnpg-cl01.svc.cluster.local)
+   *   CNPG_POOLER_PORT  (default: 5432)
+   *
+   * @param namespace - Client namespace (e.g. "client-dc5fec42901a")
+   */
+  generateCnpgCredentials(namespace: string): TigerDataDatabase {
+    const password = this.generatePassword();
+    // PostgreSQL role names cannot contain hyphens — replace with underscores.
+    const username = namespace.replace(/-/g, '_');
+    const host =
+      process.env.CNPG_POOLER_HOST ||
+      'iotistica-cnpg-cl01-pooler-rw.iotistica-cnpg-cl01.svc.cluster.local';
+    const port = parseInt(process.env.CNPG_POOLER_PORT || '5432', 10);
+
+    logger.info('[PostgresProvisioningService] Generated CNPG credentials', {
+      namespace,
+      username,
+      host,
+      port,
+    });
+
+    return {
+      serviceId: username,
+      host,
+      port,
+      dbName: namespace,
+      username,
+      password,
+      region: 'cnpg',
+      status: 'active',
+      fullResponse: null,
+    };
+  }
+
+  /**
    * Provision a new PostgreSQL database for the given client namespace.
    *
    * Creates:

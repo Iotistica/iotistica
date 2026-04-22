@@ -70,7 +70,7 @@ export class GitOpsProvisioningService {
   private git: SimpleGit;
   private config: GitOpsConfig;
   private initialized = false;
-  private dbProvider: 'tigerdata' | 'postgres';
+  private dbProvider: 'tigerdata' | 'postgres' | 'cnpg';
   private tigerDataService: TigerDataService;
   private postgresProvisioningService?: PostgresProvisioningService;
   private onePasswordService: OnePasswordService;
@@ -97,13 +97,21 @@ export class GitOpsProvisioningService {
       ],
     });
 
-    // Select database provisioning provider (PROVISIONING_DB_PROVIDER=tigerdata|postgres)
+    // Select database provisioning provider (PROVISIONING_DB_PROVIDER=tigerdata|postgres|cnpg)
     const rawProvider = (process.env.PROVISIONING_DB_PROVIDER ?? 'tigerdata').toLowerCase();
-    this.dbProvider = rawProvider === 'postgres' ? 'postgres' : 'tigerdata';
+    if (rawProvider === 'cnpg') {
+      this.dbProvider = 'cnpg';
+    } else if (rawProvider === 'postgres') {
+      this.dbProvider = 'postgres';
+    } else {
+      this.dbProvider = 'tigerdata';
+    }
 
     // Initialize provisioning services
     this.tigerDataService = new TigerDataService();
-    if (this.dbProvider === 'postgres') {
+    if (this.dbProvider === 'postgres' || this.dbProvider === 'cnpg') {
+      // postgres-provisioning-service is reused for cnpg: generateCnpgCredentials() only,
+      // no DDL is executed (database + role creation is handled by CNPG operator + db-init job).
       this.postgresProvisioningService = new PostgresProvisioningService();
     }
     this.onePasswordService = new OnePasswordService();
@@ -234,6 +242,41 @@ export class GitOpsProvisioningService {
    */
 
   /**
+   * Generate a CNPG Database CR for the given client.
+   *
+   * The CR is written to argocd/cnpg-clients/client-{id}.yaml and picked up by
+   * the cnpg-clients ArgoCD app-of-apps. The CNPG operator then creates the
+   * actual PostgreSQL database on the shared cluster. The app role and permissions
+   * are created by the db-init Helm hook on the client's first ArgoCD sync.
+   *
+   * Cluster config comes from env vars:
+   *   CNPG_CLUSTER_NAME      (default: iotistica-cnpg-cl01)
+   *   CNPG_CLUSTER_NAMESPACE (default: iotistica-cnpg-cl01)
+   *   CNPG_DB_OWNER          (default: billing)
+   */
+  private generateCnpgDatabaseCR(clientId: string, namespace: string): any {
+    const clusterName = process.env.CNPG_CLUSTER_NAME || 'iotistica-cnpg-cl01';
+    const clusterNamespace = process.env.CNPG_CLUSTER_NAMESPACE || 'iotistica-cnpg-cl01';
+    const dbOwner = process.env.CNPG_DB_OWNER || 'billing';
+
+    return {
+      apiVersion: 'postgresql.cnpg.io/v1',
+      kind: 'Database',
+      metadata: {
+        name: `client-${clientId}`,
+        namespace: clusterNamespace,
+      },
+      spec: {
+        name: `client-${clientId}`,
+        owner: dbOwner,
+        cluster: {
+          name: clusterName,
+        },
+      },
+    };
+  }
+
+  /**
    * Create Argo CD Application manifest for client
    */
   private generateApplicationManifest(data: ClientDeploymentData): any {
@@ -339,7 +382,7 @@ export class GitOpsProvisioningService {
       await this.git.pull('origin', this.config.mainBranch);
 
       // === STEP 1: Provision Database ===
-      const providerLabel = this.dbProvider === 'postgres' ? 'POSTGRES' : 'TIGERDATA';
+      const providerLabel = this.dbProvider === 'cnpg' ? 'CNPG' : this.dbProvider === 'postgres' ? 'POSTGRES' : 'TIGERDATA';
       console.log('\n' + '-'.repeat(80));
       console.log(`STEP 1/4: PROVISION ${providerLabel} DATABASE`);
       console.log('-'.repeat(80));
@@ -354,48 +397,60 @@ export class GitOpsProvisioningService {
 
       let dbResult: TigerDataDatabase;
       try {
-        console.log(`\nCreating ${providerLabel} database for namespace: ${data.namespace}`);
-
-        if (this.dbProvider === 'postgres') {
-          dbResult = await this.postgresProvisioningService!.provisionDatabase(data.namespace);
+        if (this.dbProvider === 'cnpg') {
+          // CNPG: credential generation only — no DDL.
+          // The database is created by the CNPG Database CR written to git in Step 3.
+          // The app role + grants are created by the db-init Helm hook on first ArgoCD sync.
+          console.log(`\nGenerating CNPG credentials for namespace: ${data.namespace}`);
+          dbResult = this.postgresProvisioningService!.generateCnpgCredentials(data.namespace);
+          console.log(`\nCNPG credentials generated:`);
+          console.log(`   Username: ${dbResult.username}`);
+          console.log(`   Database: ${dbResult.dbName}`);
+          console.log(`   Pooler:   ${dbResult.host}:${dbResult.port}`);
         } else {
-          dbResult = await this.tigerDataService.provisionDatabase(data.namespace);
-        }
+          console.log(`\nCreating ${providerLabel} database for namespace: ${data.namespace}`);
 
-        console.log(`\nDatabase provisioning response received:`);
-        console.log(JSON.stringify(dbResult, null, 2));
-
-        console.log(`\nDatabase provisioned:`);
-        console.log(`   Service ID: ${dbResult.serviceId}`);
-        console.log(`   Host: ${dbResult.host}`);
-        console.log(`   Port: ${dbResult.port}`);
-        console.log(`   Database: ${dbResult.dbName}`);
-        console.log(`   Username: ${dbResult.username}`);
-        console.log(`   Status: ${dbResult.status}`);
-        logger.info('Database provisioned', {
-          provider: this.dbProvider,
-          serviceId: dbResult.serviceId,
-          host: dbResult.host,
-        });
-
-        console.log(`\nWaiting for database to become ready...`);
-        try {
           if (this.dbProvider === 'postgres') {
-            await this.postgresProvisioningService!.waitUntilReady(dbResult.serviceId);
+            dbResult = await this.postgresProvisioningService!.provisionDatabase(data.namespace);
           } else {
-            await this.tigerDataService.waitUntilReady(dbResult.serviceId);
+            dbResult = await this.tigerDataService.provisionDatabase(data.namespace);
           }
-          console.log(`Database is ready!`);
-          logger.info('Database is ready', { serviceId: dbResult.serviceId });
-        } catch (waitError: any) {
-          console.log(`\nDatabase status check timed out, but continuing deployment`);
-          console.log(`   Password has been captured from initial provision response`);
-          console.log(`   Deployment will continue with available credentials`);
-          logger.warn('Database readiness timeout - continuing with captured credentials', {
+
+          console.log(`\nDatabase provisioning response received:`);
+          console.log(JSON.stringify(dbResult, null, 2));
+
+          console.log(`\nDatabase provisioned:`);
+          console.log(`   Service ID: ${dbResult.serviceId}`);
+          console.log(`   Host: ${dbResult.host}`);
+          console.log(`   Port: ${dbResult.port}`);
+          console.log(`   Database: ${dbResult.dbName}`);
+          console.log(`   Username: ${dbResult.username}`);
+          console.log(`   Status: ${dbResult.status}`);
+          logger.info('Database provisioned', {
+            provider: this.dbProvider,
             serviceId: dbResult.serviceId,
-            hasPassword: !!dbResult.password,
-            waitError: waitError.message,
+            host: dbResult.host,
           });
+
+          console.log(`\nWaiting for database to become ready...`);
+          try {
+            if (this.dbProvider === 'postgres') {
+              await this.postgresProvisioningService!.waitUntilReady(dbResult.serviceId);
+            } else {
+              await this.tigerDataService.waitUntilReady(dbResult.serviceId);
+            }
+            console.log(`Database is ready!`);
+            logger.info('Database is ready', { serviceId: dbResult.serviceId });
+          } catch (waitError: any) {
+            console.log(`\nDatabase status check timed out, but continuing deployment`);
+            console.log(`   Password has been captured from initial provision response`);
+            console.log(`   Deployment will continue with available credentials`);
+            logger.warn('Database readiness timeout - continuing with captured credentials', {
+              serviceId: dbResult.serviceId,
+              hasPassword: !!dbResult.password,
+              waitError: waitError.message,
+            });
+          }
         }
 
         // Update customer record with DB details
@@ -754,11 +809,30 @@ export class GitOpsProvisioningService {
 
       logger.info('Values file created', { path: valuesPath });
 
-      // 3. Commit changes
-      await this.git.add([
+      // 3. For CNPG provider: write the Database CR so the operator creates the DB.
+      //    The db-init Helm hook creates the app role on first ArgoCD sync.
+      const filesToAdd = [
         `argocd/clients/client-${data.clientId}.yaml`,
         `charts/iotistica-app/values/client-${data.clientId}/values.yaml`,
-      ]);
+      ];
+
+      if (this.dbProvider === 'cnpg') {
+        const cnpgCR = this.generateCnpgDatabaseCR(data.clientId, `client-${data.clientId}`);
+        const cnpgCRPath = path.join(
+          this.config.repoDir,
+          'argocd',
+          'cnpg-clients',
+          `client-${data.clientId}.yaml`
+        );
+        await fs.mkdir(path.dirname(cnpgCRPath), { recursive: true });
+        await fs.writeFile(cnpgCRPath, yaml.dump(cnpgCR, { indent: 2, lineWidth: -1 }));
+        filesToAdd.push(`argocd/cnpg-clients/client-${data.clientId}.yaml`);
+        logger.info('CNPG Database CR created', { path: cnpgCRPath });
+        console.log(`   CNPG Database CR written: argocd/cnpg-clients/client-${data.clientId}.yaml`);
+      }
+
+      // 4. Commit changes
+      await this.git.add(filesToAdd);
 
       const status = await this.git.status();
       if (status.files.length === 0) {
