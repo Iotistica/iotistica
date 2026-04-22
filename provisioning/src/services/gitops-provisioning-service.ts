@@ -249,15 +249,13 @@ export class GitOpsProvisioningService {
    * actual PostgreSQL database on the shared cluster. The app role and permissions
    * are created by the db-init Helm hook on the client's first ArgoCD sync.
    *
-   * Cluster config comes from env vars:
-   *   CNPG_CLUSTER_NAME      (default: iotistica-cnpg-cl01)
-   *   CNPG_CLUSTER_NAMESPACE (default: iotistica-cnpg-cl01)
-   *   CNPG_DB_OWNER          (default: billing)
+   * Cluster name, namespace, and DB owner are hardcoded to the single shared
+   * CNPG cluster. No new env vars are required beyond PROVISIONING_DB_PROVIDER=cnpg.
    */
   private generateCnpgDatabaseCR(clientId: string, namespace: string): any {
-    const clusterName = process.env.CNPG_CLUSTER_NAME || 'iotistica-cnpg-cl01';
-    const clusterNamespace = process.env.CNPG_CLUSTER_NAMESPACE || 'iotistica-cnpg-cl01';
-    const dbOwner = process.env.CNPG_DB_OWNER || 'billing';
+    const clusterName = 'iotistica-cnpg-cl01';
+    const clusterNamespace = 'iotistica-cnpg-cl01';
+    const dbOwner = 'billing';
 
     return {
       apiVersion: 'postgresql.cnpg.io/v1',

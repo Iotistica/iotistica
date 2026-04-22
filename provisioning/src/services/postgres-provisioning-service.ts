@@ -675,9 +675,9 @@ export class PostgresProvisioningService {
    * This method only generates the credentials that will be stored in 1Password
    * and consumed by those automated steps — no DDL is executed.
    *
-   * The CNPG pooler host/port are read from env vars:
-   *   CNPG_POOLER_HOST  (default: iotistica-cnpg-cl01-pooler-rw.iotistica-cnpg-cl01.svc.cluster.local)
-   *   CNPG_POOLER_PORT  (default: 5432)
+   * The pooler host/port are read from the same env vars used by the postgres provider:
+   *   PROVISIONING_PG_HOST  (set to pooler endpoint in values.yaml)
+   *   PROVISIONING_PG_PORT  (default: 5432)
    *
    * @param namespace - Client namespace (e.g. "client-dc5fec42901a")
    */
@@ -686,9 +686,9 @@ export class PostgresProvisioningService {
     // PostgreSQL role names cannot contain hyphens — replace with underscores.
     const username = namespace.replace(/-/g, '_');
     const host =
-      process.env.CNPG_POOLER_HOST ||
+      process.env.PROVISIONING_PG_HOST ||
       'iotistica-cnpg-cl01-pooler-rw.iotistica-cnpg-cl01.svc.cluster.local';
-    const port = parseInt(process.env.CNPG_POOLER_PORT || '5432', 10);
+    const port = parseInt(process.env.PROVISIONING_PG_PORT || '5432', 10);
 
     logger.info('[PostgresProvisioningService] Generated CNPG credentials', {
       namespace,
