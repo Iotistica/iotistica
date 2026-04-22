@@ -290,7 +290,7 @@ export class GitOpsProvisioningService {
           server: 'https://kubernetes.default.svc',
         },
         source: {
-          path: 'charts/iotistica-app',
+          path: 'charts/iotistica',
           repoURL: this.config.repoUrl,
           targetRevision: this.config.mainBranch,
           helm: {
@@ -790,7 +790,7 @@ export class GitOpsProvisioningService {
       const valuesDir = path.join(
         this.config.repoDir,
         'charts',
-        'iotistica-app',
+        'iotistica',
         'values',
         `client-${data.clientId}`
       );
@@ -811,7 +811,7 @@ export class GitOpsProvisioningService {
       //    The db-init Helm hook creates the app role on first ArgoCD sync.
       const filesToAdd = [
         `argocd/clients/client-${data.clientId}.yaml`,
-        `charts/iotistica-app/values/client-${data.clientId}/values.yaml`,
+        `charts/iotistica/values/client-${data.clientId}/values.yaml`,
       ];
 
       if (this.dbProvider === 'cnpg') {
@@ -964,7 +964,7 @@ export class GitOpsProvisioningService {
         const valuesDir = path.join(
           this.config.repoDir,
           'charts',
-          'iotistica-app',
+          'iotistica',
           'values',
           `client-${clientId}`
         );
@@ -987,14 +987,14 @@ export class GitOpsProvisioningService {
 
           if (valuesExist) {
             await fs.rm(valuesDir, { recursive: true, force: true });
-            console.log(`   ✅ Deleted: charts/iotistica-app/values/client-${clientId}/`);
+            console.log(`   ✅ Deleted: charts/iotistica/values/client-${clientId}/`);
             logger.info('Values directory deleted', { path: valuesDir });
           }
 
           // Commit changes
           await this.git.add([
             `argocd/clients/client-${clientId}.yaml`,
-            `charts/iotistica-app/values/client-${clientId}/`,
+            `charts/iotistica/values/client-${clientId}/`,
           ]);
 
           await this.git.commit(

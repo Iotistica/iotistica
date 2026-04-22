@@ -337,11 +337,11 @@ jobs:
         run: |
           RELEASE="${{ needs.prepare.outputs.release_version }}"
           CLIENT="${{ github.event.inputs.client_name || 'demo' }}"
-          VALUES_FILE="iot-k8s/charts/iotistica-app/values/${CLIENT}/values.yaml"
+          VALUES_FILE="iot-k8s/charts/iotistica/values/${CLIENT}/values.yaml"
 
           if [ ! -f "$VALUES_FILE" ]; then
             echo "❌ Values file not found: $VALUES_FILE"
-            echo "Available clients:"; ls -la "iot-k8s/charts/iotistica-app/values/" 2>/dev/null || true
+            echo "Available clients:"; ls -la "iot-k8s/charts/iotistica/values/" 2>/dev/null || true
             exit 1
           fi
 
@@ -358,7 +358,7 @@ jobs:
           if git diff --quiet; then
             echo "No changes to commit"
           else
-            git add "charts/iotistica-app/values/${CLIENT}/values.yaml"
+            git add "charts/iotistica/values/${CLIENT}/values.yaml"
             git commit -m "chore: bump ${CLIENT} version to ${RELEASE}"
             git push origin main
             echo "✅ Pushed version update to ${RELEASE} for client ${CLIENT}"

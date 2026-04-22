@@ -28,7 +28,20 @@ COPY src ./src
 RUN npm run build
 
 # =============================================================================
-# Stage 2: Provisioning API - REST API for customer management
+# Stage 2: Admin UI builder - Build the React SPA
+# =============================================================================
+FROM node:20-alpine AS admin-builder
+
+WORKDIR /app/admin-ui
+
+COPY admin-ui/package*.json ./
+RUN npm install
+
+COPY admin-ui/ ./
+RUN npm run build
+
+# =============================================================================
+# Stage 3: Provisioning API - REST API for customer management
 # =============================================================================
 FROM node:20-alpine AS provisioning
 
@@ -61,6 +74,9 @@ RUN npm ci --only=production \
 
 # Copy compiled JavaScript from builder stage
 COPY --from=builder /app/dist ./dist
+
+# Copy compiled admin UI from admin-builder stage
+COPY --from=admin-builder /app/admin-ui/dist ./admin-ui/dist
 
 # Copy templates (needed at runtime)
 COPY src/templates ./dist/templates

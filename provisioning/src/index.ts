@@ -90,6 +90,20 @@ createBullBoard({
 
 app.use('/admin/queues', serverAdapter.getRouter());
 
+// Admin UI SPA - serves the React admin interface
+const adminUiDir = path.join(__dirname, '..', 'admin-ui', 'dist');
+app.use('/admin', express.static(adminUiDir, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) {
+      res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  },
+}));
+// SPA fallback: any unmatched /admin/* path returns index.html
+app.get('/admin/*', (_req, res) => {
+  res.sendFile(path.join(adminUiDir, 'index.html'));
+});
+
 // Health check
 app.get('/health', async (req, res) => {
   try {
