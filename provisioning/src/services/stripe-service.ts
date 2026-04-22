@@ -6,7 +6,7 @@
 import Stripe from 'stripe';
 import crypto from 'crypto';
 import { CustomerModel } from '../db/customer-model';
-import { SubscriptionModel } from '../db/subscription-model';
+import { SubscriptionModel, Subscription } from '../db/subscription-model';
 import pool from '../db/connection';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
@@ -357,7 +357,26 @@ export class StripeService {
       else if (priceId === process.env.STRIPE_PRICE_PROFESSIONAL) plan = 'professional';
       else if (priceId === process.env.STRIPE_PRICE_ENTERPRISE) plan = 'enterprise';
 
-      // Create new subscription
+      // Check if a subscription row already exists for this customer (e.g. a trial
+      // created during signup with stripe_subscription_id = NULL). If so, update it
+      // rather than attempting a second INSERT which would violate the unique constraint.
+      const existingByCustomer = await SubscriptionModel.getByCustomerId(customer.customer_id);
+      if (existingByCustomer) {
+        await SubscriptionModel.update(customer.customer_id, {
+          stripe_subscription_id: subscription.id,
+          plan: plan as Subscription['plan'],
+          status: subscription.status as Subscription['status'],
+          current_period_start: new Date(subscription.current_period_start * 1000),
+          current_period_ends_at: new Date(subscription.current_period_end * 1000),
+          trial_ends_at: subscription.trial_end
+            ? new Date(subscription.trial_end * 1000)
+            : null,
+        });
+        console.log(`✅ Existing subscription updated (Stripe ID attached) for customer ${customer.customer_id} (${plan})`);
+        return;
+      }
+
+      // No subscription row at all — create one
       await SubscriptionModel.createPaid(
         customer.customer_id,
         plan,

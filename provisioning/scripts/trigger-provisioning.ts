@@ -9,17 +9,16 @@
  */
 
 import crypto from 'crypto';
-import { deploymentQueue } from '../src/queues/deployment-queue';
-import { db } from '../src/database/db';
+import { deploymentQueue } from '../src/services/deployment-queue';
+import { CustomerModel } from '../src/db/customer-model';
+import { SubscriptionModel } from '../src/db/subscription-model';
 
 async function triggerProvisioning(customerId: string) {
   try {
     console.log(`\n🔍 Looking up customer: ${customerId}...`);
     
     // Get customer details
-    const customer = await db('customers')
-      .where({ customer_id: customerId })
-      .first();
+    const customer = await CustomerModel.getById(customerId);
     
     if (!customer) {
       console.error(`❌ Customer not found: ${customerId}`);
@@ -28,13 +27,11 @@ async function triggerProvisioning(customerId: string) {
     
     console.log(`✅ Found customer: ${customer.email}`);
     console.log(`   Stripe ID: ${customer.stripe_customer_id}`);
-    console.log(`   DB Service: ${customer.db_service_id || '(not provisioned)'}`);
-    console.log(`   Secret Item: ${customer.secret_item_id || '(not created)'}`);
+    console.log(`   Deployment status: ${customer.deployment_status || '(not provisioned)'}`);
+    console.log(`   Namespace: ${customer.instance_namespace || '(none)'}`);
     
     // Get subscription details
-    const subscription = await db('subscriptions')
-      .where({ customer_id: customerId })
-      .first();
+    const subscription = await SubscriptionModel.getByCustomerId(customerId);
     
     if (!subscription) {
       console.error(`❌ No subscription found for customer: ${customerId}`);
@@ -47,48 +44,32 @@ async function triggerProvisioning(customerId: string) {
     console.log(`   Stripe Sub ID: ${subscription.stripe_subscription_id}`);
     
     // Check if already provisioned
-    if (customer.db_service_id && customer.secret_item_id) {
+    if (customer.deployment_status === 'ready') {
       console.warn(`\n⚠️  Customer already provisioned!`);
-      console.log(`   DB Service: ${customer.db_service_id}`);
-      console.log(`   Secret: ${customer.secret_item_id}`);
-      console.log(`\nDo you want to re-provision? This will create NEW resources.`);
-      process.exit(0);
+      console.log(`   Namespace: ${customer.instance_namespace}`);
+      console.log(`   Instance URL: ${customer.instance_url}`);
+      console.log(`\nRe-running will re-queue a deployment job. Ctrl+C to cancel.`);
     }
     
-    // Generate license key
-    const licenseGenerator = require('../src/services/license-generator').licenseGenerator;
-    const licenseKey = licenseGenerator.generateLicense({
-      customerId: customer.customer_id,
-      plan: subscription.plan,
-      email: customer.email,
-      companyName: customer.company_name || customer.full_name || 'Customer',
-    });
-    
-    console.log(`\n🔑 Generated license key (first 50 chars): ${licenseKey.substring(0, 50)}...`);
-    
-    // Sanitize client ID (for GitOps) - SHA256 hash to prevent collisions
+    // Derive namespace: SHA256 hash of customer_id → 12-char hex → client-{id}
     const clientId = crypto
       .createHash('sha256')
       .update(customer.customer_id)
       .digest('hex')
       .substring(0, 12);
-    const namespace = process.env.GITOPS_ENABLED === 'true' 
-      ? `client-${clientId}` 
-      : `customer-${customer.customer_id.substring(5, 13)}`;
+    const namespace = `client-${clientId}`;
     
     console.log(`\n📂 Namespace: ${namespace}`);
     console.log(`\n🚀 Triggering provisioning...`);
     
-    // Add to deployment queue
-    const job = await deploymentQueue.add('deploy-customer-stack', {
+    // Add to deployment queue using the typed helper
+    // Note: the worker fetches the license from the API itself; do not pass licenseKey here
+    const job = await deploymentQueue.addDeploymentJob({
       customerId: customer.customer_id,
       email: customer.email,
       companyName: customer.company_name || customer.full_name || 'Customer',
-      licenseKey,
       namespace,
-      // GitOps-specific fields
       plan: subscription.plan,
-      licensePublicKey: process.env.LICENSE_PUBLIC_KEY || '',
       domain: process.env.BASE_DOMAIN || 'iotistic.com',
     }, {
       attempts: 3,
