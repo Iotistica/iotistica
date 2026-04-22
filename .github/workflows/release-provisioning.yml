@@ -1,0 +1,275 @@
+name: Release Provisioning
+
+on:
+  push:
+    tags:
+      - 'provisioning-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      release_mode:
+        description: 'Release mode'
+        required: true
+        type: choice
+        default: final
+        options:
+          - rc
+          - final
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  DOCKER_ORG: iotistic
+  APPS: provisioning-api provisioning-worker
+
+jobs:
+  prepare:
+    name: Validate & tag release
+    runs-on: [arc-runner-set-iotistica-light]
+    outputs:
+      release_version: ${{ steps.set_version.outputs.release_version }}
+    steps:
+      - name: Checkout repository (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set release version
+        id: set_version
+        run: |
+          # Fetch all tags from remote
+          git fetch origin 'refs/tags/*:refs/tags/*' --force
+
+          if [ "${{ github.event_name }}" = "push" ] && [[ "${GITHUB_REF}" == refs/tags/provisioning-v* ]]; then
+            RELEASE="${GITHUB_REF#refs/tags/}"
+            echo "Tag push detected: $RELEASE"
+            echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Manual dispatch — compute next version from provisioning-v* tags
+          MODE="${{ github.event.inputs.release_mode || 'final' }}"
+          TYPE="${{ github.event.inputs.release_type }}"
+
+          LATEST_FINAL=$(git tag --list 'provisioning-v*.*.*' --sort=-version:refname | grep -v -E '\-rc' | head -1)
+          echo "Latest final release: ${LATEST_FINAL:-none}"
+
+          if [ -z "$LATEST_FINAL" ]; then
+            MAJOR=1; MINOR=0; PATCH=0
+          else
+            BASE=${LATEST_FINAL#provisioning-v}
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+            MAJOR=${MAJOR:-1}; MINOR=${MINOR:-0}; PATCH=${PATCH:-0}
+          fi
+
+          echo "Parsed version: MAJOR=$MAJOR MINOR=$MINOR PATCH=$PATCH"
+
+          if [ "$MODE" = "rc" ]; then
+            case "$TYPE" in
+              patch) TARGET_BASE="provisioning-v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+              minor) TARGET_BASE="provisioning-v${MAJOR}.$((MINOR + 1)).0" ;;
+              major) TARGET_BASE="provisioning-v$((MAJOR + 1)).0.0" ;;
+            esac
+            LATEST_RC=$(git tag -l "${TARGET_BASE}-rc.*" --sort=-version:refname | head -n1)
+            if [ -n "$LATEST_RC" ]; then
+              LAST_RC_NUM=$(echo "$LATEST_RC" | sed -E 's/.*-rc\.([0-9]+)/\1/')
+              RC_NUM=$((LAST_RC_NUM + 1))
+            else
+              RC_NUM=1
+            fi
+            RELEASE="${TARGET_BASE}-rc.${RC_NUM}"
+          else
+            case "$TYPE" in
+              patch) PATCH=$((PATCH + 1)) ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            esac
+            RELEASE="provisioning-v${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          echo "Release version: $RELEASE"
+          echo "release_version=$RELEASE" >> $GITHUB_OUTPUT
+
+      - name: Create git tag (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          RELEASE="${{ steps.set_version.outputs.release_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "$RELEASE" >/dev/null 2>&1; then
+            echo "Tag $RELEASE already exists"
+          else
+            git tag -a "$RELEASE" -m "Release $RELEASE"
+            git push origin "$RELEASE"
+            echo "✅ Tag $RELEASE created and pushed"
+          fi
+
+      - name: Summary
+        run: |
+          RELEASE="${{ steps.set_version.outputs.release_version }}"
+          MODE="${{ github.event.inputs.release_mode || 'final' }}"
+          echo "## Provisioning Release: \`$RELEASE\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Images to Promote" >> $GITHUB_STEP_SUMMARY
+          for APP in ${{ env.APPS }}; do
+            echo "- \`iotistic/${APP}\`" >> $GITHUB_STEP_SUMMARY
+          done
+
+  release:
+    name: Promote images & update iot-k8s chart
+    runs-on: [arc-runner-set-iotistica-light]
+    needs: [prepare]
+    if: needs.prepare.result == 'success'
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Promote images (digest freeze)
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE="${{ needs.prepare.outputs.release_version }}"
+
+          echo "Release version: $RELEASE"
+          echo ""
+
+          # ── Phase 1: Freeze point ────────────────────────────────────────────
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Phase 1: Resolving digests (freeze point)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          declare -A DIGESTS
+          for APP in ${{ env.APPS }}; do
+            CI_LATEST="${DOCKER_ORG}/${APP}:ci-latest"
+            DIGEST=$(docker buildx imagetools inspect "$CI_LATEST" 2>/dev/null | grep "^Digest:" | awk '{print $2}' || true)
+            if [ -z "$DIGEST" ]; then
+              echo "❌ Could not resolve digest for $CI_LATEST"
+              echo "   Ensure a CI build has completed and pushed ci-latest for $APP"
+              exit 1
+            fi
+            DIGESTS[$APP]="$DIGEST"
+            echo "  $APP → $DIGEST"
+          done
+          echo ""
+          echo "✅ All digests resolved — consistent snapshot locked"
+          echo ""
+
+          # ── Phase 2: Promote to versioned release tag ────────────────────────
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Phase 2: Promoting to $RELEASE"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          for APP in ${{ env.APPS }}; do
+            DIGEST="${DIGESTS[$APP]}"
+            docker buildx imagetools create \
+              -t "${DOCKER_ORG}/${APP}:${RELEASE}" \
+              "${DOCKER_ORG}/${APP}@${DIGEST}"
+            echo "✅ $APP: ${DIGEST:0:19}... → ${RELEASE}"
+          done
+          echo ""
+
+          # ── Phase 3: Tag as 'latest' for final releases ───────────────────────
+          if [[ "$RELEASE" != *"-rc."* ]]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Phase 3: Tagging as 'latest'"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            for APP in ${{ env.APPS }}; do
+              DIGEST="${DIGESTS[$APP]}"
+              docker buildx imagetools create \
+                -t "${DOCKER_ORG}/${APP}:latest" \
+                "${DOCKER_ORG}/${APP}@${DIGEST}"
+              echo "✅ ${DOCKER_ORG}/${APP}:latest"
+            done
+            echo ""
+          fi
+
+          echo "## Image Promotion Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** \`$RELEASE\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Promoted Images" >> $GITHUB_STEP_SUMMARY
+          for APP in ${{ env.APPS }}; do
+            DIGEST="${DIGESTS[$APP]}"
+            echo "- **${APP}**: \`ci-latest\` (\`${DIGEST:0:19}...\`) → \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: Checkout repository (for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          RELEASE="${{ needs.prepare.outputs.release_version }}"
+          PREV_TAG=$(git tag -l "provisioning-v*.*.*" --sort=-version:refname | grep -v "^${RELEASE}$" | grep -v '\-rc\.' | head -n1 || true)
+          if [ -z "$PREV_TAG" ]; then
+            git --no-pager log --pretty=format:"- %s (%h)" --no-merges -- provisioning/ | head -50 > changelog.txt
+          else
+            git --no-pager log --pretty=format:"- %s (%h)" --no-merges ${PREV_TAG}..HEAD -- provisioning/ > changelog.txt
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.prepare.outputs.release_version }}
+          name: Provisioning ${{ needs.prepare.outputs.release_version }}
+          body_path: changelog.txt
+          draft: false
+          prerelease: ${{ contains(needs.prepare.outputs.release_version, '-rc.') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout iot-k8s repository
+        uses: actions/checkout@v4
+        with:
+          repository: Iotistica/iot-k8s
+          ref: main
+          path: iot-k8s
+          token: ${{ secrets.K8S_DEPLOY_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Update provisioning chart image tags and push
+        run: |
+          RELEASE="${{ needs.prepare.outputs.release_version }}"
+          VALUES_FILE="iot-k8s/charts/provisioning/values.yaml"
+
+          if [ ! -f "$VALUES_FILE" ]; then
+            echo "❌ Values file not found: $VALUES_FILE"
+            exit 1
+          fi
+
+          yq eval ".api.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
+          yq eval ".api.image.pullPolicy = \"IfNotPresent\"" -i "$VALUES_FILE"
+          yq eval ".worker.image.tag = \"${RELEASE}\"" -i "$VALUES_FILE"
+          yq eval ".worker.image.pullPolicy = \"IfNotPresent\"" -i "$VALUES_FILE"
+
+          cd iot-k8s
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No changes to commit — tags already at $RELEASE"
+          else
+            git add "charts/provisioning/values.yaml"
+            git commit -m "chore: bump provisioning to ${RELEASE}"
+            git push origin main
+            echo "✅ Pushed provisioning version update to ${RELEASE}"
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## iot-k8s Chart Updated" >> $GITHUB_STEP_SUMMARY
+          echo "**File:** \`charts/provisioning/values.yaml\`" >> $GITHUB_STEP_SUMMARY
+          echo "**api.image.tag:** \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**worker.image.tag:** \`${RELEASE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ArgoCD will automatically sync the provisioning application." >> $GITHUB_STEP_SUMMARY

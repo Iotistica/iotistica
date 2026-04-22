@@ -8,13 +8,185 @@ on:
       - 'provisioning/**' 
       - '.github/workflows/build-provisioning-ci.yml'
   workflow_dispatch:
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+    inputs:
+      ref:
+        description: 'Git ref to build (commit SHA, tag, or branch)'
+        required: false
+        default: master
+        type: string
 
 concurrency:
   group: provisioning-ci
   cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, Scan & Push
+    runs-on: [arc-runner-set-iotistica-light]
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: provisioning/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./provisioning
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Build provisioning
+        working-directory: ./provisioning
+        run: npm run build
+
+      - name: Calculate commit SHA
+        id: sha
+        run: |
+          SHA=$(git rev-parse HEAD)
+          SHORT_SHA=${SHA:0:12}
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "Build for commit: $SHA ($SHORT_SHA)"
+
+      - name: Display Build Info
+        run: |
+          echo "## Building Provisioning Images" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.sha.outputs.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Tags:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/provisioning-api:ci-${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/provisioning-api:ci-latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/provisioning-worker:ci-${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/provisioning-worker:ci-latest\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait for Docker daemon
+        run: |
+          for i in $(seq 1 15); do
+            docker info > /dev/null 2>&1 && echo "Docker daemon ready" && break
+            echo "Waiting for Docker daemon... ($i/15)"
+            sleep 2
+          done
+          docker info
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:buildx-stable-1
+            network=host
+
+      - name: Login to Docker Hub
+        if: success()
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Build and push Provisioning API image
+        id: docker_build_api
+        if: success()
+        uses: docker/build-push-action@v5
+        with:
+          context: ./provisioning
+          file: ./provisioning/Dockerfile
+          target: provisioning
+          push: true
+          provenance: false
+          platforms: linux/amd64
+          cache-from: type=gha,scope=provisioning-api-ci
+          cache-to: type=gha,scope=provisioning-api-ci,mode=min,ignore-error=true
+          tags: |
+            iotistic/provisioning-api:ci-${{ steps.sha.outputs.short_sha }}
+            iotistic/provisioning-api:ci-latest
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+      - name: Build and push Provisioning Worker image
+        id: docker_build_worker
+        if: success()
+        uses: docker/build-push-action@v5
+        with:
+          context: ./provisioning
+          file: ./provisioning/Dockerfile
+          target: worker
+          push: true
+          provenance: false
+          platforms: linux/amd64
+          cache-from: type=gha,scope=provisioning-worker-ci
+          cache-to: type=gha,scope=provisioning-worker-ci,mode=min,ignore-error=true
+          tags: |
+            iotistic/provisioning-worker:ci-${{ steps.sha.outputs.short_sha }}
+            iotistic/provisioning-worker:ci-latest
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+      - name: Scan Provisioning API image with Trivy
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: 'iotistic/provisioning-api:ci-${{ steps.sha.outputs.short_sha }}'
+          output-file: 'trivy-api-results.sarif'
+          fail-on-critical: 'true'
+          ignore-file: 'provisioning/.trivyignore'
+
+      - name: Scan Provisioning Worker image with Trivy
+        uses: ./.github/actions/trivy-scan
+        with:
+          image-ref: 'iotistic/provisioning-worker:ci-${{ steps.sha.outputs.short_sha }}'
+          output-file: 'trivy-worker-results.sarif'
+          fail-on-critical: 'true'
+          ignore-file: 'provisioning/.trivyignore'
+
+      - name: Get Docker image sizes
+        if: always()
+        id: image_size
+        run: |
+          for IMG in api worker; do
+            TAG="iotistic/provisioning-${IMG}:ci-${{ steps.sha.outputs.short_sha }}"
+            docker pull "$TAG" > /dev/null 2>&1 || true
+            if docker image inspect "$TAG" > /dev/null 2>&1; then
+              SIZE_BYTES=$(docker image inspect "$TAG" --format='{{.Size}}')
+              SIZE_MB=$(echo "scale=2; $SIZE_BYTES / 1024 / 1024" | bc)
+              LAYERS=$(docker image inspect "$TAG" --format='{{len .RootFS.Layers}}')
+            else
+              SIZE_MB=0; LAYERS=0
+            fi
+            echo "${IMG}_size_mb=$SIZE_MB" >> $GITHUB_OUTPUT
+            echo "${IMG}_layers=$LAYERS" >> $GITHUB_OUTPUT
+          done
+
+      - name: Generate Summary Report
+        if: always()
+        run: |
+          echo "# Build & Push Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "**Git SHA:** \`${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | Tag | Size | Layers |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| provisioning-api | \`ci-${{ steps.sha.outputs.short_sha }}\` | ${{ steps.image_size.outputs.api_size_mb }} MB | ${{ steps.image_size.outputs.api_layers }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| provisioning-worker | \`ci-${{ steps.sha.outputs.short_sha }}\` | ${{ steps.image_size.outputs.worker_size_mb }} MB | ${{ steps.image_size.outputs.worker_layers }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Workflow Status" >> $GITHUB_STEP_SUMMARY
+          echo "CI images pushed. Run **release-provisioning** workflow to promote to a versioned release tag." >> $GITHUB_STEP_SUMMARY
+
 
 jobs:
   version:
