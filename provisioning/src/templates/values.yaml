@@ -76,15 +76,7 @@ mosquitto:
   # Persistence for message queues
   persistence:
     enabled: true
-# MQTT Broker Configuration
-# Choose between local (self-hosted Mosquitto) or cloud (HiveMQ, AWS IoT Core)
-mqttBroker:
-  protocol: mqtt
-  useInternalService: true
-  host: ""
-  port: 1883
-  useTls: false
-  verifyCertificate: false
+
 # API service
 api:
   enabled: true
@@ -151,7 +143,6 @@ api:
     MQTT_MONITOR_ENABLED: "true"
     LOG_COMPRESSION: "true"
     VPN_ENABLED: "false"
-    FORCE_COLOR: "1"
     VIRTUAL_AGENT_CPU_REQUEST: "50m"
     JWT_ACCESS_TOKEN_EXPIRY: "15m"
     JWT_REFRESH_TOKEN_EXPIRY: "7d"
@@ -319,45 +310,7 @@ nodered:
     gatewayName: "iotistica-gateway"
     gatewayNamespace: "envoy-gateway-system"
 
-# Housekeeper service - Database maintenance and cleanup
-housekeeper:
-  enabled: true
-  image:
-    repository: iotistic/housekeeper
-    tag: latest
-    pullPolicy: IfNotPresent
-  replicas: 1
-  port: 3400
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 200m
-      memory: 256Mi
-  env:
-    NODE_ENV: development
-    LOG_LEVEL: info
-    DB_POOL_MAX: "10"
-    DB_IDLE_TIMEOUT: "30000"
-    DB_CONNECT_TIMEOUT: "10000"
-  # Scheduled task configuration
-  tasks:
-    # Database VACUUM - reclaim storage and update statistics
-    vacuum:
-      enabled: true
-      schedule: "0 2 * * *" # Daily at 2 AM
-    # Partition maintenance - create/drop partitions for time-series data
-    partitionMaintenance:
-      enabled: true
-      schedule: "0 3 * * *" # Daily at 3 AM
-    # Log cleanup - delete old logs based on retention policy
-    logCleanup:
-      enabled: true
-      schedule: "0 4 * * *" # Daily at 4 AM
-      retentionDays: 30
-# Postoffice service - Email delivery service
-postoffice:
+
   enabled: true
   image:
     repository: iotistic/postoffice
@@ -405,67 +358,55 @@ postoffice:
   bullBoard:
     enabled: true
     path: "/admin/queues"
-# Ingress configuration (optional for local dev)
-ingress:
-  enabled: false
-  className: nginx
-  host: iotistic.local
-  tls:
-    enabled: false
+
 # Network policies
 networkPolicy:
   enabled: false # Disabled for easier local development
 # Resource quotas
 resourceQuota:
   enabled: false # Disabled for local development
-# ============================================================================
-# Pre-Provisioned Fleet Namespaces
-# ============================================================================
-# Create fleet namespaces during customer deployment (not dynamically by API)
-# This follows least-privilege principle for RBAC hardening
+# =============================================================================
+# TimescaleDB data lifecycle policies
+# =============================================================================
+# Applied on every ArgoCD sync by timescaledb-policy-job.yaml (sync-wave: "1").
+# Changing a value here and syncing via ArgoCD updates the live TimescaleDB
+# policies without requiring a database migration.
 #
-# CLUSTER CAPACITY ANALYSIS (2-node AKS):
-# - Total allocatable: 3800m CPU, 6470Mi memory
-# - Current usage: ~650m CPU (17%), ~4848Mi memory (76%)
-# - Available: ~3150m CPU, ~1622Mi memory
+# Set timescaledb.enabled: false to skip the policy job on fresh installs
+# where migration 006 has not yet run (hypertables do not exist yet).
 #
-# VIRTUAL AGENT RESOURCES (per pod with 4 protocol sidecars):
-# - Agent container: 250m CPU, 256Mi memory
-# - OPC-UA sidecar: 50m CPU, 128Mi memory
-# - Modbus TCP sidecar: 50m CPU, 32Mi memory
-# - Modbus RTU sidecar: 50m CPU, 32Mi memory
-# - SNMP sidecar: 50m CPU, 32Mi memory
-# - Total per pod: 450m CPU, 480Mi memory
+# readings.compressionAfter:
+#   Chunks older than this interval are compressed in-place (10–20× reduction).
+#   IoT readings are immutable so this can safely be as low as 1–2 days.
 #
-# CAPACITY WITH 4 SIDECARS: 3 agents max (1622Mi / 480Mi = 3.37)
-# CONFIGURED: 2 agents per namespace (conservative, leaves headroom)
+# readings.retentionRaw:
+#   Raw readings older than this are permanently deleted from the PV.
+#   Continuous aggregates (readings_1m, readings_1h, readings_daily) are NOT
+#   affected — they retain data independently per their own settings below.
+#   WARNING: reducing this is irreversible. Ensure continuous aggregates
+#   cover the discarded range before applying.
 #
-fleetNamespaces:
+# aggregates.readings1m.compressionAfter:
+#   Compress the readings_1m materialized data (significant space saving).
+#   Leave empty ("") to skip (current default — no compression on aggregates).
+#
+# aggregates.readings1m.retention:
+#   Delete readings_1m buckets older than this. Leave empty to keep indefinitely.
+#   Minute-level detail beyond 90 days has no dashboard value; hourly covers it.
+#
+# aggregates.agentMetrics5min.retention:
+#   Delete agent_metrics_5min buckets older than this. 5-min system metrics
+#   are only useful for recent performance debugging.
+# =============================================================================
+timescaledb:
   enabled: true
-  namespaces:
-    # Test fleet for development/testing
-    - name: test
-      maxAgents: 2 # 2 agents with 4 protocol sidecars each
-      maxDevices: 32 # 2 agents * 16 devices each (4 protocols * 4 devices)
-      fleetType: virtual
-      quotaPolicy: strict
-      # Calculated: 2 agents @ 500m + 4 sidecars @ 150m = 1600m CPU (+ 400m buffer = 2000m)
-      cpuRequest: "600m"
-      cpuLimit: "2000m" # Covers 2 agents @ 500m + 4 sidecars @ 150m = 1600m actual
-      memoryRequest: "960Mi"
-      memoryLimit: "4096Mi" # Covers all containers + overhead
-      networkPolicy:
-        enabled: true # Restrict traffic for security
-    # Production fleet pool 01
-    - name: pool-01
-      maxAgents: 2 # Same capacity as test
-      maxDevices: 32 # 2 agents * 16 devices each
-      fleetType: virtual
-      quotaPolicy: strict
-      # Calculated: 2 agents @ 500m + 4 sidecars @ 150m = 1600m CPU (+ 400m buffer = 2000m)
-      cpuRequest: "600m"
-      cpuLimit: "2000m" # Covers 2 agents @ 500m + 4 sidecars @ 150m = 1600m actual
-      memoryRequest: "960Mi"
-      memoryLimit: "4096Mi" # Covers all containers + overhead
-      networkPolicy:
-        enabled: true
+  readings:
+    compressionAfter: "2 days"
+    retentionRaw: "30 days"
+  aggregates:
+    readings1m:
+      compressionAfter: "7 days"
+      retention: "90 days"
+    agentMetrics5min:
+      # Empty = no retention policy (original behaviour).
+      retention: ""
