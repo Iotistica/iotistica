@@ -152,11 +152,16 @@ api:
   sql:
     # Reference existing Kubernetes secret (recommended for production)
     SecretName: "sql-credentials-client-{{CLIENT_ID}}"
-  dbInit:
+
+   dbInit:
     enabled: true
-    adminSecretName: "provisioning-db-credentials-cnpg"   # billing superuser in this namespace
+    adminSecretName: "provisioning-db-credentials-cnpg" # billing superuser in this namespace
+    adminOnePasswordItem:
+      enabled: true
+      itemPath: "vaults/iotistica/items/provisioning-db-credentials-cnpg"
     pgHost: "iotistica-cnpg-cl01-rw.iotistica-cnpg-cl01.svc.cluster.local"
     pgPort: "5432"
+
   mqtt:
     # Reference existing Kubernetes secret (recommended for production)
     SecretName: "mqtt-credentials-client-{{CLIENT_ID}}"
