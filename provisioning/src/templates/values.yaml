@@ -153,7 +153,7 @@ api:
     # Reference existing Kubernetes secret (recommended for production)
     SecretName: "sql-credentials-client-{{CLIENT_ID}}"
 
-   dbInit:
+  dbInit:
     enabled: true
     adminSecretName: "provisioning-db-credentials-cnpg" # billing superuser in this namespace
     adminOnePasswordItem:
