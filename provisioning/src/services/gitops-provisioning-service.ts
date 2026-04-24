@@ -242,39 +242,6 @@ export class GitOpsProvisioningService {
    */
 
   /**
-   * Generate a CNPG Database CR for the given client.
-   *
-   * The CR is written to argocd/cnpg-clients/client-{id}.yaml and picked up by
-   * the cnpg-clients ArgoCD app-of-apps. The CNPG operator then creates the
-   * actual PostgreSQL database on the shared cluster. The app role and permissions
-   * are created by the db-init Helm hook on the client's first ArgoCD sync.
-   *
-   * Cluster name, namespace, and DB owner are hardcoded to the single shared
-   * CNPG cluster. No new env vars are required beyond PROVISIONING_DB_PROVIDER=cnpg.
-   */
-  private generateCnpgDatabaseCR(clientId: string, namespace: string): any {
-    const clusterName = 'iotistica-cnpg-cl01';
-    const clusterNamespace = 'iotistica-cnpg-cl01';
-    const dbOwner = 'billing';
-
-    return {
-      apiVersion: 'postgresql.cnpg.io/v1',
-      kind: 'Database',
-      metadata: {
-        name: `client-${clientId}`,
-        namespace: clusterNamespace,
-      },
-      spec: {
-        name: `client-${clientId}`,
-        owner: dbOwner,
-        cluster: {
-          name: clusterName,
-        },
-      },
-    };
-  }
-
-  /**
    * Create Argo CD Application manifest for client
    */
   private generateApplicationManifest(data: ClientDeploymentData): any {
@@ -397,8 +364,7 @@ export class GitOpsProvisioningService {
       try {
         if (this.dbProvider === 'cnpg') {
           // CNPG: credential generation only — no DDL.
-          // The database is created by the CNPG Database CR written to git in Step 3.
-          // The app role + grants are created by the db-init Helm hook on first ArgoCD sync.
+          // Database + role bootstrap is handled by the db-init Job in the client chart.
           console.log(`\nGenerating CNPG credentials for namespace: ${data.namespace}`);
           dbResult = this.postgresProvisioningService!.generateCnpgCredentials(data.namespace);
           console.log(`\nCNPG credentials generated:`);
@@ -807,27 +773,11 @@ export class GitOpsProvisioningService {
 
       logger.info('Values file created', { path: valuesPath });
 
-      // 3. For CNPG provider: write the Database CR so the operator creates the DB.
-      //    The db-init Helm hook creates the app role on first ArgoCD sync.
+      // 3. DB bootstrap now relies on the client chart db-init Job only.
       const filesToAdd = [
         `argocd/clients/client-${data.clientId}.yaml`,
         `charts/iotistica/values/client-${data.clientId}/values.yaml`,
       ];
-
-      if (this.dbProvider === 'cnpg') {
-        const cnpgCR = this.generateCnpgDatabaseCR(data.clientId, `client-${data.clientId}`);
-        const cnpgCRPath = path.join(
-          this.config.repoDir,
-          'argocd',
-          'cnpg-clients',
-          `client-${data.clientId}.yaml`
-        );
-        await fs.mkdir(path.dirname(cnpgCRPath), { recursive: true });
-        await fs.writeFile(cnpgCRPath, yaml.dump(cnpgCR, { indent: 2, lineWidth: -1 }));
-        filesToAdd.push(`argocd/cnpg-clients/client-${data.clientId}.yaml`);
-        logger.info('CNPG Database CR created', { path: cnpgCRPath });
-        console.log(`   CNPG Database CR written: argocd/cnpg-clients/client-${data.clientId}.yaml`);
-      }
 
       // 4. Commit changes
       await this.git.add(filesToAdd);
