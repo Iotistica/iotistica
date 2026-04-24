@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { buildApiUrl } from '../config/api';
+import { auth0Config } from '../config/auth0';
 
 interface User {
   id: number;
@@ -163,9 +164,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const loginWithAuth0Credentials = async (email: string, password: string): Promise<void> => {
-    const auth0Domain = import.meta.env.VITE_AUTH0_DOMAIN;
-    const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
-    const audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+    const auth0Domain = auth0Config.domain;
+    const clientId = auth0Config.clientId;
+    const audience = auth0Config.audience;
 
     if (!auth0Domain || !clientId) {
       throw new Error('Auth0 configuration missing');
@@ -262,8 +263,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
 
     // Redirect to Auth0 logout
-    const auth0Domain = import.meta.env.VITE_AUTH0_DOMAIN;
-    const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
+    const auth0Domain = auth0Config.domain;
+    const clientId = auth0Config.clientId;
     const returnTo = window.location.origin; // Redirect back to home page
 
     if (auth0Domain && clientId) {
