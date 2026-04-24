@@ -38,10 +38,17 @@ ENV VITE_AUTH0_SHOW_SOCIAL_LOGIN=$VITE_AUTH0_SHOW_SOCIAL_LOGIN
 RUN npm run build
 
 # Production stage
-FROM nginx:1.27-alpine
+FROM nginx:1.28-alpine
 
 # Ensure runtime OS packages include latest security patches
-RUN apk upgrade --no-cache && apk add --no-cache "libpng>=1.6.56"
+RUN apk update && apk upgrade --no-cache && apk add --no-cache \
+  "libcrypto3>=3.3.7-r0" \
+  "libssl3>=3.3.7-r0" \
+  "musl>=1.2.5-r11" \
+  "musl-utils>=1.2.5-r11" \
+  "zlib>=1.3.2-r0" \
+  "libpng>=1.6.57-r0" \
+  "libxpm>=3.5.19-r0"
 
 # Copy built assets from builder stage
 COPY --from=builder /app/build /usr/share/nginx/html
