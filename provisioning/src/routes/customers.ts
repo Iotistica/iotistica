@@ -146,6 +146,7 @@ router.post('/signup', strictLimiter, async (req, res) => {
       .substring(0, 12);
     
     const namespace = `client-${clientId}`;
+    const deploymentPlan = subscription.plan === 'trial' ? 'starter' : subscription.plan;
 
     // License will be fetched by gitops-provisioning-service from provisioning API
     const job = await deploymentQueue.addDeploymentJob({
@@ -153,7 +154,7 @@ router.post('/signup', strictLimiter, async (req, res) => {
       email,
       companyName: company_name,
       namespace,
-      plan: subscription.plan,
+      plan: deploymentPlan,
       domain: process.env.BASE_DOMAIN || 'iotistica.com',
     });
 
@@ -441,6 +442,7 @@ router.post('/:id/deploy', authenticateAdmin, async (req, res) => {
       .substring(0, 12);
     
     const namespace = `client-${clientId}`;
+    const deploymentPlan = subscription.plan === 'trial' ? 'starter' : subscription.plan;
 
     // License will be fetched by gitops-provisioning-service from provisioning API
     const job = await deploymentQueue.addDeploymentJob({
@@ -448,7 +450,7 @@ router.post('/:id/deploy', authenticateAdmin, async (req, res) => {
       email: customer.email,
       companyName: customer.company_name || 'Unknown Company',
       namespace,
-      plan: subscription.plan,
+      plan: deploymentPlan,
       domain: process.env.BASE_DOMAIN || 'iotistica.com',
     });
 
@@ -595,6 +597,7 @@ router.post('/:id/retry-deployment', authenticateAdmin, async (req, res) => {
       .substring(0, 12);
     
     const namespace = customer.instance_namespace || `client-${clientId}`;
+    const deploymentPlan = subscription.plan === 'trial' ? 'starter' : subscription.plan;
 
     // License will be fetched by gitops-provisioning-service from provisioning API
     const job = await deploymentQueue.addDeploymentJob({
@@ -602,7 +605,7 @@ router.post('/:id/retry-deployment', authenticateAdmin, async (req, res) => {
       email: customer.email,
       companyName: customer.company_name || 'Unknown Company',
       namespace,
-      plan: subscription.plan,
+      plan: deploymentPlan,
       domain: process.env.BASE_DOMAIN || 'iotistica.com',
     });
 

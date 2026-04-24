@@ -208,7 +208,8 @@ export class LicenseGenerator {
       throw new Error('License generator not initialized. Call init() first.');
     }
 
-    const planConfig = PLAN_CONFIG[subscription.plan] || PLAN_CONFIG.starter;
+    const effectivePlan = subscription.plan === 'trial' ? 'starter' : subscription.plan;
+    const planConfig = PLAN_CONFIG[effectivePlan] || PLAN_CONFIG.starter;
     const clientId = this.toClientId(customer.customer_id);
     const tenantId = tenantIdOverride || clientId;
 

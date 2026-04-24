@@ -8,7 +8,7 @@ export interface Subscription {
   id: number;
   customer_id: string;
   stripe_subscription_id?: string;
-  plan: 'starter' | 'professional' | 'enterprise';
+  plan: 'trial' | 'starter' | 'professional' | 'enterprise';
   status: 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid';
   trial_ends_at?: Date | null;
   current_period_start?: Date | null;

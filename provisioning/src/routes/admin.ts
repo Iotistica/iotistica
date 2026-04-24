@@ -554,8 +554,6 @@ router.post('/customers', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid plan' });
     }
 
-    const normalizedPlan = requestedPlan === 'trial' ? 'starter' : requestedPlan;
-
     const existing = await CustomerModel.getByEmail(email);
     if (existing) return res.status(409).json({ error: 'A customer with this email already exists' });
 
@@ -583,7 +581,7 @@ router.post('/customers', async (req: Request, res: Response) => {
 
     const subscription = await StripeService.createTrialSubscription({
       customerId: customer.customer_id,
-      plan: normalizedPlan,
+      plan: requestedPlan,
       trialDays: 14,
       source: 'admin_create_customer',
     });
@@ -594,7 +592,7 @@ router.post('/customers', async (req: Request, res: Response) => {
         customerId: customer.customer_id,
         email,
         requestedPlan,
-        plan: normalizedPlan,
+        plan: requestedPlan,
         auth0UserCreated: auth0Provisioning.created,
         auth0PasswordSetupEmailSent: auth0Provisioning.passwordSetupEmailSent,
         auth0Sub: auth0Provisioning.auth0Sub || null,
@@ -726,13 +724,14 @@ router.post('/customers/:id/provision', async (req: Request, res: Response) => {
 
     const subscription = await SubscriptionModel.getByCustomerId(req.params.id);
     const clientId = deriveClientId(customer.customer_id);
+    const deploymentPlan = subscription?.plan === 'trial' ? 'starter' : (subscription?.plan || 'starter');
 
     const jobData: DeploymentJobData = {
       customerId: customer.customer_id,
       email: customer.email,
       companyName: customer.company_name || '',
       namespace: customer.instance_namespace || `client-${clientId}`,
-      plan: subscription?.plan || 'starter',
+      plan: deploymentPlan,
     };
 
     const job = await deploymentQueue.addDeploymentJob(jobData);
