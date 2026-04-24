@@ -148,6 +148,87 @@ export function getAuth0ErrorFromUrl(): { error: string; description: string } |
 }
 
 /**
+ * Direct password grant authentication with Auth0
+ * 
+ * Exchanges username/password for access token using password-realm grant.
+ * NOTE: Password-realm grant does NOT support audience parameter.
+ * 
+ * @param username - Username to authenticate with
+ * @param password - Password for the user
+ * @returns { accessToken, refreshToken, user }
+ */
+export async function authenticateWithPassword(
+  username: string,
+  password: string
+): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  user: any;
+}> {
+  if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID) {
+    throw new Error('Auth0 not configured - check environment variables');
+  }
+
+  // Use password-realm grant WITHOUT audience parameter
+  // (password-realm grant does not support audience)
+  const response = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      client_id: AUTH0_CLIENT_ID,
+      username,
+      password,
+      grant_type: 'http://auth0.com/oauth/grant-type/password-realm',
+      realm: 'Username-Password-Authentication',
+      scope: 'openid profile email offline_access',
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(
+      errorData.error_description || errorData.error || 'Password authentication failed'
+    );
+  }
+
+  const data = await response.json();
+
+  if (!data.access_token) {
+    throw new Error('No access token received from Auth0');
+  }
+
+  // Fetch user info using the access token
+  const userResponse = await fetch(`https://${AUTH0_DOMAIN}/userinfo`, {
+    headers: {
+      Authorization: `Bearer ${data.access_token}`,
+    },
+  });
+
+  if (!userResponse.ok) {
+    throw new Error('Failed to fetch user info from Auth0');
+  }
+
+  const userInfo = await userResponse.json();
+
+  // Map Auth0 userinfo to our User format
+  const user = {
+    id: userInfo.sub,
+    username: userInfo.nickname || userInfo.email?.split('@')[0] || 'user',
+    email: userInfo.email,
+    role: 'user', // Default role, should be fetched from API if needed
+    isActive: true,
+  };
+
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token || '',
+    user,
+  };
+}
+
+/**
  * Format Auth0 user info from JWT
  * 
  * Extracts minimal claims from ID token:

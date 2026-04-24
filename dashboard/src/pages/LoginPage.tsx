@@ -5,18 +5,15 @@ import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import { buildApiUrl } from '../config/api';
+import { authenticateWithPassword } from '../config/auth0';
 
 interface LoginPageProps {
   onLogin: (accessToken: string, refreshToken: string, user: any) => void;
 }
 
 export function LoginPage({ onLogin }: LoginPageProps) {
-  const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -26,31 +23,18 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     setIsLoading(true);
 
     try {
-      const endpoint = isLogin ? '/api/v1/auth/login' : '/api/v1/auth/register';
-      const body = isLogin
-        ? { username, password }
-        : { username, email, password, fullName };
-
-      const response = await fetch(buildApiUrl(endpoint), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || data.error || 'Authentication failed');
-      }
+      // Authenticate with Auth0 using password-realm grant
+      const { accessToken, refreshToken, user } = await authenticateWithPassword(
+        username,
+        password
+      );
 
       // Store tokens in localStorage
-      localStorage.setItem('accessToken', data.data.accessToken);
-      localStorage.setItem('refreshToken', data.data.refreshToken);
+      localStorage.setItem('accessToken', accessToken);
+      localStorage.setItem('refreshToken', refreshToken);
 
       // Call parent handler
-      onLogin(data.data.accessToken, data.data.refreshToken, data.data.user);
+      onLogin(accessToken, refreshToken, user);
     } catch (err: any) {
       console.error('Authentication error:', err);
       setError(err.message || 'An error occurred during authentication');
@@ -64,12 +48,10 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <CardTitle className="text-2xl font-bold text-center">
-            {isLogin ? 'Welcome Back' : 'Create Account'}
+            Welcome Back
           </CardTitle>
           <CardDescription className="text-center">
-            {isLogin
-              ? 'Sign in to your Iotistica account'
-              : 'Get started with Iotistic'}
+            Sign in to your Iotistica account
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -94,35 +76,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               />
             </div>
 
-            {!isLogin && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="Enter your email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    disabled={isLoading}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="fullName">Full Name (Optional)</Label>
-                  <Input
-                    id="fullName"
-                    type="text"
-                    placeholder="Enter your full name"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    disabled={isLoading}
-                  />
-                </div>
-              </>
-            )}
-
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input
@@ -135,40 +88,19 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 disabled={isLoading}
                 minLength={8}
               />
-              {!isLogin && (
-                <p className="text-xs text-muted-foreground">
-                  Password must be at least 8 characters
-                </p>
-              )}
             </div>
 
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  {isLogin ? 'Signing in...' : 'Creating account...'}
+                  Signing in...
                 </>
               ) : (
-                <>{isLogin ? 'Sign In' : 'Sign Up'}</>
+                <>Sign In</>
               )}
             </Button>
           </form>
-
-          <div className="mt-4 text-center">
-            <button
-              type="button"
-              onClick={() => {
-                setIsLogin(!isLogin);
-                setError('');
-              }}
-              className="text-sm text-blue-600 hover:underline"
-              disabled={isLoading}
-            >
-              {isLogin
-                ? "Don't have an account? Sign up"
-                : 'Already have an account? Sign in'}
-            </button>
-          </div>
         </CardContent>
       </Card>
     </div>
