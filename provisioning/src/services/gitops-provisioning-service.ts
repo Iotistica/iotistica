@@ -19,7 +19,6 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import axios from 'axios';
-import { execSync } from 'child_process';
 import { Job } from 'bull';
 import { logger } from '../utils/logger';
 import { TigerDataService, TigerDataDatabase } from './tigerdata-service';
@@ -262,6 +261,10 @@ export class GitOpsProvisioningService {
       kind: 'Application',
       metadata: {
         name: `client-${data.clientId}`,
+        finalizers: [
+          // Ensure deleting the Argo CD Application cascades deletion of managed resources.
+          'resources-finalizer.argocd.argoproj.io',
+        ],
       },
       spec: {
         destination: {
@@ -285,6 +288,10 @@ export class GitOpsProvisioningService {
           },
           syncOptions: [
             'CreateNamespace=true',
+            // Use foreground propagation so child resources are fully removed on prune/delete.
+            'PrunePropagationPolicy=foreground',
+            // Apply regular sync first, then prune leftover resources as a final step.
+            'PruneLast=true',
           ],
         },
       },
@@ -1031,31 +1038,6 @@ export class GitOpsProvisioningService {
       }
 
       console.log('-'.repeat(80) + '\n');
-
-      // === STEP 2.5: Delete Kubernetes namespace (cascade delete all resources) ===
-      console.log('⚡ STEP 2.5/4: DELETE KUBERNETES NAMESPACE');
-      console.log('-'.repeat(80));
-      console.log('   ℹ️  This cascade-deletes all pods and remaining resources');
-
-      try {
-        const namespace = `client-${clientId}`;
-        const deleteResult = await this.deleteNamespace(namespace);
-        
-        if (deleteResult) {
-          console.log(`   ✅ Kubernetes namespace ${namespace} deleted or already absent`);
-          logger.info('Kubernetes namespace deleted', { namespace });
-        } else {
-          console.log(`   ⚠️  Namespace deletion returned unexpected result`);
-          logger.warn('Namespace deletion result unclear', { namespace });
-        }
-      } catch (error: any) {
-        const errorMsg = `Kubernetes namespace cleanup failed: ${error.message}`;
-        errors.push(errorMsg);
-        console.log(`   ❌ ${errorMsg}`);
-        logger.error('Kubernetes namespace cleanup failed', { clientId, error: error.message });
-      }
-
-      console.log('-'.repeat(80) + '\n');
       console.log('🔐 STEP 3/4: DELETE 1PASSWORD SECRET BUNDLE');
       console.log('-'.repeat(80));
       
@@ -1089,7 +1071,7 @@ export class GitOpsProvisioningService {
           : effectiveDbProvider === 'postgres'
             ? 'POSTGRES'
             : 'TIGERDATA';
-      console.log(`STEP 4/5: DELETE ${deleteProviderLabel} DATABASE`);
+      console.log(`STEP 4/4: DELETE ${deleteProviderLabel} DATABASE`);
       console.log('-'.repeat(80));
 
       try {
@@ -1147,7 +1129,6 @@ export class GitOpsProvisioningService {
       console.log('DELETION SUMMARY');
       console.log('='.repeat(80));
       console.log(`   Git Manifests: ${gitDeleted ? 'Deleted' : 'Failed'}`);
-      console.log(`   Kubernetes Namespace: Cascade-deleted`);
       console.log(`   1Password Secret: ${secretDeleted ? 'Deleted' : 'Failed'}`);
       console.log(`   Database (${deleteProviderLabel}): ${dbDeleted ? 'Deleted' : 'Failed'}`);
       console.log('='.repeat(80) + '\n');
@@ -1170,43 +1151,6 @@ export class GitOpsProvisioningService {
         stack: error.stack,
       });
       throw new Error(`Client deletion failed: ${error.message}`);
-    }
-  }
-
-  /**
-   * Delete Kubernetes namespace and all its resources
-   * Cascade deletes all pods, services, and other resources in the namespace
-   */
-  private async deleteNamespace(namespace: string): Promise<boolean> {
-    try {
-      // Check if namespace exists
-      const checkCmd = `kubectl get namespace ${namespace} 2>&1`;
-      let exists = false;
-      
-      try {
-        execSync(checkCmd, { encoding: 'utf8', stdio: 'pipe' });
-        exists = true;
-      } catch (e) {
-        exists = false;
-      }
-
-      if (!exists) {
-        logger.info('Namespace does not exist, skipping deletion', { namespace });
-        return true;
-      }
-
-      // Delete namespace (this cascade-deletes all resources)
-      const deleteCmd = `kubectl delete namespace ${namespace} --ignore-not-found=true`;
-      execSync(deleteCmd, { encoding: 'utf8', stdio: 'pipe' });
-
-      logger.info('Kubernetes namespace deleted', { namespace });
-      return true;
-    } catch (error: any) {
-      logger.error('Failed to delete Kubernetes namespace', {
-        namespace,
-        error: error.message,
-      });
-      throw new Error(`Kubectl namespace deletion failed: ${error.message}`);
     }
   }
 
