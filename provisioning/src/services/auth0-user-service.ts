@@ -22,6 +22,19 @@ interface Auth0ManagementConfig {
 }
 
 export class Auth0UserService {
+  private static extractAuth0Sub(payload: unknown): string | undefined {
+    if (!payload || typeof payload !== 'object') {
+      return undefined;
+    }
+
+    const data = payload as Record<string, unknown>;
+    const candidate = data.user_id || data._id || data.sub;
+
+    return typeof candidate === 'string' && candidate.length > 0
+      ? candidate
+      : undefined;
+  }
+
   private static getConfig(): Auth0Config {
     const domain = process.env.AUTH0_DOMAIN;
     const clientId = process.env.AUTH0_CLIENT_ID;
@@ -116,11 +129,11 @@ export class Auth0UserService {
     email: string;
     fullName?: string;
     username?: string;
-  }): Promise<{ created: boolean }> {
+  }): Promise<{ created: boolean; auth0Sub?: string }> {
     const config = this.getConfig();
 
     try {
-      await axios.post(
+      const response = await axios.post(
         `https://${config.domain}/dbconnections/signup`,
         {
           client_id: config.clientId,
@@ -138,7 +151,10 @@ export class Auth0UserService {
         }
       );
 
-      return { created: true };
+      return {
+        created: true,
+        auth0Sub: this.extractAuth0Sub(response.data),
+      };
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 400) {
         const auth0Error = error.response.data as { code?: string; description?: string; error_description?: string } | undefined;
@@ -187,7 +203,12 @@ export class Auth0UserService {
   }): Promise<Auth0UserProvisionResult> {
     const result = await this.ensureDatabaseUser(data);
     await this.sendPasswordSetupEmail(data.email);
-    const auth0Sub = await this.resolveAuth0SubByEmail(data.email);
+
+    // Prefer direct Auth0 subject from signup response to avoid Management API dependency.
+    let auth0Sub = result.auth0Sub;
+    if (!auth0Sub) {
+      auth0Sub = await this.resolveAuth0SubByEmail(data.email) || undefined;
+    }
 
     return {
       created: result.created,
