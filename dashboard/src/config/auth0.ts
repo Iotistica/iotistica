@@ -261,3 +261,53 @@ export function parseAuth0IdToken(idToken: string): {
     throw new Error(`Failed to parse Auth0 ID token: ${error.message}`);
   }
 }
+
+/**
+ * Exchange Auth0 access token for API tokens
+ * 
+ * After successful Auth0 login, exchange the Auth0 JWT for API-compatible tokens
+ * so the dashboard can authenticate with the backend API.
+ * 
+ * @param auth0Token - Auth0 access token from password-realm grant
+ * @returns { accessToken, refreshToken, user }
+ */
+export async function exchangeAuth0TokenForApiToken(
+  auth0Token: string
+): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  user: any;
+}> {
+  // Import buildApiUrl here to avoid circular dependency
+  const { buildApiUrl } = await import('./api');
+
+  try {
+    const response = await fetch(buildApiUrl('/api/v1/auth/auth0-exchange'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${auth0Token}`,
+      },
+      body: JSON.stringify({
+        auth0Token,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData.message || errorData.error || `Token exchange failed with status ${response.status}`
+      );
+    }
+
+    const data = await response.json();
+    return {
+      accessToken: data.data.accessToken,
+      refreshToken: data.data.refreshToken,
+      user: data.data.user,
+    };
+  } catch (error: any) {
+    console.error('Token exchange error:', error);
+    throw new Error(`Failed to exchange Auth0 token for API token: ${error.message}`);
+  }
+}

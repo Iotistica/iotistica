@@ -5,7 +5,7 @@ import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import { authenticateWithPassword } from '../config/auth0';
+import { authenticateWithPassword, exchangeAuth0TokenForApiToken } from '../config/auth0';
 
 interface LoginPageProps {
   onLogin: (accessToken: string, refreshToken: string, user: any) => void;
@@ -23,18 +23,18 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     setIsLoading(true);
 
     try {
-      // Authenticate with Auth0 using password-realm grant
-      const { accessToken, refreshToken, user } = await authenticateWithPassword(
-        username,
-        password
-      );
+      // Step 1: Authenticate with Auth0 using password-realm grant
+      const auth0Response = await authenticateWithPassword(username, password);
 
-      // Store tokens in localStorage
-      localStorage.setItem('accessToken', accessToken);
-      localStorage.setItem('refreshToken', refreshToken);
+      // Step 2: Exchange Auth0 token for API-compatible tokens
+      const apiTokens = await exchangeAuth0TokenForApiToken(auth0Response.accessToken);
 
-      // Call parent handler
-      onLogin(accessToken, refreshToken, user);
+      // Step 3: Store API tokens in localStorage
+      localStorage.setItem('accessToken', apiTokens.accessToken);
+      localStorage.setItem('refreshToken', apiTokens.refreshToken);
+
+      // Step 4: Call parent handler
+      onLogin(apiTokens.accessToken, apiTokens.refreshToken, apiTokens.user);
     } catch (err: any) {
       console.error('Authentication error:', err);
       setError(err.message || 'An error occurred during authentication');
