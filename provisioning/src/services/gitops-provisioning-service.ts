@@ -1017,14 +1017,8 @@ export class GitOpsProvisioningService {
           console.log(`   ✅ 1Password secret bundle deleted successfully (${deletedCount} item(s))`);
           logger.info('1Password secret bundle deleted', { clientId, clientTag, deletedCount });
           secretDeleted = true;
-        } else if (customer?.secret_item_id) {
-          console.log(`   ℹ️  No tagged bundle found, falling back to legacy secret item: ${customer.secret_item_id}`);
-          await this.onePasswordService.deleteItem(customer.secret_item_id);
-          console.log('   ✅ Legacy 1Password secret deleted successfully');
-          logger.info('Legacy 1Password secret deleted', { itemId: customer.secret_item_id, clientId });
-          secretDeleted = true;
         } else {
-          console.log(`   ⚠️  No tagged bundle found for ${clientTag} and no legacy secret_item_id is stored`);
+          console.log(`   ⚠️  No tagged bundle found for ${clientTag}`);
           logger.info('No 1Password secret bundle to delete', { customerId, clientId, clientTag });
           secretDeleted = true; // Consider it "deleted" if it never existed
         }
