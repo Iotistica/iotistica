@@ -1,17 +1,8 @@
-import { Fragment, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
-import {
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   XCircle,
   Circle,
   Clock,
@@ -25,7 +16,6 @@ import {
   Loader2,
 } from "lucide-react";
 import { Button } from "./ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { buildApiUrl } from "@/config/api";
 
 interface TimelineEvent {
@@ -48,9 +38,6 @@ interface TimelineCardProps {
   limit?: number;
   autoRefresh?: boolean;
   refreshInterval?: number;
-  showHeaderDetails?: boolean;
-  showToolbar?: boolean;
-  showCategoryFilter?: boolean;
 }
 
 export function TimelineCard({
@@ -58,17 +45,11 @@ export function TimelineCard({
   limit = 5,
   autoRefresh = true,
   refreshInterval = 30000,
-  showHeaderDetails = true,
-  showToolbar = true,
-  showCategoryFilter = false,
 }: TimelineCardProps) {
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-  const [selectedCategory, setSelectedCategory] = useState<string>("all");
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
 
   const parseMaybeJson = (value: unknown) => {
     if (!value) return value;
@@ -97,7 +78,7 @@ export function TimelineCard({
       
       // Determine API endpoint based on whether deviceId is provided
       const endpoint = deviceId 
-        ? `/api/v1/events/agent/${deviceId}?limit=${limit}`
+        ? `/api/v1/events/device/${deviceId}?limit=${limit}`
         : `/api/v1/events/recent?limit=${limit}`; // Global view - all devices
       
       const response = await fetch(buildApiUrl(endpoint));
@@ -360,130 +341,49 @@ export function TimelineCard({
     return details;
   };
 
-  const getDateGroupKey = (event: TimelineEvent): string => {
-    const ts = getEventTimestamp(event);
-    if (!ts) return "unknown";
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return "unknown";
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-
-  const getDateGroupLabel = (groupKey: string): string => {
-    if (groupKey === "unknown") return "Unknown Date";
-
-    const now = new Date();
-    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    const yesterdayKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
-
-    if (groupKey === todayKey) return "Today";
-    if (groupKey === yesterdayKey) return "Yesterday";
-
-    const parsed = new Date(`${groupKey}T00:00:00`);
-    if (Number.isNaN(parsed.getTime())) return groupKey;
-
-    return parsed.toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  };
-
-  const categories = Array.from(new Set(events.map((event) => event.category).filter(Boolean))).sort();
-  const visibleEvents = selectedCategory === "all"
-    ? events
-    : events.filter((event) => event.category === selectedCategory);
-
-  const groupedEvents = visibleEvents.reduce((acc, event) => {
-    const key = getDateGroupKey(event);
-    if (!acc[key]) {
-      acc[key] = [];
-    }
-    acc[key].push(event);
-    return acc;
-  }, {} as Record<string, TimelineEvent[]>);
-
-  const dateGroups = Object.keys(groupedEvents);
-  const categoryBadgeBaseClass = "h-6 min-w-[96px] inline-flex items-center justify-center px-2 rounded-md border text-xs font-semibold leading-none capitalize";
-
   return (
-    <>
-      {showCategoryFilter && !error && (
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-foreground">Category:</label>
-            <Select
-              value={selectedCategory}
-              onValueChange={setSelectedCategory}
-            >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All ({events.length})</SelectItem>
-                {categories.map((category) => (
-                  <SelectItem key={category} value={category}>
-                    {category} ({events.filter((event) => event.category === category).length})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      )}
-
-      <Card className="flex flex-col h-[600px]">
+    <Card className="flex flex-col h-[600px]">
       {/* Sticky Header */}
-      {showToolbar && (
-        <div className="flex-shrink-0 bg-background border-b border-border p-4 md:p-6">
-          <div className={`flex items-start ${showHeaderDetails ? 'justify-between' : 'justify-end'}`}>
-            {showHeaderDetails ? (
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-950/30 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-                </div>
-                <div>
-                  <h3 className="text-lg text-foreground font-medium mb-1">Timeline</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {loading ? "Loading events..." : `Device activity and system events`}
-                  </p>
-                  {!loading && lastRefresh && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Last updated: {lastRefresh.toLocaleTimeString()}
-                    </p>
-                  )}
-                </div>
-              </div>
-            ) : null}
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {events.length > 0 && (
-                <Badge variant="outline" className="bg-muted text-muted-foreground border-border">
-                  {events.length} {events.length === 1 ? "event" : "events"}
-                </Badge>
+      <div className="flex-shrink-0 bg-background border-b border-border p-4 md:p-6">
+        <div className="flex items-start justify-between">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-950/30 rounded-lg flex items-center justify-center flex-shrink-0">
+              <Clock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <div>
+              <h3 className="text-lg text-foreground font-medium mb-1">Timeline</h3>
+              <p className="text-sm text-muted-foreground">
+                {loading ? "Loading events..." : `Device activity and system events`}
+              </p>
+              {!loading && lastRefresh && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Last updated: {lastRefresh.toLocaleTimeString()}
+                </p>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleManualRefresh}
-                disabled={loading}
-                className="h-8 w-8 p-0"
-              >
-                {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-              </Button>
             </div>
           </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {events.length > 0 && (
+              <Badge variant="outline" className="bg-muted text-muted-foreground border-border">
+                {events.length} {events.length === 1 ? "event" : "events"}
+              </Badge>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleManualRefresh}
+              disabled={loading}
+              className="h-8 w-8 p-0"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
         </div>
-      )}
+      </div>
 
       {/* Scrollable Events Section */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
@@ -510,24 +410,20 @@ export function TimelineCard({
             <Loader2 className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin mb-3" />
             <p className="text-muted-foreground">Loading events...</p>
           </div>
-        ) : visibleEvents.length === 0 ? (
+        ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <div className="w-12 h-12 bg-muted rounded-full flex items-center justify-center mb-3">
               <Info className="w-6 h-6 text-muted-foreground" />
             </div>
             <p className="text-foreground">No events to display</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {selectedCategory === "all"
-                ? "Events will appear here as they occur"
-                : `No events found for category \"${selectedCategory}\"`}
-            </p>
+            <p className="text-sm text-muted-foreground mt-1">Events will appear here as they occur</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left py-3 px-4 font-semibold text-sm text-foreground" aria-label="Timestamp" />
+                  <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Timestamp</th>
                   <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Category</th>
                   <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Event</th>
                   <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Description</th>
@@ -536,171 +432,68 @@ export function TimelineCard({
                 </tr>
               </thead>
               <tbody>
-                {dateGroups.map((groupKey) => (
-                  <Fragment key={`group-fragment-${groupKey}`}>
-                    <tr
-                      key={`group-${groupKey}`}
-                      className="bg-muted/80 border-y border-border cursor-pointer"
-                      onClick={() =>
-                        setCollapsedGroups((prev) => ({
-                          ...prev,
-                          [groupKey]: !(prev[groupKey] ?? false),
-                        }))
-                      }
-                    >
-                      <td colSpan={6} className="py-2 px-4">
-                        <div className="inline-flex items-center gap-3 text-[72px] font-bold text-foreground uppercase tracking-wide leading-none">
-                          {collapsedGroups[groupKey] ? (
-                            <ChevronRight className="h-5 w-5" />
-                          ) : (
-                            <ChevronDown className="h-5 w-5" />
-                          )}
-                          <span className="h-2 w-2 rounded-full bg-foreground/70" />
-                          <span>{getDateGroupLabel(groupKey)}</span>
-                          <span className="text-[44px] text-muted-foreground normal-case font-medium leading-none">
-                            ({groupedEvents[groupKey].length} {groupedEvents[groupKey].length === 1 ? 'event' : 'events'})
-                          </span>
+                {events.map((event) => {
+                  const colors = getEventColor(event.type, event.category);
+                  const timestamp = getEventTimestamp(event);
+                  const details = renderEventDetails(event);
+
+                  return (
+                    <tr key={event.id} className="border-b border-border last:border-0 hover:bg-muted">
+                      <td className="py-3 px-4 text-muted-foreground whitespace-nowrap">
+                        {timestamp ? formatDate(timestamp) : '-'}
+                      </td>
+                      <td className="py-3 px-4">
+                        <Badge
+                          variant="outline"
+                          className={`${colors.badgeBg} ${colors.badgeText} ${colors.badgeBorder}`}
+                        >
+                          {event.category}
+                        </Badge>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <div className={`${colors.text}`}>
+                            {getEventIcon(event.type)}
+                          </div>
+                          <span className="font-medium text-foreground">{event.title}</span>
                         </div>
                       </td>
-                    </tr>
-                    {!collapsedGroups[groupKey] && groupedEvents[groupKey].map((event) => {
-                      const colors = getEventColor(event.type, event.category);
-                      const timestamp = getEventTimestamp(event);
-                      const details = renderEventDetails(event);
-
-                      return (
-                        <tr key={event.id} className="border-b border-border last:border-0 hover:bg-muted/60">
-                          <td className="py-3 pl-10 pr-4 text-muted-foreground whitespace-nowrap relative">
-                            <span className="absolute left-4 top-0 bottom-0 w-px bg-border/60" aria-hidden="true" />
-                            <span className="absolute left-[13px] top-1/2 -translate-y-1/2 h-2 w-2 rounded-full bg-muted-foreground/50" aria-hidden="true" />
-                            {timestamp ? formatDate(timestamp) : '-'}
-                          </td>
-                          <td className="py-3 px-4">
-                            <Badge
-                              variant="outline"
-                              className={`${categoryBadgeBaseClass} ${colors.badgeBg} ${colors.badgeText} ${colors.badgeBorder}`}
-                            >
-                              {event.category}
-                            </Badge>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <div className={`${colors.text}`}>
-                                {getEventIcon(event.type)}
+                      <td className="py-3 px-4 text-foreground max-w-md">
+                        {event.description || '-'}
+                      </td>
+                      <td className="py-3 px-4 hidden lg:table-cell">
+                        {details.length > 0 ? (
+                          <div className="space-y-1">
+                            {details.slice(0, 3).map((detail, idx) => (
+                              <div key={idx} className="text-xs">
+                                <span className="text-muted-foreground">{detail.label}:</span>{' '}
+                                <span className="text-foreground">{detail.value}</span>
                               </div>
-                              <span className="font-medium text-foreground">{event.title}</span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4 text-foreground max-w-md">
-                            {event.description || '-'}
-                          </td>
-                          <td className="py-3 px-4 hidden lg:table-cell">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => setSelectedEvent(event)}
-                            >
-                              Details
-                            </Button>
-                          </td>
-                          <td className="py-3 px-4 hidden xl:table-cell">
-                            <code className="text-xs font-mono text-muted-foreground">
-                              {event.event_id}
-                            </code>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </Fragment>
-                ))}
+                            ))}
+                            {details.length > 3 && (
+                              <div className="text-xs text-muted-foreground">
+                                +{details.length - 3} more
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 hidden xl:table-cell">
+                        <code className="text-xs font-mono text-muted-foreground">
+                          {event.event_id}
+                        </code>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
         </div>
       </div>
-      </Card>
-
-      <Dialog open={selectedEvent !== null} onOpenChange={(open) => !open && setSelectedEvent(null)}>
-        <DialogContent
-          className="w-[min(96vw,980px)] max-w-[96vw] !p-0 overflow-hidden flex flex-col"
-          style={{ height: "66vh", maxHeight: "66vh" }}
-        >
-          {selectedEvent && (
-            <>
-              <DialogHeader className="px-6 py-4 border-b border-border">
-                <DialogTitle>{selectedEvent.title || "Event Details"}</DialogTitle>
-                <DialogDescription>
-                  {formatDate(getEventTimestamp(selectedEvent) || selectedEvent.timestamp)}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
-                <div className="space-y-4 text-sm">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-xs text-muted-foreground">Category</p>
-                      <p className="font-medium text-foreground">{selectedEvent.category || "-"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Type</p>
-                      <p className="font-medium text-foreground">{selectedEvent.type || "-"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Event ID</p>
-                      <p className="font-mono text-xs text-foreground break-all">{selectedEvent.event_id || "-"}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Source</p>
-                      <p className="font-medium text-foreground">{selectedEvent.source || "-"}</p>
-                    </div>
-                  </div>
-
-                  {selectedEvent.description ? (
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Description</p>
-                      <p className="text-foreground">{selectedEvent.description}</p>
-                    </div>
-                  ) : null}
-
-                  {renderEventDetails(selectedEvent).length > 0 ? (
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-2">Details</p>
-                      <div className="space-y-1">
-                        {renderEventDetails(selectedEvent).map((detail, idx) => (
-                          <div key={idx} className="text-sm">
-                            <span className="text-muted-foreground">{detail.label}:</span>{" "}
-                            <span className="text-foreground">{detail.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {selectedEvent.data && typeof selectedEvent.data === "object" ? (
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Raw Data</p>
-                      <pre className="text-xs bg-muted p-3 rounded-md max-h-64 overflow-auto text-foreground">
-                        {JSON.stringify(selectedEvent.data, null, 2)}
-                      </pre>
-                    </div>
-                  ) : null}
-
-                  {selectedEvent.metadata && typeof selectedEvent.metadata === "object" ? (
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">Metadata</p>
-                      <pre className="text-xs bg-muted p-3 rounded-md max-h-64 overflow-auto text-foreground">
-                        {JSON.stringify(selectedEvent.metadata, null, 2)}
-                      </pre>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
+    </Card>
   );
 }

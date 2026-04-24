@@ -28,8 +28,6 @@ interface HeaderProps {
   onTagDefinitionsClick?: () => void; // Callback for opening tag definitions page
   onDigitalTwinClick?: () => void; // Callback for opening digital twin page
   userRole?: string; // User role for conditional UI
-  currentView?: string;
-  currentDeviceView?: string; // Current device sub-view (metrics, logs, endpoints, etc.)
 }
 
 export function Header({
@@ -44,9 +42,7 @@ export function Header({
   onUsersClick = () => {},
   onProfileClick = () => {},
   onTagDefinitionsClick = () => {},
-  userRole = 'viewer',
-  currentView,
-  currentDeviceView,
+  userRole = 'viewer'
 }: HeaderProps) {
   // AI Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -71,8 +67,6 @@ export function Header({
   }, [deviceUuid]);
 
   const displayVersion = window.env?.APP_VERSION || __APP_VERSION__;
-  const assistantMode = currentView === 'dashboard' ? 'dashboard' : 'device';
-  const canUseAiAssistant = assistantMode === 'dashboard' || !!deviceUuid;
   
   return (
     <header className="bg-card border-b border-border sticky top-0 z-50">
@@ -93,7 +87,7 @@ export function Header({
           {isAuthenticated ? (
             <>
               {/* AI Chat Button */}
-              {canUseAiAssistant && (
+              {deviceUuid && (
                 <Button
                   onClick={() => setIsChatOpen(true)}
                   size="lg"
@@ -180,12 +174,10 @@ export function Header({
       </div>
       
       {/* AI Chat Widget */}
-      {canUseAiAssistant && (
+      {deviceUuid && (
         <AIChatWidget 
-          mode={assistantMode}
           deviceUuid={deviceUuid}
           deviceName={deviceName}
-          deviceView={currentDeviceView}
           isOpen={isChatOpen} 
           onClose={() => setIsChatOpen(false)} 
         />

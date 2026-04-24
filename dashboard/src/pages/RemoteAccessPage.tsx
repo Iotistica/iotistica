@@ -38,9 +38,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   const isNewSessionRef = useRef<boolean>(false);
   const inputBufferRef = useRef<string>(''); // Buffer for keystroke batching
   const flushTimerRef = useRef<NodeJS.Timeout | null>(null); // Timer for flushing batched keystrokes
-  const noOutputTimerRef = useRef<NodeJS.Timeout | null>(null); // Fires if no shell output arrives after session attach
   const reconnectSessionIdRef = useRef<string | null>(null); // Session to reconnect to when socket opens
-  const lastSessionStatusRef = useRef<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -82,24 +80,15 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
   };
 
   const connectWebSocket = (skipAutoConnect = false) => {
-    // Prevent duplicate connections: bail out if already CONNECTING or OPEN
-    if (wsRef.current &&
-        (wsRef.current.readyState === WebSocket.CONNECTING ||
-         wsRef.current.readyState === WebSocket.OPEN)) {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
     
     setIsConnecting(true);
+    
+    const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace(/^http/, 'ws');
 
-    const token = localStorage.getItem('accessToken');
-    const wsUrl = new URL(buildApiUrl('/ws'));
-    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-    wsUrl.searchParams.set('deviceUuid', deviceUuid);
-    if (token) {
-      wsUrl.searchParams.set('token', token);
-    }
-
-    const ws = new WebSocket(wsUrl.toString());
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -121,7 +110,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           type: 'attach-session',
           data: { 
             sessionId: sessionToReconnect,
-            userId: String(user.id),
+            userId: user?.id,
           },
         }));
       }
@@ -160,14 +149,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         xtermRef.current.writeln('\r\n\x1b[31m✗ Connection lost\x1b[0m');
       }
       isDisconnectingRef.current = false;
-        // Discard any input that was buffered but never sent (WS was not OPEN when
-        // flush timer fired). Keeping stale input would prepend it to the next
-        // keystroke on reconnect, making one character appear twice.
-        if (flushTimerRef.current) {
-          clearTimeout(flushTimerRef.current);
-          flushTimerRef.current = null;
-        }
-        inputBufferRef.current = '';
     };
   };
 
@@ -183,7 +164,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
             type: 'attach-session',
             data: { 
               sessionId: message.sessionId,
-              userId: user?.id !== undefined && user?.id !== null ? String(user.id) : undefined,
+              userId: user?.id,
             },
           }));
         }
@@ -199,16 +180,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         
         // Save session state immediately when attached
         saveSessionState(deviceUuid, message.sessionId, sessions);
-
-        // Start a watchdog: if no shell output arrives within 8 s the agent/MQTT is likely unreachable.
-        if (noOutputTimerRef.current) clearTimeout(noOutputTimerRef.current);
-        noOutputTimerRef.current = setTimeout(() => {
-          noOutputTimerRef.current = null;
-          if (xtermRef.current && currentSessionIdRef.current) {
-            xtermRef.current.writeln('\r\n\x1b[33mAgent not responding. Check if agent is online and connected.\x1b[0m');
-            terminateSession();
-          }
-        }, 8000);
         
         // Check for PTY restart (nested under data)
         const ptyWasRestarted = message.data?.ptyRestarted || message.ptyRestarted;
@@ -287,19 +258,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         listSessions();
         break;
       case 'session-status':
-        if (message.data?.message) {
-          const status = String(message.data?.status || '').toLowerCase();
-          const statusText = String(message.data.message);
-          const isImportantStatus =
-            status === 'agent-timeout' ||
-            /offline|timed out|unable|failed|error/i.test(statusText);
-
-          if (isImportantStatus && xtermRef.current && lastSessionStatusRef.current !== statusText) {
-            xtermRef.current.writeln(`\r\n\x1b[33m${statusText}\x1b[0m`);
-          }
-
-          lastSessionStatusRef.current = isImportantStatus ? statusText : null;
-        }
+        // Session status updates - not displayed in UI anymore
         break;
 
       case 'all-sessions-cleared':
@@ -355,7 +314,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
                 type: 'attach-session',
                 data: { 
                   sessionId: mostRecent.sessionId,
-                  userId: String(user.id),
+                  userId: user?.id,
                 },
               }));
             }
@@ -367,27 +326,9 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
       case 'shell-output':
         if (message.data?.output && (message.sessionId === currentSessionIdRef.current || !message.sessionId)) {
-          // First output received — cancel the MQTT watchdog timer.
-          if (noOutputTimerRef.current) {
-            clearTimeout(noOutputTimerRef.current);
-            noOutputTimerRef.current = null;
-          }
           if (xtermRef.current) {
-            const output = String(message.data.output);
-            const hasHardClearSequence =
-              output.includes('\x1b[2J') ||
-              output.includes('\x1b[3J') ||
-              output.includes('\x1bc');
-
-            xtermRef.current.write(output);
-
-            // Call clear() AFTER write() so that any scrollback xterm creates
-            // while processing the erase sequences is itself wiped.
-            if (hasHardClearSequence) {
-              xtermRef.current.clear();
-            }
+            xtermRef.current.write(message.data.output);
           }
-          lastSessionStatusRef.current = null;
           if (ptyRestarted) {
             setPtyRestarted(false);
           }
@@ -398,17 +339,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
         // Legacy shell output format (type: 'shell', data: { output: '...' })
         if (message.data?.output) {
           if (xtermRef.current) {
-            const output = String(message.data.output);
-            const hasHardClearSequence =
-              output.includes('\x1b[2J') ||
-              output.includes('\x1b[3J') ||
-              output.includes('\x1bc');
-
-            xtermRef.current.write(output);
-
-            if (hasHardClearSequence) {
-              xtermRef.current.clear();
-            }
+            xtermRef.current.write(message.data.output);
           }
           // Clear PTY restart warning on first output
           if (ptyRestarted) {
@@ -463,7 +394,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       type: 'create-session',
       deviceUuid,
       data: {
-        userId: user?.id !== undefined && user?.id !== null ? String(user.id) : undefined,
+        userId: user?.id,
       },
     };
     wsRef.current.send(JSON.stringify(msg));
@@ -531,7 +462,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
   const flushInputBuffer = () => {
     if (inputBufferRef.current && wsRef.current?.readyState === WebSocket.OPEN && currentSessionIdRef.current) {
-      console.log(`[RemoteShell] flushing buffer: ${JSON.stringify(inputBufferRef.current)}`);
       wsRef.current.send(JSON.stringify({
         type: 'shell-input',
         data: {
@@ -539,10 +469,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
           input: inputBufferRef.current,
         },
       }));
-      console.log(`[RemoteShell] buffer cleared after flush`);
       inputBufferRef.current = '';
-    } else {
-      console.log(`[RemoteShell] flush skipped - socket: ${wsRef.current?.readyState}, buffer: ${JSON.stringify(inputBufferRef.current)}, sessionId: ${currentSessionIdRef.current}`);
     }
   };
 
@@ -556,9 +483,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     }
 
     // Add to buffer
-    console.log(`[RemoteShell] sendInput called with: ${JSON.stringify(data)} (buffer before: ${JSON.stringify(inputBufferRef.current)})`);
     inputBufferRef.current += data;
-    console.log(`[RemoteShell] buffer after add: ${JSON.stringify(inputBufferRef.current)}`);
     
     // Clear existing timer and set new one to flush after 50ms
     if (flushTimerRef.current) {
@@ -683,11 +608,6 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
     
     term.open(terminalRef.current);
     fitAddon.fit();
-
-    // Show a brief welcome hint when no session is active yet.
-    term.writeln('\x1b[36mRemote Access Terminal\x1b[0m');
-    term.writeln('\x1b[90mPress Connect to start a remote shell session.\x1b[0m');
-    term.writeln('');
     
     // Focus terminal immediately after opening
     term.focus();
@@ -697,19 +617,15 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
 
     // Handle user input
     term.onData((data) => {
-      console.log(`[RemoteShell] term.onData fired with: ${JSON.stringify(data)}`);
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        console.log('[RemoteShell] onData: socket not open');
         return;
       }
 
       if (!currentSessionIdRef.current) {
-        console.log('[RemoteShell] onData: no session');
         term.write('\x1b[31m✗ Not attached to a session\x1b[0m\r\n');
         return;
       }
 
-      console.log(`[RemoteShell] onData: calling sendInput`);
       sendInput(data);
     });
 
@@ -851,7 +767,7 @@ export function RemoteAccessPage({ deviceUuid }: RemoteAccessPageProps) {
       // Connect WebSocket (socket's onopen will handle reconnection)
       connectWebSocket(true); // Pass true to skip auto-connect logic
     }
-    }, [deviceUuid, user?.id]);
+  }, [deviceUuid, user]);
 
   return (
     <div className="flex-1 bg-background overflow-auto">

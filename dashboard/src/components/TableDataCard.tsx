@@ -4,10 +4,6 @@ import { Settings, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-rea
 import { buildApiUrl } from '../config/api';
 
 export interface TableDataCardConfig {
-  agentUuid?: string;
-  agentName?: string;
-  endpointName?: string;
-  deviceUuid?: string;
   deviceName: string;
   metricName: string;
   timeRange: string; // '1h', '6h', '12h', '24h'
@@ -55,8 +51,6 @@ function TableDataCardComponent({
   const [data, setData] = useState<TableRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [stale, setStale] = useState(false);
-  const [staleReason, setStaleReason] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortColumn, setSortColumn] = useState<SortColumn>('timestamp');
@@ -71,11 +65,7 @@ function TableDataCardComponent({
       return;
     }
     
-    if (!config.deviceUuid && !config.deviceName) {
-      setError('Missing configuration');
-      return;
-    }
-    if (!config.metricName || !config.timeRange) {
+    if (!config.deviceName || !config.metricName || !config.timeRange) {
       setError('Missing configuration');
       return;
     }
@@ -85,20 +75,8 @@ function TableDataCardComponent({
 
     try {
       const token = localStorage.getItem('accessToken');
-      const params = new URLSearchParams({
-        metricName: config.metricName,
-        timeRange: config.timeRange,
-      });
-      if (config.deviceUuid) {
-        params.set('deviceUuid', config.deviceUuid);
-      } else {
-        params.set('deviceName', config.deviceName);
-      }
-      if (config.agentUuid) {
-        params.set('agentUuid', config.agentUuid);
-      }
       const response = await fetch(
-        buildApiUrl(`/api/v1/metrics/timeseries?${params.toString()}`),
+        buildApiUrl(`/api/v1/metrics/timeseries?deviceName=${encodeURIComponent(config.deviceName)}&metricName=${encodeURIComponent(config.metricName)}&timeRange=${config.timeRange}`),
         {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -124,21 +102,10 @@ function TableDataCardComponent({
 
       setData(tableData);
       setLastRefreshed(new Date());
-      setStale(false);
-      setStaleReason(null);
       onDataLoaded?.(result);
     } catch (err) {
       console.error('Error fetching table data:', err);
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      const hasExistingData = data.length > 0;
-
-      if (hasExistingData) {
-        setStale(true);
-        setStaleReason(message);
-        setError(null);
-      } else {
-        setError(message);
-      }
+      setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setIsLoading(false);
     }
@@ -151,7 +118,7 @@ function TableDataCardComponent({
       const interval = setInterval(fetchData, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [config.deviceUuid, config.deviceName, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
+  }, [config.deviceName, config.metricName, config.timeRange, refreshInterval, refreshTrigger]);
 
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
@@ -208,18 +175,12 @@ function TableDataCardComponent({
     <div className="flex flex-col h-full">
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        {stale && data.length > 0 && (
-          <div className="mb-2 rounded-md border border-amber-300/60 bg-amber-50/80 px-3 py-2 text-xs text-amber-800">
-            Showing last known table data{lastRefreshed ? ` • updated ${lastRefreshed.toLocaleTimeString()}` : ''}
-            {staleReason ? ` • ${staleReason}` : ''}
-          </div>
-        )}
         {isLoading && data.length === 0 ? (
           <div className="flex items-center justify-center h-32 text-muted-foreground">
             <RefreshCw className="h-4 w-4 animate-spin mr-2" />
             Loading...
           </div>
-        ) : error && data.length === 0 ? (
+        ) : error ? (
           <div className="flex items-center justify-center h-32 text-destructive">
             {error}
           </div>

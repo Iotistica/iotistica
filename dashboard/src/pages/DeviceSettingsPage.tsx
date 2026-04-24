@@ -146,7 +146,7 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
     // Fetch device info to check if it's a virtual agent
     const fetchDeviceInfo = async () => {
       try {
-        const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}`), {
+        const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`), {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -200,7 +200,7 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
 
     setRestarting(true);
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual/restart`), {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual/restart`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -476,14 +476,14 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
           </CardHeader>
           <CardContent className="space-y-3">
             <FeatureToggle
-              label="Agent Jobs"
+              label="Device Jobs"
               description="Enable job execution engine on the agent"
               enabled={settings.features.enableDeviceJobs}
               onToggle={() => updateSetting('features.enableDeviceJobs', !settings.features.enableDeviceJobs)}
             />
             <FeatureToggle
               label="Anomaly Detection"
-              description="Enable anomaly detection for metrics"
+              description="Enable AI-powered anomaly detection for metrics"
               enabled={settings.features.enableAnomalyDetection}
               onToggle={() => updateSetting('features.enableAnomalyDetection', !settings.features.enableAnomalyDetection)}
             />
@@ -588,7 +588,7 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
                 <Brain className="h-5 w-5" />
                 Anomaly Detection
               </CardTitle>
-              <CardDescription>Configure anomaly detection thresholds</CardDescription>
+              <CardDescription>Configure AI-powered anomaly detection thresholds</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

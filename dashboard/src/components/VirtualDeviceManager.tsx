@@ -72,7 +72,7 @@ export const VirtualDeviceManager = ({
   // Fetch virtual devices
   const fetchVirtualDevices = async () => {
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual-devices`));
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices`));
       if (!response.ok) throw new Error('Failed to fetch virtual devices');
       const data = await response.json();
       setVirtualDevices(data.virtualDevices || []);
@@ -128,7 +128,7 @@ export const VirtualDeviceManager = ({
     setLoading(true);
 
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual-devices`), {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
@@ -161,7 +161,7 @@ export const VirtualDeviceManager = ({
 
     try {
       const response = await fetch(
-        buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual-devices/${virtualDeviceUuid}`),
+        buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices/${virtualDeviceUuid}`),
         { method: 'DELETE' }
       );
 

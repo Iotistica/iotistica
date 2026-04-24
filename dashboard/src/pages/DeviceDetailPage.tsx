@@ -16,7 +16,7 @@ interface DeviceDetail {
   protocol: string;
   status: string;
   connected: boolean;
-  lastTelemetryAt: string | null;
+  lastPoll: string | null;
   errorCount: number;
   lastError: string | null;
   lastSeen: string;
@@ -54,7 +54,7 @@ export const DeviceDetailPage: React.FC<DeviceDetailPageProps> = ({
         setLoading(true);
         
         // Fetch current sensor status from device-health endpoint
-        const sensorsResponse = await fetch(`/api/v1/agents/${deviceUuid}/device-health`);
+        const sensorsResponse = await fetch(`/api/v1/devices/${deviceUuid}/device-health`);
         const sensorsData = await sensorsResponse.json();
         const currentSensor = sensorsData.devices.find((d: any) => d.name === sensorName);
         
@@ -64,7 +64,7 @@ export const DeviceDetailPage: React.FC<DeviceDetailPageProps> = ({
             protocol: currentSensor.protocol,
             status: currentSensor.status,
             connected: currentSensor.connected,
-            lastTelemetryAt: currentSensor.lastTelemetryAt,
+            lastPoll: currentSensor.lastPoll,
             errorCount: currentSensor.errorCount,
             lastError: currentSensor.lastError,
             lastSeen: currentSensor.lastSeen,
@@ -74,7 +74,7 @@ export const DeviceDetailPage: React.FC<DeviceDetailPageProps> = ({
 
           // Fetch 24-hour history from protocol adapter history
           const historyResponse = await fetch(
-            `/api/v1/agents/${deviceUuid}/protocol-adapters/${currentSensor.protocol}/${sensorName}/history?hours=24`
+            `/api/v1/devices/${deviceUuid}/protocol-adapters/${currentSensor.protocol}/${sensorName}/history?hours=24`
           );
           
           if (historyResponse.ok) {
@@ -171,9 +171,9 @@ export const DeviceDetailPage: React.FC<DeviceDetailPageProps> = ({
               <p className="text-2xl font-bold text-destructive">{sensor.errorCount}</p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Last Activity</p>
+              <p className="text-sm text-muted-foreground">Last Poll</p>
               <p className="text-sm font-medium">
-                {sensor.lastTelemetryAt ? new Date(sensor.lastTelemetryAt).toLocaleString() : 'Never'}
+                {sensor.lastPoll ? new Date(sensor.lastPoll).toLocaleString() : 'Never'}
               </p>
             </div>
             <div>

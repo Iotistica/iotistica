@@ -1,66 +1,174 @@
-import { FormEvent, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '../components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Alert, AlertDescription } from '../components/ui/alert';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { AlertCircle } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import { getAuth0LoginUrl } from '../config/auth0';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Alert, AlertDescription } from '../components/ui/alert';
+import { AlertCircle, Loader2 } from 'lucide-react';
+import { buildApiUrl } from '../config/api';
 
-export function LoginPage() {
-  const { loginWithAuth0Credentials } = useAuth();
+interface LoginPageProps {
+  onLogin: (accessToken: string, refreshToken: string, user: any) => void;
+}
 
+export function LoginPage({ onLogin }: LoginPageProps) {
+  const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleCredentialsLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('');
-
-    if (!username.trim() || !password) {
-      setError('Email and password are required');
-      return;
-    }
+    setIsLoading(true);
 
     try {
-      setIsSubmitting(true);
-      await loginWithAuth0Credentials(username.trim(), password);
+      const endpoint = isLogin ? '/api/v1/auth/login' : '/api/v1/auth/register';
+      const body = isLogin
+        ? { username, password }
+        : { username, email, password, fullName };
+
+      const response = await fetch(buildApiUrl(endpoint), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Authentication failed');
+      }
+
+      // Store tokens in localStorage
+      localStorage.setItem('accessToken', data.data.accessToken);
+      localStorage.setItem('refreshToken', data.data.refreshToken);
+
+      // Call parent handler
+      onLogin(data.data.accessToken, data.data.refreshToken, data.data.user);
     } catch (err: any) {
-      console.error('Login error:', err);
-      setError(err.message || 'Login failed');
+      console.error('Authentication error:', err);
+      setError(err.message || 'An error occurred during authentication');
     } finally {
-      setIsSubmitting(false);
+      setIsLoading(false);
     }
   };
 
   return (
-    <div data-testid="login-page" className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-cyan-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800 p-4">
-      <Card data-testid="login-card" className="w-full max-w-md border-slate-200 shadow-xl">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
+      <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold text-center">Sign in to Iotistica</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center">
+            {isLogin ? 'Welcome Back' : 'Create Account'}
+          </CardTitle>
           <CardDescription className="text-center">
-            Sign in with your organization account
+            {isLogin
+              ? 'Sign in to your Iotistica account'
+              : 'Get started with Iotistic'}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {error && (
-            <Alert variant="destructive" data-testid="login-error">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          <Button
-            type="button"
-            data-testid="login-auth0"
-            onClick={loginWithAuth0Credentials}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-            disabled={isSubmitting}
-          >
-            Login with Auth0
-          </Button>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="username">Username</Label>
+              <Input
+                id="username"
+                type="text"
+                placeholder="Enter your username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                disabled={isLoading}
+              />
+            </div>
+
+            {!isLogin && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="Enter your email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    disabled={isLoading}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="fullName">Full Name (Optional)</Label>
+                  <Input
+                    id="fullName"
+                    type="text"
+                    placeholder="Enter your full name"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    disabled={isLoading}
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                disabled={isLoading}
+                minLength={8}
+              />
+              {!isLogin && (
+                <p className="text-xs text-muted-foreground">
+                  Password must be at least 8 characters
+                </p>
+              )}
+            </div>
+
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {isLogin ? 'Signing in...' : 'Creating account...'}
+                </>
+              ) : (
+                <>{isLogin ? 'Sign In' : 'Sign Up'}</>
+              )}
+            </Button>
+          </form>
+
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setError('');
+              }}
+              className="text-sm text-blue-600 hover:underline"
+              disabled={isLoading}
+            >
+              {isLogin
+                ? "Don't have an account? Sign up"
+                : 'Already have an account? Sign in'}
+            </button>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -9,11 +9,6 @@ import { buildApiUrl } from '@/config/api';
 export interface MetricValueCardConfig {
   widgetId: string;
   title?: string;
-  agentUuid?: string;
-  agentName?: string;
-  endpointName?: string;
-  deviceUuid?: string;
-  endpointUuid?: string;
   deviceName: string;
   metricName: string;
   timeRange: '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
@@ -59,34 +54,19 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [stale, setStale] = useState(false);
-  const [staleReason, setStaleReason] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   const fetchData = async () => {
-    if (!config.deviceUuid && !config.deviceName) return;
-    if (!config.metricName) return;
+    if (!config.deviceName || !config.metricName) return;
 
     try {
       setIsRefreshing(true);
       setError(null);
 
       const token = localStorage.getItem('accessToken');
-      const params = new URLSearchParams({
-        metricName: config.metricName,
-        timeRange: config.timeRange,
-      });
-      if (config.deviceUuid) {
-        params.set('deviceUuid', config.deviceUuid);
-      } else {
-        params.set('deviceName', config.deviceName);
-      }
-      if (config.agentUuid) {
-        params.set('agentUuid', config.agentUuid);
-      }
       const apiUrl = buildApiUrl(
-        `/api/v1/metrics/timeseries?${params.toString()}`
+        `/api/v1/metrics/timeseries?deviceName=${encodeURIComponent(config.deviceName)}&metricName=${encodeURIComponent(config.metricName)}&timeRange=${config.timeRange}`
       );
 
       const response = await fetch(apiUrl, {
@@ -102,24 +82,13 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
       const result: TimeSeriesResponse = await response.json();
       setData(result);
       setLastUpdate(new Date());
-      setStale(false);
-      setStaleReason(null);
       
       if (onDataLoaded) {
         onDataLoaded(result);
       }
     } catch (err) {
       console.error('Error fetching metric data:', err);
-      const message = err instanceof Error ? err.message : 'Failed to fetch data';
-      const hasExistingData = Boolean(data && data.data && data.data.length > 0);
-
-      if (hasExistingData) {
-        setStale(true);
-        setStaleReason(message);
-        setError(null);
-      } else {
-        setError(message);
-      }
+      setError(err instanceof Error ? err.message : 'Failed to fetch data');
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -128,14 +97,14 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
 
   useEffect(() => {
     fetchData();
-  }, [config.deviceUuid, config.deviceName, config.metricName, config.timeRange, refreshTrigger]);
+  }, [config.deviceName, config.metricName, config.timeRange, refreshTrigger]);
 
   useEffect(() => {
     if (refreshInterval > 0) {
       const interval = setInterval(fetchData, refreshInterval * 1000);
       return () => clearInterval(interval);
     }
-  }, [refreshInterval, config.deviceUuid, config.deviceName, config.metricName, config.timeRange]);
+  }, [refreshInterval, config.deviceName, config.metricName, config.timeRange]);
 
   const formatValue = (value: number): string => {
     if (Math.abs(value) >= 1000000) {
@@ -198,7 +167,7 @@ const MetricValueCard: React.FC<MetricValueCardProps> = ({
     );
   }
 
-  if (error && !data) {
+  if (error) {
     return (
       <Card className="h-full">
         <CardContent className="flex flex-col items-center justify-center h-full gap-2">
@@ -274,8 +243,7 @@ const content = (
 
       {/* Footer Info */}
       <div className="text-xs text-muted-foreground text-center">
-        {data.data_points} points • {config.timeRange} • {stale ? 'Stale' : 'Live'} • Updated {formatTime(lastUpdate)}
-        {staleReason ? ` • ${staleReason}` : ''}
+        {data.data_points} points • {config.timeRange} • Updated {formatTime(lastUpdate)}
       </div>
     </>
   );

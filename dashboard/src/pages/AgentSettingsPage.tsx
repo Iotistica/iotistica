@@ -149,7 +149,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
     // Fetch device info to check if it's a virtual agent
     const fetchDeviceInfo = async () => {
       try {
-        const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}`), {
+        const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`), {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -200,7 +200,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
     setShowRestartDialog(false);
     setRestarting(true);
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual/restart`), {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual/restart`), {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -484,14 +484,14 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
           </CardHeader>
           <CardContent className="space-y-3">
             <FeatureToggle
-              label="Agent Jobs"
+              label="Device Jobs"
               description="Enable job execution engine on the agent"
               enabled={settings.features?.enableDeviceJobs || false}
               onToggle={() => updateSetting('features.enableDeviceJobs', !(settings.features?.enableDeviceJobs || false))}
             />
             <FeatureToggle
               label="Anomaly Detection"
-              description="Enable anomaly detection for metrics"
+              description="Enable AI-powered anomaly detection for metrics"
               enabled={settings.features?.enableAnomalyDetection || false}
               onToggle={() => updateSetting('features.enableAnomalyDetection', !(settings.features?.enableAnomalyDetection || false))}
             />
@@ -502,8 +502,8 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
               onToggle={() => updateSetting('features.enableDeviceRemoteAccess', !(settings.features?.enableDeviceRemoteAccess || false))}
             />
             <FeatureToggle
-              label="Device publish"
-              description="Automatically publish device metrics to cloud. Device configuration is required."
+              label="Metrics Publishing"
+              description="Automatically publish device data to MQTT broker"
               enabled={settings.features?.enableDeviceSensorPublish || false}
               onToggle={() => updateSetting('features.enableDeviceSensorPublish', !(settings.features?.enableDeviceSensorPublish || false))}
             />
@@ -596,7 +596,7 @@ export default function AgentSettingsPage({ deviceUuid }: Props) {
                 <Brain className="h-5 w-5" />
                 Anomaly Detection
               </CardTitle>
-              <CardDescription>Configure anomaly detection thresholds</CardDescription>
+              <CardDescription>Configure AI-powered anomaly detection thresholds</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

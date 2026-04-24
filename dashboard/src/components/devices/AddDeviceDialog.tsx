@@ -2,7 +2,7 @@
  * Add Sensor Dialog
  * 
  * Tabbed interface for protocol-specific device configuration.
- * Supports: Modbus TCP/RTU, OPC-UA, MQTT
+ * Supports: Modbus TCP/RTU, OPC-UA
  * Uses React Hook Form with validation.
  */
 
@@ -10,10 +10,8 @@ import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Checkbox } from '@/components/ui/checkbox';
 import { AlertCircle, ChevronsUpDown, Check } from 'lucide-react';
 import {
   Command,
@@ -34,25 +32,23 @@ import { ModbusConfigForm } from './ModbusConfigForm';
 import { DataPointsTable } from './DataPointsTable';
 import { OPCUAConfigForm } from './OPCUAConfigForm';
 import { OPCUADataPointsTable } from './OPCUADataPointsTable';
-import { MqttConfigForm } from './MqttConfigForm';
-import type { ModbusDeviceConfig, ModbusDataPoint, OPCUADeviceConfig, OPCUADataPoint, MQTTDeviceConfig } from '@/schemas/sensor-schemas';
+import type { ModbusDeviceConfig, ModbusDataPoint, OPCUADeviceConfig, OPCUADataPoint } from '@/schemas/sensor-schemas';
 
 interface AddSensorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaveDevice: (device: any, options?: any) => Promise<void>;
+  onSaveDevice: (device: any) => Promise<void>;
   deviceUuid: string;
 }
 
 export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({ 
   open, 
   onOpenChange, 
-  onSaveDevice,
-  deviceUuid
+  onSaveDevice
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedProtocol, setSelectedProtocol] = useState<'modbus' | 'opcua' | 'mqtt'>('modbus');
+  const [selectedProtocol, setSelectedProtocol] = useState<'modbus' | 'opcua'>('modbus');
   const [location, setLocation] = useState<string>('');
   const [locations, setLocations] = useState<string[]>([]);
   const [locationOpen, setLocationOpen] = useState(false);
@@ -67,17 +63,10 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
   const [opcuaFormValid, setOpcuaFormValid] = useState(false);
   const [opcuaDataPoints, setOpcuaDataPoints] = useState<OPCUADataPoint[]>([]);
 
-  // MQTT form state
-  const [mqttConfig, setMqttConfig] = useState<MQTTDeviceConfig | null>(null);
-  const [mqttFormValid, setMqttFormValid] = useState(false);
-  const [mqttUsername, setMqttUsername] = useState('');
-  const [mqttPassword, setMqttPassword] = useState('');
-  const [mqttAclAccess, setMqttAclAccess] = useState<number>(2);
-
   const loadLocations = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl('/api/v1/agents/locations'), {
+      const response = await fetch(buildApiUrl('/api/v1/devices/locations'), {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
@@ -151,44 +140,6 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
       } finally {
         setLoading(false);
       }
-    } else if (selectedProtocol === 'mqtt') {
-      if (!mqttConfig || !mqttFormValid) {
-        setError('Please complete all required fields');
-        return;
-      }
-
-      if (!mqttUsername.trim() || !mqttPassword.trim()) {
-        setError('Please provide username and password');
-        return;
-      }
-
-      const finalConfig: MQTTDeviceConfig = {
-        ...mqttConfig,
-        protocol: 'mqtt',
-        connection: {
-          qos: mqttConfig.connection.qos,
-          username: mqttUsername.trim(),
-        } as any,
-      };
-
-      try {
-        setLoading(true);
-        await onSaveDevice(
-          { ...finalConfig, location },
-          {
-            mqttCredentials: {
-              username: mqttUsername.trim(),
-              password: mqttPassword,
-              access: mqttAclAccess,
-            },
-          }
-        );
-        handleClose();
-      } catch (err: any) {
-        setError(err.message || 'Failed to save device');
-      } finally {
-        setLoading(false);
-      }
     }
   };
 
@@ -198,12 +149,7 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
     setModbusDataPoints([]);
     setOpcuaConfig(null);
     setOpcuaDataPoints([]);
-    setMqttConfig(null);
     setSelectedProtocol('modbus');
-    setMqttFormValid(false);
-    setMqttUsername('');
-    setMqttPassword('');
-    setMqttAclAccess(2);
     setLocation('');
     onOpenChange(false);
   };
@@ -215,27 +161,13 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
     } else if (selectedProtocol === 'opcua') {
       // OPC UA uses auto-discovery, nodes are optional
       return opcuaFormValid;
-    } else if (selectedProtocol === 'mqtt') {
-      if (!mqttFormValid) {
-        return false;
-      }
-
-      if (!mqttUsername.trim() || !mqttPassword.trim()) {
-        return false;
-      }
-
-      return true;
     }
     return false;
   };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent
-        data-testid="add-device-dialog"
-        className="!p-0 overflow-hidden flex flex-col"
-        style={{ width: '66vh', maxWidth: '66vh', height: '66vh', maxHeight: '66vh' }}
-      >
+      <DialogContent className="!grid !grid-rows-[auto,1fr,auto] !gap-0 !h-[85vh] !max-h-[85vh] w-[720px] max-w-[95vw] sm:max-w-[95vw] !p-0 overflow-hidden">
         <DialogHeader className="px-6 py-4">
           <DialogTitle>Add Device</DialogTitle>
           <DialogDescription>
@@ -307,15 +239,14 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
             </label>
             <Select
               value={selectedProtocol}
-              onValueChange={(value) => setSelectedProtocol(value as 'modbus' | 'opcua' | 'mqtt')}
+              onValueChange={(value) => setSelectedProtocol(value as 'modbus' | 'opcua')}
             >
-              <SelectTrigger id="protocol-select" data-testid="protocol-select" className="h-11 text-left">
+              <SelectTrigger id="protocol-select" className="h-11 text-left">
                 <SelectValue placeholder="Select protocol" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="modbus">Modbus TCP/RTU</SelectItem>
                 <SelectItem value="opcua">OPC-UA</SelectItem>
-                <SelectItem value="mqtt">MQTT</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -328,10 +259,12 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
                 onDataPointsChange={setModbusDataPoints}
               />
 
+              {/* Data Points Table - Commented out to reduce confusion, users should work with profiles only
               <DataPointsTable
                 value={modbusDataPoints}
                 onChange={setModbusDataPoints}
               />
+              */}
             </div>
           )}
 
@@ -350,91 +283,13 @@ export const AddSensorDialog: React.FC<AddSensorDialogProps> = ({
               */}
             </div>
           )}
-
-          {selectedProtocol === 'mqtt' && (
-            <div className="space-y-6">
-              <MqttConfigForm
-                value={mqttConfig || undefined}
-                onChange={setMqttConfig}
-                onValidationChange={setMqttFormValid}
-              />
-
-              <div className="space-y-4 rounded-lg border p-4">
-                <div className="space-y-1">
-                  <h4 className="text-sm font-medium">MQTT Access</h4>
-                  <p className="text-xs text-muted-foreground">
-                    Set the login details and permission for this device.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="mqtt-user-name">Username</Label>
-                    <Input
-                      id="mqtt-user-name"
-                      data-testid="mqtt-username-input"
-                      value={mqttUsername}
-                      onChange={(e) => setMqttUsername(e.target.value)}
-                      placeholder="device_mqtt_user"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="mqtt-user-password">Password</Label>
-                    <Input
-                      id="mqtt-user-password"
-                      data-testid="mqtt-password-input"
-                      type="password"
-                      value={mqttPassword}
-                      onChange={(e) => setMqttPassword(e.target.value)}
-                      placeholder="Strong password"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Permission</Label>
-                  <Select
-                    value={String(mqttAclAccess)}
-                    onValueChange={(value) => setMqttAclAccess(Number(value))}
-                  >
-                    <SelectTrigger data-testid="mqtt-permission-select">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">Read</SelectItem>
-                      <SelectItem value="2">Write</SelectItem>
-                      <SelectItem value="3">Read + Write</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
-        {selectedProtocol === 'mqtt' && (
-          <div
-            className="flex items-center px-6"
-            style={{ columnGap: '12px', paddingTop: '10px', paddingBottom: '10px' }}
-          >
-            <Checkbox
-              id="add-mqtt-enabled"
-              checked={mqttConfig?.enabled ?? true}
-              onCheckedChange={(checked) => {
-                if (mqttConfig) setMqttConfig({ ...mqttConfig, enabled: Boolean(checked) });
-              }}
-            />
-            <Label htmlFor="add-mqtt-enabled" className="font-normal cursor-pointer">
-              Enabled
-            </Label>
-          </div>
-        )}
         <DialogFooter className="px-6 py-4">
           <Button variant="outline" onClick={handleClose} disabled={loading}>
             Cancel
           </Button>
           <Button 
-            data-testid="save-device-button"
             onClick={handleSave} 
             disabled={!canSave() || loading}
           >

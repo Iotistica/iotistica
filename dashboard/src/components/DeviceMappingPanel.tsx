@@ -75,7 +75,7 @@ export const DeviceMappingPanel: React.FC<DeviceMappingPanelProps> = ({
 
       // Load devices and mappings in parallel
       const [devicesRes, mappingsRes] = await Promise.all([
-        axios.get<{ devices: Device[] }>(`${API_BASE_URL}/api/v1/agents`),
+        axios.get<{ devices: Device[] }>(`${API_BASE_URL}/api/v1/devices`),
         axios.get<{ success: boolean; data: DeviceMapping[] }>(
           `${API_BASE_URL}/api/v1/digital-twin/graph/device-mappings`
         ),

@@ -56,7 +56,6 @@ import {
 } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Switch } from '../components/ui/switch';
 import {
   Tooltip,
   TooltipContent,
@@ -68,14 +67,8 @@ import { MetricDataCard, type MetricDataCardConfig } from '../components/MetricD
 import { MetricDataCardConfigDialog } from '../components/MetricDataCardConfigDialog';
 import MetricValueCard, { type MetricValueCardConfig } from '../components/MetricValueCard';
 import MetricValueCardConfigDialog from '../components/MetricValueCardConfigDialog';
-import {
-  MultiSeriesMetricCard,
-  type MultiSeriesMetricCardConfig,
-} from '../components/MultiSeriesMetricCard';
-import { MultiSeriesMetricCardConfigDialog } from '../components/MultiSeriesMetricCardConfigDialog';
 import { TableDataCard, type TableDataCardConfig } from '../components/TableDataCard';
 import { TableDataCardConfigDialog } from '../components/TableDataCardConfigDialog';
-import { useDeviceState } from '../contexts/DeviceStateContext';
 import { Table } from 'lucide-react';
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
@@ -109,9 +102,9 @@ const WIDGET_TYPES = {
     defaultW: 4,
     defaultH: 3
   },
-  MONITORING_SUMMARY: {
-    id: 'monitoring',
-    name: 'Monitoring Summary',
+  ALERT_SUMMARY: {
+    id: 'alerts',
+    name: 'Alert Summary',
     icon: AlertTriangle,
     minW: 3,
     minH: 2,
@@ -145,15 +138,6 @@ const WIDGET_TYPES = {
     defaultW: 4,
     defaultH: 4
   },
-  MULTI_SERIES: {
-    id: 'multi-series',
-    name: 'Multi-Series Chart',
-    icon: BarChart3,
-    minW: 4,
-    minH: 6,
-    defaultW: 8,
-    defaultH: 8
-  },
   TABLE: {
     id: 'table',
     name: 'Metrics Table',
@@ -171,14 +155,9 @@ interface DashboardWidget extends Layout {
   deviceId?: string; // For device-specific widgets
   metricConfig?: MetricDataCardConfig; // For metric data widgets
   metricValueConfig?: MetricValueCardConfig; // For metric value widgets
-  multiSeriesConfig?: MultiSeriesMetricCardConfig; // For multi-series widgets
   tableConfig?: TableDataCardConfig; // For table widgets
+  _metricData?: any; // Runtime data for badge rendering
   _refreshTrigger?: number; // Timestamp to trigger manual refresh
-  _aiFeedback?: {
-    suggestionId?: string;
-    suggestionSignature: string;
-    source: 'rules' | 'llm' | 'hybrid';
-  };
 }
 
 interface DashboardLayout {
@@ -191,268 +170,9 @@ interface DashboardLayout {
   updatedAt: string;
 }
 
-interface WidgetMetricBadgeData {
-  protocol?: string;
-  qualityPercentage?: number;
-}
-
-type AiSuggestedChart = 'line' | 'bar' | 'gauge' | 'stat';
-type AiSuggestedBin = 'top' | 'main' | 'side' | 'bottom';
-
-interface AiSuggestedCard {
-  id: string;
-  deviceId: string;
-  deviceName: string;
-  metric: string;
-  unit?: string;
-  chart: AiSuggestedChart;
-  bin: AiSuggestedBin;
-  score: number;
-  metricClass: string;
-  title?: string;
-}
-
-interface AiSuggestedCardsResponse {
-  count: number;
-  cards: AiSuggestedCard[];
-  source?: 'rules' | 'llm' | 'hybrid';
-}
-
-interface AiFeedbackEvent {
-  eventType: 'suggestion_shown' | 'suggestion_accepted' | 'widget_removed';
-  suggestionId?: string;
-  suggestionSignature: string;
-  deviceId?: string;
-  metric: string;
-  chart: AiSuggestedChart;
-  bin: AiSuggestedBin;
-  source: 'rules' | 'llm' | 'hybrid';
-  metadata?: Record<string, unknown>;
-}
-
 interface GlobalDashboardPageProps {
   devices: Device[];
   onDeviceSelect: (device: Device) => void;
-}
-
-interface AnomalyMetricConfig {
-  name: string;
-  enabled: boolean;
-  methods: string[];
-  threshold: number;
-  windowSize: number;
-  expectedRange?: [number, number];
-}
-
-function getFiniteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function getExpectedRangeFromMetricConfig(config: MetricDataCardConfig): [number, number] | undefined {
-  if (config.alertEnabled) {
-    const min = getFiniteNumber(config.alertMin);
-    const max = getFiniteNumber(config.alertMax);
-    if (min !== undefined && max !== undefined) {
-      return min <= max ? [min, max] : [max, min];
-    }
-    return undefined;
-  }
-
-  if (!config.thresholdsEnabled || !Array.isArray(config.thresholds) || config.thresholds.length === 0) {
-    return undefined;
-  }
-
-  const values = config.thresholds
-    .map(threshold => getFiniteNumber(threshold.value))
-    .filter((value): value is number => value !== undefined);
-
-  if (values.length === 0) return undefined;
-
-  return [Math.min(...values), Math.max(...values)];
-}
-
-function buildAiWidgetsFromCards(
-  cards: AiSuggestedCard[],
-  source: 'rules' | 'llm' | 'hybrid' = 'hybrid'
-): DashboardWidget[] {
-  const binIndexes: Record<AiSuggestedBin, number> = {
-    top: 0,
-    main: 0,
-    side: 0,
-    bottom: 0,
-  };
-
-  const binCounts: Record<AiSuggestedBin, number> = {
-    top: 0,
-    main: 0,
-    side: 0,
-    bottom: 0,
-  };
-
-  for (const card of cards) {
-    binCounts[card.bin] += 1;
-  }
-
-  const topRows = Math.ceil(binCounts.top / 2);
-  const topEndY = topRows * 3;
-  const mainStartY = topEndY + (binCounts.top > 0 ? 1 : 0);
-  const mainRows = Math.ceil(binCounts.main / 2);
-  const sideStartY = mainStartY + (mainRows * 6) + (binCounts.main > 0 && binCounts.side > 0 ? 1 : 0);
-  const sideRows = Math.ceil(binCounts.side / 2);
-  const bottomStartY = sideStartY + (sideRows * 4) + (binCounts.side > 0 && binCounts.bottom > 0 ? 1 : 0);
-
-  return cards.map((card) => {
-    const index = binIndexes[card.bin]++;
-    const widgetType: DashboardWidget['type'] =
-      card.chart === 'line' || card.chart === 'bar' ? 'METRIC_DATA' : 'METRIC_VALUE';
-    const widgetId = `ai-${card.id}`;
-    const title = card.title || `${card.deviceName} - ${card.metric}`;
-
-    let x = 0;
-    let y = 0;
-    let w = WIDGET_TYPES[widgetType].defaultW;
-    let h = WIDGET_TYPES[widgetType].defaultH;
-
-    if (card.bin === 'top') {
-      x = (index % 2) * 6;
-      y = Math.floor(index / 2) * 3;
-      w = 6;
-      h = 3;
-    } else if (card.bin === 'main') {
-      x = (index % 2) * 6;
-      y = mainStartY + Math.floor(index / 2) * 6;
-      w = 6;
-      h = 6;
-    } else if (card.bin === 'side') {
-      x = (index % 2) * 6;
-      y = sideStartY + Math.floor(index / 2) * 4;
-      w = 6;
-      h = 4;
-    } else {
-      x = (index % 2) * 6;
-      y = bottomStartY + Math.floor(index / 2) * 6;
-      w = 6;
-      h = 6;
-    }
-
-    const baseWidget: DashboardWidget = {
-      i: widgetId,
-      x,
-      y,
-      w,
-      h,
-      minW: WIDGET_TYPES[widgetType].minW,
-      minH: WIDGET_TYPES[widgetType].minH,
-      type: widgetType,
-      title,
-      deviceId: card.deviceId,
-      _aiFeedback: {
-        suggestionId: card.id,
-        suggestionSignature: `${card.deviceId.toLowerCase()}::${card.metric.toLowerCase()}::${card.chart}::${card.bin}`,
-        source,
-      },
-    };
-
-    if (widgetType === 'METRIC_DATA') {
-      baseWidget.metricConfig = {
-        widgetId,
-        title,
-        deviceUuid: card.deviceId,
-        deviceName: card.deviceName,
-        metricName: card.metric,
-        chartType: card.chart === 'bar' ? 'bar' : 'line',
-        timeRange: '1h',
-        showStats: false,
-      };
-    } else {
-      baseWidget.metricValueConfig = {
-        widgetId,
-        title,
-        deviceUuid: card.deviceId,
-        deviceName: card.deviceName,
-        metricName: card.metric,
-        timeRange: '1h',
-        showSparkline: card.chart !== 'stat',
-      };
-    }
-
-    return baseWidget;
-  });
-}
-
-async function trackAiFeedbackEvents(events: AiFeedbackEvent[]): Promise<void> {
-  if (!Array.isArray(events) || events.length === 0) {
-    return;
-  }
-
-  try {
-    const token = localStorage.getItem('accessToken');
-    if (!token) {
-      console.warn('Skipping AI feedback tracking: no auth token available');
-      return;
-    }
-
-    const response = await fetch(buildApiUrl('/api/v1/dashboard/ai-feedback'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ events }),
-      keepalive: true,
-    });
-
-    if (!response.ok) {
-      let body = '';
-      try {
-        body = await response.text();
-      } catch {
-        body = '';
-      }
-      console.warn('AI feedback tracking failed', {
-        status: response.status,
-        statusText: response.statusText,
-        body,
-      });
-    }
-  } catch (error) {
-    console.warn('Failed to track AI feedback events', error);
-  }
-}
-
-function toAiFeedbackEvent(
-  eventType: AiFeedbackEvent['eventType'],
-  card: AiSuggestedCard,
-  source: 'rules' | 'llm' | 'hybrid',
-  metadata?: Record<string, unknown>
-): AiFeedbackEvent {
-  return {
-    eventType,
-    suggestionId: card.id,
-    suggestionSignature: `${card.deviceId.toLowerCase()}::${card.metric.toLowerCase()}::${card.chart}::${card.bin}`,
-    deviceId: card.deviceId,
-    metric: card.metric,
-    chart: card.chart,
-    bin: card.bin,
-    source,
-    metadata,
-  };
-}
-
-function parseSuggestionSignature(signature: string): { chart: AiSuggestedChart; bin: AiSuggestedBin } {
-  const parts = signature.split('::');
-  const chart = parts[2];
-  const bin = parts[3];
-
-  if (chart !== 'line' && chart !== 'bar' && chart !== 'gauge' && chart !== 'stat') {
-    throw new Error(`Invalid suggestion signature chart: ${signature}`);
-  }
-
-  if (bin !== 'top' && bin !== 'main' && bin !== 'side' && bin !== 'bottom') {
-    throw new Error(`Invalid suggestion signature bin: ${signature}`);
-  }
-
-  return { chart, bin };
 }
 
 export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboardPageProps) {
@@ -469,10 +189,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     }));
   };
 
-  const [userWidgets, setUserWidgets] = useState<DashboardWidget[]>([]);
-  const [aiWidgets, setAiWidgets] = useState<DashboardWidget[]>([]);
-  const [showAI, setShowAI] = useState(false);
-  const [isLoadingAiWidgets, setIsLoadingAiWidgets] = useState(false);
+  const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
   const [isEditMode, setIsEditMode] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -487,11 +204,9 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const [newDashboardName, setNewDashboardName] = useState('');
   const [showMetricConfigDialog, setShowMetricConfigDialog] = useState(false);
   const [showMetricValueConfigDialog, setShowMetricValueConfigDialog] = useState(false);
-  const [showMultiSeriesConfigDialog, setShowMultiSeriesConfigDialog] = useState(false);
   const [showTableConfigDialog, setShowTableConfigDialog] = useState(false);
   const [configuringWidgetId, setConfiguringWidgetId] = useState<string | null>(null);
   const [refreshingWidgets, setRefreshingWidgets] = useState<Set<string>>(new Set());
-  const [widgetMetricBadges, setWidgetMetricBadges] = useState<Record<string, WidgetMetricBadgeData | undefined>>({});
   const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false);
   const [widgetToDelete, setWidgetToDelete] = useState<string | null>(null);
   const [showResetConfirmDialog, setShowResetConfirmDialog] = useState(false);
@@ -512,126 +227,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     const saved = localStorage.getItem('dashboard-kiosk-mode');
     return saved === 'true';
   });
-  const { getPendingConfig, updatePendingConfig } = useDeviceState();
-
-  // Phase 1 AI-dashboard scaffolding: keep user widgets as source-of-truth for edits/saves.
-  const widgets = userWidgets;
-  const setWidgets = setUserWidgets;
-  const displayedWidgets = showAI ? aiWidgets : userWidgets;
-
-  const resetAiView = () => {
-    setShowAI(false);
-    setAiWidgets([]);
-    setIsLoadingAiWidgets(false);
-  };
-
-  const fetchAiWidgets = async () => {
-    try {
-      setIsLoadingAiWidgets(true);
-      const response = await fetch(buildApiUrl('/api/v1/dashboard/ai-cards?strategy=hybrid'), {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to load AI cards: ${response.status}`);
-      }
-
-      const data: AiSuggestedCardsResponse = await response.json();
-      const source = data.source || 'hybrid';
-      const cards = data.cards || [];
-      setAiWidgets(buildAiWidgetsFromCards(cards, source));
-
-      void trackAiFeedbackEvents(cards.map((card) =>
-        toAiFeedbackEvent('suggestion_shown', card, source, { origin: 'dashboard_toggle' })
-      ));
-    } catch (error) {
-      console.error('Failed to load AI suggested widgets:', error);
-    } finally {
-      setIsLoadingAiWidgets(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!showAI || aiWidgets.length > 0 || isLoadingAiWidgets) {
-      return;
-    }
-
-    fetchAiWidgets();
-  }, [showAI, aiWidgets.length, isLoadingAiWidgets]);
-
-  useEffect(() => {
-    const handleAiSuggestionsGenerated = (event: Event) => {
-      const customEvent = event as CustomEvent<{ cards?: AiSuggestedCard[]; source?: 'rules' | 'llm' | 'hybrid' }>;
-      const cards = customEvent.detail?.cards;
-      const source = customEvent.detail?.source || 'hybrid';
-      if (!Array.isArray(cards) || cards.length === 0) {
-        return;
-      }
-
-      setAiWidgets(buildAiWidgetsFromCards(cards, source));
-      setShowAI(true);
-      setIsLoadingAiWidgets(false);
-
-      void trackAiFeedbackEvents(cards.map((card) =>
-        toAiFeedbackEvent('suggestion_shown', card, source, { origin: 'chat_preview' })
-      ));
-    };
-
-    window.addEventListener('dashboard-ai-suggestions-generated', handleAiSuggestionsGenerated as EventListener);
-    return () => {
-      window.removeEventListener('dashboard-ai-suggestions-generated', handleAiSuggestionsGenerated as EventListener);
-    };
-  }, []);
-
-  const syncMetricAnomalyFromWidgetConfig = (config: MetricDataCardConfig) => {
-    const deviceUuid = config.deviceUuid;
-    const endpointUuid = config.endpointUuid;
-    const metricName = config.metricName?.trim();
-
-    if (!deviceUuid || !endpointUuid || !metricName) {
-      return;
-    }
-
-    const qualifiedMetricName = `${endpointUuid}_${metricName}`;
-    const pendingConfig = getPendingConfig(deviceUuid);
-    const existingMetrics: AnomalyMetricConfig[] = Array.isArray(pendingConfig?.anomalyDetection?.metrics)
-      ? pendingConfig.anomalyDetection.metrics
-      : [];
-    const expectedRange = getExpectedRangeFromMetricConfig(config);
-    const existingMetric = existingMetrics.find(metric => metric?.name === qualifiedMetricName);
-
-    if (!expectedRange) {
-      if (!existingMetric) {
-        return;
-      }
-
-      const updatedMetrics = existingMetrics.filter(metric => metric?.name !== qualifiedMetricName);
-      updatePendingConfig(deviceUuid, 'anomalyDetection.metrics', updatedMetrics);
-      return;
-    }
-
-    const upsertedMetric: AnomalyMetricConfig = {
-      name: qualifiedMetricName,
-      enabled: existingMetric?.enabled ?? true,
-      methods: Array.isArray(existingMetric?.methods) && existingMetric.methods.length > 0
-        ? existingMetric.methods
-        : ['iqr', 'zscore'],
-      threshold: getFiniteNumber(existingMetric?.threshold) ?? 3.0,
-      windowSize: getFiniteNumber(existingMetric?.windowSize) ?? 120,
-      expectedRange,
-    };
-
-    const updatedMetrics = existingMetric
-      ? existingMetrics.map(metric => (metric?.name === qualifiedMetricName ? upsertedMetric : metric))
-      : [...existingMetrics, upsertedMetric];
-
-    updatePendingConfig(deviceUuid, 'anomalyDetection.metrics', updatedMetrics);
-    if (!pendingConfig?.features?.enableAnomalyDetection) {
-      updatePendingConfig(deviceUuid, 'features.enableAnomalyDetection', true);
-    }
-  };
 
   const toggleKioskMode = () => {
     const newKioskMode = !isKioskMode;
@@ -745,7 +340,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const loadLayoutByShareToken = async (shareToken: string) => {
     try {
       setIsLoading(true);
-      resetAiView();
       
       const response = await fetch(buildApiUrl(`/api/v1/dashboard-layouts/by-share-token/${shareToken}`), {
         headers: {
@@ -785,7 +379,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const loadLayout = async (layoutId?: number) => {
     try {
       setIsLoading(true);
-      resetAiView();
       
       if (layoutId) {
         // Load specific layout by ID
@@ -821,8 +414,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
       if (response.ok) {
         const data = await response.json();
-        if (data.id && Array.isArray(data.widgets)) {
-          // A real saved layout was found — always trust the server, even if widgets is []
+        if (data.widgets && Array.isArray(data.widgets) && data.widgets.length > 0) {
           setWidgets(sanitizeWidgets(data.widgets));
           setCurrentLayoutId(data.id || null);
           setCurrentLayoutName(data.layoutName || 'Default');
@@ -834,7 +426,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             shareToken: data.shareToken || null
           });
         } else {
-          // No saved layout exists yet — try cache, then hardcoded default
           if (!loadCachedLayout()) {
             loadDefaultLayout();
           }
@@ -855,8 +446,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   };
 
   const loadDefaultLayout = () => {
-    resetAiView();
-
     const defaultWidgets: DashboardWidget[] = [
       { i: '1', x: 0, y: 0, w: 6, h: 4, type: 'FLEET_OVERVIEW', title: 'Fleet Overview' },
       { i: '2', x: 6, y: 0, w: 6, h: 4, type: 'SYSTEM_HEALTH', title: 'System Health' },
@@ -904,14 +493,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       if (data.id) {
         setCurrentLayoutId(data.id);
       }
-
-      // Keep cache in sync so a stale cache never overrides the saved state on reload
-      saveCachedLayout({
-        widgets: widgetsToSave,
-        id: data.id ?? currentLayoutId,
-        layoutName: currentLayoutName,
-        shareToken: currentShareToken
-      });
 
       if (showFeedback) {
         console.log('Global layout saved to server successfully');
@@ -965,7 +546,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
       if (response.ok) {
         const data = await response.json();
-        resetAiView();
         setCurrentLayoutId(data.id);
         setCurrentLayoutName(newDashboardName);
         setWidgets([]);
@@ -1094,8 +674,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   };
 
   const handleLayoutChange = (layout: Layout[]) => {
-    if (showAI) return;
-
     // Only update if in edit mode to prevent false unsaved changes on initial render
     if (!isEditMode) return;
     
@@ -1166,13 +744,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
       return;
     }
 
-    if (type === 'MULTI_SERIES') {
-      setConfiguringWidgetId(`multi-series-${crypto.randomUUID()}`);
-      setIsEditingWidget(false);
-      setShowMultiSeriesConfigDialog(true);
-      return;
-    }
-
     if (type === 'TABLE') {
       // Open config dialog for table widgets
       setConfiguringWidgetId(`table-${crypto.randomUUID()}`);
@@ -1199,43 +770,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   };
 
   const removeWidget = (id: string) => {
-    const removedWidget = widgets.find(w => w.i === id);
     setWidgets(widgets.filter(w => w.i !== id));
-    setWidgetMetricBadges((current) => {
-      if (!(id in current)) {
-        return current;
-      }
-
-      const next = { ...current };
-      delete next[id];
-      return next;
-    });
-
-    if (removedWidget?._aiFeedback) {
-      const { chart, bin } = parseSuggestionSignature(removedWidget._aiFeedback.suggestionSignature);
-      const metric = removedWidget.metricConfig?.metricName
-        || removedWidget.metricValueConfig?.metricName
-        || 'unknown';
-      const deviceId = removedWidget.metricConfig?.deviceUuid
-        || removedWidget.metricValueConfig?.deviceUuid
-        || removedWidget.deviceId
-        || undefined;
-
-      void trackAiFeedbackEvents([
-        {
-          eventType: 'widget_removed',
-          suggestionId: removedWidget._aiFeedback.suggestionId,
-          suggestionSignature: removedWidget._aiFeedback.suggestionSignature,
-          deviceId,
-          metric,
-          chart,
-          bin,
-          source: removedWidget._aiFeedback.source,
-          metadata: { origin: 'dashboard_remove' },
-        },
-      ]);
-    }
-
     setHasUnsavedChanges(true);
     setShowDeleteConfirmDialog(false);
     setWidgetToDelete(null);
@@ -1249,11 +784,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
   const handleSaveMetricConfig = (config: MetricDataCardConfig) => {
     if (!configuringWidgetId) return;
 
-    // Always ensure widgetId matches the actual widget slot — duplicate cards
-    // carry the original's widgetId inside their cloned metricConfig, which must
-    // be corrected here so chart SVG IDs and references are unique.
-    const correctedConfig: MetricDataCardConfig = { ...config, widgetId: configuringWidgetId };
-
     const existingWidget = widgets.find(w => w.i === configuringWidgetId);
     
     if (existingWidget) {
@@ -1262,8 +792,8 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         w.i === configuringWidgetId
           ? { 
               ...w, 
-              metricConfig: correctedConfig, 
-              title: correctedConfig.title || [correctedConfig.deviceName, correctedConfig.metricName].filter(Boolean).join(' - '),
+              metricConfig: config, 
+              title: config.title || (config.agentName ? `${config.agentName} - ${config.deviceName} - ${config.metricName}` : `${config.deviceName} - ${config.metricName}`),
               _refreshTrigger: Date.now() // Trigger re-render to show threshold changes
             }
           : w
@@ -1272,23 +802,20 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     } else {
       // Create new widget
       const widgetConfig = WIDGET_TYPES.METRIC_DATA;
-      const placement = getNextMetricWidgetPlacement(widgets);
       const newWidget: DashboardWidget = {
         i: configuringWidgetId,
-        x: placement.x,
-        y: placement.y,
+        x: 0,
+        y: Infinity,
         w: widgetConfig.defaultW,
         h: widgetConfig.defaultH,
         minW: widgetConfig.minW,
         minH: widgetConfig.minH,
         type: 'METRIC_DATA',
-        title: correctedConfig.title || [correctedConfig.deviceName, correctedConfig.metricName].filter(Boolean).join(' - '),
-        metricConfig: correctedConfig
+        title: config.title || (config.agentName ? `${config.agentName} - ${config.deviceName} - ${config.metricName}` : `${config.deviceName} - ${config.metricName}`),
+        metricConfig: config
       };
       setWidgets([...widgets, newWidget]);
     }
-
-    syncMetricAnomalyFromWidgetConfig(correctedConfig);
 
     setHasUnsavedChanges(true);
     setConfiguringWidgetId(null);
@@ -1306,7 +833,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           ? { 
               ...w, 
               metricValueConfig: config, 
-              title: config.title || [config.deviceName, config.metricName].filter(Boolean).join(' - '),
+              title: config.title || `${config.metricName} - ${config.deviceName}`,
               _refreshTrigger: Date.now() // Trigger re-render to show threshold changes
             }
           : w
@@ -1315,59 +842,17 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     } else {
       // Create new widget
       const widgetConfig = WIDGET_TYPES.METRIC_VALUE;
-      const placement = getNextMetricWidgetPlacement(widgets);
       const newWidget: DashboardWidget = {
         i: configuringWidgetId,
-        x: placement.x,
-        y: placement.y,
+        x: 0,
+        y: Infinity,
         w: widgetConfig.defaultW,
         h: widgetConfig.defaultH,
         minW: widgetConfig.minW,
         minH: widgetConfig.minH,
         type: 'METRIC_VALUE',
-        title: config.title || [config.deviceName, config.metricName].filter(Boolean).join(' - '),
+        title: config.title || `${config.metricName} - ${config.deviceName}`,
         metricValueConfig: config
-      };
-      setWidgets([...widgets, newWidget]);
-    }
-
-    setHasUnsavedChanges(true);
-    setConfiguringWidgetId(null);
-  };
-
-  const handleSaveMultiSeriesConfig = (config: MultiSeriesMetricCardConfig) => {
-    if (!configuringWidgetId) return;
-
-    const correctedConfig: MultiSeriesMetricCardConfig = { ...config, widgetId: configuringWidgetId };
-    const existingWidget = widgets.find(w => w.i === configuringWidgetId);
-    const title = correctedConfig.title || `${correctedConfig.deviceName} - Multi-Series`;
-
-    if (existingWidget) {
-      const updatedWidgets = widgets.map(w =>
-        w.i === configuringWidgetId
-          ? {
-              ...w,
-              multiSeriesConfig: correctedConfig,
-              title,
-              _refreshTrigger: Date.now(),
-            }
-          : w
-      );
-      setWidgets(updatedWidgets);
-    } else {
-      const widgetConfig = WIDGET_TYPES.MULTI_SERIES;
-      const placement = getNextMetricWidgetPlacement(widgets);
-      const newWidget: DashboardWidget = {
-        i: configuringWidgetId,
-        x: placement.x,
-        y: placement.y,
-        w: widgetConfig.defaultW,
-        h: widgetConfig.defaultH,
-        minW: widgetConfig.minW,
-        minH: widgetConfig.minH,
-        type: 'MULTI_SERIES',
-        title,
-        multiSeriesConfig: correctedConfig,
       };
       setWidgets([...widgets, newWidget]);
     }
@@ -1388,7 +873,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           ? { 
               ...w, 
               tableConfig: config, 
-              title: config.title || [config.agentName, config.endpointName, config.deviceName, config.metricName].filter(Boolean).join(' - '),
+              title: config.title || `${config.metricName} - Table`,
               _refreshTrigger: Date.now() // Trigger re-render to show config changes
             }
           : w
@@ -1406,7 +891,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         minW: widgetConfig.minW,
         minH: widgetConfig.minH,
         type: 'TABLE',
-        title: config.title || [config.agentName, config.endpointName, config.deviceName, config.metricName].filter(Boolean).join(' - '),
+        title: config.title || `${config.metricName} - Metrics Table`,
         tableConfig: config
       };
       setWidgets([...widgets, newWidget]);
@@ -1416,223 +901,12 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
     setConfiguringWidgetId(null);
   };
 
-  const buildMetricPathTitle = (config: {
-    agentName?: string;
-    endpointName?: string;
-    deviceName?: string;
-    metricName?: string;
-  }) => [config.agentName, config.endpointName, config.deviceName, config.metricName].filter(Boolean).join(' - ');
-
-  const buildDeviceMetricTitle = (config: {
-    deviceName?: string;
-    metricName?: string;
-  }) => [config.deviceName, config.metricName].filter(Boolean).join(' - ');
-
-  const getNextMetricWidgetPlacement = (targetWidgets: DashboardWidget[]): { x: number; y: number } => {
-    const metricWidgets = targetWidgets.filter(
-      (candidate) => candidate.type === 'METRIC_DATA' || candidate.type === 'METRIC_VALUE' || candidate.type === 'MULTI_SERIES'
-    );
-
-    const leftBottom = metricWidgets
-      .filter((candidate) => candidate.x < 6)
-      .reduce((maxBottom, candidate) => Math.max(maxBottom, candidate.y + candidate.h), 0);
-
-    const rightBottom = metricWidgets
-      .filter((candidate) => candidate.x >= 6)
-      .reduce((maxBottom, candidate) => Math.max(maxBottom, candidate.y + candidate.h), 0);
-
-    const useLeftColumn = leftBottom <= rightBottom;
-    return {
-      x: useLeftColumn ? 0 : 6,
-      y: useLeftColumn ? leftBottom : rightBottom,
-    };
-  };
-
-  const duplicateMetricWidget = (widget: DashboardWidget) => {
-    if (widget.type !== 'METRIC_DATA' || !widget.metricConfig) return;
-
-    const widgetConfig = WIDGET_TYPES.METRIC_DATA;
-    const placement = getNextMetricWidgetPlacement(widgets);
-    const duplicateConfig = typeof structuredClone === 'function'
-      ? structuredClone(widget.metricConfig)
-      : JSON.parse(JSON.stringify(widget.metricConfig)) as MetricDataCardConfig;
-
-    const newTitle = widget.title ? `${widget.title} Copy` : widget.title;
-
-    // Keep metricConfig.title in sync so the settings dialog pre-fills the correct title
-    if (newTitle) {
-      duplicateConfig.title = newTitle;
-    }
-
-    const duplicateWidget: DashboardWidget = {
-      ...widget,
-      i: `metric-${crypto.randomUUID()}`,
-      x: placement.x,
-      y: placement.y,
-      w: widget.w ?? widgetConfig.defaultW,
-      h: widget.h ?? widgetConfig.defaultH,
-      minW: widget.minW ?? widgetConfig.minW,
-      minH: widget.minH ?? widgetConfig.minH,
-      title: newTitle,
-      metricConfig: duplicateConfig,
-      _refreshTrigger: Date.now(),
-      _aiFeedback: undefined,
-    };
-
-    setWidgets([...widgets, duplicateWidget]);
-    setHasUnsavedChanges(true);
-  };
-
-  const getWidgetMetricSignature = (widget: DashboardWidget): string | null => {
-    if (widget.type === 'METRIC_DATA' && widget.metricConfig) {
-      const deviceKey = (widget.metricConfig.deviceUuid || widget.metricConfig.deviceName || '').trim().toLowerCase();
-      const metricKey = (widget.metricConfig.metricName || '').trim().toLowerCase();
-      if (!deviceKey || !metricKey) return null;
-      return `${deviceKey}::${metricKey}`;
-    }
-
-    if (widget.type === 'METRIC_VALUE' && widget.metricValueConfig) {
-      const deviceKey = (widget.metricValueConfig.deviceUuid || widget.metricValueConfig.deviceName || '').trim().toLowerCase();
-      const metricKey = (widget.metricValueConfig.metricName || '').trim().toLowerCase();
-      if (!deviceKey || !metricKey) return null;
-      return `${deviceKey}::${metricKey}`;
-    }
-
-    return null;
-  };
-
-  const isDuplicateAiWidget = (candidate: DashboardWidget): boolean => {
-    const candidateSignature = getWidgetMetricSignature(candidate);
-    if (!candidateSignature) return false;
-
-    return userWidgets.some((widget) => getWidgetMetricSignature(widget) === candidateSignature);
-  };
-
-  const addAiWidgetToDashboard = (widget: DashboardWidget) => {
-    if (!showAI) return;
-    if (isDuplicateAiWidget(widget)) return;
-
-    if (widget._aiFeedback) {
-      const { chart, bin } = parseSuggestionSignature(widget._aiFeedback.suggestionSignature);
-      const metric = widget.metricConfig?.metricName
-        || widget.metricValueConfig?.metricName
-        || 'unknown';
-      const deviceId = widget.metricConfig?.deviceUuid
-        || widget.metricValueConfig?.deviceUuid
-        || widget.deviceId
-        || undefined;
-
-      void trackAiFeedbackEvents([
-        {
-          eventType: 'suggestion_accepted',
-          suggestionId: widget._aiFeedback.suggestionId,
-          suggestionSignature: widget._aiFeedback.suggestionSignature,
-          deviceId,
-          metric,
-          chart,
-          bin,
-          source: widget._aiFeedback.source,
-          metadata: { origin: 'dashboard_add_button' },
-        },
-      ]);
-    }
-
-    const newId = crypto.randomUUID();
-    const baseCopiedWidget: DashboardWidget = {
-      ...widget,
-      i: newId,
-      _refreshTrigger: Date.now(),
-      _metricData: undefined,
-      metricConfig: widget.metricConfig
-        ? {
-            ...widget.metricConfig,
-            widgetId: newId,
-          }
-        : undefined,
-      metricValueConfig: widget.metricValueConfig
-        ? {
-            ...widget.metricValueConfig,
-            widgetId: newId,
-          }
-        : undefined,
-      tableConfig: widget.tableConfig ? { ...widget.tableConfig } : undefined,
-    };
-
-    setUserWidgets((prev) => {
-      const copiedSignature = getWidgetMetricSignature(baseCopiedWidget);
-      if (!copiedSignature) {
-        const placement =
-          baseCopiedWidget.type === 'METRIC_DATA' || baseCopiedWidget.type === 'METRIC_VALUE'
-            ? getNextMetricWidgetPlacement(prev)
-            : { x: 0, y: Infinity };
-        return [...prev, { ...baseCopiedWidget, x: placement.x, y: placement.y }];
-      }
-
-      const alreadyExists = prev.some((existingWidget) => getWidgetMetricSignature(existingWidget) === copiedSignature);
-      if (alreadyExists) {
-        return prev;
-      }
-
-      const placement =
-        baseCopiedWidget.type === 'METRIC_DATA' || baseCopiedWidget.type === 'METRIC_VALUE'
-          ? getNextMetricWidgetPlacement(prev)
-          : { x: 0, y: Infinity };
-      return [...prev, { ...baseCopiedWidget, x: placement.x, y: placement.y }];
-    });
-    setHasUnsavedChanges(true);
-  };
-
-  const getDisplayWidgetTitle = (widget: DashboardWidget) => {
-    if (widget.type === 'METRIC_DATA' && widget.metricConfig) {
-      const cfg = widget.metricConfig;
-      const deviceMetricTitle = buildDeviceMetricTitle(cfg);
-      const pathTitle = buildMetricPathTitle(cfg);
-      if (!widget.title || widget.title === pathTitle) {
-        return deviceMetricTitle || widget.title;
-      }
-      return widget.title;
-    }
-
-    if (widget.type === 'METRIC_VALUE' && widget.metricValueConfig) {
-      const cfg = widget.metricValueConfig;
-      const deviceMetricTitle = buildDeviceMetricTitle(cfg);
-      const pathTitle = buildMetricPathTitle(cfg);
-      const legacyTitle = `${cfg.metricName} - ${cfg.deviceName}`;
-      if (!widget.title || widget.title === legacyTitle || widget.title === pathTitle) {
-        return deviceMetricTitle || widget.title;
-      }
-    }
-
-    if (widget.type === 'MULTI_SERIES' && widget.multiSeriesConfig) {
-      const cfg = widget.multiSeriesConfig;
-      if (!widget.title || widget.title === `${cfg.deviceName} - Multi-Series`) {
-        return cfg.title || `${cfg.deviceName} - Multi-Series`;
-      }
-    }
-
-    if (widget.type === 'TABLE' && widget.tableConfig) {
-      const cfg = widget.tableConfig;
-      const pathTitle = buildMetricPathTitle(cfg);
-      const legacyTitleA = `${cfg.metricName} - Table`;
-      const legacyTitleB = `${cfg.metricName} - Metrics Table`;
-      if (!widget.title || widget.title === legacyTitleA || widget.title === legacyTitleB) {
-        return pathTitle || widget.title;
-      }
-    }
-
-    return widget.title;
-  };
-
   const renderWidget = (widget: DashboardWidget) => {
     const WidgetIcon = WIDGET_TYPES[widget.type].icon;
     const isMetricWidget = widget.type === 'METRIC_DATA';
-    const isMetricValueWidget = widget.type === 'METRIC_VALUE';
-    const isMultiSeriesWidget = widget.type === 'MULTI_SERIES';
     const isTableWidget = widget.type === 'TABLE';
-    const metricData = widgetMetricBadges[widget.i];
+    const metricData = widget._metricData;
     const isRefreshing = refreshingWidgets.has(widget.i);
-    const canAddFromAi = showAI && (isMetricWidget || isMetricValueWidget);
-    const isAlreadyAdded = canAddFromAi ? isDuplicateAiWidget(widget) : false;
     
     return (
       <div key={widget.i} className="h-full">
@@ -1646,19 +920,19 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                 <div className="flex-1 min-w-0">
                   <CardTitle className="text-sm font-medium flex items-center gap-2">
                     <WidgetIcon className="w-4 h-4 flex-shrink-0" />
-                    <span className="truncate">{getDisplayWidgetTitle(widget)}</span>
+                    <span className="truncate">{widget.title}</span>
                     {isMetricWidget && metricData && (
                       <>
                         <span className="text-muted-foreground mx-1">·</span>
                         <Badge variant="outline" className="text-xs">
-                          {metricData.protocol}
+                          {metricData.metric.protocol}
                         </Badge>
-                        {typeof metricData.qualityPercentage === 'number' && (
+                        {metricData.metadata.qualityPercentage && (
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <div className="flex items-center">
-                                  {metricData.qualityPercentage > 95 ? (
+                                  {metricData.metadata.qualityPercentage > 95 ? (
                                     <Check className="w-4 h-4 text-green-600" />
                                   ) : (
                                     <AlertTriangle className="w-4 h-4 text-yellow-600" />
@@ -1666,7 +940,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                                 </div>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>Data Quality: {metricData.qualityPercentage.toFixed(1)}%</p>
+                                <p>Data Quality: {metricData.metadata.qualityPercentage.toFixed(1)}%</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -1677,31 +951,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                 </div>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
-                {canAddFromAi && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 px-2 cursor-pointer"
-                    disabled={isAlreadyAdded}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      addAiWidgetToDashboard(widget);
-                    }}
-                  >
-                    {isAlreadyAdded ? (
-                      <>
-                        <Check className="w-4 h-4 mr-1 text-green-600" />
-                        Added
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="w-4 h-4 mr-1" />
-                        Add
-                      </>
-                    )}
-                  </Button>
-                )}
                 {isMetricWidget && widget.metricConfig && (
                   <>
                     <div className="flex items-center gap-1.5">
@@ -1770,27 +1019,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              e.preventDefault();
-                              duplicateMetricWidget(widget);
-                            }}
-                          >
-                            <Copy className="w-4 h-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Duplicate metric card</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -1830,85 +1058,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                         setConfiguringWidgetId(widget.i);
                         setIsEditingWidget(true);
                         setShowMetricConfigDialog(true);
-                      }}
-                    >
-                      <Settings className="w-4 h-4" />
-                    </Button>
-                  </>
-                )}
-                {isMultiSeriesWidget && widget.multiSeriesConfig && (
-                  <>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground">Time Range:</span>
-                      <Select
-                        value={widget.multiSeriesConfig.timeRange}
-                        onValueChange={(value: '1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d') => {
-                          const updatedWidgets = widgets.map(w =>
-                            w.i === widget.i
-                              ? {
-                                  ...w,
-                                  multiSeriesConfig: { ...w.multiSeriesConfig!, timeRange: value },
-                                  _refreshTrigger: Date.now(),
-                                }
-                              : w
-                          );
-                          setWidgets(updatedWidgets);
-                          setHasUnsavedChanges(true);
-                        }}
-                      >
-                        <SelectTrigger className="h-8 w-[80px] text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1m">1m</SelectItem>
-                          <SelectItem value="1h">1h</SelectItem>
-                          <SelectItem value="6h">6h</SelectItem>
-                          <SelectItem value="12h">12h</SelectItem>
-                          <SelectItem value="24h">24h</SelectItem>
-                          <SelectItem value="7d">7d</SelectItem>
-                          <SelectItem value="30d">30d</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        const updatedWidgets = widgets.map(w =>
-                          w.i === widget.i ? { ...w, _refreshTrigger: Date.now() } : w
-                        );
-                        setWidgets(updatedWidgets);
-                        setRefreshingWidgets(prev => new Set(prev).add(widget.i));
-                        setTimeout(() => {
-                          setRefreshingWidgets(prev => {
-                            const next = new Set(prev);
-                            next.delete(widget.i);
-                            return next;
-                          });
-                        }, 1500);
-                      }}
-                    >
-                      <RefreshCw
-                        className="w-4 h-4"
-                        style={{
-                          transform: isRefreshing ? 'rotate(360deg)' : 'rotate(0deg)',
-                          transition: isRefreshing ? 'transform 1s linear' : 'none'
-                        }}
-                      />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 cursor-pointer hover:bg-primary/10 transition-colors"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        setConfiguringWidgetId(widget.i);
-                        setIsEditingWidget(true);
-                        setShowMultiSeriesConfigDialog(true);
                       }}
                     >
                       <Settings className="w-4 h-4" />
@@ -2010,7 +1159,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               </div>
             </div>
           </CardHeader>
-          <CardContent className={`p-4 pt-0 ${widget.type === 'METRIC_VALUE' || widget.type === 'MULTI_SERIES' ? 'h-full' : ''}`}>
+          <CardContent className={`p-4 pt-0 ${widget.type === 'METRIC_VALUE' ? 'h-full' : ''}`}>
             {renderWidgetContent(widget)}
           </CardContent>
         </Card>
@@ -2130,7 +1279,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           </div>
         );
 
-      case 'MONITORING_SUMMARY':
+      case 'ALERT_SUMMARY':
       case 'RECENT_EVENTS':
         return (
           <div className="text-center text-muted-foreground h-full flex items-center justify-center">
@@ -2166,69 +1315,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             refreshInterval={refreshInterval}
             refreshTrigger={widget._refreshTrigger}
             onDataLoaded={(data) => {
-              const nextBadge = data
-                ? {
-                    protocol: data.metric.protocol,
-                    qualityPercentage: data.metadata.qualityPercentage,
-                  }
-                : undefined;
-
-              setWidgetMetricBadges((current) => {
-                const previous = current[widget.i];
-                if (
-                  previous?.protocol === nextBadge?.protocol &&
-                  previous?.qualityPercentage === nextBadge?.qualityPercentage
-                ) {
-                  return current;
-                }
-
-                if (!nextBadge) {
-                  if (!(widget.i in current)) {
-                    return current;
-                  }
-
-                  const next = { ...current };
-                  delete next[widget.i];
-                  return next;
-                }
-
-                return {
-                  ...current,
-                  [widget.i]: nextBadge,
-                };
-              });
+              // Store data reference for badge rendering
+              setWidgets(prevWidgets => 
+                prevWidgets.map(w => 
+                  w.i === widget.i ? { ...w, _metricData: data } : w
+                )
+              );
             }}
-          />
-        );
-
-      case 'MULTI_SERIES':
-        if (!widget.multiSeriesConfig) {
-          return (
-            <div className="text-center text-muted-foreground h-full flex items-center justify-center">
-              <div>
-                <div className="mb-2">No multi-series chart configured</div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setConfiguringWidgetId(widget.i);
-                    setIsEditingWidget(true);
-                    setShowMultiSeriesConfigDialog(true);
-                  }}
-                >
-                  Configure Widget
-                </Button>
-              </div>
-            </div>
-          );
-        }
-
-        return (
-          <MultiSeriesMetricCard
-            key={`${widget.i}-${widget.multiSeriesConfig.timeRange}-${widget.multiSeriesConfig.metrics.map(metric => metric.metricName).join('|')}`}
-            config={widget.multiSeriesConfig}
-            refreshInterval={refreshInterval}
-            refreshTrigger={widget._refreshTrigger}
           />
         );
 
@@ -2274,6 +1367,13 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               setIsEditingWidget(true);
               setShowTableConfigDialog(true);
             }}
+            onDataLoaded={(data) => {
+              setWidgets(prevWidgets => 
+                prevWidgets.map(w => 
+                  w.i === widget.i ? { ...w, _metricData: data } : w
+                )
+              );
+            }}
           />
         );
 
@@ -2305,6 +1405,14 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             refreshInterval={refreshInterval}
             refreshTrigger={widget._refreshTrigger}
             noWrapper={true}
+            onDataLoaded={(data) => {
+              // Store data reference for badge rendering
+              setWidgets(prevWidgets => 
+                prevWidgets.map(w => 
+                  w.i === widget.i ? { ...w, _metricData: data } : w
+                )
+              );
+            }}
           />
         );
 
@@ -2408,7 +1516,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             </DropdownMenuContent>
           </DropdownMenu>
           
-          {!showAI && hasUnsavedChanges && (
+          {hasUnsavedChanges && (
             <Badge variant="outline" className="bg-yellow-100 text-yellow-700 border-yellow-200">
               Unsaved Changes
             </Badge>
@@ -2416,25 +1524,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         </div>
         
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 rounded-md border px-2 py-1">
-            <Switch
-              id="ai-dashboard-toggle"
-              checked={showAI}
-              onCheckedChange={(checked) => {
-                if (checked) {
-                  setIsEditMode(false);
-                }
-                setShowAI(checked);
-              }}
-            />
-            <Label htmlFor="ai-dashboard-toggle" className="text-sm cursor-pointer">
-              AI Suggested
-            </Label>
-            {isLoadingAiWidgets && (
-              <span className="text-xs text-muted-foreground">Loading...</span>
-            )}
-          </div>
-
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">Refresh:</span>
             <Select
@@ -2459,14 +1548,14 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             </Select>
           </div>
           
-          {!showAI && hasUnsavedChanges && (
+          {hasUnsavedChanges && (
             <Button onClick={saveLayout} size="sm" variant="default" disabled={isSaving}>
               <Save className="w-4 h-4 mr-2" />
               {isSaving ? 'Saving...' : 'Save Layout'}
             </Button>
           )}
           
-          <Button onClick={resetLayout} size="sm" variant="outline" disabled={isSaving || showAI}>
+          <Button onClick={resetLayout} size="sm" variant="outline" disabled={isSaving}>
             <RotateCcw className="w-4 h-4 mr-2" />
             Reset
           </Button>
@@ -2498,7 +1587,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" disabled={showAI}>
+              <Button size="sm" variant="outline">
                 <Plus className="w-4 h-4 mr-2" />
                 Add Widget
               </Button>
@@ -2512,9 +1601,9 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
                 <Activity className="w-4 h-4 mr-2" />
                 System Health
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => addWidget('MONITORING_SUMMARY')}>
+              <DropdownMenuItem onClick={() => addWidget('ALERT_SUMMARY')}>
                 <AlertTriangle className="w-4 h-4 mr-2" />
-                Monitoring Summary
+                Alert Summary
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => addWidget('RECENT_EVENTS')}>
                 <Clock className="w-4 h-4 mr-2" />
@@ -2523,10 +1612,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
               <DropdownMenuItem onClick={() => addWidget('METRIC_DATA')}>
                 <BarChart3 className="w-4 h-4 mr-2" />
                 Metric Card
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => addWidget('MULTI_SERIES')}>
-                <BarChart3 className="w-4 h-4 mr-2" />
-                Multi-Series Chart
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => addWidget('TABLE')}>
                 <Table className="w-4 h-4 mr-2" />
@@ -2570,7 +1655,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
             onClick={() => setIsEditMode(!isEditMode)}
             size="sm"
             variant={isEditMode ? "default" : "outline"}
-            disabled={showAI}
           >
             {isEditMode ? <Lock className="w-4 h-4 mr-2" /> : <Unlock className="w-4 h-4 mr-2" />}
             {isEditMode ? "Lock Layout" : "Edit Layout"}
@@ -2581,15 +1665,9 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
 
       {/* Grid Layout */}
       <div className={`flex-1 overflow-auto ${isKioskMode ? 'p-0' : 'p-4'}`}>
-        {showAI && (
-          <div className="mb-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
-            AI Suggested Charts preview. Your saved dashboard is unchanged unless you explicitly add cards.
-          </div>
-        )}
-
         <ResponsiveGridLayout
           className="layout"
-          layouts={{ lg: displayedWidgets }}
+          layouts={{ lg: widgets }}
           breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
           cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
           rowHeight={80}
@@ -2598,7 +1676,7 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
           onLayoutChange={handleLayoutChange}
           draggableHandle=".card-header"
         >
-          {displayedWidgets.map(widget => renderWidget(widget))}
+          {widgets.map(widget => renderWidget(widget))}
         </ResponsiveGridLayout>
       </div>
 
@@ -2731,21 +1809,6 @@ export function GlobalDashboardPage({ devices, onDeviceSelect }: GlobalDashboard
         onSave={handleSaveMetricValueConfig}
         initialConfig={isEditingWidget && configuringWidgetId 
           ? widgets.find(w => w.i === configuringWidgetId)?.metricValueConfig 
-          : undefined}
-      />
-
-      <MultiSeriesMetricCardConfigDialog
-        open={showMultiSeriesConfigDialog}
-        onOpenChange={(open) => {
-          setShowMultiSeriesConfigDialog(open);
-          if (!open) {
-            setConfiguringWidgetId(null);
-            setIsEditingWidget(false);
-          }
-        }}
-        onSave={handleSaveMultiSeriesConfig}
-        initialConfig={isEditingWidget && configuringWidgetId
-          ? widgets.find(w => w.i === configuringWidgetId)?.multiSeriesConfig
           : undefined}
       />
 

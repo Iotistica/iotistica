@@ -31,27 +31,11 @@ interface MetricValueCardConfigDialogProps {
 interface EndpointDevice {
   agent_uuid: string;
   agent_name: string;
-  device_uuid: string;
   device_name: string;
   protocol: string;
   available_metrics: string[];
   metric_count: number;
   last_seen: string;
-  agent_count?: number;
-  agent_uuids?: string[];
-  agent_names?: string[];
-  source_refs?: Array<{ deviceUuid: string; endpointUuid: string; agentUuid?: string; agentName?: string; }>;
-}
-
-interface AgentOption {
-  uuid: string;
-  name: string;
-}
-
-interface RegisteredAgent {
-  uuid: string;
-  name: string;
-  isOnline: boolean;
 }
 
 const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = ({
@@ -61,10 +45,6 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
   initialConfig,
 }) => {
   const [selectedDevice, setSelectedDevice] = useState('');
-  const [selectedDeviceUuid, setSelectedDeviceUuid] = useState('');
-  const [selectedAgentUuid, setSelectedAgentUuid] = useState('');
-  const [selectedAgentName, setSelectedAgentName] = useState('');
-  const [selectedEndpointName, setSelectedEndpointName] = useState('');
   const [selectedMetric, setSelectedMetric] = useState('');
   const [timeRange, setTimeRange] = useState<'1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d'>('1h');
   const [title, setTitle] = useState('');
@@ -75,16 +55,15 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
   const[enableCritical, setEnableCritical] = useState(false);
   
   const [devices, setDevices] = useState<EndpointDevice[]>([]);
-  const [registeredAgents, setRegisteredAgents] = useState<RegisteredAgent[]>([]);
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
 
   // Fetch devices on mount
   useEffect(() => {
-    if (open && devices.length === 0 && !loadingDevices) {
+    if (open) {
       fetchDevices();
     }
-  }, [open, devices.length, loadingDevices]);
+  }, [open]);
 
   // Extract available metrics when device changes
   useEffect(() => {
@@ -92,27 +71,14 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
       const device = devices.find(d => d.device_name === selectedDevice);
       if (device) {
         setAvailableMetrics(device.available_metrics);
-        const ref = device.source_refs?.[0];
-        const uuid = device.device_uuid || ref?.deviceUuid || '';
-        setSelectedDeviceUuid(uuid);
-        setSelectedEndpointName(ref?.agentName || device.agent_name || '');
-        setSelectedAgentName(ref?.agentName || device.agent_name || '');
       }
-    } else {
-      setSelectedDeviceUuid('');
-      setSelectedAgentName('');
-      setSelectedEndpointName('');
     }
   }, [selectedDevice, devices]);
 
   // Update form fields when initialConfig changes (for editing existing widgets)
   useEffect(() => {
     if (open && initialConfig) {
-      setSelectedAgentUuid(initialConfig.agentUuid || '');
-      setSelectedAgentName(initialConfig.agentName || '');
-      setSelectedEndpointName(initialConfig.endpointName || '');
       setSelectedDevice(initialConfig.deviceName || '');
-      setSelectedDeviceUuid(initialConfig.deviceUuid || '');
       setSelectedMetric(initialConfig.metricName || '');
       setTimeRange(initialConfig.timeRange || '1h');
       setTitle(initialConfig.title || '');
@@ -123,11 +89,7 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
       setEnableCritical(initialConfig.criticalThreshold !== undefined);
     } else if (open && !initialConfig) {
       // Reset form for new widget
-      setSelectedAgentUuid('');
-      setSelectedAgentName('');
-      setSelectedEndpointName('');
       setSelectedDevice('');
-      setSelectedDeviceUuid('');
       setSelectedMetric('');
       setTimeRange('1h');
       setTitle('');
@@ -143,97 +105,19 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
     setLoadingDevices(true);
     try {
       const token = localStorage.getItem('accessToken');
-      const [metricsResponse, agentsResponse] = await Promise.all([
-        fetch(buildApiUrl('/api/v1/metrics/agents'), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        fetch(buildApiUrl('/api/v1/agents?limit=1000'), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        })
-      ]);
-
-      if (metricsResponse.ok) {
-        const metricsData = await metricsResponse.json();
-        setDevices(metricsData.agents || []);
-      } else {
-        setDevices([]);
-      }
-
-      if (agentsResponse.ok) {
-        const devicesData = await agentsResponse.json();
-        const registryAgents = Array.isArray(devicesData.agents)
-          ? devicesData.agents
-          : (Array.isArray(devicesData.devices) ? devicesData.devices : []);
-        setRegisteredAgents(
-          registryAgents
-            .filter((d: any) => d?.uuid)
-            .map((d: any) => ({
-              uuid: d.uuid,
-              name: (d.name || '').trim() || `Agent ${String(d.uuid).slice(0, 8)}`,
-              isOnline: Boolean(d.is_online),
-            }))
-        );
-      } else {
-        setRegisteredAgents([]);
-      }
+      const response = await fetch(buildApiUrl('/api/v1/metrics/devices'), {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await response.json();
+      setDevices(data.devices || []);
     } catch (error) {
       console.error('Error fetching devices:', error);
     } finally {
       setLoadingDevices(false);
     }
   };
-
-  const agentOptions: AgentOption[] = Array.from(
-    devices.reduce((acc, device) => {
-      const uuids = Array.isArray(device.agent_uuids) && device.agent_uuids.length > 0
-        ? device.agent_uuids
-        : (device.agent_uuid ? [device.agent_uuid] : []);
-      const names = Array.isArray(device.agent_names) && device.agent_names.length > 0
-        ? device.agent_names
-        : (device.agent_name ? [device.agent_name] : []);
-
-      uuids.forEach((uuid, index) => {
-        if (!uuid || acc.has(uuid)) return;
-        acc.set(uuid, {
-          uuid,
-          name: (names[index] || '').trim() || `Agent ${uuid.slice(0, 8)}`,
-        });
-      });
-      return acc;
-    }, new Map<string, AgentOption>(
-      registeredAgents.map((agent) => [agent.uuid, { uuid: agent.uuid, name: agent.name }])
-    )).values()
-  );
-
-  const agentStatusByUuid = new Map(registeredAgents.map((agent) => [agent.uuid, agent.isOnline]));
-
-  agentOptions.sort((a, b) => {
-    const aOnline = Boolean(agentStatusByUuid.get(a.uuid));
-    const bOnline = Boolean(agentStatusByUuid.get(b.uuid));
-    if (aOnline !== bOnline) return aOnline ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  const filteredDevices = selectedAgentUuid
-    ? devices.filter((device) => {
-        if (Array.isArray(device.agent_uuids) && device.agent_uuids.includes(selectedAgentUuid)) return true;
-        return device.agent_uuid === selectedAgentUuid;
-      })
-    : devices;
-
-  useEffect(() => {
-    if (!selectedDevice) return;
-    const stillVisible = filteredDevices.some((d) => d.device_name === selectedDevice);
-    if (!stillVisible) {
-      setSelectedDevice('');
-      setSelectedMetric('');
-      setAvailableMetrics([]);
-    }
-  }, [selectedAgentUuid, filteredDevices, selectedDevice]);
 
 
 
@@ -244,10 +128,6 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
 
     const config: MetricValueCardConfig = {
       widgetId: initialConfig?.widgetId || `metric-value-${Date.now()}`,
-      agentUuid: selectedAgentUuid || undefined,
-      agentName: selectedAgentName || undefined,
-      endpointName: selectedEndpointName || undefined,
-      deviceUuid: selectedDeviceUuid || undefined,
       deviceName: selectedDevice,
       metricName: selectedMetric,
       timeRange,
@@ -272,31 +152,6 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
-          <div className="grid gap-2 w-fit">
-            <Label htmlFor="agent">Agent</Label>
-            <Select
-              value={selectedAgentUuid || 'all'}
-              onValueChange={(value) => setSelectedAgentUuid(value === 'all' ? '' : value)}
-            >
-              <SelectTrigger id="agent" className="w-[320px]">
-                <SelectValue placeholder="All agents" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All agents</SelectItem>
-                {agentOptions.map((agent) => (
-                  <SelectItem key={agent.uuid} value={agent.uuid}>
-                    <div className="flex items-center justify-between w-full gap-2">
-                      <span>{agent.name}</span>
-                      <span className={agentStatusByUuid.get(agent.uuid) ? 'text-xs text-green-600' : 'text-xs text-gray-500'}>
-                        {agentStatusByUuid.get(agent.uuid) ? 'Online' : 'Offline'}
-                      </span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           <div className="grid gap-2">
             <Label htmlFor="device">Device</Label>
             <Select value={selectedDevice} onValueChange={setSelectedDevice}>
@@ -308,12 +163,12 @@ const MetricValueCardConfigDialog: React.FC<MetricValueCardConfigDialogProps> = 
                   <SelectItem value="loading" disabled>
                     Loading devices...
                   </SelectItem>
-                ) : filteredDevices.length === 0 ? (
+                ) : devices.length === 0 ? (
                   <SelectItem value="none" disabled>
-                    {selectedAgentUuid ? 'No devices for selected agent' : 'No devices available'}
+                    No devices available
                   </SelectItem>
                 ) : (
-                  filteredDevices.map((device) => (
+                  devices.map((device) => (
                     <SelectItem key={device.device_name} value={device.device_name}>
                       {device.device_name} ({device.protocol}) - {device.metric_count} metrics
                     </SelectItem>

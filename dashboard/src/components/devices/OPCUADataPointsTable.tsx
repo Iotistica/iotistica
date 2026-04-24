@@ -277,7 +277,7 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
                 </div>
 
             {/* Node ID and Namespace */}
-            <div className="grid gap-4" style={{ gridTemplateColumns: '2fr 1fr' }}>
+            <div className="grid grid-cols-3 gap-4">
               <div className="col-span-2 space-y-2">
                 <Label htmlFor="nodeId">
                   Node ID <span className="text-red-500">*</span>
@@ -409,9 +409,12 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
                       )}
                     />
                     <Label htmlFor="anomaly-enabled" className="font-semibold">
-                      Enable
+                      Enable Anomaly Detection
                     </Label>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Monitor this data point for statistical anomalies using machine learning algorithms
+                  </p>
                 </div>
 
                 {/* Detection Methods */}
@@ -566,7 +569,7 @@ export const OPCUADataPointsTable: React.FC<OPCUADataPointsTableProps> = ({
               </div>
             </Tabs>
 
-            <DialogFooter className="mt-6 pt-4">
+            <DialogFooter className="mt-4 pt-4 border-t">
               <Button
                 type="button"
                 variant="outline"

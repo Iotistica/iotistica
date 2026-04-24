@@ -8,6 +8,14 @@ export interface SystemMetricsData {
   timestamp: string;
 }
 
+export interface ProcessData {
+  pid: number;
+  name: string;
+  cpu: number;
+  mem: number;
+  command?: string;
+}
+
 export interface NetworkInterfaceData {
   id: string;
   name: string;
@@ -73,7 +81,6 @@ type MessageHandler = (data: any) => void;
 class WebSocketService {
   private socket: WebSocket | null = null;
   private reconnectTimeout: NodeJS.Timeout | null = null;
-  private tokenRefreshPromise: Promise<boolean> | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 3000;
@@ -119,16 +126,10 @@ class WebSocketService {
     this.isIntentionallyClosed = false;
     this.connectionPending = true;
 
-    const token = localStorage.getItem('accessToken');
-    const wsUrl = new URL(buildApiUrl('/ws'));
-    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-    wsUrl.searchParams.set('deviceUuid', deviceUuid);
-    if (token) {
-      wsUrl.searchParams.set('token', token);
-    }
-    console.log('[WebSocket] Connecting to:', wsUrl.toString());
+    const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace('http', 'ws');
+    console.log('[WebSocket] Connecting to:', wsUrl);
 
-    this.createWebSocket(wsUrl.toString(), ['system-info', 'history', 'network-interfaces']);
+    this.createWebSocket(wsUrl, ['system-info', 'processes', 'history', 'network-interfaces']);
   }
 
   connectGlobal() {
@@ -160,16 +161,10 @@ class WebSocketService {
     this.isIntentionallyClosed = false;
     this.connectionPending = true;
 
-    const token = localStorage.getItem('accessToken');
-    const wsUrl = new URL(buildApiUrl('/ws'));
-    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-    wsUrl.searchParams.set('type', 'global');
-    if (token) {
-      wsUrl.searchParams.set('token', token);
-    }
-    console.log('[WebSocket] Connecting to global:', wsUrl.toString());
+    const wsUrl = buildApiUrl(`/ws?type=global`).replace('http', 'ws');
+    console.log('[WebSocket] Connecting to global:', wsUrl);
 
-    this.createWebSocket(wsUrl.toString(), ['mqtt-stats', 'mqtt-topics']);
+    this.createWebSocket(wsUrl, ['mqtt-stats', 'mqtt-topics']);
   }
 
   private createWebSocket(wsUrl: string, channels: string[]): void {
@@ -242,7 +237,7 @@ class WebSocketService {
         // Don't log the error object as it doesn't contain useful info
       };
 
-      this.socket.onclose = async (event) => {
+      this.socket.onclose = (event) => {
         const connectionType = this.deviceUuid === 'global' ? 'global' : `device ${this.deviceUuid?.substring(0, 8)}`;
         console.log(`[WebSocket] Connection closed for ${connectionType}:`, {
           code: event.code,
@@ -251,24 +246,6 @@ class WebSocketService {
         });
         this.socket = null;
         this.connectionPending = false;
-
-        const isTokenExpired = event.code === 1008 && event.reason?.toLowerCase().includes('token expired');
-        if (!this.isIntentionallyClosed && isTokenExpired) {
-          console.log('[WebSocket] Token expired, attempting refresh before reconnect...');
-          const refreshed = await this.refreshAccessToken();
-          if (refreshed) {
-            this.reconnectAttempts = 0;
-            this.reconnectTimeout = setTimeout(() => {
-              if (this.deviceUuid === 'global') {
-                this.connectGlobal();
-              } else if (this.deviceUuid) {
-                this.connect(this.deviceUuid);
-              }
-            }, 250);
-            return;
-          }
-          console.warn('[WebSocket] Token refresh failed after websocket expiry');
-        }
 
         // Only attempt reconnect if not intentionally closed and within retry limit
         if (!this.isIntentionallyClosed && this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -294,57 +271,6 @@ class WebSocketService {
       console.error('[WebSocket] Failed to create connection:', error);
       this.connectionPending = false;
     }
-  }
-
-  private async refreshAccessToken(): Promise<boolean> {
-    if (this.tokenRefreshPromise) {
-      return this.tokenRefreshPromise;
-    }
-
-    const refreshToken = localStorage.getItem('refreshToken');
-    if (!refreshToken) {
-      return false;
-    }
-
-    this.tokenRefreshPromise = (async () => {
-      try {
-        const response = await fetch(buildApiUrl('/api/v1/auth/refresh'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ refreshToken }),
-        });
-
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
-            localStorage.removeItem('accessToken');
-            localStorage.removeItem('refreshToken');
-            localStorage.removeItem('user');
-            window.dispatchEvent(new CustomEvent('auth:tokens-cleared', {
-              detail: { reason: 'ws_refresh_failed_unauthorized' }
-            }));
-          }
-          return false;
-        }
-
-        const data = await response.json();
-        const accessToken = data?.data?.accessToken;
-        if (!accessToken) {
-          return false;
-        }
-
-        localStorage.setItem('accessToken', accessToken);
-        return true;
-      } catch (error) {
-        console.error('[WebSocket] Token refresh error:', error);
-        return false;
-      } finally {
-        this.tokenRefreshPromise = null;
-      }
-    })();
-
-    return this.tokenRefreshPromise;
   }
 
   disconnect() {

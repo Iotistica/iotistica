@@ -3,21 +3,22 @@ import { DeviceSidebar, Device } from "./components/AgentSidebar";
 import { AddEditDeviceDialog } from "./components/AddEditAgentDialog";
 import { useWebSocketConnection, useWebSocket } from "./hooks/useWebSocket";
 import type { NetworkInterfaceData } from "./services/websocket";
-import { SystemMetrics } from "./components/Overview";
+import { SystemMetrics } from "./components/SystemMetrics";
 import { MqttPage } from "./pages/MqttPage";
 import { JobsPage } from "./pages/JobsPage";
 import { ApplicationsPage } from "./pages/ApplicationsPage";
 import { UsagePage } from "./pages/UsagePage";
-import { NodeRedPage } from "./pages/NodeRedPage";
 import { AnalyticsPage } from "./pages/AnalyticsPage";
 import { SecurityPage } from "./pages/SecurityPage";
+import { Toaster } from "./components/ui/sonner";
 import { Sheet, SheetContent } from "./components/ui/sheet";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Menu, Activity, BarChart3, Radio, Package, Shield, FileText, Terminal, Layers, Plus, Home, Bell, HelpCircle, AlertOctagon } from "lucide-react";
+import { Menu, Activity, BarChart3, Radio, CalendarClock, Package, Shield, FileText, Terminal, Layers, Plus, Home, Bell, HelpCircle, AlertOctagon } from "lucide-react";
 import { buildApiUrl } from "./config/api";
 import { SensorHealthDashboard } from "./pages/DeviceHealthDashboard";
 import { SensorsPage } from "./pages/DevicesPage";
+import { EndpointsVisualizationPage } from "./pages/EndpointsVisualizationPage";
 import HousekeeperPage from "./pages/HousekeeperPage";
 import AgentSettingsPage from "./pages/AgentSettingsPage";
 import AccountPage from "./pages/AccountPage";
@@ -31,7 +32,7 @@ import { DigitalTwinPage } from "./pages/DigitalTwinPage";
 import { EventDebuggerPage } from "./pages/EventDebuggerPage";
 import { AuditPage } from "./pages/audit";
 import { FleetsPage } from "./pages/FleetsPage";
-import { AlertsPage } from "./pages/MonitoringPage";
+import { AlertsPage } from "./pages/AlertsPage";
 
 import { toast } from "sonner";
 import { Header } from "./components/Header";
@@ -51,10 +52,10 @@ import "./lib/authInterceptor";
 
 export default function App() {
   // Device state context
-  const { fetchDeviceState, getPendingConfig } = useDeviceState();
+  const { fetchDeviceState } = useDeviceState();
   
   // Auth context
-  const { user, isAuthenticated, isLoading: isAuthLoading, logout } = useAuth();
+  const { user, isAuthenticated, isLoading: isAuthLoading, login, logout } = useAuth();
   
   // Fleet context - for auto-assigning devices to selected fleet
   const { selectedFleetId, setSelectedFleetId } = useFleet();
@@ -67,18 +68,20 @@ export default function App() {
     'home',
     'fleets',
     'metrics',
-    'devices',
+    'sensors',
     'endpoints',
+    'mqtt',
+    'jobs',
+    'applications',
+    'audit',
+    'usage',
+    'analytics',
+    'security',
+    'maintenance',
     'logs',
     'remote-access',
     'settings',
     'tags',
-    'usage',
-    'analytics',
-    'maintenance',
-    'mqtt',
-    'jobs',
-    'applications',
     'tag-definitions',
     'account',
     'users',
@@ -86,21 +89,15 @@ export default function App() {
     'dashboard',
     'digital-twin',
     'event-debugger',
-    'monitoring',
-    'nodered',
-    'audit',
-    'security'
+    'alerts'
   ] as const;
   type View = typeof viewOptions[number];
   const agentViews: View[] = [
     'metrics',
-    'devices',
+    'sensors',
     'endpoints',
     'jobs',
     'applications',
-    'usage',
-    'analytics',
-    'maintenance',
     'logs',
     'remote-access',
     'settings',
@@ -120,7 +117,7 @@ export default function App() {
     return stored && viewOptions.includes(stored as View) ? (stored as View) : 'metrics';
   });
   const [fleetNameById, setFleetNameById] = useState<Record<string, string>>({});
-  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets' || currentView === 'monitoring' || currentView === 'nodered';
+  const isGlobalView = currentView === 'dashboard' || currentView === 'mqtt' || currentView === 'audit' || currentView === 'security' || currentView === 'fleets' || currentView === 'alerts';
   const [debugMode, setDebugMode] = useState(false);
   const [isKioskMode, setIsKioskMode] = useState<boolean>(() => {
     return localStorage.getItem('dashboard-kiosk-mode') === 'true';
@@ -165,10 +162,10 @@ export default function App() {
         
         if (response.ok) {
           const data = await response.json();
-          // Count critical and warning severity incidents
-          const criticalCount = data.stats?.bySeverity?.critical || 0;
-          const warningCount = data.stats?.bySeverity?.warning || 0;
-          setCriticalAlertsCount(criticalCount + warningCount);
+          // Count critical severity incidents
+          const criticalCount = data.bySeverity?.critical || 0;
+          const highCount = data.bySeverity?.high || 0;
+          setCriticalAlertsCount(criticalCount + highCount);
         }
       } catch (error) {
         console.error('Failed to fetch critical alerts count:', error);
@@ -190,31 +187,8 @@ export default function App() {
     return devices.find((d) => d.id === selectedDeviceId);
   }, [devices, selectedDeviceId]);
 
-  const isRemoteAccessEnabledForSelectedDevice = useMemo(() => {
-    if (!selectedDevice?.deviceUuid) {
-      return true;
-    }
-
-    const pendingConfig = getPendingConfig(selectedDevice.deviceUuid);
-    return pendingConfig?.features?.enableDeviceRemoteAccess !== false;
-  }, [getPendingConfig, selectedDevice?.deviceUuid]);
-
   // URL routing integration (no UI changes, just URL sync)
   const { currentPath, navigateToAgent, navigateToGlobal, navigateToFleet } = useRouting();
-
-  // If an agent is selected but view is a non-global non-agent view (e.g. "home"),
-  // restore to metrics so right panels render correctly after refresh.
-  // Exception: device-independent pages (users, account, profile, etc.) should not redirect.
-  const deviceIndependentViews: View[] = ['users', 'account', 'profile', 'tag-definitions', 'digital-twin'];
-  useEffect(() => {
-    if (!selectedDevice || isGlobalView) return;
-    if (agentViews.includes(currentView)) return;
-    if (deviceIndependentViews.includes(currentView)) return;
-
-    const fleetUuid = selectedDevice.fleet_uuid || undefined;
-    setCurrentView('metrics');
-    navigateToAgent(selectedDevice.deviceUuid, fleetUuid, 'metrics');
-  }, [selectedDevice, isGlobalView, agentViews, currentView, navigateToAgent]);
 
   // Sync URL with current view and selected device
   useEffect(() => {
@@ -235,6 +209,10 @@ export default function App() {
         
         // Only update fleet if URL fleet ID actually changed (not just device poll)
         if (lastUrlFleetIdRef.current !== currentPath.fleetId) {
+          console.log('[URL SYNC] URL fleet ID changed:', { 
+            from: lastUrlFleetIdRef.current, 
+            to: currentPath.fleetId
+          });
           lastUrlFleetIdRef.current = currentPath.fleetId;
           // Use fleet UUID directly from URL (don't convert to ID) - sidebar expects UUID
           const fleetUuid = currentPath.fleetId || device.fleet_uuid || '';
@@ -248,7 +226,10 @@ export default function App() {
       
       // Only update fleet if URL fleet ID actually changed
       if (lastUrlFleetIdRef.current !== currentPath.fleetId) {
-    
+        console.log('[URL SYNC] URL fleet ID changed (fleet view):', { 
+          from: lastUrlFleetIdRef.current, 
+          to: currentPath.fleetId
+        });
         lastUrlFleetIdRef.current = currentPath.fleetId;
         // Use fleet UUID directly from URL (don't convert to ID) - sidebar expects UUID
         setSelectedFleetId(currentPath.fleetId);
@@ -265,6 +246,7 @@ export default function App() {
       // Don't clear fleet selection when going to global view - preserve for restoration
       // when user returns via Home button
       if (lastUrlFleetIdRef.current !== undefined) {
+        console.log('[URL SYNC] Switched to global view, preserving fleet selection');
         lastUrlFleetIdRef.current = undefined;
         // REMOVED: setSelectedFleetId(''); - Keep fleet filter when going to global views
       }
@@ -285,8 +267,11 @@ export default function App() {
 
     const loadFleetName = async () => {
       try {
+        const token = localStorage.getItem('accessToken');
         const response = await fetch(buildApiUrl(`/api/v1/fleets/${fleetId}`), {
-          credentials: 'include',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
         });
 
         if (!response.ok) {
@@ -309,7 +294,7 @@ export default function App() {
       }
     };
 
-    void loadFleetName();
+    loadFleetName();
   }, [currentPath, fleetNameById]);
 
   // Track previous fleet ID to detect when fleet selection changes
@@ -321,12 +306,15 @@ export default function App() {
     if (prevFleetIdRef.current === selectedFleetId) {
       return;
     }
-
     prevFleetIdRef.current = selectedFleetId;
-
+    
     if (selectedFleetId) {
-      const devicesInFleet = devices.filter((d: any) => d.fleet_uuid === selectedFleetId);
-
+      // Check if there are any devices in the selected fleet
+      const devicesInFleet = devices.filter(d => {
+        const deviceFleetId = (d as any).fleet_uuid;
+        return deviceFleetId === selectedFleetId;
+      });
+      
       // Clear selection if fleet is empty OR if currently selected device doesn't belong to this fleet
       if (devicesInFleet.length === 0) {
         console.log('[FLEET FILTER] Fleet has no agents, clearing device selection');
@@ -345,6 +333,10 @@ export default function App() {
   }, [selectedFleetId, devices, selectedDeviceId, selectedDevice]); // Only depend on fleet changes
 
   const handleGlobalViewChange = useCallback((view: View) => {
+    console.log('[handleGlobalViewChange] Called with view:', view);
+    console.log('[handleGlobalViewChange] lastViewedAgent:', lastViewedAgent);
+    console.log('[handleGlobalViewChange] devices.length:', devices.length);
+    console.log('[handleGlobalViewChange] selectedFleetId:', selectedFleetId);
     
     if (view === 'home') {
       // Try to restore last viewed agent first
@@ -403,49 +395,18 @@ export default function App() {
   }, [navigateToGlobal, setSelectedFleetId, devices, setCurrentView, navigateToAgent, lastViewedAgent, setSelectedDeviceId, selectedFleetId]);
 
   const handleAgentViewChange = useCallback((view: View) => {
-    if (view === 'remote-access' && !isRemoteAccessEnabledForSelectedDevice) {
-      toast.warning('Remote access is disabled for this agent.');
-      return;
-    }
-
     if (selectedDevice?.deviceUuid) {
       const fleetUuid = selectedDevice.fleet_uuid
         ? selectedDevice.fleet_uuid
         : undefined;
       navigateToAgent(selectedDevice.deviceUuid, fleetUuid, view);
     }
-  }, [isRemoteAccessEnabledForSelectedDevice, navigateToAgent, selectedDevice]);
-
-  useEffect(() => {
-    if (!selectedDevice?.deviceUuid) {
-      return;
-    }
-
-    if (currentView !== 'remote-access') {
-      return;
-    }
-
-    if (isRemoteAccessEnabledForSelectedDevice) {
-      return;
-    }
-
-    const fleetUuid = selectedDevice.fleet_uuid
-      ? selectedDevice.fleet_uuid
-      : undefined;
-
-    toast.warning('Remote access is disabled for this agent. Redirecting to System view.');
-    navigateToAgent(selectedDevice.deviceUuid, fleetUuid, 'metrics');
-  }, [
-    currentView,
-    isRemoteAccessEnabledForSelectedDevice,
-    navigateToAgent,
-    selectedDevice?.deviceUuid,
-    selectedDevice?.fleet_uuid,
-  ]);
+  }, [navigateToAgent, selectedDevice]);
 
   const formatViewLabel = useCallback((view: string) => {
     // Special mappings for views with different display names
     const viewLabelMap: Record<string, string> = {
+      'sensors': 'Devices',
       'metrics': 'System',
       'devices': 'Devices',
       'system': 'System',
@@ -536,16 +497,11 @@ export default function App() {
         
         // Get auth token from localStorage
         const accessToken = localStorage.getItem('accessToken');
-        if (!accessToken || accessToken.split('.').length !== 3) {
-          console.warn('[AUTH] Missing or invalid access token while fetching devices');
-          setIsLoadingDevices(false);
-          return;
-        }
-
-        const apiUrl = buildApiUrl('/api/v1/agents?limit=100');
+        const apiUrl = buildApiUrl('/api/v1/devices?limit=100');
         console.log('[DEBUG] API URL:', apiUrl);
-        console.log('[DEBUG] Fetching devices with token:', `${accessToken.substring(0, 20)}...`);
-
+        console.log('[DEBUG] Fetching devices with token:', accessToken ? `${accessToken.substring(0, 20)}...` : 'NULL');
+        console.log('[DEBUG] Full auth header:', `Bearer ${accessToken}`);
+        
         const response = await fetch(apiUrl, {
           headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -565,12 +521,11 @@ export default function App() {
         const data = await response.json();
         
         console.log('Devices API response:', data);
-        const deviceList = data.agents || data.devices || [];
-        console.log('[FLEET DEBUG] Raw devices with fleet_uuid:', deviceList.map((d: any) => ({ uuid: d.uuid, name: d.device_name, fleet_uuid: d.fleet_uuid })));
+        console.log('[FLEET DEBUG] Raw devices with fleet_uuid:', data.devices.map((d: any) => ({ uuid: d.uuid, name: d.device_name, fleet_uuid: d.fleet_uuid })));
         
         // Transform API response to match Device interface
         // CRITICAL: Use stable UUID as ID instead of index to prevent React remounts
-        const transformedDevices: Device[] = deviceList.map((apiDevice: any) => ({
+        const transformedDevices: Device[] = data.devices.map((apiDevice: any) => ({
           id: apiDevice.uuid, // Use stable UUID instead of index
           deviceUuid: apiDevice.uuid,
           name: apiDevice.device_name || 'Unnamed Device',
@@ -691,42 +646,7 @@ export default function App() {
           virtual: iface.virtual,
         };
       });
-      const normalizeIp = (ip?: string) => {
-        if (!ip) return '';
-        const trimmed = ip.trim();
-        if (trimmed === '' || trimmed === '0.0.0.0' || trimmed === '::') return '';
-        return trimmed;
-      };
-
-      const scoreInterface = (iface: typeof interfaces[number]) => {
-        let score = 0;
-        if (iface.status === 'connected') score += 5;
-        if (iface.default) score += 3;
-        if (normalizeIp(iface.ipAddress)) score += 3;
-        if (iface.mac) score += 2;
-        if (iface.speed) score += 1;
-        if (iface.signal !== undefined) score += 1;
-        return score;
-      };
-
-      const deduped = new Map<string, typeof interfaces[number]>();
-      interfaces.forEach((iface) => {
-        const ipKey = normalizeIp(iface.ipAddress);
-        const idKey = iface.mac || iface.name || iface.id || ipKey || `${iface.type}-${iface.virtual ? 'v' : 'p'}`;
-        const key = iface.virtual ? `virtual|${iface.type}` : `${idKey}|${iface.type}|p`;
-        const existing = deduped.get(key);
-        if (!existing) {
-          deduped.set(key, iface);
-          return;
-        }
-
-        // Prefer higher-quality interface data when duplicates exist
-        if (scoreInterface(iface) > scoreInterface(existing)) {
-          deduped.set(key, iface);
-        }
-      });
-
-      setNetworkInterfaces(Array.from(deduped.values()));
+      setNetworkInterfaces(interfaces);
     }
   }, []);
 
@@ -786,16 +706,6 @@ export default function App() {
     window.addEventListener('kiosk-mode-changed', handleKioskModeChange);
     return () => window.removeEventListener('kiosk-mode-changed', handleKioskModeChange);
   }, []);
-  
-  // Listen for navigate-to-monitoring events (from SystemMetrics alerts card)
-  useEffect(() => {
-    const handleNavigateToMonitoring = () => {
-      handleGlobalViewChange('monitoring');
-    };
-
-    window.addEventListener('navigate-to-monitoring', handleNavigateToMonitoring);
-    return () => window.removeEventListener('navigate-to-monitoring', handleNavigateToMonitoring);
-  }, [handleGlobalViewChange]);
 
   // Helper function to format last seen time
   const formatLastSeen = (timestamp: string | null): string => {
@@ -833,7 +743,7 @@ export default function App() {
         
         // Update device basic info
         const accessToken = localStorage.getItem('accessToken');
-        const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceData.id}`), {
+        const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceData.id}`), {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -861,10 +771,10 @@ export default function App() {
           console.log('[DEBUG] Updating tags for device:', {
             deviceUuid: deviceData.deviceUuid,
             tags: deviceData.tags,
-            url: buildApiUrl(`/api/v1/agents/${deviceData.deviceUuid}/tags`)
+            url: buildApiUrl(`/api/v1/devices/${deviceData.deviceUuid}/tags`)
           });
           
-          const tagsResponse = await fetch(buildApiUrl(`/api/v1/agents/${deviceData.deviceUuid}/tags`), {
+          const tagsResponse = await fetch(buildApiUrl(`/api/v1/devices/${deviceData.deviceUuid}/tags`), {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -927,7 +837,7 @@ export default function App() {
           requestBody.tags = Object.entries(deviceData.tags).map(([key, value]) => ({ key, value }));
         }
         
-        const response = await fetch(buildApiUrl('/api/v1/agents'), {
+        const response = await fetch(buildApiUrl('/api/v1/devices'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -993,6 +903,10 @@ export default function App() {
 
   const handleLogout = () => {
     logout();
+  };
+
+  const handleLogin = (accessToken: string, refreshToken: string, userData: any) => {
+    login(accessToken, refreshToken, userData);
   };
 
   const handleSelectDevice = async (deviceId: string) => {
@@ -1093,21 +1007,21 @@ export default function App() {
     }
 
     setIsDeploying(true);
-    const toastId = toast.loading("Deploying changes...");
     try {
       if (hasUnsavedChanges) {
-        toast.loading("Saving changes...", { id: toastId });
+        toast.info("Saving changes...");
         try {
           await saveTargetState(selectedDevice.deviceUuid);
-          toast.loading("Deploying changes...", { id: toastId });
+          toast.success("Changes saved");
         } catch (saveError: any) {
           console.error("Save error:", saveError);
-          toast.error(`Failed to save changes: ${saveError.message || 'Unknown error'}`, { id: toastId });
+          toast.error(`Failed to save changes: ${saveError.message || 'Unknown error'}`);
           setIsDeploying(false); // Clear on error so user can retry
           throw saveError;
         }
       }
 
+      const toastId = toast.loading("Deploying changes...");
       try {
         await syncTargetState(selectedDevice.deviceUuid, 'dashboard');
         window.dispatchEvent(new CustomEvent('deployment-started', { detail: { deviceUuid: selectedDevice.deviceUuid } }));
@@ -1170,7 +1084,7 @@ export default function App() {
   // History arrays start empty and fill as new data arrives from device metrics
 
   // Disabled mock simulation - using real data from API only
-  // Real device metrics are fetched every 30 seconds from /api/v1/agents
+  // Real device metrics are fetched every 30 seconds from /api/v1/devices
 
   // Show loading while checking auth
   if (isAuthLoading) {
@@ -1188,14 +1102,15 @@ export default function App() {
   if (!isAuthenticated) {
     return (
       <>
-        <LoginPage />
+        <LoginPage onLogin={handleLogin} />
+        <Toaster />
       </>
     );
   }
 
   return (
 
-    <div data-testid="dashboard-app" className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden">
 
            {/* Header - Hidden in kiosk mode */}
       {!isKioskMode && (
@@ -1203,11 +1118,9 @@ export default function App() {
           isAuthenticated={isAuthenticated}
           onLogout={handleLogout}
           userEmail={user?.email || ''}
-          userName={user?.name || user?.email || ''}
-          currentView={currentView}
+          userName={user?.username || ''}
           deviceUuid={selectedDevice?.deviceUuid}
           deviceName={selectedDevice?.name}
-          currentDeviceView={currentView}
           onHomeClick={() => handleGlobalViewChange('home')}
           onAccountClick={() => handleGlobalViewChange('account')}
           onUsersClick={() => handleGlobalViewChange('users')}
@@ -1223,7 +1136,6 @@ export default function App() {
         <div className="bg-card border-b border-border px-6 py-2 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Button
-                data-testid="global-nav-home"
               variant={currentView === 'home' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleGlobalViewChange('home')}
@@ -1233,7 +1145,6 @@ export default function App() {
               Home
             </Button>
             <Button
-                data-testid="global-nav-fleets"
               variant={currentView === 'fleets' ? 'default' : 'outline'}
               size="sm"
               onClick={() => handleGlobalViewChange('fleets')}
@@ -1250,9 +1161,8 @@ export default function App() {
               <Activity className="w-4 h-4 mr-2" />
               Agents
             </Button> */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 overflow-x-auto">
               <Button
-                data-testid="global-nav-dashboard"
                 variant={currentView === 'dashboard' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('dashboard')}
@@ -1262,7 +1172,6 @@ export default function App() {
                 Dashboards
               </Button>
               <Button
-                data-testid="global-nav-mqtt"
                 variant={currentView === 'mqtt' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('mqtt')}
@@ -1272,7 +1181,6 @@ export default function App() {
                 MQTT
               </Button>
               <Button
-                data-testid="global-nav-audit"
                 variant={currentView === 'audit' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('audit')}
@@ -1282,7 +1190,6 @@ export default function App() {
                 Audit & Activity
               </Button>
               <Button
-                data-testid="global-nav-security"
                 variant={currentView === 'security' ? 'default' : 'outline'}
                 size="sm"
                 onClick={() => handleGlobalViewChange('security')}
@@ -1291,25 +1198,15 @@ export default function App() {
                 <Shield className="w-5 h-5 mr-2" />
                 Security
               </Button>
-              {/* <Button
-                variant={currentView === 'nodered' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => handleGlobalViewChange('nodered')}
-                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
-              >
-                <AlertOctagon className="w-5 h-5 mr-2" />
-                Node-RED
-              </Button> */}
               <Button
-                data-testid="global-nav-monitoring"
-                variant={currentView === 'monitoring' ? 'default' : 'outline'}
+                variant={currentView === 'alerts' ? 'default' : 'outline'}
                 size="sm"
-                onClick={() => handleGlobalViewChange('monitoring')}
-                style={{ fontSize: '1.1rem', padding: '0.6rem 1.75rem', cursor: 'pointer' }}
+                onClick={() => handleGlobalViewChange('alerts')}
+                style={{ fontSize: '1.1rem', padding: '0.6rem 1.25rem', cursor: 'pointer' }}
                 className="relative"
               >
                 <AlertOctagon className="w-5 h-5 mr-2" />
-                Monitoring
+                Alerts
                 {criticalAlertsCount > 0 && (
                   <Badge 
                     variant="destructive" 
@@ -1374,7 +1271,7 @@ export default function App() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Desktop Sidebar - Hidden on mobile and in kiosk mode */}
+                {/* Desktop Sidebar - Hidden on mobile and in kiosk mode */}
         {!isKioskMode && !isGlobalView && (
           <div className="hidden lg:block">
             <DeviceSidebar
@@ -1387,7 +1284,6 @@ export default function App() {
             />
           </div>
         )}
-
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-y-auto">
           {isGlobalView ? (
@@ -1396,7 +1292,7 @@ export default function App() {
                 <FleetsPage />
               )}
               {currentView === 'dashboard' && (
-                <div data-testid="global-dashboard-page" className="h-full overflow-hidden">
+                <div className="h-full overflow-hidden">
                   <GlobalDashboardPage 
                     devices={devices} 
                     onDeviceSelect={(device) => {
@@ -1417,29 +1313,23 @@ export default function App() {
                   <SecurityPage />
                 </div>
               )}
-              {currentView === 'nodered' && (
-                <NodeRedPage />
-              )}
-              {currentView === 'monitoring' && (
-                <AlertsPage initialDeviceUuid={selectedDevice?.deviceUuid} />
+              {currentView === 'alerts' && (
+                <AlertsPage />
               )}
             </>
           ) : isLoadingDevices ? (
-            <div data-testid="devices-loading" className="flex items-center justify-center h-full">
+            <div className="flex items-center justify-center h-full">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
                 <p className="text-gray-600">Loading devices...</p>
               </div>
             </div>
           ) : devices.length === 0 ? (
-            <div data-testid="no-agents-state" className="flex items-center justify-center h-full">
+            <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-md px-4">
                 <p className="text-xl font-semibold text-foreground mb-2">No Agents Found</p>
                 <p className="text-muted-foreground mb-4">Get started by adding your first agent.</p>
-                <div className="flex gap-2 justify-center">
-                  <Button onClick={() => handleGlobalViewChange('fleets')}>Add Fleet</Button>
-                  <Button variant="outline" onClick={handleAddDevice}>Add Agent</Button>
-                </div>
+                <Button onClick={handleAddDevice}>Add Agent</Button>
               </div>
             </div>
           ) : !selectedDevice ? (
@@ -1474,15 +1364,15 @@ export default function App() {
                       System
                     </Button>
                     <Button
-                      variant={currentView === 'devices' ? 'default' : 'ghost'}
+                      variant={currentView === 'sensors' ? 'default' : 'ghost'}
                       size="sm"
-                      onClick={() => handleAgentViewChange('devices')}
+                      onClick={() => handleAgentViewChange('sensors')}
                       className="text-sm"
                     >
                       <Activity className="w-4 h-4 mr-2" />
                       Devices
                     </Button>
-                    {/* <Button
+                    <Button
                       variant={currentView === 'jobs' ? 'default' : 'ghost'}
                       size="sm"
                       onClick={() => handleAgentViewChange('jobs')}
@@ -1490,7 +1380,7 @@ export default function App() {
                     >
                       <CalendarClock className="w-4 h-4 mr-2" />
                       Jobs
-                    </Button> */}
+                    </Button>
                     <Button
                       variant={currentView === 'applications' ? 'default' : 'ghost'}
                       size="sm"
@@ -1509,17 +1399,15 @@ export default function App() {
                       <FileText className="w-4 h-4 mr-2" />
                       Logs
                     </Button>
-                    {isRemoteAccessEnabledForSelectedDevice && (
-                      <Button
-                        variant={currentView === 'remote-access' ? 'default' : 'ghost'}
-                        size="sm"
-                        onClick={() => handleAgentViewChange('remote-access')}
-                        className="text-sm"
-                      >
-                        <Terminal className="w-4 h-4 mr-2" />
-                        Remote Access
-                      </Button>
-                    )}
+                    <Button
+                      variant={currentView === 'remote-access' ? 'default' : 'ghost'}
+                      size="sm"
+                      onClick={() => handleAgentViewChange('remote-access')}
+                      className="text-sm"
+                    >
+                      <Terminal className="w-4 h-4 mr-2" />
+                      Remote Access
+                    </Button>
                     <Button
                       variant={currentView === 'settings' ? 'default' : 'ghost'}
                       size="sm"
@@ -1543,7 +1431,7 @@ export default function App() {
               )}
 
               {/* Empty State Message */}
-              <div data-testid="no-selected-agent-state" className="flex items-center justify-center h-full">
+              <div className="flex items-center justify-center h-full">
                 <div className="text-center space-y-4 max-w-md">
                   <h2 className="text-2xl font-bold text-foreground">No Agents Yet</h2>
                   <div className="pt-4 space-y-2">
@@ -1592,20 +1480,18 @@ export default function App() {
             <div className="bg-card border-b border-border px-6 py-3 flex items-center justify-between gap-4">
             <div className="flex items-center gap-2 overflow-x-auto flex-1 pr-2">
             <Button
-                      data-testid="agent-view-metrics"
               variant={currentView === 'metrics' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('metrics')}
               className="text-sm"
             >
               <BarChart3 className="w-4 h-4 mr-2" />
-              Overview
+              System
             </Button>
             <Button
-                      data-testid="agent-view-devices"
-              variant={currentView === 'devices' ? 'default' : 'ghost'}
+              variant={currentView === 'sensors' ? 'default' : 'ghost'}
               size="sm"
-              onClick={() => handleAgentViewChange('devices')}
+              onClick={() => handleAgentViewChange('sensors')}
               className="text-sm"
             >
               <Activity className="w-4 h-4 mr-2" />
@@ -1618,7 +1504,7 @@ export default function App() {
               <BarChart3 className="w-4 h-4 mr-2" />
               Endpoints Viz
             </Button> */}
-            {/* <Button
+            <Button
               variant={currentView === 'jobs' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('jobs')}
@@ -1626,9 +1512,8 @@ export default function App() {
             >
               <CalendarClock className="w-4 h-4 mr-2" />
               Jobs
-            </Button> */}
+            </Button>
             <Button
-                      data-testid="agent-view-applications"
               variant={currentView === 'applications' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('applications')}
@@ -1670,7 +1555,6 @@ export default function App() {
               Housekeeping
             </Button> */}
             <Button
-                      data-testid="agent-view-logs"
               variant={currentView === 'logs' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => handleAgentViewChange('logs')}
@@ -1679,17 +1563,15 @@ export default function App() {
               <FileText className="w-4 h-4 mr-2" />
               Logs
             </Button>
-            {isRemoteAccessEnabledForSelectedDevice && (
-              <Button
-                variant={currentView === 'remote-access' ? 'default' : 'ghost'}
-                size="sm"
-                onClick={() => handleAgentViewChange('remote-access')}
-                className="text-sm"
-              >
-                <Terminal className="w-4 h-4 mr-2" />
-                Remote Access
-              </Button>
-            )}
+            <Button
+              variant={currentView === 'remote-access' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => handleAgentViewChange('remote-access')}
+              className="text-sm"
+            >
+              <Terminal className="w-4 h-4 mr-2" />
+              Remote Access
+            </Button>
             <Button
               variant={currentView === 'settings' ? 'default' : 'ghost'}
               size="sm"
@@ -1701,12 +1583,11 @@ export default function App() {
             </Button>
             </div>
             <div className="flex items-center gap-3 shrink-0">
-              {/* Deploy Buttons - Show for agent views OR when devices have pending changes in global views */}
-              {(!isGlobalView || devicesWithPendingChanges.length > 0) && (
+              {/* Deploy Buttons - Only show for agent views */}
+              {!isGlobalView && (
                 <>
-                  {!isGlobalView && hasUnsavedChanges && (
+                  {hasUnsavedChanges && (
                     <Button
-                      data-testid="save-draft-button"
                       onClick={handleSaveDraft}
                       size="sm"
                       variant="outline"
@@ -1716,32 +1597,29 @@ export default function App() {
                       Save Draft
                     </Button>
                   )}
-                  {!isGlobalView && (
-                    <Button
-                      data-testid="deploy-button"
-                      onClick={handleDeploy}
-                      size="sm"
-                      disabled={!needsDeployment || isDeploying}
-                      variant="ghost"
-                      style={!isDeploying && needsDeployment ? {
-                        backgroundColor: '#d97706',
-                        color: 'white',
-                        fontWeight: 500,
-                        fontSize: '1.1rem',
-                        padding: '0.6rem 1.25rem'
-                      } : {
-                        backgroundColor: '#9ca3af',
-                        color: 'white',
-                        cursor: 'not-allowed',
-                        fontSize: '1.1rem',
-                        padding: '0.6rem 1.25rem'
-                      }}
-                      className="hover:opacity-90"
-                    >
-                      {isDeploying ? 'Deploying...' : 'Deploy'}
-                    </Button>
-                  )}
-                  {!isGlobalView && needsDeployment && (
+                  <Button
+                    onClick={handleDeploy}
+                    size="sm"
+                    disabled={!needsDeployment || isDeploying}
+                    variant="ghost"
+                    style={!isDeploying && needsDeployment ? {
+                      backgroundColor: '#d97706',
+                      color: 'white',
+                      fontWeight: 500,
+                      fontSize: '1.1rem',
+                      padding: '0.6rem 1.25rem'
+                    } : {
+                      backgroundColor: '#9ca3af',
+                      color: 'white',
+                      cursor: 'not-allowed',
+                      fontSize: '1.1rem',
+                      padding: '0.6rem 1.25rem'
+                    }}
+                    className="hover:opacity-90"
+                  >
+                    {isDeploying ? 'Deploying...' : 'Deploy'}
+                  </Button>
+                  {needsDeployment && (
                     <Button
                       onClick={handleCancelDeploy}
                       size="sm"
@@ -1752,7 +1630,7 @@ export default function App() {
                       {hasUnsavedChanges && !needsDeployment ? 'Discard' : 'Cancel'}
                     </Button>
                   )}
-                  {devicesWithPendingChanges.length > 0 && (isGlobalView || devicesWithPendingChanges.length > 1) && (
+                  {devicesWithPendingChanges.length > 1 && (
                     <Button
                       onClick={handleDeployAll}
                       size="sm"
@@ -1773,9 +1651,7 @@ export default function App() {
                       }}
                       className="hover:opacity-90"
                     >
-                      {isDeploying ? 'Deploying...' : devicesWithPendingChanges.length === 1 
-                        ? `Deploy ${devicesWithPendingChanges[0].name || 'Agent'}`
-                        : `Deploy All (${devicesWithPendingChanges.length})`}
+                      {isDeploying ? 'Deploying...' : `Deploy All (${devicesWithPendingChanges.length})`}
                     </Button>
                   )}
                   {/* Spacer between deploy buttons and Add agent */}
@@ -1840,7 +1716,7 @@ export default function App() {
               device={selectedDevice}
             />
           )}
-          {currentView === 'devices' && selectedDevice && (
+          {currentView === 'sensors' && selectedDevice && (
             debugMode 
               ? <SensorHealthDashboard deviceUuid={selectedDevice.deviceUuid} />
               : <SensorsPage 
@@ -1851,7 +1727,9 @@ export default function App() {
                   onDebugModeChange={setDebugMode}
                 />
           )}
-       
+          {currentView === 'endpoints' && selectedDevice && (
+            <EndpointsVisualizationPage />
+          )}
           {currentView === 'jobs' && selectedDevice && (
             <JobsPage device={selectedDevice} />
           )}
@@ -1870,7 +1748,7 @@ export default function App() {
           {currentView === 'logs' && selectedDevice && (
             <LogsPage deviceUuid={selectedDevice.deviceUuid} />
           )}
-          {currentView === 'remote-access' && selectedDevice && isRemoteAccessEnabledForSelectedDevice && (
+          {currentView === 'remote-access' && selectedDevice && (
             <RemoteAccessPage deviceUuid={selectedDevice.deviceUuid} />
           )}
           {currentView === 'settings' && selectedDevice && (
@@ -1901,20 +1779,18 @@ export default function App() {
 
 
         {/* Mobile Drawer - Opens from right */}
-        {!isKioskMode && !isGlobalView && (
-          <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-            <SheetContent side="right" className="p-0 w-80">
-              <DeviceSidebar
-                devices={devices}
-                selectedDeviceId={selectedDeviceId}
-                onSelectDevice={handleSelectDevice}
-                onAddDevice={handleAddDevice}
-                onEditDevice={handleEditDevice}
-                hasPendingChanges={hasPendingChanges}
-              />
-            </SheetContent>
-          </Sheet>
-        )}
+        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+          <SheetContent side="right" className="p-0 w-80">
+            <DeviceSidebar
+              devices={devices}
+              selectedDeviceId={selectedDeviceId}
+              onSelectDevice={handleSelectDevice}
+              onAddDevice={handleAddDevice}
+              onEditDevice={handleEditDevice}
+              hasPendingChanges={hasPendingChanges}
+            />
+          </SheetContent>
+        </Sheet>
       </div>
 
        {/* Add/Edit Device Dialog */}
@@ -1924,6 +1800,8 @@ export default function App() {
         device={editingDevice}
         onSave={handleSaveDevice}
       />
+
+      <Toaster />
     </div>
   );
 }

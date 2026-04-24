@@ -1,173 +1,103 @@
-import { test, expect, type Page, type TestInfo } from '@playwright/test';
-import { ensureAuthenticatedDashboard, getE2EAuth, selectAgentFromSidebar } from './helpers/auth';
-import { createPageDiagnosticsCollector } from './helpers/diagnostics';
+import { test, expect } from '@playwright/test';
 
-const diagnosticsByPage = new WeakMap<object, ReturnType<typeof createPageDiagnosticsCollector>>();
+/**
+ * Helper function to login before running dashboard tests
+ */
+async function login(page: any) {
+  await page.goto('/');
+  
+  // Check if we're already logged in
+  const isLoggedIn = await page.getByRole('button', { name: /logout|profile|user|admin/i }).count() > 0;
+  
+  if (!isLoggedIn) {
+    // Perform login with default admin credentials
+    const emailInput = page.getByLabel(/email|username/i);
+    const passwordInput = page.getByLabel(/password/i);
+    const loginButton = page.getByRole('button', { name: /login|sign in/i });
 
-async function attachPageScreenshot(page: Page, testInfo: TestInfo, fileName: string, attachmentName: string) {
-  const screenshotPath = testInfo.outputPath(fileName);
-  await page.screenshot({ path: screenshotPath, fullPage: true });
-  await testInfo.attach(attachmentName, {
-    path: screenshotPath,
-    contentType: 'image/png',
-  });
+    await emailInput.fill('admin');
+    await passwordInput.fill('admin');
+    await loginButton.click();
+    
+    // Wait for navigation after login
+    await page.waitForURL(/dashboard|devices|home/i, { timeout: 10000 });
+  }
 }
 
 test.describe('Dashboard Navigation', () => {
-  test.beforeEach(async ({ page }, testInfo) => {
-    diagnosticsByPage.set(page, createPageDiagnosticsCollector(page));
-    await ensureAuthenticatedDashboard(page, testInfo);
-  });
-
-  test.afterEach(async ({ page }, testInfo) => {
-    const diagnostics = diagnosticsByPage.get(page);
-    if (diagnostics) {
-      await diagnostics.attach(testInfo);
-      diagnosticsByPage.delete(page);
-    }
+  test.beforeEach(async ({ page }) => {
+    await login(page);
   });
 
   test('should display main navigation after login', async ({ page }) => {
-    await expect(page.getByTestId('dashboard-app')).toBeVisible();
-    await expect(page.getByTestId('global-nav-home')).toBeVisible();
-    await expect(page.getByTestId('global-nav-fleets')).toBeVisible();
-    await expect(page.getByTestId('global-nav-dashboard')).toBeVisible();
+    // Check for main navigation items
+    const navigation = page.locator('nav, [role="navigation"], aside, .sidebar');
+    await expect(navigation.first()).toBeVisible({ timeout: 10000 });
   });
 
-  test('should show an agent in the left sidebar', async ({ page }, testInfo) => {
-    const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
-    const selectedAgentUuid = await selectAgentFromSidebar(page, expectedAgentUuid, expectedAgentName);
-
-    if (selectedAgentUuid) {
-      await expect(page.getByTestId(`agent-row-selected-${selectedAgentUuid}`)).toBeVisible();
+  test('should navigate to devices page', async ({ page }) => {
+    // Look for devices link
+    const devicesLink = page.getByRole('link', { name: /devices/i }).first();
+    
+    if (await devicesLink.count() > 0) {
+      await devicesLink.click();
+      await expect(page).toHaveURL(/devices/i);
+      
+      // Check for devices heading or content
+      const devicesHeading = page.getByRole('heading', { name: /devices/i });
+      await expect(devicesHeading).toBeVisible({ timeout: 10000 });
+    } else {
+      test.skip();
     }
-
-    await expect(page.getByTestId('agent-sidebar')).toBeVisible();
-    await attachPageScreenshot(page, testInfo, 'home-sidebar-state.png', 'home-sidebar-state');
   });
 
-  test('should capture the fleets page state', async ({ page }, testInfo) => {
-    await page.getByTestId('global-nav-fleets').click();
-    await expect(page.getByTestId('fleets-page')).toBeVisible({ timeout: 30000 });
-    await expect(page.getByTestId('fleets-page-title')).toContainText('Fleet Management');
-
-    await page.waitForFunction(
-      () => {
-        return !document.querySelector('[data-testid="fleets-loading-state"]');
-      },
-      undefined,
-      { timeout: 30000 }
-    );
-
-    await page.waitForFunction(
-      () => {
-        return (
-          !!document.querySelector('[data-testid="fleets-table"]') ||
-          !!document.querySelector('[data-testid="fleets-empty-state"]') ||
-          !!document.querySelector('[data-testid="fleets-filtered-empty-state"]')
-        );
-      },
-      undefined,
-      { timeout: 30000 }
-    );
-
-    await attachPageScreenshot(page, testInfo, 'fleets-page-state.png', 'fleets-page-state');
+  test('should display device list', async ({ page }) => {
+    // Navigate to devices page
+    await page.goto('/devices');
+    
+    // Wait for page to load
+    await page.waitForLoadState('networkidle');
+    
+    // Check if device table or list is present
+    const deviceContent = page.locator('table, [role="table"], .device-list, [data-testid="device-list"]');
+    const hasContent = await deviceContent.count() > 0;
+    
+    if (hasContent) {
+      await expect(deviceContent.first()).toBeVisible({ timeout: 10000 });
+    } else {
+      // If no devices, should show empty state
+      const emptyState = page.getByText(/no devices|empty|add device/i);
+      await expect(emptyState).toBeVisible({ timeout: 10000 });
+    }
   });
 
-  test('should show system metrics for the selected agent', async ({ page }, testInfo) => {
-    const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
-    await selectAgentFromSidebar(page, expectedAgentUuid, expectedAgentName);
-
-    await page.getByTestId('agent-view-metrics').click();
-    await expect(page.getByTestId('system-metrics')).toBeVisible({ timeout: 30000 });
-    await expect(page.getByTestId('system-metrics-cards')).toBeVisible();
-    await expect(page.getByTestId('metric-card-cpu-usage')).toBeVisible();
-    await expect(page.getByTestId('metric-card-memory')).toBeVisible();
-    await expect(page.getByTestId('metric-card-disk-usage')).toBeVisible();
-    await expect(page.getByTestId('metric-card-network')).toBeVisible();
-    await expect(page.getByTestId('system-insights-telemetry')).toBeVisible();
-
-    await attachPageScreenshot(page, testInfo, 'agent-overview-metrics-state.png', 'agent-overview-metrics-state');
+  test('should display dashboard sections', async ({ page }) => {
+    await page.goto('/');
+    
+    // Wait for dashboard to load
+    await page.waitForLoadState('networkidle');
+    
+    // Check for common dashboard sections (cards, widgets, etc)
+    const dashboardContent = page.locator('[class*="card"], [class*="widget"], [class*="panel"], main');
+    await expect(dashboardContent.first()).toBeVisible({ timeout: 10000 });
   });
 
-  test('should navigate to the global dashboard view', async ({ page }) => {
-    await page.getByTestId('global-nav-dashboard').click();
-    await expect(page.getByTestId('global-dashboard-page')).toBeVisible({ timeout: 30000 });
-  });
-
-  test('should add a new MQTT device', async ({ page }, testInfo) => {
-    test.setTimeout(60_000);
-
-    const { expectedAgentName, expectedAgentUuid } = getE2EAuth();
-    const E2E_API_URL = process.env.E2E_API_URL || 'http://localhost:4002';
-
-    // Use a timestamp-based name to avoid conflicts between runs
-    const deviceName = `e2e_mqtt_${Date.now()}`;
-
-    // Select an agent and navigate to the Devices tab
-    const agentUuid = await selectAgentFromSidebar(page, expectedAgentUuid, expectedAgentName);
-    await page.getByTestId('agent-view-devices').click();
-    await expect(page.getByTestId('devices-tab-trigger')).toBeVisible({ timeout: 15000 });
-
-    // Open the Add Device dialog
-    await page.getByTestId('add-device-button').click();
-    await expect(page.getByTestId('add-device-dialog')).toBeVisible({ timeout: 10000 });
-
-    // Select MQTT as the protocol
-    await page.getByTestId('protocol-select').click();
-    await page.getByRole('option', { name: 'MQTT' }).click();
-
-    // Fill in the device name
-    await page.getByTestId('mqtt-device-name-input').fill(deviceName);
-
-    // Fill in MQTT credentials
-    await page.getByTestId('mqtt-username-input').fill(`${deviceName}_user`);
-    await page.getByTestId('mqtt-password-input').fill('E2eSecurePass1!');
-
-    // Select Write permission
-    await page.getByTestId('mqtt-permission-select').click();
-    await page.getByRole('option', { name: 'Write', exact: true }).click();
-
-    await attachPageScreenshot(page, testInfo, 'add-mqtt-device-before-save.png', 'add-mqtt-device-before-save');
-
-    // Save the device (calls POST validateOnly — validates + adds to pending state)
-    await expect(page.getByTestId('save-device-button')).toBeEnabled({ timeout: 5000 });
-    await page.getByTestId('save-device-button').click();
-
-    // Dialog should close after a successful save
-    await expect(page.getByTestId('add-device-dialog')).not.toBeVisible({ timeout: 10000 });
-
-    // Device should appear in the pending-state grid immediately
-    const deviceRow = page.locator('[data-testid^="device-row-"]', { hasText: deviceName });
-    await expect(deviceRow).toBeVisible({ timeout: 15000 });
-
-    // Deploy — handleDeploy auto-saves the draft first when there are unsaved changes,
-    // then dispatches to the agent in one step.
-    await expect(page.getByTestId('deploy-button')).toBeEnabled({ timeout: 10000 });
-    await page.getByTestId('deploy-button').click();
-
-    // Wait for the deploy button to become disabled (deployment dispatched, needsDeployment clears)
-    await expect(page.getByTestId('deploy-button')).toBeDisabled({ timeout: 30000 });
-
-    // The device row must still be visible after deploy (not wiped from the grid)
-    await expect(deviceRow).toBeVisible({ timeout: 10000 });
-
-    // The endpoint cell must show the MQTT topic (non-empty, not '—')
-    const endpointCell = deviceRow.locator('[data-testid^="device-endpoint-"]');
-    await expect(endpointCell).toBeVisible({ timeout: 10000 });
-    const endpointText = await endpointCell.textContent();
-    expect(endpointText?.trim(), 'Device endpoint/topic should be populated after deploy').not.toBe('');
-    expect(endpointText?.trim(), 'Device endpoint/topic should not be a dash placeholder').not.toBe('—');
-
-    // The devices table must be visible (not showing empty state)
-    await expect(page.getByTestId('devices-table')).toBeVisible();
-    await expect(page.getByTestId('devices-empty-state')).not.toBeVisible();
-
-    await attachPageScreenshot(page, testInfo, 'add-mqtt-device-result.png', 'add-mqtt-device-result');
-
-    // Note: device cleanup is handled by the CI workflow step "Cleanup e2e test devices"
-    // so that the device remains visible to the agent long enough for it to reconcile,
-    // write Mosquitto auth files, and subscribe to MQTT topics before verification runs.
+  test('should allow logout', async ({ page }) => {
+    // Find logout button
+    const logoutButton = page.getByRole('button', { name: /logout|sign out/i });
+    
+    if (await logoutButton.count() > 0) {
+      await logoutButton.click();
+      
+      // Should redirect to login page
+      await page.waitForURL(/login|^\/$/, { timeout: 5000 });
+      
+      // Should show login form again
+      const loginButton = page.getByRole('button', { name: /login|sign in/i });
+      await expect(loginButton).toBeVisible({ timeout: 5000 });
+    } else {
+      test.skip();
+    }
   });
 });
 

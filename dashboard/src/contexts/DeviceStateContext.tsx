@@ -53,8 +53,6 @@ interface DeviceConfig {
     enableShadow?: boolean;
     enableCloudJobs?: boolean;
     enableMetricsExport?: boolean;
-    enableAnomalyDetection?: boolean;
-    enableDeviceRemoteAccess?: boolean;
   };
   settings?: {
     metricsIntervalMs?: number;
@@ -167,16 +165,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   // Fetch device state from API
   const fetchDeviceState = useCallback(async (deviceUuid: string) => {
     try {
-      const accessToken = localStorage.getItem('accessToken');
-      if (!accessToken || accessToken.split('.').length !== 3) {
-        return;
-      }
-
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}`), {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}`));
       if (!response.ok) {
         throw new Error(`Failed to fetch device: ${response.statusText}`);
       }
@@ -439,12 +428,12 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         config: { ...deviceState.targetState?.config }
       };
       
-      // Endpoints use a single stable identifier (uuid) across draft/saved/deployed.
+      // Generate unique ID for sensor (UUID v4)
+      // This ID persists through: draft → saved → deployed states
       const sensorWithId = {
         ...sensor,
-        uuid: sensor.uuid || sensor.id || crypto.randomUUID()
+        id: sensor.id || crypto.randomUUID() // Use existing ID or generate new one
       };
-      delete (sensorWithId as any).id;
       
       // Add sensor to endpoints array
       const updatedConfig = { ...currentPending.config };
@@ -467,9 +456,12 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   
   // Update sensor in config (local only)
   const updatePendingSensor = useCallback((deviceUuid: string, sensorName: string, updates: any) => {
+    console.log(`[DeviceStateContext] updatePendingSensor called: ${sensorName}`, updates);
+    
     setDeviceStates(prev => {
       const deviceState = prev[deviceUuid];
       if (!deviceState) {
+        console.log('[DeviceStateContext] No device state found for', deviceUuid);
         return prev;
       }
       
@@ -479,15 +471,16 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         config: { ...deviceState.targetState?.config }
       };
       
+      console.log('[DeviceStateContext] Current pending config.endpoints:', (currentPending.config as any)?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled })));
+      
       // Update sensor in endpoints array
       const updatedConfig = { ...currentPending.config };
       const existingDevices = updatedConfig.endpoints || [];
-      const updateIdentity = updates?.uuid || updates?.id;
       updatedConfig.endpoints = existingDevices.map((device: any) =>
-        ((updateIdentity && (device.uuid === updateIdentity || device.id === updateIdentity)) || device.name === sensorName)
-          ? { ...device, ...updates }
-          : device
+        device.name === sensorName ? { ...device, ...updates } : device
       );
+      
+      console.log('[DeviceStateContext] Updated config.endpoints:', updatedConfig.endpoints.map((e: any) => ({ name: e.name, enabled: e.enabled })));
       
       return {
         ...prev,
@@ -546,7 +539,13 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
     
     try {
       // Save to API (device_target_state table) - sets needs_deployment = true
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/target-state`), {
+      console.log('[saveTargetState] Sending to API:', {
+        deviceUuid,
+        apps: deviceState.pendingChanges.apps,
+        configEndpoints: (deviceState.pendingChanges.config as any)?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled }))
+      });
+      
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/target-state`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -609,7 +608,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
         configEndpoints: config?.endpoints?.map((e: any) => ({ name: e.name, enabled: e.enabled }))
       });
       
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/target-state`), {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/target-state`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apps, config })
@@ -657,7 +656,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
     }));
     
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/deploy`), {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/deploy`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deployedBy })
@@ -691,7 +690,7 @@ export function DeviceStateProvider({ children }: { children: ReactNode }) {
   // Cancel deployment - discard pending deployment
   const cancelDeployment = useCallback(async (deviceUuid: string) => {
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/deploy/cancel`), {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/deploy/cancel`), {
         method: 'POST'
       });
       

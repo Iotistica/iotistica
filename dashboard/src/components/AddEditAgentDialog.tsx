@@ -86,23 +86,12 @@ export function AddEditDeviceDialog({
   });
   const { selectedFleetId: contextFleetId } = useFleet();
   const [fleetOptions, setFleetOptions] = useState<Array<{ fleet_uuid: string; fleet_name: string }>>([]);
-  const [selectedFleetId, setSelectedFleetId] = useState<string>("");
+  const [selectedFleetId, setSelectedFleetId] = useState<string>(UNASSIGNED_FLEET_ID);
   const [locations, setLocations] = useState<string[]>([]);
   const [locationOpen, setLocationOpen] = useState(false);
-  const [clientApiUrl, setClientApiUrl] = useState("");
-  const [copiedApiUrl, setCopiedApiUrl] = useState(false);
-  const hasSelectedFleet = !!selectedFleetId && selectedFleetId !== UNASSIGNED_FLEET_ID;
-
-  // Initialize client API URL with current API URL on mount
-  useEffect(() => {
-    if (open && !isEditMode && formData.type === 'standalone') {
-      const currentApiUrl = buildApiUrl('').replace(/\/$/, '');
-      setClientApiUrl(currentApiUrl);
-    }
-  }, [open, isEditMode, formData.type]);
 
   // Install command
-  const installCommand = `curl -sfL https://get.iotistica.com/agent/install | sh`;
+  const installCommand = `curl -sfL https://iotistica.com/agent/install | sh`;
 
   // Load tag definitions
   const loadTagDefinitions = async () => {
@@ -122,12 +111,6 @@ export function AddEditDeviceDialog({
 
   // Fetch provisioning key from API
   const fetchProvisioningKey = async (isRegenerate = false) => {
-    if (!isEditMode && !hasSelectedFleet) {
-      setProvisioningKey("");
-      setProvisioningKeyId(null);
-      return;
-    }
-
     setIsLoadingKey(true);
     try {
       const provisioningFleetUuid = selectedFleetId === UNASSIGNED_FLEET_ID ? null : selectedFleetId;
@@ -186,7 +169,7 @@ export function AddEditDeviceDialog({
   const loadLocations = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl('/api/v1/agents/locations'), {
+      const response = await fetch(buildApiUrl('/api/v1/devices/locations'), {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
@@ -231,7 +214,7 @@ export function AddEditDeviceDialog({
       // Fetch tags from API for this device
       const fetchDeviceTags = async () => {
         try {
-          const response = await fetch(buildApiUrl(`/api/v1/agents/${device.deviceUuid}/tags`));
+          const response = await fetch(buildApiUrl(`/api/v1/devices/${device.deviceUuid}/tags`));
           if (response.ok) {
             const data = await response.json();
             setTags(data.tags || {});
@@ -260,7 +243,7 @@ export function AddEditDeviceDialog({
         disk: 0,
       });
       setTags({});
-      setSelectedFleetId(contextFleetId || "");
+      setSelectedFleetId(contextFleetId || UNASSIGNED_FLEET_ID);
     }
 
     loadTagDefinitions();
@@ -277,11 +260,6 @@ export function AddEditDeviceDialog({
 
   const handleSave = () => {
     // Required field validation
-    if (!isEditMode && !hasSelectedFleet) {
-      toast.error("Please select a fleet");
-      return;
-    }
-
     if (formData.type === 'virtual' && !formData.name) {
       toast.error("Please enter a device name for virtual agent");
       return;
@@ -363,7 +341,7 @@ export function AddEditDeviceDialog({
     setIsDeleting(true);
 
     try {
-      const url = buildApiUrl(`/api/v1/agents/${device.deviceUuid}/virtual`);
+      const url = buildApiUrl(`/api/v1/devices/${device.deviceUuid}/virtual`);
       const response = await fetch(url, {
         method: 'DELETE',
         headers: {
@@ -529,15 +507,21 @@ export function AddEditDeviceDialog({
 
           {!isEditMode && (
             <div className="space-y-2 text-left">
-              <Label htmlFor="fleet-select" className="text-left">Fleet *</Label>
+              <Label htmlFor="fleet-select" className="text-left">Fleet</Label>
               <Select
-                value={selectedFleetId || undefined}
+                value={selectedFleetId}
                 onValueChange={setSelectedFleetId}
               >
                 <SelectTrigger id="fleet-select" className="h-11 text-left">
                   <SelectValue placeholder="Select fleet" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={UNASSIGNED_FLEET_ID}>
+                    <div className="flex flex-col items-start">
+                      <span>Unassigned</span>
+                      <span className="text-xs text-muted-foreground">Not linked to a fleet</span>
+                    </div>
+                  </SelectItem>
                   {fleetOptions.map((fleet) => (
                     <SelectItem key={fleet.fleet_uuid} value={fleet.fleet_uuid}>
                       <div className="flex flex-col items-start">
@@ -548,7 +532,7 @@ export function AddEditDeviceDialog({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Required. Defaults to the current fleet filter when one is selected.
+                Defaults to the current fleet filter.
               </p>
             </div>
           )}
@@ -757,7 +741,7 @@ export function AddEditDeviceDialog({
               </PopoverContent>
             </Popover>
             <p className="text-xs text-muted-foreground">
-              Specify the physical location
+              Specify the physical location for Digital Twins integration
             </p>
           </div>
           )}
@@ -769,7 +753,7 @@ export function AddEditDeviceDialog({
                 <Label htmlFor="provisioning-key" className="text-sm font-semibold text-foreground">Provisioning Key</Label>
                 <div className="relative bg-muted border border-border rounded-md px-3 py-2.5">
                   <code className="block font-mono text-xs text-foreground select-all break-all leading-relaxed pr-20">
-                    {!hasSelectedFleet ? "Select a fleet first" : isLoadingKey ? "Generating..." : (provisioningKey || "Loading...")}
+                    {isLoadingKey ? "Generating..." : (provisioningKey || "Loading...")}
                   </code>
                   <div className="absolute top-2 right-2 flex gap-1">
                     <Button
@@ -788,7 +772,7 @@ export function AddEditDeviceDialog({
                       variant="ghost"
                       className="h-8 w-8 hover:bg-gray-200"
                       onClick={regenerateProvisioningKey}
-                      disabled={isLoadingKey || !hasSelectedFleet}
+                      disabled={isLoadingKey}
                     >
                       <RefreshCw className={`w-4 h-4 text-gray-600 ${isLoadingKey ? 'animate-spin' : ''}`} />
                     </Button>
@@ -796,33 +780,6 @@ export function AddEditDeviceDialog({
                 </div>
                 <p className="text-xs text-gray-500">
                   Use this key during device provisioning. You can regenerate it if needed.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="client-api-url" className="text-sm font-semibold text-foreground">Client API URL</Label>
-                <div className="relative bg-muted border border-border rounded-md px-3 py-2.5">
-                  <code className="block font-mono text-xs text-foreground select-all break-all leading-relaxed pr-10">
-                    {clientApiUrl || "Loading..."}
-                  </code>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="absolute top-2 right-2 h-8 w-8"
-                    onClick={() => {
-                      navigator.clipboard.writeText(clientApiUrl);
-                      setCopiedApiUrl(true);
-                      setTimeout(() => setCopiedApiUrl(false), 2000);
-                      toast.success("API URL copied to clipboard");
-                    }}
-                    disabled={!clientApiUrl}
-                  >
-                    {copiedApiUrl ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4 text-muted-foreground" />}
-                  </Button>
-                </div>
-                <p className="text-xs text-gray-500">
-                  The API endpoint URL for this customer instance. Copy this to use in agent configuration.
                 </p>
               </div>
 
@@ -881,7 +838,7 @@ export function AddEditDeviceDialog({
                     <Button variant="outline" onClick={() => onOpenChange(false)}>
                       Cancel
                     </Button>
-                    <Button onClick={handleSave} disabled={!isEditMode && !hasSelectedFleet}>
+                    <Button onClick={handleSave}>
                       {isEditMode ? "Update" : "Add"}
                     </Button>
                   </div>
@@ -891,7 +848,7 @@ export function AddEditDeviceDialog({
                   <Button variant="outline" onClick={() => onOpenChange(false)}>
                     Cancel
                   </Button>
-                  <Button onClick={handleSave} disabled={!isEditMode && !hasSelectedFleet}>
+                  <Button onClick={handleSave}>
                     {isEditMode ? "Update" : "Add"}
                   </Button>
                 </div>

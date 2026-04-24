@@ -65,16 +65,14 @@
           changeOrigin: true,
           secure: false,
         },
-        // Local dev: DEPRECATED - using direct http://localhost:1880 with CORS instead
-        // '/nodered': {
-        //   target: process.env.VITE_NODERED_URL || 'http://localhost:1880',
-        //   changeOrigin: true,
-        //   secure: false,
-        //   ws: true,
-        // },
       },
     },
+    // Environment variables configuration
+    // See: https://vitejs.dev/guide/env-and-mode.html
     define: {
+      // Make environment variables available at build time
+      // This allows K8s to inject VITE_API_URL via Dockerfile ARG
+      'import.meta.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL),
       // Inject displayVersion from package.json at build time (user-facing release version)
       '__APP_VERSION__': JSON.stringify(pkg.displayVersion || pkg.version),
     },

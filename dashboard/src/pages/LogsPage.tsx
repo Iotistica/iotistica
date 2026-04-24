@@ -7,7 +7,7 @@
  * - Log level (ERROR, WARN, INFO)
  */
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,6 @@ interface LogEntry {
   level?: string;
   is_stderr: boolean;
   is_system: boolean;
-  meta?: unknown;
 }
 
 interface LogsPageProps {
@@ -45,38 +44,6 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
   const [wsConnected, setWsConnected] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
-
-  const normalizeMeta = (meta: unknown): unknown => {
-    if (meta == null) {
-      return undefined;
-    }
-
-    if (typeof meta === 'string') {
-      try {
-        return JSON.parse(meta);
-      } catch {
-        return meta;
-      }
-    }
-
-    return meta;
-  };
-
-  const formatMeta = (meta: unknown): string => {
-    if (meta == null) {
-      return '';
-    }
-
-    if (typeof meta === 'string') {
-      return meta;
-    }
-
-    try {
-      return JSON.stringify(meta);
-    } catch {
-      return String(meta);
-    }
-  };
 
   // Initialize date range to "Last 7 Days" on mount
   useEffect(() => {
@@ -116,14 +83,10 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
         params.append('service', selectedService);
       }
       
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/logs?${params}`));
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/logs?${params}`));
       if (response.ok) {
         const data = await response.json();
-        const normalizedLogs = (data.logs || []).map((log: any) => ({
-          ...log,
-          meta: normalizeMeta(log.meta ?? log.context),
-        }));
-        setLogs(normalizedLogs);
+        setLogs(data.logs || []);
       } 
     } catch (error) {
       console.error('[LogsPage] Error fetching historical logs:', error);
@@ -136,7 +99,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
   useEffect(() => {
     const fetchServices = async () => {
       try {
-        const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/logs/services`));
+        const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/logs/services`));
         if (response.ok) {
           const data = await response.json();
           setServiceOptions(data.services || []);
@@ -164,15 +127,9 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
 
     setIsLoading(true);
     
-    const token = localStorage.getItem('accessToken');
-    const wsUrl = new URL(buildApiUrl('/ws'));
-    wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-    wsUrl.searchParams.set('deviceUuid', deviceUuid);
-    if (token) {
-      wsUrl.searchParams.set('token', token);
-    }
+    const wsUrl = buildApiUrl(`/ws?deviceUuid=${deviceUuid}`).replace(/^http/, 'ws');
 
-    const ws = new WebSocket(wsUrl.toString());
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -200,7 +157,6 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
             level: log.level,
             is_stderr: log.is_stderr ?? log.isStderr,
             is_system: log.is_system ?? log.isSystem,
-            meta: normalizeMeta(log.meta ?? log.context),
           }));
           
           setLogs(prev => {
@@ -338,10 +294,10 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
   };
 
   const downloadLogs = () => {
-    const logText = sortedFilteredLogs.map(log =>
-      `[${formatTimestamp(log.timestamp)}] [${log.service_name}] ${log.message}${log.meta != null ? ` | meta=${formatMeta(log.meta)}` : ''}`
+    const logText = logs.map(log => 
+      `[${formatTimestamp(log.timestamp)}] [${log.service_name}] ${log.message}`
     ).join('\n');
-
+    
     const blob = new Blob([logText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -371,34 +327,22 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
     return `${dateStr} ${time}.${ms}`;
   };
 
-  // Filter and sort logs chronologically for deterministic rendering.
-  const sortedFilteredLogs = useMemo(() => {
-    return logs
-      .filter((log) => {
-        if (dateFrom) {
-          const logDate = new Date(log.timestamp);
-          // Parse dateFrom as UTC midnight to match log timestamps
-          const fromDate = new Date(dateFrom + 'T00:00:00.000Z');
-          if (logDate < fromDate) return false;
-        }
-        if (dateTo) {
-          const logDate = new Date(log.timestamp);
-          // Parse dateTo as UTC end-of-day to match log timestamps
-          const toDate = new Date(dateTo + 'T23:59:59.999Z');
-          if (logDate > toDate) return false;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        const timeDiff = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-        if (timeDiff !== 0) return timeDiff;
-
-        // Stable secondary ordering for identical timestamps.
-        const aId = a.id ?? 0;
-        const bId = b.id ?? 0;
-        return aId - bId;
-      });
-  }, [logs, dateFrom, dateTo]);
+  // Filter logs by date if date filters are set
+  const filteredLogs = logs.filter(log => {
+    if (dateFrom) {
+      const logDate = new Date(log.timestamp);
+      // Parse dateFrom as UTC midnight to match log timestamps
+      const fromDate = new Date(dateFrom + 'T00:00:00.000Z');
+      if (logDate < fromDate) return false;
+    }
+    if (dateTo) {
+      const logDate = new Date(log.timestamp);
+      // Parse dateTo as UTC end-of-day to match log timestamps
+      const toDate = new Date(dateTo + 'T23:59:59.999Z');
+      if (logDate > toDate) return false;
+    }
+    return true;
+  });
 
 
   return (
@@ -490,7 +434,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
                   variant="outline"
                   size="sm"
                   onClick={downloadLogs}
-                  disabled={sortedFilteredLogs.length === 0}
+                  disabled={filteredLogs.length === 0}
                 >
                   <Download className="h-4 w-4" />
                 </Button>
@@ -585,7 +529,7 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
 
           {/* Log Count Badge */}
           <Badge className="bg-blue-600 dark:bg-blue-900 text-white dark:text-blue-100 border border-blue-700 dark:border-blue-800 font-medium">
-            {sortedFilteredLogs.length} lines {mode === 'live' ? '(last 500)' : ''}
+            {filteredLogs.length} lines {mode === 'live' ? '(last 500)' : ''}
           </Badge>
         </div>
       </CardHeader>
@@ -601,13 +545,13 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
             minHeight: '400px',
           }}
         >
-          {sortedFilteredLogs.length === 0 && !isLoading && (
+          {filteredLogs.length === 0 && !isLoading && (
             <div className="text-gray-500 text-center py-8">
               No logs available
             </div>
           )}
           
-          {sortedFilteredLogs.map((log, index) => {
+          {filteredLogs.map((log, index) => {
             const isActualError = /\[error\]|\[crit\]|\[alert\]|\[emerg\]|ERROR|FATAL|CRITICAL/i.test(log.message) || 
                                   log.level?.toLowerCase() === 'error';
             const isWarning = /\[warn\]|WARNING/i.test(log.message) || 
@@ -650,16 +594,11 @@ export function LogsPage({ deviceUuid }: LogsPageProps) {
                 <span className="ml-2" style={{ color: messageColor }}>
                   {log.message}
                 </span>
-                {log.meta != null && (
-                  <span className="ml-2" style={{ color: '#94a3b8' }}>
-                    {formatMeta(log.meta)}
-                  </span>
-                )}
               </div>
             );
           })}
           
-          {isLoading && sortedFilteredLogs.length === 0 && (
+          {isLoading && filteredLogs.length === 0 && (
             <div className="text-gray-500 text-center py-8">
               Loading logs...
             </div>

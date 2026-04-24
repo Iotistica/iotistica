@@ -44,25 +44,6 @@ interface MetricDataCardConfigDialogProps {
   initialConfig?: MetricDataCardConfig;
 }
 
-interface MetricSourceRef {
-  agentUuid?: string;
-  deviceUuid: string;
-  endpointUuid: string;
-  agentName?: string;
-  endpointName?: string;
-}
-
-interface AgentOption {
-  uuid: string;
-  name: string;
-}
-
-interface RegisteredAgent {
-  uuid: string;
-  name: string;
-  isOnline: boolean;
-}
-
 interface EndpointDevice {
   device_name: string;
   protocol: string;
@@ -73,7 +54,6 @@ interface EndpointDevice {
   agent_count: number;
   agent_uuids: string[];
   agent_names: string[];
-  source_refs?: MetricSourceRef[];
 }
 
 export function MetricDataCardConfigDialog({
@@ -83,15 +63,8 @@ export function MetricDataCardConfigDialog({
   initialConfig,
 }: MetricDataCardConfigDialogProps) {
   const [devices, setDevices] = useState<EndpointDevice[]>([]);
-  const [agentOpen, setAgentOpen] = useState(false);
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<string>(initialConfig?.deviceName || '');
-  const [selectedSourceKey, setSelectedSourceKey] = useState<string>(
-    initialConfig?.deviceUuid && initialConfig?.endpointUuid
-      ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
-      : ''
-  );
-  const [selectedAgentUuid, setSelectedAgentUuid] = useState<string>(initialConfig?.agentUuid || '');
   const [selectedMetric, setSelectedMetric] = useState<string>(initialConfig?.metricName || '');
   const [chartType, setChartType] = useState<'line' | 'area' | 'bar'>(initialConfig?.chartType || 'line');
   const [timeRange, setTimeRange] = useState<'1m' | '1h' | '6h' | '12h' | '24h' | '7d' | '30d'>(initialConfig?.timeRange || '1h');
@@ -101,30 +74,13 @@ export function MetricDataCardConfigDialog({
   const [availableMetrics, setAvailableMetrics] = useState<string[]>([]);
   const [thresholds, setThresholds] = useState<ThresholdLine[]>(initialConfig?.thresholds || []);
   const [showThresholds, setShowThresholds] = useState<boolean>((initialConfig?.thresholds?.length || 0) > 0);
-  const [enableAlert, setEnableAlert] = useState<boolean>(initialConfig?.alertEnabled ?? false);
-  const [alertMin, setAlertMin] = useState<string>(
-    initialConfig?.alertMin !== undefined ? String(initialConfig.alertMin) : ''
-  );
-  const [alertMax, setAlertMax] = useState<string>(
-    initialConfig?.alertMax !== undefined ? String(initialConfig.alertMax) : ''
-  );
   const [showStats, setShowStats] = useState<boolean>(initialConfig?.showStats ?? true);
-  const [showAnomalyOverlay, setShowAnomalyOverlay] = useState<boolean>(initialConfig?.showAnomalyOverlay ?? true);
   const [registeredDevices, setRegisteredDevices] = useState<Map<string, { isOnline: boolean }>>(new Map());
-  const [registeredAgents, setRegisteredAgents] = useState<RegisteredAgent[]>([]);
-
-  const getSourceKey = (sourceRef: MetricSourceRef) => `${sourceRef.deviceUuid}:${sourceRef.endpointUuid}`;
 
   // Update form fields when initialConfig changes (for editing existing widgets)
   useEffect(() => {
     if (open && initialConfig) {
       setSelectedDevice(initialConfig.deviceName || '');
-      setSelectedSourceKey(
-        initialConfig.deviceUuid && initialConfig.endpointUuid
-          ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
-          : ''
-      );
-      setSelectedAgentUuid(initialConfig.agentUuid || '');
       setSelectedMetric(initialConfig.metricName || '');
       setChartType(initialConfig.chartType || 'line');
       setTimeRange(initialConfig.timeRange || '1h');
@@ -132,16 +88,10 @@ export function MetricDataCardConfigDialog({
       setColor(initialConfig.color || '#3b82f6');
       setThresholds(initialConfig.thresholds || []);
       setShowThresholds(initialConfig.thresholdsEnabled ?? ((initialConfig.thresholds?.length || 0) > 0));
-      setEnableAlert(initialConfig.alertEnabled ?? false);
-      setAlertMin(initialConfig.alertMin !== undefined ? String(initialConfig.alertMin) : '');
-      setAlertMax(initialConfig.alertMax !== undefined ? String(initialConfig.alertMax) : '');
       setShowStats(initialConfig.showStats ?? true);
-      setShowAnomalyOverlay(initialConfig.showAnomalyOverlay ?? true);
     } else if (open && !initialConfig) {
       // Reset form for new widget
       setSelectedDevice('');
-      setSelectedSourceKey('');
-      setSelectedAgentUuid('');
       setSelectedMetric('');
       setChartType('line');
       setTimeRange('1h');
@@ -149,189 +99,61 @@ export function MetricDataCardConfigDialog({
       setColor('#3b82f6');
       setThresholds([]);
       setShowThresholds(false);
-      setEnableAlert(false);
-      setAlertMin('');
-      setAlertMax('');
       setShowStats(false);
-      setShowAnomalyOverlay(true);
     }
   }, [open, initialConfig]);
 
   useEffect(() => {
-    if (open && devices.length === 0 && !loading) {
+    if (open) {
       fetchDevices();
     }
-  }, [open, devices.length, loading]);
-
-  const sourceRefAgentUuid = (sourceRef: MetricSourceRef): string | undefined =>
-    sourceRef.agentUuid || (sourceRef as any).agent_uuid;
-
-  const agentOptions: AgentOption[] = Array.from(
-    devices.reduce((acc, device) => {
-      const uuids = Array.isArray(device.agent_uuids) ? device.agent_uuids : [];
-      const names = Array.isArray(device.agent_names) ? device.agent_names : [];
-      uuids.forEach((uuid, index) => {
-        if (!uuid || acc.has(uuid)) return;
-        const name = (names[index] || '').trim() || `Agent ${uuid.slice(0, 8)}`;
-        acc.set(uuid, { uuid, name });
-      });
-
-      const sourceRefs = Array.isArray(device.source_refs) ? device.source_refs : [];
-      sourceRefs.forEach((ref) => {
-        const refAgentUuid = sourceRefAgentUuid(ref);
-        if (!refAgentUuid || acc.has(refAgentUuid)) return;
-        const fallbackName = (ref.agentName || '').trim() || `Agent ${refAgentUuid.slice(0, 8)}`;
-        acc.set(refAgentUuid, { uuid: refAgentUuid, name: fallbackName });
-      });
-      return acc;
-    }, new Map<string, AgentOption>(
-      registeredAgents.map((agent) => [agent.uuid, { uuid: agent.uuid, name: agent.name || `Agent ${agent.uuid.slice(0, 8)}` }])
-    )).values()
-  );
-
-  const agentStatusByUuid = new Map(registeredAgents.map((agent) => [agent.uuid, agent.isOnline]));
-
-  agentOptions.sort((a, b) => {
-    const aOnline = Boolean(agentStatusByUuid.get(a.uuid));
-    const bOnline = Boolean(agentStatusByUuid.get(b.uuid));
-    if (aOnline !== bOnline) return aOnline ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  const filteredDevices = selectedAgentUuid
-    ? devices.filter((device) => {
-        if (Array.isArray(device.agent_uuids) && device.agent_uuids.includes(selectedAgentUuid)) return true;
-        const sourceRefs = Array.isArray(device.source_refs) ? device.source_refs : [];
-        return sourceRefs.some((ref) => sourceRefAgentUuid(ref) === selectedAgentUuid);
-      })
-    : devices;
+  }, [open]);
 
   useEffect(() => {
-    if (!selectedDevice) {
-      setAvailableMetrics([]);
-      return;
-    }
-
-    const device = filteredDevices.find(d => d.device_name === selectedDevice) || devices.find(d => d.device_name === selectedDevice);
-    if (!device) {
-      setAvailableMetrics([]);
-      return;
-    }
-
-    setAvailableMetrics(device.available_metrics);
-
-    const sourceRefs = (Array.isArray(device.source_refs) ? device.source_refs : [])
-      .filter((sourceRef) => !selectedAgentUuid || sourceRefAgentUuid(sourceRef) === selectedAgentUuid);
-    if (sourceRefs.length >= 1) {
-      const currentSourceStillValid = sourceRefs.some(sourceRef => getSourceKey(sourceRef) === selectedSourceKey);
-      if (!currentSourceStillValid) {
-        setSelectedSourceKey(getSourceKey(sourceRefs[0]));
+    if (selectedDevice) {
+      const device = devices.find(d => d.device_name === selectedDevice);
+      if (device) {
+        setAvailableMetrics(device.available_metrics);
       }
-      return;
     }
-
-    const matchesInitialConfig =
-      initialConfig?.deviceName === selectedDevice &&
-      initialConfig?.deviceUuid &&
-      initialConfig?.endpointUuid
-        ? sourceRefs.some(
-            sourceRef =>
-              sourceRef.deviceUuid === initialConfig.deviceUuid &&
-              sourceRef.endpointUuid === initialConfig.endpointUuid
-          )
-        : false;
-
-    setSelectedSourceKey(
-      matchesInitialConfig && initialConfig?.deviceUuid && initialConfig?.endpointUuid
-        ? `${initialConfig.deviceUuid}:${initialConfig.endpointUuid}`
-        : ''
-    );
-  }, [selectedDevice, filteredDevices, devices, selectedAgentUuid, selectedSourceKey, initialConfig]);
-
-  useEffect(() => {
-    if (!selectedDevice) return;
-    if (loading) return;
-    if (devices.length === 0) return;
-    const stillVisible = filteredDevices.some((device) => device.device_name === selectedDevice);
-    if (!stillVisible) {
-      setSelectedDevice('');
-      setSelectedMetric('');
-      setSelectedSourceKey('');
-      setAvailableMetrics([]);
-    }
-  }, [selectedAgentUuid, selectedDevice, filteredDevices, loading, devices.length]);
-
-  const selectedDeviceData = filteredDevices.find(d => d.device_name === selectedDevice) || devices.find(d => d.device_name === selectedDevice);
-  const selectedDeviceSources = Array.isArray(selectedDeviceData?.source_refs)
-    ? selectedDeviceData.source_refs.filter(sourceRef => {
-        if (!sourceRef.deviceUuid || !sourceRef.endpointUuid) return false;
-        if (!selectedAgentUuid) return true;
-        return sourceRefAgentUuid(sourceRef) === selectedAgentUuid;
-      })
-    : [];
-  const selectedSourceRef = selectedDeviceSources.find(sourceRef => getSourceKey(sourceRef) === selectedSourceKey)
-    ?? selectedDeviceSources[0];
-  const canSave = Boolean(
-    selectedDevice &&
-    selectedMetric &&
-    selectedSourceRef?.deviceUuid &&
-    selectedSourceRef?.endpointUuid
-  );
-  const parsedAlertMin = alertMin.trim() === '' ? undefined : Number(alertMin);
-  const parsedAlertMax = alertMax.trim() === '' ? undefined : Number(alertMax);
-  const hasValidAlertRange =
-    parsedAlertMin !== undefined &&
-    parsedAlertMax !== undefined &&
-    Number.isFinite(parsedAlertMin) &&
-    Number.isFinite(parsedAlertMax);
-  const canSaveWithAlert = canSave && (!enableAlert || hasValidAlertRange);
+  }, [selectedDevice, devices]);
 
   const fetchDevices = async () => {
     try {
       setLoading(true);
-
-      const token = localStorage.getItem('accessToken');
-      const [metricsResponse, devicesResponse] = await Promise.all([
-        fetch(buildApiUrl('/api/v1/metrics/agents'), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        fetch(buildApiUrl('/api/v1/agents?limit=1000'), {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-      ]);
+      
+      // Fetch devices with metric data
+      const metricsUrl = buildApiUrl('/api/v1/metrics/devices');
+      const metricsResponse = await fetch(metricsUrl, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+      });
 
       if (!metricsResponse.ok) {
         throw new Error('Failed to fetch devices');
       }
 
       const metricsResult = await metricsResponse.json();
-      setDevices(metricsResult.agents || []);
+      setDevices(metricsResult.devices || []);
+      
+      // Fetch registered devices to check status
+      const devicesUrl = buildApiUrl('/api/v1/devices?limit=1000');
+      const devicesResponse = await fetch(devicesUrl, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+      });
       
       if (devicesResponse.ok) {
         const devicesData = await devicesResponse.json();
         const deviceMap = new Map();
-        const liveAgents: RegisteredAgent[] = [];
-        const registryAgents = Array.isArray(devicesData.agents)
-          ? devicesData.agents
-          : (Array.isArray(devicesData.devices) ? devicesData.devices : []);
-        registryAgents.forEach((d: any) => {
+        devicesData.devices?.forEach((d: any) => {
           deviceMap.set(d.uuid, {
             isOnline: d.is_online || false
           });
-          if (d.uuid) {
-            liveAgents.push({
-              uuid: d.uuid,
-              name: (d.name || '').trim() || `Agent ${String(d.uuid).slice(0, 8)}`,
-              isOnline: Boolean(d.is_online),
-            });
-          }
         });
         setRegisteredDevices(deviceMap);
-        setRegisteredAgents(liveAgents);
       }
     } catch (err) {
       console.error('Error fetching devices:', err);
@@ -341,21 +163,16 @@ export function MetricDataCardConfigDialog({
   };
 
   const handleSave = () => {
-    if (!selectedDevice || !selectedMetric || !selectedSourceRef) {
+    if (!selectedDevice || !selectedMetric) {
       return;
     }
 
-    if (enableAlert && !hasValidAlertRange) {
-      return;
-    }
+    const selectedDeviceData = devices.find(d => d.device_name === selectedDevice);
+    const agentName = selectedDeviceData?.agent_names?.[0] || undefined;
 
     const config: MetricDataCardConfig = {
       widgetId: initialConfig?.widgetId || `metric-${Date.now()}`,
-      agentUuid: selectedAgentUuid || sourceRefAgentUuid(selectedSourceRef),
-      agentName: selectedSourceRef.agentName,
-      endpointName: selectedSourceRef.endpointName,
-      deviceUuid: selectedSourceRef.deviceUuid,
-      endpointUuid: selectedSourceRef.endpointUuid,
+      agentName,
       deviceName: selectedDevice,
       metricName: selectedMetric,
       chartType,
@@ -363,10 +180,6 @@ export function MetricDataCardConfigDialog({
       color,
       title: title || undefined,
       showStats,
-      showAnomalyOverlay,
-      alertEnabled: enableAlert,
-      alertMin: enableAlert && hasValidAlertRange ? parsedAlertMin : undefined,
-      alertMax: enableAlert && hasValidAlertRange ? parsedAlertMax : undefined,
       thresholds: thresholds.length > 0 ? thresholds : undefined,
       thresholdsEnabled: showThresholds,
     };
@@ -386,88 +199,6 @@ export function MetricDataCardConfigDialog({
         </DialogHeader>
 
         <div className="grid gap-4 py-4">
-          <div className="grid gap-2 w-fit">
-            <Label htmlFor="agent">Agent</Label>
-            <Popover open={agentOpen} onOpenChange={setAgentOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={agentOpen}
-                  className="w-[320px] justify-between"
-                >
-                  {selectedAgentUuid
-                    ? agentOptions.find((agent) => agent.uuid === selectedAgentUuid)?.name || `Agent ${selectedAgentUuid.slice(0, 8)}`
-                    : 'All agents'}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[320px] p-0">
-                <Command>
-                  <CommandInput placeholder="Search agents..." />
-                  <CommandList>
-                    <CommandEmpty>No agents found.</CommandEmpty>
-                    <CommandGroup>
-                      <CommandItem
-                        value="all agents"
-                        onSelect={() => {
-                          setSelectedAgentUuid('');
-                          setAgentOpen(false);
-                        }}
-                      >
-                        <Check
-                          className={cn(
-                            'mr-2 h-4 w-4',
-                            selectedAgentUuid === '' ? 'opacity-100' : 'opacity-0'
-                          )}
-                        />
-                        <span>All agents</span>
-                      </CommandItem>
-                      {agentOptions.map((agent) => {
-                        const isKnownAgent = agentStatusByUuid.has(agent.uuid);
-                        const isOnline = isKnownAgent ? Boolean(agentStatusByUuid.get(agent.uuid)) : false;
-                        const isDeleted = registeredAgents.length > 0 && !isKnownAgent;
-                        const isOffline = isKnownAgent && !isOnline;
-
-                        return (
-                          <CommandItem
-                            key={agent.uuid}
-                            value={`${agent.name} ${agent.uuid}`}
-                            onSelect={() => {
-                              setSelectedAgentUuid(agent.uuid === selectedAgentUuid ? '' : agent.uuid);
-                              setAgentOpen(false);
-                            }}
-                            className={isDeleted || isOffline ? 'opacity-50' : ''}
-                          >
-                            <Check
-                              className={cn(
-                                'mr-2 h-4 w-4',
-                                selectedAgentUuid === agent.uuid ? 'opacity-100' : 'opacity-0'
-                              )}
-                            />
-                            <div className="flex items-center justify-between w-full gap-2">
-                              <span>{agent.name}</span>
-                              {isDeleted && (
-                                <Badge variant="outline" className="text-xs bg-red-50 text-red-600 border-red-200">
-                                  Deleted
-                                </Badge>
-                              )}
-                              {!isDeleted && isOffline && (
-                                <Badge variant="outline" className="text-xs bg-gray-100 text-gray-600 border-gray-300">
-                                  Offline
-                                </Badge>
-                              )}
-                            </div>
-                          </CommandItem>
-                        );
-                      })}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
-
           <div className="grid gap-2">
             <Label>Device</Label>
             <Popover open={deviceOpen} onOpenChange={setDeviceOpen}>
@@ -479,7 +210,7 @@ export function MetricDataCardConfigDialog({
                   className="w-full justify-between"
                 >
                   {selectedDevice
-                    ? filteredDevices.find((device) => device.device_name === selectedDevice)?.device_name
+                    ? devices.find((device) => device.device_name === selectedDevice)?.device_name
                     : "Select device..."}
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
@@ -492,8 +223,7 @@ export function MetricDataCardConfigDialog({
                       {loading ? "Loading devices..." : "No devices found."}
                     </CommandEmpty>
                     <CommandGroup>
-                      {filteredDevices.map((device) => {
-                        const hasRegistryData = registeredDevices.size > 0;
+                      {devices.map((device) => {
                         // Check if any of the device's agents are registered and online
                         const hasOnlineAgent = device.agent_uuids?.some(uuid => {
                           const deviceInfo = registeredDevices.get(uuid);
@@ -504,7 +234,7 @@ export function MetricDataCardConfigDialog({
                           registeredDevices.has(uuid)
                         );
                         
-                        const isDeleted = hasRegistryData && !hasRegisteredAgent;
+                        const isDeleted = !hasRegisteredAgent;
                         const isOffline = hasRegisteredAgent && !hasOnlineAgent;
                         
                         return (
@@ -619,22 +349,6 @@ export function MetricDataCardConfigDialog({
             </div>
             <p className="text-xs text-muted-foreground ml-6">
               Display Current/Average/Minimum/Maximum cards above the chart.
-            </p>
-          </div>
-
-          <div className="grid gap-2">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="show-anomaly-overlay"
-                checked={showAnomalyOverlay}
-                onCheckedChange={(checked) => setShowAnomalyOverlay(checked === true)}
-              />
-              <Label htmlFor="show-anomaly-overlay" className="cursor-pointer">
-                Show Anomaly Overlay
-              </Label>
-            </div>
-            <p className="text-xs text-muted-foreground ml-6">
-              Display anomaly event markers on the chart.
             </p>
           </div>
 
@@ -792,57 +506,6 @@ export function MetricDataCardConfigDialog({
               </div>
             )}
           </div>
-
-          {/* Alert Section */}
-          <div className="grid gap-2 pt-2">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="enable-alert"
-                checked={enableAlert}
-                onCheckedChange={(checked) => setEnableAlert(checked === true)}
-              />
-              <Label htmlFor="enable-alert" className="cursor-pointer">
-                Add Alert (Expected Range)
-              </Label>
-            </div>
-
-            {enableAlert && (
-              <div className="space-y-2 rounded-lg border p-3 bg-muted/20">
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <Label htmlFor="alert-min" className="text-xs">Minimum</Label>
-                    <Input
-                      id="alert-min"
-                      type="number"
-                      step="any"
-                      value={alertMin}
-                      onChange={(e) => setAlertMin(e.target.value)}
-                      className="h-8"
-                      placeholder="e.g. 20"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="alert-max" className="text-xs">Maximum</Label>
-                    <Input
-                      id="alert-max"
-                      type="number"
-                      step="any"
-                      value={alertMax}
-                      onChange={(e) => setAlertMax(e.target.value)}
-                      className="h-8"
-                      placeholder="e.g. 80"
-                    />
-                  </div>
-                </div>
-
-                {!hasValidAlertRange && (
-                  <p className="text-xs text-amber-700">
-                    Enter both minimum and maximum values to enable alert syncing.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
         </div>
 
         <DialogFooter>
@@ -851,7 +514,7 @@ export function MetricDataCardConfigDialog({
           </Button>
           <Button 
             onClick={handleSave}
-            disabled={!canSaveWithAlert}
+            disabled={!selectedDevice || !selectedMetric}
           >
             Save Widget
           </Button>

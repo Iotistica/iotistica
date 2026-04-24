@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   Dialog, 
   DialogContent, 
@@ -48,24 +48,30 @@ import {
 } from "lucide-react";
 import { buildApiUrl } from "@/config/api";
 import { toast } from "sonner";
-import {
-  createMqttAcl,
-  createMqttUser,
-  deleteMqttAcl,
-  deleteMqttUser,
-  listMqttUsers,
-  updateMqttAcl,
-  updateMqttUser,
-  type MqttAcl,
-  type MqttUser,
-} from "@/services/mqttSecurity";
+
+interface MqttAcl {
+  id: number;
+  topic: string;
+  access: number; // 1=read, 2=write, 3=read+write
+  priority: number;
+  created_at: string;
+}
+
+interface MqttUser {
+  id: number;
+  username: string;
+  is_superuser: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  acls: MqttAcl[];
+}
 
 interface ApiKey {
   id: number;
   name: string;
   key_prefix: string;
   key: string;
-  description?: string | null;
   created_at: string;
   expires_at: string | null;
   last_used_at: string | null;
@@ -73,8 +79,6 @@ interface ApiKey {
 }
 
 export function SecurityPage() {
-  const [activeTab, setActiveTab] = useState('mqtt');
-
   // MQTT Users state
   const [mqttUsers, setMqttUsers] = useState<MqttUser[]>([]);
   const [loadingMqtt, setLoadingMqtt] = useState(true);
@@ -83,12 +87,6 @@ export function SecurityPage() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [loadingApiKeys, setLoadingApiKeys] = useState(true);
   const [showApiKey, setShowApiKey] = useState<{[key: number]: boolean}>({});
-  const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
-  const [apiKeyFormData, setApiKeyFormData] = useState({
-    name: '',
-    description: '',
-    expiry_period: '90d'
-  });
   
   // User dialog state
   const [userDialogOpen, setUserDialogOpen] = useState(false);
@@ -121,11 +119,20 @@ export function SecurityPage() {
 
   const fetchMqttUsers = async () => {
     try {
-      const users = await listMqttUsers();
-      setMqttUsers(users);
+      const response = await fetch(buildApiUrl('/api/v1/auth/mqtt-users'), {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setMqttUsers(data.users || []);
+      } else {
+        console.error('Failed to fetch MQTT users:', response.status);
+        toast.error("Failed to fetch MQTT users");
+      }
     } catch (error) {
       console.error('Failed to fetch MQTT users:', error);
-      toast.error(error instanceof Error ? error.message : "Network error while fetching users");
+      toast.error("Network error while fetching users");
     } finally {
       setLoadingMqtt(false);
     }
@@ -133,103 +140,12 @@ export function SecurityPage() {
 
   const fetchApiKeys = async () => {
     try {
-      const response = await fetch(buildApiUrl('/api/v1/auth/api-keys'), {
-        credentials: 'include'
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setApiKeys(data.keys || []);
-      } else {
-        const data = await response.json().catch(() => ({}));
-        toast.error(data.message || 'Failed to fetch API keys');
-      }
+      // Placeholder - implement when backend endpoint exists
+      setApiKeys([]);
     } catch (error) {
       console.error('Failed to fetch API keys:', error);
-      toast.error('Network error while fetching API keys');
     } finally {
       setLoadingApiKeys(false);
-    }
-  };
-
-  const resolveApiKeyExpiry = (period: string): string | null => {
-    const daysByPeriod: Record<string, number> = {
-      '30d': 30,
-      '90d': 90,
-      '180d': 180,
-      '365d': 365,
-    };
-
-    if (period === 'never') {
-      return null;
-    }
-
-    const days = daysByPeriod[period];
-    if (!days) {
-      return null;
-    }
-
-    return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
-  };
-
-  const handleOpenApiKeyDialog = () => {
-    setApiKeyFormData({ name: '', description: '', expiry_period: '90d' });
-    setApiKeyDialogOpen(true);
-  };
-
-  const handleGenerateApiKey = async () => {
-    try {
-      if (!apiKeyFormData.name.trim()) {
-        toast.error('Name is required');
-        return;
-      }
-
-      const response = await fetch(buildApiUrl('/api/v1/auth/api-keys'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          name: apiKeyFormData.name.trim(),
-          description: apiKeyFormData.description.trim() || null,
-          expires_at: resolveApiKeyExpiry(apiKeyFormData.expiry_period),
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        toast.success('API key generated successfully');
-        setApiKeyDialogOpen(false);
-        setApiKeys((prev) => [data.key, ...prev]);
-        setShowApiKey((prev) => ({ ...prev, [data.key.id]: true }));
-      } else {
-        const data = await response.json().catch(() => ({}));
-        toast.error(data.message || 'Failed to generate API key');
-      }
-    } catch (error) {
-      console.error('Generate API key error:', error);
-      toast.error('Network error while generating API key');
-    }
-  };
-
-  const handleRevokeApiKey = async (id: number) => {
-    try {
-      const response = await fetch(buildApiUrl(`/api/v1/auth/api-keys/${id}`), {
-        method: 'DELETE',
-        credentials: 'include'
-      });
-
-      if (response.ok) {
-        toast.success('API key revoked successfully');
-        setApiKeys((prev) => prev.map((key) =>
-          key.id === id ? { ...key, is_active: false } : key
-        ));
-      } else {
-        const data = await response.json().catch(() => ({}));
-        toast.error(data.message || 'Failed to revoke API key');
-      }
-    } catch (error) {
-      console.error('Revoke API key error:', error);
-      toast.error('Network error while revoking API key');
     }
   };
 
@@ -257,6 +173,12 @@ export function SecurityPage() {
 
   const handleSaveUser = async () => {
     try {
+      const url = editingUser 
+        ? buildApiUrl(`/api/v1/auth/mqtt-users/${editingUser.id}`)
+        : buildApiUrl('/api/v1/auth/mqtt-users');
+      
+      const method = editingUser ? 'PUT' : 'POST';
+      
       const body: any = {
         is_superuser: userFormData.is_superuser,
         is_active: userFormData.is_active
@@ -269,19 +191,25 @@ export function SecurityPage() {
         // Only include password if it was changed
         body.password = userFormData.password;
       }
-
-      if (editingUser) {
-        await updateMqttUser(editingUser.id, body);
+      
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      
+      if (response.ok) {
+        toast.success(`MQTT user ${editingUser ? 'updated' : 'created'} successfully`);
+        setUserDialogOpen(false);
+        fetchMqttUsers();
       } else {
-        await createMqttUser(body);
+        const data = await response.json();
+        toast.error(data.message || `Failed to ${editingUser ? 'update' : 'create'} user`);
       }
-
-      toast.success(`MQTT user ${editingUser ? 'updated' : 'created'} successfully`);
-      setUserDialogOpen(false);
-      fetchMqttUsers();
     } catch (error) {
       console.error('Save user error:', error);
-      toast.error(error instanceof Error ? error.message : "Network error while saving user");
+      toast.error("Network error while saving user");
     }
   };
 
@@ -289,12 +217,23 @@ export function SecurityPage() {
     if (!deleteTarget || deleteTarget.type !== 'user') return;
     
     try {
-      await deleteMqttUser(deleteTarget.id);
-      toast.success("MQTT user deleted successfully");
-      fetchMqttUsers();
+      const response = await fetch(
+        buildApiUrl(`/api/v1/auth/mqtt-users/${deleteTarget.id}`),
+        {
+          method: 'DELETE',
+          credentials: 'include'
+        }
+      );
+      
+      if (response.ok) {
+        toast.success("MQTT user deleted successfully");
+        fetchMqttUsers();
+      } else {
+        toast.error("Failed to delete user");
+      }
     } catch (error) {
       console.error('Delete user error:', error);
-      toast.error(error instanceof Error ? error.message : "Network error while deleting user");
+      toast.error("Network error while deleting user");
     } finally {
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
@@ -316,19 +255,30 @@ export function SecurityPage() {
     if (!selectedUserId) return;
     
     try {
-
-      if (editingAcl) {
-        await updateMqttAcl(editingAcl.id, aclFormData);
+      const url = editingAcl
+        ? buildApiUrl(`/api/v1/auth/mqtt-acls/${editingAcl.id}`)
+        : buildApiUrl(`/api/v1/auth/mqtt-users/${selectedUserId}/acls`);
+      
+      const method = editingAcl ? 'PUT' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(aclFormData)
+      });
+      
+      if (response.ok) {
+        toast.success(`ACL rule ${editingAcl ? 'updated' : 'created'} successfully`);
+        setAclDialogOpen(false);
+        fetchMqttUsers();
       } else {
-        await createMqttAcl(selectedUserId, aclFormData);
+        const data = await response.json();
+        toast.error(data.message || `Failed to ${editingAcl ? 'update' : 'create'} ACL rule`);
       }
-
-      toast.success(`ACL rule ${editingAcl ? 'updated' : 'created'} successfully`);
-      setAclDialogOpen(false);
-      fetchMqttUsers();
     } catch (error) {
       console.error('Save ACL error:', error);
-      toast.error(error instanceof Error ? error.message : "Network error while saving ACL rule");
+      toast.error("Network error while saving ACL rule");
     }
   };
 
@@ -336,12 +286,23 @@ export function SecurityPage() {
     if (!deleteTarget || deleteTarget.type !== 'acl') return;
     
     try {
-      await deleteMqttAcl(deleteTarget.id);
-      toast.success("ACL rule deleted successfully");
-      fetchMqttUsers();
+      const response = await fetch(
+        buildApiUrl(`/api/v1/auth/mqtt-acls/${deleteTarget.id}`),
+        {
+          method: 'DELETE',
+          credentials: 'include'
+        }
+      );
+      
+      if (response.ok) {
+        toast.success("ACL rule deleted successfully");
+        fetchMqttUsers();
+      } else {
+        toast.error("Failed to delete ACL rule");
+      }
     } catch (error) {
       console.error('Delete ACL error:', error);
-      toast.error(error instanceof Error ? error.message : "Network error while deleting ACL rule");
+      toast.error("Network error while deleting ACL rule");
     } finally {
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
@@ -352,7 +313,8 @@ export function SecurityPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-2xl font-bold">
+        <h2 className="text-2xl font-bold flex items-center gap-2">
+          <Shield className="w-6 h-6" />
           Security & Access Control
         </h2>
         <p className="text-sm text-gray-600 mt-1">
@@ -361,36 +323,27 @@ export function SecurityPage() {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4 mt-4">
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-foreground">Category:</label>
-            <Select value={activeTab} onValueChange={setActiveTab}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="mqtt">MQTT Users</SelectItem>
-                <SelectItem value="api-keys">API Keys</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {activeTab === 'mqtt' ? (
-            <Button onClick={handleAddUser} aria-label="Add MQTT User" title="Add MQTT User">
-              <Plus className="w-4 h-4 mr-2" />
-              Add MQTT User
-            </Button>
-          ) : (
-            <Button onClick={handleOpenApiKeyDialog}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add API Key
-            </Button>
-          )}
-        </div>
+      <Tabs defaultValue="mqtt" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="mqtt">
+            <Key className="w-4 h-4 mr-2" />
+            MQTT Users
+          </TabsTrigger>
+          <TabsTrigger value="api-keys">
+            <Shield className="w-4 h-4 mr-2" />
+            API Keys
+          </TabsTrigger>
+        </TabsList>
 
         {/* MQTT Users Tab */}
         <TabsContent value="mqtt" className="space-y-4">
+          <div className="flex justify-end mb-4">
+            <Button onClick={handleAddUser} className="ml-auto">
+              <UserPlus className="w-4 h-4 mr-2" />
+              Add MQTT User
+            </Button>
+          </div>
+
           {loadingMqtt ? (
             <div className="flex items-center justify-center h-64">
               <p className="text-muted-foreground">Loading MQTT users...</p>
@@ -417,7 +370,7 @@ export function SecurityPage() {
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Permissions</th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">ACL Rules</th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Created</th>
-                      <th className="py-3 px-4 font-semibold text-sm text-foreground" style={{ textAlign: 'left' }}>Actions</th>
+                      <th className="text-right py-3 px-4 font-semibold text-sm text-foreground">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -449,21 +402,6 @@ export function SecurityPage() {
                                 (bypasses ACLs)
                               </span>
                             )}
-                            {!user.is_superuser && user.acls.length === 0 && (
-                              <Badge variant="outline" className="text-xs">
-                                No ACL
-                              </Badge>
-                            )}
-                            {!user.is_superuser && user.acls.length > 0 && user.acls.slice(0, 2).map((acl) => (
-                              <Badge key={acl.id} variant="secondary" className="text-xs max-w-[220px] truncate" title={`${acl.topic} (${acl.access === 1 ? 'read' : acl.access === 2 ? 'write' : 'read+write'})`}>
-                                {acl.access === 1 ? 'R' : acl.access === 2 ? 'W' : 'R/W'}: {acl.topic}
-                              </Badge>
-                            ))}
-                            {!user.is_superuser && user.acls.length > 2 && (
-                              <Badge variant="outline" className="text-xs">
-                                +{user.acls.length - 2} more
-                              </Badge>
-                            )}
                           </div>
                         </td>
                         <td className="py-3 px-4">
@@ -485,8 +423,8 @@ export function SecurityPage() {
                         <td className="py-3 px-4 text-muted-foreground">
                           {new Date(user.created_at).toLocaleDateString()}
                         </td>
-                        <td className="py-3 px-4" style={{ textAlign: 'left' }}>
-                          <div className="inline-flex items-center gap-2 whitespace-nowrap">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center justify-end gap-2 whitespace-nowrap ml-auto">
                             <Button
                               variant="outline"
                               size="sm"
@@ -517,6 +455,13 @@ export function SecurityPage() {
 
         {/* API Keys Tab */}
         <TabsContent value="api-keys" className="space-y-4">
+          <div className="flex justify-end">
+            <Button>
+              <Plus className="w-4 h-4 mr-2" />
+              Generate API Key
+            </Button>
+          </div>
+
           {loadingApiKeys ? (
             <div className="flex items-center justify-center h-64">
               <p className="text-muted-foreground">Loading API keys...</p>
@@ -526,9 +471,9 @@ export function SecurityPage() {
               <CardContent className="py-12 text-center">
                 <Key className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
                 <p className="text-muted-foreground mb-4">No API keys configured</p>
-                <Button onClick={handleOpenApiKeyDialog}>
+                <Button>
                   <Plus className="w-4 h-4 mr-2" />
-                  Add Your First API Key
+                  Generate Your First API Key
                 </Button>
               </CardContent>
             </Card>
@@ -544,7 +489,7 @@ export function SecurityPage() {
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Last Used</th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Expires</th>
                       <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Created</th>
-                      <th className="py-3 px-4 font-semibold text-sm text-foreground" style={{ textAlign: 'left' }}>Actions</th>
+                      <th className="text-right py-3 px-4 font-semibold text-sm text-foreground">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -576,8 +521,8 @@ export function SecurityPage() {
                         <td className="py-3 px-4 text-muted-foreground">
                           {new Date(key.created_at).toLocaleDateString()}
                         </td>
-                        <td className="py-3 px-4" style={{ textAlign: 'left' }}>
-                          <div className="inline-flex items-center gap-2 whitespace-nowrap">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center justify-end gap-2 whitespace-nowrap ml-auto">
                             <Button
                               variant="outline"
                               size="sm"
@@ -588,7 +533,6 @@ export function SecurityPage() {
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={!key.key}
                               onClick={() => {
                                 navigator.clipboard.writeText(key.key);
                                 toast.success("API key copied to clipboard");
@@ -596,12 +540,7 @@ export function SecurityPage() {
                             >
                               <Copy className="w-4 h-4" />
                             </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              disabled={!key.is_active}
-                              onClick={() => handleRevokeApiKey(key.id)}
-                            >
+                            <Button variant="outline" size="sm">
                               <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
                             </Button>
                           </div>
@@ -615,69 +554,6 @@ export function SecurityPage() {
           )}
         </TabsContent>
       </Tabs>
-
-      {/* MQTT User Dialog */}
-      <Dialog open={apiKeyDialogOpen} onOpenChange={setApiKeyDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add API Key</DialogTitle>
-            <DialogDescription>
-              Create a new service API key for internal integrations.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="api-key-name">Name</Label>
-              <Input
-                id="api-key-name"
-                value={apiKeyFormData.name}
-                onChange={(e) => setApiKeyFormData({ ...apiKeyFormData, name: e.target.value })}
-                placeholder="simulator"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="api-key-description">Description (optional)</Label>
-              <Input
-                id="api-key-description"
-                value={apiKeyFormData.description}
-                onChange={(e) => setApiKeyFormData({ ...apiKeyFormData, description: e.target.value })}
-                placeholder="Used by protocol simulators"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="api-key-expiry-period">Expiry Period</Label>
-              <Select
-                value={apiKeyFormData.expiry_period}
-                onValueChange={(value) => setApiKeyFormData({ ...apiKeyFormData, expiry_period: value })}
-              >
-                <SelectTrigger id="api-key-expiry-period">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="30d">30 days</SelectItem>
-                  <SelectItem value="90d">90 days (recommended)</SelectItem>
-                  <SelectItem value="180d">180 days</SelectItem>
-                  <SelectItem value="365d">365 days</SelectItem>
-                  <SelectItem value="never">Never expires</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-gray-500">
-                Best practice: prefer short-lived keys (30-90 days) and rotate regularly.
-              </p>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setApiKeyDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleGenerateApiKey}>Generate</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* MQTT User Dialog */}
       <Dialog open={userDialogOpen} onOpenChange={setUserDialogOpen}>

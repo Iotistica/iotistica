@@ -2,7 +2,7 @@
  * Edit Sensor Dialog
  * 
  * Tabbed interface for editing existing protocol devices.
- * Supports: Modbus TCP/RTU, OPC-UA, MQTT
+ * Supports: Modbus TCP/RTU, OPC-UA
  * Pre-populates form with existing configuration and allows updates.
  */
 
@@ -11,7 +11,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Checkbox } from '@/components/ui/checkbox';
 import { AlertCircle, Trash2, ChevronsUpDown, Check } from 'lucide-react';
 import {
   Command,
@@ -29,10 +28,11 @@ import {
 import { cn } from '@/components/ui/utils';
 import { buildApiUrl } from '@/config/api';
 import { ModbusConfigForm } from './ModbusConfigForm';
+import { DataPointsTable } from './DataPointsTable';
 import { OPCUAConfigForm } from './OPCUAConfigForm';
-import { MqttConfigForm } from './MqttConfigForm';
+import { OPCUADataPointsTable } from './OPCUADataPointsTable';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import type { ModbusDeviceConfig, ModbusDataPoint, OPCUADeviceConfig, OPCUADataPoint, MQTTDeviceConfig } from '@/schemas/sensor-schemas';
+import type { ModbusDeviceConfig, ModbusDataPoint, OPCUADeviceConfig, OPCUADataPoint } from '@/schemas/sensor-schemas';
 
 interface EditSensorDialogProps {
   open: boolean;
@@ -67,14 +67,10 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
   const [opcuaFormValid, setOpcuaFormValid] = useState(false);
   const [opcuaDataPoints, setOpcuaDataPoints] = useState<OPCUADataPoint[]>([]);
 
-  // MQTT form state
-  const [mqttConfig, setMqttConfig] = useState<MQTTDeviceConfig | null>(null);
-  const [mqttFormValid, setMqttFormValid] = useState(false);
-
   const loadLocations = async () => {
     try {
       const token = localStorage.getItem('accessToken');
-      const response = await fetch(buildApiUrl('/api/v1/agents/locations'), {
+      const response = await fetch(buildApiUrl('/api/v1/devices/locations'), {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
@@ -89,6 +85,8 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
   // Initialize form with existing device data
   useEffect(() => {
     if (device && open) {
+      console.log('[EditSensorDialog] Initializing with device:', device);
+      
       // Load location autocomplete options
       loadLocations();
       
@@ -105,7 +103,8 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
           connection: device.connection,
           dataPoints: device.dataPoints || [],
         };
-
+        
+        console.log('[EditSensorDialog] Modbus config:', config);
         setModbusConfig(config);
         setModbusDataPoints(device.dataPoints || []);
         setModbusFormValid(true); // Assume valid since it was saved before
@@ -116,31 +115,14 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
           protocol: 'opcua',
           enabled: device.enabled ?? true,
           pollInterval: device.pollInterval || 1000,
-          connection: {
-            certificateTrustMode: 'strict',
-            ...device.connection,
-          },
+          connection: device.connection,
           dataPoints: device.dataPoints || [],
         };
-
+        
+        console.log('[EditSensorDialog] OPC-UA config:', config);
         setOpcuaConfig(config);
         setOpcuaDataPoints(device.dataPoints || []);
         setOpcuaFormValid(true); // Assume valid since it was saved before
-      } else if (device.protocol === 'mqtt') {
-        const config: MQTTDeviceConfig = {
-          name: device.name,
-          protocol: 'mqtt',
-          enabled: device.enabled ?? true,
-          pollInterval: device.pollInterval,
-          connection: {
-            ...(device.connection || {}),
-            qos: device.connection?.qos ?? 1,
-          },
-          dataPoints: device.dataPoints || [],
-        };
-
-        setMqttConfig(config);
-        setMqttFormValid(true); // Assume valid since it was saved before
       }
     }
   }, [device, open]);
@@ -176,7 +158,7 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
 
       try {
         setLoading(true);
-        await onUpdateDevice(device.name, { ...finalConfig, uuid: device.uuid, location });
+        await onUpdateDevice(device.name, { ...finalConfig, location });
         handleClose();
       } catch (err: any) {
         setError(err.message || 'Failed to update device');
@@ -200,31 +182,7 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
 
       try {
         setLoading(true);
-        await onUpdateDevice(device.name, { ...finalConfig, uuid: device.uuid, location });
-        handleClose();
-      } catch (err: any) {
-        setError(err.message || 'Failed to update device');
-      } finally {
-        setLoading(false);
-      }
-    } else if (protocol === 'mqtt') {
-      if (!mqttConfig || !mqttFormValid) {
-        setError('Please complete all required fields');
-        return;
-      }
-
-      const finalConfig: MQTTDeviceConfig = {
-        ...mqttConfig,
-        protocol: 'mqtt',
-        connection: {
-          ...(mqttConfig.connection || {}),
-          qos: mqttConfig.connection?.qos ?? 1,
-        },
-      };
-
-      try {
-        setLoading(true);
-        await onUpdateDevice(device.name, { ...finalConfig, uuid: device.uuid, location });
+        await onUpdateDevice(device.name, { ...finalConfig, location });
         handleClose();
       } catch (err: any) {
         setError(err.message || 'Failed to update device');
@@ -261,13 +219,11 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
     if (!device) return false;
     
     if (device.protocol === 'modbus') {
-      // Match Add dialog behavior: profile-based configs may not have explicit points at edit time
-      return modbusFormValid;
+      // Modbus requires at least one register mapping
+      return modbusFormValid && modbusDataPoints.length > 0;
     } else if (device.protocol === 'opcua') {
       // OPC UA uses auto-discovery, nodes are optional
       return opcuaFormValid;
-    } else if (device.protocol === 'mqtt') {
-      return mqttFormValid;
     }
     return false;
   };
@@ -279,140 +235,109 @@ export const EditSensorDialog: React.FC<EditSensorDialogProps> = ({
   return (
     <>
       <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent
-          className="!p-0 overflow-hidden flex flex-col"
-          style={{ width: '66vh', maxWidth: '66vh', height: '66vh', maxHeight: '66vh' }}
-        >
-          <DialogHeader className="px-6 py-4">
-            <DialogTitle>Edit Device</DialogTitle>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Edit Device: {device.name}</DialogTitle>
             <DialogDescription>
-              Update configuration for {device.name}
+              Update configuration for this {device.protocol?.toUpperCase()} device
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-6">
-            {error && (
-              <Alert variant="destructive">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-            {/* Location field - common for all protocols */}
-            <div className="space-y-2 px-1">
-              <Label>Location (optional)</Label>
-              <Popover open={locationOpen} onOpenChange={setLocationOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={locationOpen}
-                    className="w-full justify-between font-normal"
-                  >
-                    {location || "Select or enter location..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-full p-0" align="start">
-                  <Command>
-                    <CommandInput 
-                      placeholder="Search or type new location..." 
-                      value={location}
-                      onValueChange={setLocation}
-                    />
-                    <CommandList>
-                      <CommandEmpty>Type to add a new location</CommandEmpty>
-                      <CommandGroup>
-                        {locations.map((loc) => (
-                          <CommandItem
-                            key={loc}
-                            value={loc}
-                            onSelect={(currentValue) => {
-                              setLocation(currentValue);
-                              setLocationOpen(false);
-                            }}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                location === loc ? "opacity-100" : "opacity-0"
-                              )}
-                            />
-                            {loc}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {device.protocol === 'modbus' && (
-              <div className="space-y-6">
-                <ModbusConfigForm 
-                  value={modbusConfig || undefined}
-                  onChange={setModbusConfig}
-                  onValidationChange={setModbusFormValid}
-                  onDataPointsChange={setModbusDataPoints}
-                />
-
-                <DataPointsTable
-                  value={modbusDataPoints}
-                  onChange={setModbusDataPoints}
-                />
-              </div>
-            )}
-
-            {device.protocol === 'opcua' && (
-              <div className="space-y-6">
-                <OPCUAConfigForm 
-                  value={opcuaConfig || undefined}
-                  onChange={setOpcuaConfig}
-                  onValidationChange={setOpcuaFormValid}
-                  certificateMetadata={device.metadata}
-                  workflowHint="Use approve or rotate actions here, then save the device to stage the change for draft or deploy."
-                />
-
-                {/* OPC-UA Data Points Table - Commented out to reduce confusion, users should work with profiles only
-                <OPCUADataPointsTable
-                  dataPoints={opcuaDataPoints}
-                  onChange={setOpcuaDataPoints}
-                />
-                */}
-              </div>
-            )}
-
-            {device.protocol === 'mqtt' && (
-              <div className="space-y-6">
-                <MqttConfigForm
-                  value={mqttConfig || undefined}
-                  onChange={setMqttConfig}
-                  onValidationChange={setMqttFormValid}
-                  readOnlyTopic={device.connection?.topic}
-                />
-              </div>
-            )}
+          {/* Location field - common for all protocols */}
+          <div className="space-y-2 px-1">
+            <Label>Location (optional)</Label>
+            <Popover open={locationOpen} onOpenChange={setLocationOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={locationOpen}
+                  className="w-full justify-between font-normal"
+                >
+                  {location || "Select or enter location..."}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0" align="start">
+                <Command>
+                  <CommandInput 
+                    placeholder="Search or type new location..." 
+                    value={location}
+                    onValueChange={setLocation}
+                  />
+                  <CommandList>
+                    <CommandEmpty>Type to add a new location</CommandEmpty>
+                    <CommandGroup>
+                      {locations.map((loc) => (
+                        <CommandItem
+                          key={loc}
+                          value={loc}
+                          onSelect={(currentValue) => {
+                            setLocation(currentValue);
+                            setLocationOpen(false);
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              location === loc ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          {loc}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+            <p className="text-xs text-muted-foreground">
+              Specify the physical location for Digital Twins integration
+            </p>
           </div>
 
-          {device.protocol === 'mqtt' && (
-            <div
-              className="flex items-center px-6"
-              style={{ columnGap: '12px', paddingTop: '10px', paddingBottom: '10px' }}
-            >
-              <Checkbox
-                id="edit-mqtt-enabled"
-                checked={mqttConfig?.enabled ?? true}
-                onCheckedChange={(checked) => {
-                  if (mqttConfig) setMqttConfig({ ...mqttConfig, enabled: Boolean(checked) });
-                }}
+          {device.protocol === 'modbus' && (
+            <div className="flex-1 overflow-y-auto space-y-6 mt-4">
+              <ModbusConfigForm 
+                value={modbusConfig || undefined}
+                onChange={setModbusConfig}
+                onValidationChange={setModbusFormValid}
               />
-              <Label htmlFor="edit-mqtt-enabled" className="font-normal cursor-pointer">
-                Enabled
-              </Label>
+
+              {/* Data Points Table - Commented out to reduce confusion, users should work with profiles only
+              <DataPointsTable
+                value={modbusDataPoints}
+                onChange={setModbusDataPoints}
+              />
+              */}
             </div>
           )}
-          <DialogFooter className="px-6 py-4 flex justify-between items-center">
+
+          {device.protocol === 'opcua' && (
+            <div className="flex-1 overflow-y-auto space-y-6 mt-4">
+              <OPCUAConfigForm 
+                value={opcuaConfig || undefined}
+                onChange={setOpcuaConfig}
+                onValidationChange={setOpcuaFormValid}
+              />
+
+              {/* OPC-UA Data Points Table - Commented out to reduce confusion, users should work with profiles only
+              <OPCUADataPointsTable
+                dataPoints={opcuaDataPoints}
+                onChange={setOpcuaDataPoints}
+              />
+              */}
+            </div>
+          )}
+
+          <DialogFooter className="flex justify-between items-center">
             {onDeleteDevice ? (
               <Button 
                 variant="destructive" 

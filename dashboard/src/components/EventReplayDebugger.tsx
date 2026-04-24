@@ -123,7 +123,7 @@ export function EventReplayDebugger({ deviceUuid }: EventReplayDebuggerProps) {
 
     try {
       const response = await fetch(
-        buildApiUrl(`/api/v1/events/agent/${deviceUuid}/replay`),
+        buildApiUrl(`/api/v1/events/device/${deviceUuid}/replay`),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -157,7 +157,7 @@ export function EventReplayDebugger({ deviceUuid }: EventReplayDebuggerProps) {
 
     try {
       const response = await fetch(
-        buildApiUrl(`/api/v1/events/agent/${deviceUuid}/snapshot`),
+        buildApiUrl(`/api/v1/events/device/${deviceUuid}/snapshot`),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -190,7 +190,7 @@ export function EventReplayDebugger({ deviceUuid }: EventReplayDebuggerProps) {
 
     try {
       const response = await fetch(
-        buildApiUrl(`/api/v1/events/agent/${deviceUuid}/compare`),
+        buildApiUrl(`/api/v1/events/device/${deviceUuid}/compare`),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

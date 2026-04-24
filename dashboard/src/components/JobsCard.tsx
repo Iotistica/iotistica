@@ -86,7 +86,7 @@ export const JobsCard: React.FC<JobsCardProps> = ({ deviceUuid, deviceStatus }) 
     
     try {
       const offset = (page - 1) * pageSize;
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/jobs?limit=${pageSize}&offset=${offset}`));
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/jobs?limit=${pageSize}&offset=${offset}`));
       
       if (!response.ok) {
         throw new Error('Failed to fetch jobs');
@@ -291,7 +291,7 @@ export const JobsCard: React.FC<JobsCardProps> = ({ deviceUuid, deviceStatus }) 
                     Execution Type
                   </th>
                   <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Date</th>
-                  <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Actions</th>
+                  <th className="text-right py-3 px-4 font-semibold text-sm text-foreground">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -313,7 +313,7 @@ export const JobsCard: React.FC<JobsCardProps> = ({ deviceUuid, deviceStatus }) 
                       {formatDate(job.completed_at || job.started_at || job.queued_at)}
                     </td>
                     <td className="py-3 px-4">
-                      <div className="flex items-center justify-start gap-2 whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-2 whitespace-nowrap ml-auto">
                         {/* View button - always visible */}
                         <Button
                           variant="outline"

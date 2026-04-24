@@ -145,8 +145,6 @@ export type OPCUASecurityPolicy =
   | 'Aes128_Sha256_RsaOaep'
   | 'Aes256_Sha256_RsaPss';
 
-export type OPCUACertificateTrustMode = 'strict' | 'trust-on-first-use';
-
 /**
  * OPC-UA data types
  */
@@ -175,8 +173,6 @@ export interface OPCUAConnection {
   password?: string;
   securityMode: OPCUASecurityMode;
   securityPolicy: OPCUASecurityPolicy;
-  certificateTrustMode: OPCUACertificateTrustMode;
-  expectedServerThumbprint?: string;
   connectionTimeout: number;
   sessionTimeout: number;
   keepAliveInterval: number;
@@ -213,48 +209,13 @@ export interface OPCUADeviceConfig {
 }
 
 // ============================================================================
-// MQTT Types
-// ============================================================================
-
-export type MQTTDataType = 'number' | 'boolean' | 'string' | 'json' | 'float32' | 'int32' | 'uint32';
-
-export interface MQTTMetricConfig {
-  field: string;
-  metric: string;
-  unit?: string;
-  type?: MQTTDataType;
-}
-
-export interface MQTTConnection {
-  topic?: string;
-  qos?: 0 | 1 | 2;
-  dataType?: MQTTDataType;
-  unit?: string;
-  metric?: string;
-  deviceId?: string;
-  topics?: string[];
-  discoveryRoots?: string[];
-  metrics?: MQTTMetricConfig[];
-  autoMetrics?: boolean;
-}
-
-export interface MQTTDeviceConfig {
-  name: string;
-  protocol: 'mqtt';
-  enabled: boolean;
-  pollInterval: number;
-  connection: MQTTConnection;
-  dataPoints?: any[];
-}
-
-// ============================================================================
 // Protocol Adapter Device (Union Type)
 // ============================================================================
 
 /**
  * Union type for all protocol device configurations
  */
-export type ProtocolDeviceConfig = ModbusDeviceConfig | OPCUADeviceConfig | MQTTDeviceConfig;
+export type ProtocolDeviceConfig = ModbusDeviceConfig | OPCUADeviceConfig;
 
 // ============================================================================
 // Helper Functions
@@ -274,10 +235,9 @@ export function getDefaultConnection(protocol: 'modbus' | 'opcua'): ModbusConnec
     };
   } else {
     return {
-      endpointUrl: 'opc.tcp://10.0.0.60:4840',
+      endpointUrl: 'opc.tcp://192.168.1.100:4840',
       securityMode: 'None',
       securityPolicy: 'None',
-      certificateTrustMode: 'strict',
       connectionTimeout: 10000,
       sessionTimeout: 60000,
       keepAliveInterval: 5000,

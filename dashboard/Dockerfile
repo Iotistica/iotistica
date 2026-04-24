@@ -1,8 +1,5 @@
 # Build stage
-FROM node:20-alpine3.22 AS builder
-
-# Patch base OS packages in build stage for image-layer vulnerability scans
-RUN apk upgrade --no-cache
+FROM node:20-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -18,37 +15,15 @@ COPY . .
 
 # Build arguments
 ARG NODE_ENV=production
-ARG VITE_API_URL
-ARG VITE_AUTH0_DOMAIN
-ARG VITE_AUTH0_CLIENT_ID
-ARG VITE_AUTH0_AUDIENCE
-ARG VITE_AUTH0_CALLBACK_URL
-ARG VITE_AUTH0_SHOW_SOCIAL_LOGIN
 
-# Set environment variables for Vite buildt
+# Set environment variables for Vite build
 ENV NODE_ENV=$NODE_ENV
-ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_AUTH0_DOMAIN=$VITE_AUTH0_DOMAIN
-ENV VITE_AUTH0_CLIENT_ID=$VITE_AUTH0_CLIENT_ID
-ENV VITE_AUTH0_AUDIENCE=$VITE_AUTH0_AUDIENCE
-ENV VITE_AUTH0_CALLBACK_URL=$VITE_AUTH0_CALLBACK_URL
-ENV VITE_AUTH0_SHOW_SOCIAL_LOGIN=$VITE_AUTH0_SHOW_SOCIAL_LOGIN
 
 # Build the application (API URL will be configured at runtime via ConfigMap)
 RUN npm run build
 
 # Production stage
-FROM nginx:1.28-alpine
-
-# Ensure runtime OS packages include latest security patches
-RUN apk update && apk upgrade --no-cache && apk add --no-cache \
-  "libcrypto3>=3.3.7-r0" \
-  "libssl3>=3.3.7-r0" \
-  "musl>=1.2.5-r11" \
-  "musl-utils>=1.2.5-r11" \
-  "zlib>=1.3.2-r0" \
-  "libpng>=1.6.57-r0" \
-  "libxpm>=3.5.19-r0"
+FROM nginx:alpine
 
 # Copy built assets from builder stage
 COPY --from=builder /app/build /usr/share/nginx/html

@@ -17,12 +17,6 @@ const originalFetch = window.fetch;
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
 
-function clearAuthTokens(reason: string): void {
-  localStorage.removeItem('accessToken');
-  localStorage.removeItem('refreshToken');
-  window.dispatchEvent(new CustomEvent('auth:tokens-cleared', { detail: { reason } }));
-}
-
 async function refreshAccessToken(): Promise<boolean> {
   const refreshToken = localStorage.getItem('refreshToken');
 
@@ -40,10 +34,9 @@ async function refreshAccessToken(): Promise<boolean> {
     });
 
     if (!response.ok) {
-      // Only clear on definitive auth failure. Preserve state on transient/server errors.
-      if (response.status === 401 || response.status === 403) {
-        clearAuthTokens('refresh_failed_unauthorized');
-      }
+      // Refresh failed, clear tokens
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
       return false;
     }
 
@@ -52,7 +45,8 @@ async function refreshAccessToken(): Promise<boolean> {
     return true;
   } catch (error) {
     console.error('Token refresh error:', error);
-    // Network errors can occur during deploy/startup; do not force logout.
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
     return false;
   }
 }
@@ -65,8 +59,10 @@ window.fetch = async function (...args: Parameters<typeof fetch>): Promise<Respo
   // Only intercept API calls (not external resources)
   const isApiCall = urlString.includes('/api/v1/');
   
-  // Don't intercept token refresh endpoint
-  const isAuthEndpoint = urlString.includes('/api/v1/auth/refresh');
+  // Don't intercept auth endpoints
+  const isAuthEndpoint = urlString.includes('/api/v1/auth/login') || 
+                         urlString.includes('/api/v1/auth/register') ||
+                         urlString.includes('/api/v1/auth/refresh');
 
   if (isApiCall && !isAuthEndpoint) {
     // Add Authorization header
@@ -75,14 +71,6 @@ window.fetch = async function (...args: Parameters<typeof fetch>): Promise<Respo
       options.headers = {
         ...options.headers,
         Authorization: `Bearer ${accessToken}`,
-      };
-    }
-
-    // For localhost development, add X-Tenant-ID header (required by API fallback)
-    if (urlString.includes('localhost:4002')) {
-      options.headers = {
-        ...options.headers,
-        'X-Tenant-ID': 'customer-dev-local',
       };
     }
   }
@@ -122,9 +110,11 @@ window.fetch = async function (...args: Parameters<typeof fetch>): Promise<Respo
         };
         response = await originalFetch(url, options);
       } else {
-        // Refresh failed: keep current route and let page-level auth handling decide.
-        // Some endpoints can legitimately return 401/403 for authorization reasons.
-        console.log('Token refresh failed; preserving current route for app-level handling.');
+        // Refresh failed, redirect to login (only if not already there)
+        if (window.location.pathname !== '/login') {
+          console.log('Token refresh failed, redirecting to login...');
+          window.location.href = '/login';
+        }
       }
     }
   }

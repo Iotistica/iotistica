@@ -3,8 +3,8 @@
  * Hides technical pipeline details, focuses on sensor configuration and status
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Activity, ChevronDown, ChevronRight, Pencil, Plus, FileText, Copy } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { Activity, Pencil, Plus, AlertCircle, FileText } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -14,11 +14,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AddSensorDialog } from '@/components/devices/AddDeviceDialog';
 import { EditSensorDialog } from '@/components/devices/EditDeviceDialog';
 import { EditProfileDialog } from '@/components/devices/EditProfileDialog';
-import { AnomalyMetricsTable } from '@/components/monitoring/AnomalyMetricsTable';
 import { SensorSummaryCards } from '@/components/devices/DeviceSummaryCards';
 import { toast } from 'sonner';
 import { buildApiUrl } from '@/config/api';
@@ -53,7 +53,6 @@ interface OPCUADataPoint {
 
 interface Sensor {
   uuid?: string; // Unique identifier for the sensor
-  configId?: string;
   name: string;
   state: string;
   healthy: boolean;
@@ -65,16 +64,13 @@ interface Sensor {
   type?: 'pipeline' | 'device' | 'virtual'; // pipeline = sensor publish, device = protocol adapter, virtual = simulator
   protocol?: string;
   connected?: boolean;
-  connection?: Record<string, any>;
   dataPoints?: ModbusDataPoint[] | OPCUADataPoint[]; // Protocol-specific data points
-  metadata?: Record<string, any>;
-  pollInterval?: number | null; // Poll interval in milliseconds
   // Deployment tracking fields
-  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'draft' | 'pending_deletion' | 'deleted';
+  deploymentStatus?: 'pending' | 'deployed' | 'deploying' | 'failed' | 'draft' | 'pending_deletion';
   lastDeployedAt?: string | null;
   deploymentError?: string | null;
   deploymentAttempts?: number;
-  // Health metrics from endpoints table
+  // Health metrics from device_sensors table
   health?: {
     status: string;
     connected: boolean;
@@ -82,7 +78,6 @@ interface Sensor {
     errorCount: number;
     lastError: string | null;
     updatedAt: string | null;
-    lastTelemetryAt: string | null;
   } | null;
   // Virtual device fields
   isVirtual?: boolean;
@@ -92,20 +87,6 @@ interface Sensor {
     host: string;
     port: number;
   };
-  childCount?: number;
-  children?: ChildDevice[];
-}
-
-interface ChildDevice {
-  uuid: string;
-  endpointUuid: string;
-  name: string;
-  protocol: string;
-  identifier: string | null;
-  enabled: boolean;
-  lastSeenAt: string | null;
-  createdAt?: string | null;
-  updatedAt?: string | null;
 }
 
 interface Profile {
@@ -128,15 +109,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addSensorDialogOpen, setAddSensorDialogOpen] = useState(false);
-  const anomalyAddRef = useRef<(() => void) | undefined>(undefined);
-  const [anomalyFilterDevice, setAnomalyFilterDevice] = useState<string>('all');
-  const [anomalyFilterMethod, setAnomalyFilterMethod] = useState<string>('all');
-  const [anomalyDeviceOptions, setAnomalyDeviceOptions] = useState<string[]>([]);
-  const [anomalyMethodOptions, setAnomalyMethodOptions] = useState<string[]>([]);
-  const [anomalyMetricsSummary, setAnomalyMetricsSummary] = useState<{ total: number; filtered: number }>({ total: 0, filtered: 0 });
   const [selectedSensor, setSelectedSensor] = useState<Sensor | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
-  const [expandedSensors, setExpandedSensors] = useState<Record<string, boolean>>({});
   
   // Load filter preferences from localStorage
   const getStoredFilter = (key: string, defaultValue: string[]) => {
@@ -153,7 +127,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
   const [selectedProtocol, setSelectedProtocol] = useState<string[]>(() => getStoredFilter('protocol', []));
   const [selectedStatus, setSelectedStatus] = useState<string[]>(() => getStoredFilter('status', []));
   const [selectedType, setSelectedType] = useState<string[]>(() => getStoredFilter('type', []));
-  const { getDeviceState, updatePendingSensor, addPendingSensor } = useDeviceState();
+  const { getPendingConfig, updatePendingSensor, addPendingSensor } = useDeviceState();
 
   // Persist filter changes to localStorage
   useEffect(() => {
@@ -178,6 +152,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     slaveCount: 40,
   });
   const [virtualDeviceLoading, setVirtualDeviceLoading] = useState(false);
+  const selectedVirtualProfile = profiles.find(profile => profile.profile_name === virtualFormData.profile);
 
   // Profile management states
   const [addProfileDialogOpen, setAddProfileDialogOpen] = useState(false);
@@ -235,28 +210,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     ],
     mqtt: [
       {
-        name: 'temperature',
-        topic: 'sim/generic/temperature',
-        qos: 0,
+        name: 'example_topic',
+        topic: 'sensor/example',
+        qos: 1,
         dataType: 'float',
-        unit: '°C',
-        base: 22,
-        noise_pct: 0.05,
-        period_s: 30,
-        min: -10,
-        max: 60
-      },
-      {
-        name: 'humidity',
-        topic: 'sim/generic/humidity',
-        qos: 0,
-        dataType: 'float',
-        unit: '%RH',
-        base: 55,
-        noise_pct: 0.05,
-        period_s: 30,
-        min: 0,
-        max: 100
+        unit: ''
       }
     ],
     can: [
@@ -273,7 +231,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   const fetchSensors = useCallback(async () => {
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/devices`));
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors`));
       if (!response.ok) {
         const text = await response.text();
         let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -286,44 +244,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         throw new Error(errorMessage);
       }
       const data = await response.json();
-
-      const getSensorIdentity = (sensor: any) => {
-        const explicitId = sensor?.uuid || sensor?.configId || sensor?.id;
-        return explicitId ? String(explicitId) : '';
-      };
-
-      const getSensorLogicalKey = (sensor: any) => {
-        const protocol = String(sensor?.protocol || '').trim().toLowerCase();
-        const name = String(sensor?.name || '').trim().toLowerCase();
-        return `${protocol}:${name}`;
-      };
-
-      const getPendingDiffReasons = (pendingSensor: any, deployedSensor: any): string[] => {
-        const pendingEnabled = pendingSensor.enabled !== undefined ? pendingSensor.enabled : true;
-        const deployedEnabled = deployedSensor.enabled !== undefined ? deployedSensor.enabled : true;
-        const pendingDataPoints = pendingSensor.dataPoints ?? pendingSensor.data_points;
-        const deployedDataPoints = deployedSensor.dataPoints ?? deployedSensor.data_points;
-        const reasons: string[] = [];
-
-        if (pendingSensor.name !== deployedSensor.name) reasons.push('name_mismatch');
-        if (pendingSensor.protocol !== deployedSensor.protocol) reasons.push('protocol_mismatch');
-        if (pendingEnabled !== deployedEnabled) reasons.push('enabled_mismatch');
-        if ((pendingSensor.pollInterval ?? null) !== (deployedSensor.pollInterval ?? null)) reasons.push('poll_interval_mismatch');
-        if (JSON.stringify(pendingSensor.connection || {}) !== JSON.stringify(deployedSensor.connection || {})) reasons.push('connection_mismatch');
-        // Only compare data points when pending payload explicitly includes them.
-        // Some target-state payloads omit data points for unchanged endpoints.
-        if (pendingDataPoints !== undefined && pendingDataPoints !== null) {
-          if (JSON.stringify(pendingDataPoints || []) !== JSON.stringify(deployedDataPoints || [])) {
-            reasons.push('data_points_mismatch');
-          }
-        }
-
-        return reasons;
-      };
-
-      const hasPendingChanges = (pendingSensor: any, deployedSensor: any) => {
-        return getPendingDiffReasons(pendingSensor, deployedSensor).length > 0;
-      };
       
       
       // Merge pipelines and protocol adapter devices
@@ -340,12 +260,11 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         
         return {
           uuid: d.uuid || d.configId, // Use uuid from table, fallback to configId
-          configId: d.configId,
           name: d.name,
           state: isConnected ? 'CONNECTED' : 'DISCONNECTED',
           healthy: health ? (health.status === 'healthy' || health.connected) : d.connected,
           messagesPublished: 0, // Protocol adapters don't track messages
-          lastActivity: health?.lastTelemetryAt || null,
+          lastActivity: health?.updatedAt || null,
           lastError: health?.lastError || d.lastError,
           configured: true,
           enabled: d.enabled !== undefined ? d.enabled : true, // Default to enabled
@@ -354,7 +273,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           connected: isConnected,
           connection: d.connection, // Full connection configuration
           dataPoints: d.dataPoints || d.data_points || [], // Data points configuration
-          metadata: d.metadata || {},
           pollInterval: d.pollInterval, // Poll interval
           // Virtual device fields (populated from metadata.sidecar)
           isVirtual: d.metadata?.sidecar === true,
@@ -366,8 +284,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           lastDeployedAt: d.lastDeployedAt,
           deploymentError: d.deploymentError,
           deploymentAttempts: d.deploymentAttempts,
-          childCount: d.childCount || 0,
-          children: Array.isArray(d.children) ? d.children : [],
           // Health metrics
           health: health ? {
             status: health.status,
@@ -375,17 +291,14 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             lastPoll: health.lastPoll,
             errorCount: health.errorCount,
             lastError: health.lastError,
-            updatedAt: health.updatedAt,
-            lastTelemetryAt: health.lastTelemetryAt
+            updatedAt: health.updatedAt
           } : null,
         };
       });
-
+      
       // Get pending devices from config (devices not yet deployed)
-      const deviceState = getDeviceState(deviceUuid);
-      const rawEndpoints = deviceState?.isDirty
-        ? (deviceState.pendingChanges?.config?.endpoints || [])
-        : [];
+      const pendingConfig = getPendingConfig(deviceUuid);
+      const rawEndpoints = pendingConfig.endpoints || [];
       
       // NOTE: Discovery parents are automatically removed from target state config by API
       // when their slaves are discovered. So we just display what's in the config.
@@ -393,19 +306,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
       const pendingSensors = pendingEndpoints
         .filter((s: any) => {
-          const pendingIdentity = getSensorIdentity(s);
-          const matchingDevice = devices.find((d: any) => getSensorIdentity(d) === pendingIdentity);
-
-          if (!matchingDevice) {
-            return true;
-          }
-
-          return hasPendingChanges(s, matchingDevice);
+          // Only include sensors that are NOT in the database yet
+          return !devices.find((d: any) => d.name === s.name);
         })
         .map((s: any) => {
           return {
-            uuid: s.uuid || s.configId || s.id,
-            configId: s.configId || s.uuid || s.id,
+            uuid: s.id || s.uuid, // Use generated ID from addPendingSensor
             name: s.name,
             state: 'DRAFT', // Use DRAFT to distinguish from deployed sensors waiting for agent
             healthy: false,
@@ -418,8 +324,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
             protocol: s.protocol,
             connected: false,
             connection: s.connection, // Include connection config
-            dataPoints: s.dataPoints || s.data_points, // Include data points (camelCase/snake_case)
-            metadata: s.metadata || {},
+            dataPoints: s.dataPoints, // Include data points
             pollInterval: s.pollInterval,
             deploymentStatus: s.deploymentStatus || 'draft',
             lastDeployedAt: null,
@@ -435,30 +340,23 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         const bOrder = statusOrder[b.deploymentStatus as keyof typeof statusOrder] ?? 3;
         return aOrder - bOrder;
       });
-
-      const pendingSensorIds = new Set(pendingSensors.map((sensor: any) => getSensorIdentity(sensor)));
-      const pendingSensorLogicalKeys = new Set(pendingSensors.map((sensor: any) => getSensorLogicalKey(sensor)));
-      const mergedDevices = sortedDevices.filter((sensor: any) => {
-        const byId = pendingSensorIds.has(getSensorIdentity(sensor));
-        const byLogicalKey = pendingSensorLogicalKeys.has(getSensorLogicalKey(sensor));
-        return !(byId || byLogicalKey);
-      });
       
       // Virtual devices now come through regular devices endpoint (no separate fetch needed)
       // They have metadata.sidecar === true
 
       // Show newly added devices (DRAFT) at the top, then sorted devices (includes virtual devices now)
-      setSensors([...pendingSensors, ...pipelines, ...mergedDevices]);
+      setSensors([...pendingSensors, ...pipelines, ...sortedDevices]);
       setError(null);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [deviceUuid, getDeviceState]);
+  }, [deviceUuid, getPendingConfig]);
 
   useEffect(() => {
     fetchSensors();
+    fetchAllProfiles(); // Fetch all profiles for the Profiles tab
     
     // Auto-refresh every 10 seconds to pick up agent status updates
     const interval = setInterval(fetchSensors, 10000);
@@ -482,12 +380,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     };
   }, [deviceUuid, fetchSensors]);
 
-  const handleAddProtocolDevice = async (device: any, options?: any) => {
+  const handleAddProtocolDevice = async (device: any) => {
     try {
       
-      // Call POST /api/v1/agents/:uuid/devices?validateOnly=true
+      // Call POST /api/v1/devices/:uuid/sensors?validateOnly=true
       // This validates the sensor config without persisting to DB
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/devices?validateOnly=true`), {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors?validateOnly=true`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -507,26 +405,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         throw new Error('API did not return validated sensor. Please rebuild the API service.');
       }
 
-      if (device.protocol === 'mqtt' && options?.mqttCredentials) {
-        result.sensor.connection = {
-          ...(result.sensor.connection || {}),
-          username: options.mqttCredentials.username,
-        };
-
-        result.sensor.metadata = {
-          ...(result.sensor.metadata || {}),
-        };
-
-        result.sensor.auth = {
-          ...(result.sensor.auth || {}),
-          mqtt: {
-            username: options.mqttCredentials.username,
-            password: options.mqttCredentials.password,
-            access: options.mqttCredentials.access,
-          },
-        };
-      }
-
       // Add to pending state (React only - not in DB yet)
       await addPendingSensor(deviceUuid, result.sensor);
 
@@ -544,9 +422,10 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
   const handleUpdateProtocolDevice = async (deviceName: string, updates: any) => {
     try {
-      // Call PUT /api/v1/agents/:uuid/devices/:name?validateOnly=true
+      
+      // Call PUT /api/v1/devices/:uuid/sensors/:name?validateOnly=true
       // This validates updates without persisting to DB
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/devices/${encodeURIComponent(deviceName)}?validateOnly=true`), {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}?validateOnly=true`), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -592,12 +471,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       return;
     }
 
-    // Physical devices use soft delete and rely on reconciliation for permanent removal
+    // Physical devices use soft delete
     try {
       
-      // Call DELETE /api/v1/agents/:uuid/devices/:name
-      // Soft delete marks pending_deletion and waits for agent reconciliation.
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/devices/${encodeURIComponent(deviceName)}`), {
+      // Call DELETE /api/v1/devices/:uuid/sensors/:name API endpoint
+      // This performs a SOFT DELETE - marks for deletion, waits for agent confirmation
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/sensors/${encodeURIComponent(deviceName)}`), {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -609,13 +488,38 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         throw new Error(errorData.error || `Failed to delete sensor: ${response.status}`);
       }
 
-      // Refresh sensor list to show pending deletion state
+      // Refresh sensor list to show pending_deletion status
       await fetchSensors();
 
-      toast.success(`Sensor "${deviceName}" marked for deletion - pending agent reconciliation`);
+      toast.success(`Sensor "${deviceName}" marked for deletion - Click Sync to confirm on agent`);
     } catch (error: any) {
       toast.error(`Failed to delete sensor: ${error.message}`);
       throw error;
+    }
+  };
+
+  const handleToggleSensorEnabled = async (sensor: Sensor, currentEnabled: boolean) => {
+    try {
+      const newEnabled = !currentEnabled;
+      
+      // Build the update payload
+      const updates = {
+        uuid: sensor.uuid,
+        name: sensor.name,
+        enabled: newEnabled
+      };
+      
+      // Update pending changes (React state only - not saved to DB yet)
+      await updatePendingSensor(deviceUuid, sensor.name, updates);
+      
+      // Refresh sensor list to show updated state from pending changes
+      await fetchSensors();
+
+      toast.success(`Device "${sensor.name}" ${newEnabled ? 'enabled' : 'disabled'} - Click "Save Draft" or "Deploy"`, {
+        duration: 4000
+      });
+    } catch (error: any) {
+      toast.error(`Failed to toggle device: ${error.message}`);
     }
   };
 
@@ -656,13 +560,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     }
   };
 
-  // Lazy-load profiles only when Profiles tab is active.
-  useEffect(() => {
-    if (activeTab === 'profiles') {
-      fetchAllProfiles();
-    }
-  }, [activeTab]);
-
   const handleOpenVirtualDeviceDialog = () => {
     const virtualCount = sensors.filter(s => s.type === 'virtual').length;
     
@@ -683,7 +580,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     setVirtualDeviceLoading(true);
 
     try {
-      const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual-devices`), {
+      const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(virtualFormData),
@@ -715,7 +612,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
     try {
       const response = await fetch(
-        buildApiUrl(`/api/v1/agents/${deviceUuid}/virtual-devices/${virtualDeviceUuid}`),
+        buildApiUrl(`/api/v1/devices/${deviceUuid}/virtual-devices/${virtualDeviceUuid}`),
         { method: 'DELETE' }
       );
 
@@ -759,6 +656,16 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     });
     setDataPointsError('');
     setAddProfileDialogOpen(true);
+  };
+
+  const handleCancelEditProfile = () => {
+    setEditingProfileName(null);
+    setProfileFormData({
+      profile_name: '',
+      protocol: 'modbus',
+      description: '',
+      data_points: '[]'
+    });
   };
 
   const handleLoadTemplate = () => {
@@ -881,30 +788,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
    */
   const getStatusBadge = (sensor: Sensor) => {
     const deploymentStatus = sensor.deploymentStatus;
-
-    const lastPollMs = sensor.health?.lastPoll ? new Date(sensor.health.lastPoll).getTime() : null;
-    const lastTelemetryMs = sensor.health?.lastTelemetryAt ? new Date(sensor.health.lastTelemetryAt).getTime() : null;
-    const pollIntervalMs = sensor.pollInterval && sensor.pollInterval > 0 ? sensor.pollInterval : null;
-
-    // Mark as no data when polling has happened but telemetry is missing or too far behind polls.
-    // Uses both last poll and last telemetry timestamps so connected adapters still surface stale data.
-    const isNoData = (() => {
-      if (sensor.type !== 'device' || !sensor.enabled || !lastPollMs) {
-        return false;
-      }
-
-      if (!lastTelemetryMs) {
-        return true;
-      }
-
-      const telemetryLagMs = lastPollMs - lastTelemetryMs;
-      // Allow 5 missed poll cycles, with a minimum floor of 2 minutes, to avoid
-      // flipping to No Data due to minor network/processing delays.
-      const lagThresholdMs = pollIntervalMs
-        ? Math.max(pollIntervalMs * 5, 2 * 60 * 1000)
-        : 5 * 60 * 1000;
-      return telemetryLagMs > lagThresholdMs;
-    })();
     
     // 1. Deployment lifecycle states (require user action - highest priority)
     
@@ -935,10 +818,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
       return <Badge className="bg-gray-500 dark:bg-gray-600 text-white border border-gray-600 dark:border-gray-500">Pending Deletion</Badge>;
     }
 
-    if (deploymentStatus === 'deleted') {
-      return <Badge className="bg-slate-500 dark:bg-slate-600 text-white border border-slate-600 dark:border-slate-500">Deleted</Badge>;
-    }
-
     
     // 2. Disabled state (toggle is off - don't show health indicators)
     if (!sensor.enabled) {
@@ -950,21 +829,12 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     if (sensor.lastError || (sensor.health && sensor.health.errorCount > 0)) {
       return <Badge className="bg-red-500 dark:bg-red-600 text-white border border-red-600 dark:border-red-500 font-semibold">Error</Badge>;
     }
-
-    if (isNoData) {
-      return <Badge className="bg-amber-500 dark:bg-amber-600 text-white border border-amber-600 dark:border-amber-500 font-semibold">No Data</Badge>;
-    }
     
     // Active (healthy and connected) - Same for all device types
     if (sensor.state === 'CONNECTED' && sensor.healthy) {
       return <Badge className="bg-green-500 dark:bg-green-600 text-white border border-green-600 dark:border-green-500 font-semibold">Active</Badge>;
     }
     
-    // Connecting (deployed and enabled but never polled yet - agent still initializing)
-    if (!sensor.health?.lastPoll) {
-      return <Badge className="bg-blue-500 dark:bg-blue-600 text-white border border-blue-600 dark:border-blue-500 font-semibold">Connecting</Badge>;
-    }
-
     // Offline (not healthy or not connected, but enabled)
     if (!sensor.healthy || sensor.state === 'DISCONNECTED') {
       return <Badge className="bg-orange-500 dark:bg-orange-600 text-white border border-orange-600 dark:border-orange-500 font-semibold">Offline</Badge>;
@@ -972,96 +842,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
     
     // Fallback
     return <Badge variant="outline" className="bg-muted text-muted-foreground border-border">Unknown</Badge>;
-  };
-
-  const getChildStatusBadge = (child: ChildDevice) => {
-    if (!child.enabled) {
-      return <Badge className="bg-gray-500 dark:bg-gray-600 text-white border border-gray-600 dark:border-gray-500">Disabled</Badge>;
-    }
-
-    if (!child.lastSeenAt) {
-      return <Badge variant="outline" className="bg-muted text-muted-foreground border-border">Unknown</Badge>;
-    }
-
-    const lastSeenMs = new Date(child.lastSeenAt).getTime();
-    const ageMs = Date.now() - lastSeenMs;
-
-    if (ageMs <= 5 * 60 * 1000) {
-      return <Badge className="bg-green-500 dark:bg-green-600 text-white border border-green-600 dark:border-green-500 font-semibold">Online</Badge>;
-    }
-
-    return <Badge className="bg-amber-500 dark:bg-amber-600 text-white border border-amber-600 dark:border-amber-500 font-semibold">Stale</Badge>;
-  };
-
-  const toggleExpandedSensor = (sensorId: string) => {
-    setExpandedSensors(prev => ({
-      ...prev,
-      [sensorId]: !prev[sensorId],
-    }));
-  };
-
-  const getEndpointUrl = (sensor: Sensor): string | null => {
-    const connection = sensor.connection;
-    if (!connection || typeof connection !== 'object') {
-      return null;
-    }
-
-    const protocol = String(sensor.protocol || '').toLowerCase();
-
-    if (protocol === 'opcua' && typeof connection.endpointUrl === 'string' && connection.endpointUrl.trim().length > 0) {
-      return connection.endpointUrl.trim();
-    }
-
-    if (protocol === 'modbus') {
-      if (connection.type === 'tcp' && typeof connection.host === 'string' && connection.host.trim().length > 0) {
-        return `modbus-tcp://${connection.host.trim()}${connection.port ? `:${connection.port}` : ''}`;
-      }
-
-      if (connection.type === 'rtu' && typeof connection.serialPort === 'string' && connection.serialPort.trim().length > 0) {
-        return `serial://${connection.serialPort.trim()}`;
-      }
-    }
-
-    if (protocol === 'mqtt') {
-      if (typeof connection.topic === 'string' && connection.topic.trim().length > 0) {
-        return connection.topic.trim();
-      }
-
-      if (Array.isArray(connection.topics) && connection.topics.length > 0) {
-        return connection.topics.filter((topic: unknown) => typeof topic === 'string' && topic.trim().length > 0).join(', ');
-      }
-    }
-
-    const directUrl = connection.url || connection.endpoint || connection.uri || connection.brokerUrl;
-    if (typeof directUrl === 'string' && directUrl.trim().length > 0) {
-      return directUrl.trim();
-    }
-
-    const host = connection.host || connection.hostname || connection.server;
-    if (!host || typeof host !== 'string') {
-      return null;
-    }
-
-    const scheme = String(connection.protocol || sensor.protocol || 'tcp').toLowerCase();
-    const hasPort = connection.port !== undefined && connection.port !== null && connection.port !== '';
-    const base = `${scheme}://${host}${hasPort ? `:${connection.port}` : ''}`;
-
-    const pathOrTopic = connection.path || connection.topic;
-    if (typeof pathOrTopic === 'string' && pathOrTopic.trim().length > 0) {
-      const suffix = pathOrTopic.startsWith('/') ? pathOrTopic : `/${pathOrTopic}`;
-      return `${base}${suffix}`;
-    }
-
-    return base;
-  };
-
-  const copyEndpointToClipboard = async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.success('Endpoint copied');
-    } catch {
-      toast.error('Failed to copy endpoint');
-    }
   };
 
   if (loading) {
@@ -1109,29 +889,18 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
         {/* Tabs for Devices and Profiles */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start border-0">
-            <TabsTrigger
+          <TabsList className="bg-transparent w-fit h-auto p-0 rounded-none justify-start gap-12 border-0">
+            <TabsTrigger 
               value="devices"
-              data-testid="devices-tab-trigger"
-              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-base leading-none font-normal data-[state=active]:font-medium"
-              style={
-                activeTab === 'devices'
-                  ? { color: 'hsl(var(--foreground))', marginRight: '1.5rem', fontWeight: 700, textDecoration: 'underline', textUnderlineOffset: '8px', textDecorationThickness: '2px', textDecorationColor: 'hsl(var(--foreground))' }
-                  : { color: 'hsl(var(--foreground))', marginRight: '1.5rem', textDecoration: 'none' }
-              }
+              className="!flex-none !border-0 !border-b-2 !border-b-transparent px-4 pb-3 text-base font-medium data-[state=active]:!border-b-foreground bg-transparent data-[state=active]:bg-transparent rounded-none hover:bg-transparent"
             >
-              Devices
+              Configured Devices
             </TabsTrigger>
-            <TabsTrigger
-              value="anomaly"
-              className="!flex-none !border-0 bg-transparent rounded-none hover:bg-transparent px-0 pb-2 text-base leading-none font-normal data-[state=active]:font-medium"
-              style={
-                activeTab === 'anomaly'
-                  ? { color: 'hsl(var(--foreground))', fontWeight: 700, textDecoration: 'underline', textUnderlineOffset: '8px', textDecorationThickness: '2px', textDecorationColor: 'hsl(var(--foreground))' }
-                  : { color: 'hsl(var(--foreground))', textDecoration: 'none' }
-              }
+            <TabsTrigger 
+              value="profiles"
+              className="!flex-none !border-0 !border-b-2 !border-b-transparent px-4 pb-3 text-base font-medium data-[state=active]:!border-b-foreground bg-transparent data-[state=active]:bg-transparent rounded-none hover:bg-transparent"
             >
-              Anomaly Detection
+              Profiles
             </TabsTrigger>
           </TabsList>
 
@@ -1315,13 +1084,13 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           
           <div className="flex gap-2">
             {deviceType !== 'virtual' && (
-              <Button data-testid="add-device-button" onClick={() => setAddSensorDialogOpen(true)}>
+              <Button onClick={() => setAddSensorDialogOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add Device
               </Button>
             )}
             {deviceType === 'virtual' && (
-              <Button data-testid="add-device-button" onClick={handleOpenVirtualDeviceDialog}>
+              <Button onClick={handleOpenVirtualDeviceDialog}>
                 <Plus className="w-4 h-4 mr-2" />
                 Add Device
               </Button>
@@ -1333,7 +1102,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
         {/* Sensors List */}
         <Card>
           <CardHeader>
-            
+            <CardTitle>Configured Devices</CardTitle>
             <CardDescription>
               {sensors.length === 0 
                 ? 'No devices configured yet.' 
@@ -1357,282 +1126,139 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
           </CardHeader>
           <CardContent>
             {sensors.length === 0 ? (
-              <div data-testid="devices-empty-state" className="text-center py-12 text-muted-foreground">
+              <div className="text-center py-12 text-muted-foreground">
                 <Activity className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-2">No devices yet</p>
                
               </div>
             ) : (
-              <div className="overflow-x-auto" data-testid="devices-table">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="w-10 py-3 px-2"></th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Status</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Name</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Protocol</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Devices</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Poll Interval</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Endpoint</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Last Activity</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Last Poll</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Last Deployed</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Errors</th>
-                      <th className="py-3 px-4 font-semibold text-sm text-foreground text-left">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sensors
-                      .filter(sensor => selectedProtocol.length === 0 || selectedProtocol.includes(sensor.protocol || ''))
-                      .filter(sensor => selectedType.length === 0 || selectedType.includes(sensor.type || ''))
-                      .filter(sensor => {
-                        if (selectedStatus.length === 0) return true;
-                        if (selectedStatus.includes('healthy') && sensor.healthy) return true;
-                        if (selectedStatus.includes('unhealthy') && !sensor.healthy && sensor.state !== 'PENDING') return true;
-                        return selectedStatus.includes(sensor.state);
-                      })
-                      .map((sensor) => {
-                      const sensorId = sensor.uuid || sensor.configId || sensor.name;
-                      const hasChildren = (sensor.childCount || 0) > 0;
-                      const isExpanded = !!expandedSensors[sensorId];
-                      const endpointUrl = getEndpointUrl(sensor);
-
-                      return (
-                      <React.Fragment key={sensorId}>
-                      <tr data-testid={`device-row-${sensorId}`} className="border-b border-border last:border-0 hover:bg-muted">
-                        <td className="py-3 px-2 align-top">
-                          {hasChildren ? (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => toggleExpandedSensor(sensorId)}
-                              aria-label={isExpanded ? 'Collapse child devices' : 'Expand child devices'}
-                            >
-                              {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                            </Button>
-                          ) : null}
-                        </td>
-                        <td className="py-3 px-4 align-top">
-                          <div className="flex items-center gap-2">
-                            {getStatusBadge(sensor)}
-                            {(sensor.type === 'virtual' || sensor.isVirtual) && (
-                              <Badge className="bg-purple-600 dark:bg-purple-700 text-white border border-purple-700 dark:border-purple-600 text-xs font-semibold">
-                                Virtual
-                              </Badge>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 font-medium text-foreground align-top">
-                          <div>
-                            {sensor.name}
-                            {sensor.lastError && sensor.state !== 'PENDING' && (
-                              <div className="text-xs text-red-600 mt-0.5 max-w-[200px] truncate" title={sensor.lastError}>
-                                {sensor.lastError}
-                              </div>
-                            )}
-                            {sensor.deploymentError && (
-                              <div className="text-xs text-red-600 mt-0.5 max-w-[200px] truncate" title={sensor.deploymentError}>
-                                {sensor.deploymentError}
-                              </div>
-                            )}
-                            {sensor.state === 'PENDING' && (
-                              <div className="text-xs text-yellow-600 mt-0.5">Waiting for agent...</div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 align-top">
+              <div className="space-y-3">
+                {sensors
+                  .filter(sensor => selectedProtocol.length === 0 || selectedProtocol.includes(sensor.protocol || ''))
+                  .filter(sensor => selectedType.length === 0 || selectedType.includes(sensor.type || ''))
+                  .filter(sensor => {
+                    if (selectedStatus.length === 0) return true;
+                    if (selectedStatus.includes('healthy') && sensor.healthy) return true;
+                    if (selectedStatus.includes('unhealthy') && !sensor.healthy && sensor.state !== 'PENDING') return true;
+                    return selectedStatus.includes(sensor.state);
+                  })
+                  .map((sensor) => (
+                  <div key={sensor.name}>
+                    {/* Sensor Row */}
+                    <div
+                      className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors"
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-lg font-semibold text-foreground">{sensor.name}</h3>
+                          {getStatusBadge(sensor)}
+                          {(sensor.type === 'virtual' || sensor.isVirtual) && (
+                            <Badge className="bg-purple-600 dark:bg-purple-700 text-white border border-purple-700 dark:border-purple-600 text-xs font-semibold">
+                              Virtual
+                            </Badge>
+                          )}
                           {sensor.protocol && (
                             <Badge variant="outline" className="text-xs">
                               {sensor.protocol.toUpperCase()}
                             </Badge>
                           )}
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground align-top">
-                          {hasChildren ? (
-                            <button
-                              type="button"
-                              className="text-left hover:text-foreground underline-offset-2 hover:underline"
-                              onClick={() => toggleExpandedSensor(sensorId)}
-                            >
-                              {sensor.childCount}
-                            </button>
-                          ) : '—'}
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground align-top">
-                          {sensor.pollInterval
-                            ? sensor.pollInterval >= 60000
-                              ? `${sensor.pollInterval / 60000}m`
-                              : `${sensor.pollInterval / 1000}s`
-                            : '—'}
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground align-top w-[360px] min-w-[360px] max-w-[360px]">
-                          <div className="flex items-start gap-2">
-                            <span data-testid={`device-endpoint-${sensorId}`} className="block flex-1 truncate" title={endpointUrl || undefined}>
-                              {endpointUrl || '—'}
-                            </span>
-                            {endpointUrl && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 shrink-0"
-                                onClick={() => copyEndpointToClipboard(endpointUrl)}
-                                title="Copy full endpoint"
-                                aria-label="Copy full endpoint"
-                              >
-                                <Copy className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground align-top">
-                          {sensor.health?.lastPoll && sensor.lastActivity ? new Date(sensor.lastActivity).toLocaleString() : '—'}
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground align-top">
-                          {sensor.type === 'device' && sensor.health?.lastPoll
-                            ? new Date(sensor.health.lastPoll).toLocaleString()
-                            : '—'}
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground align-top">
-                          {sensor.type === 'device' && sensor.lastDeployedAt
-                            ? new Date(sensor.lastDeployedAt).toLocaleString()
-                            : '—'}
-                        </td>
-                        <td className="py-3 px-4 align-top">
-                          {sensor.health && sensor.health.errorCount > 0
-                            ? <span className="text-red-600 font-semibold">{sensor.health.errorCount}</span>
-                            : <span className="text-muted-foreground">—</span>}
-                        </td>
-                        <td className="py-3 px-4 align-top">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedSensor(sensor);
-                              setDetailsDialogOpen(true);
-                            }}
-                          >
-                            <Pencil className="h-4 w-4 mr-2" />
-                            Edit
-                          </Button>
-                        </td>
-                      </tr>
-                      {hasChildren && isExpanded && (
-                        <tr className="border-b border-border bg-muted/30">
-                          <td></td>
-                          <td colSpan={10} className="px-4 py-4">
-                            <div className="rounded-lg border border-border bg-background overflow-hidden">
-                              <table className="w-full text-xs sm:text-sm">
-                                <thead className="bg-muted/60">
-                                  <tr>
-                                    <th className="text-left py-2 px-3 font-semibold text-foreground">Device</th>
-                                    <th className="text-left py-2 px-3 font-semibold text-foreground">UUID</th>
-                                    <th className="text-left py-2 px-3 font-semibold text-foreground">Status</th>
-                                    <th className="text-left py-2 px-3 font-semibold text-foreground">Last Seen</th>
-                                    <th className="text-left py-2 px-3 font-semibold text-foreground">Protocol</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {(sensor.children || []).map((child) => (
-                                    <tr key={child.uuid} className="border-t border-border">
-                                      <td className="py-2 px-3 font-medium text-foreground">{child.name}</td>
-                                      <td className="py-2 px-3 text-muted-foreground">{child.identifier || '—'}</td>
-                                      <td className="py-2 px-3">{getChildStatusBadge(child)}</td>
-                                      <td className="py-2 px-3 text-muted-foreground">
-                                        {child.lastSeenAt ? new Date(child.lastSeenAt).toLocaleString() : '—'}
-                                      </td>
-                                      <td className="py-2 px-3">
-                                        <Badge variant="outline" className="text-xs">
-                                          {child.protocol.toUpperCase()}
-                                        </Badge>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                          {sensor.dataPoints && sensor.dataPoints.length > 0 && (
+                            <Badge variant="secondary" className="text-xs">
+                              {sensor.dataPoints.length} data point{sensor.dataPoints.length !== 1 ? 's' : ''}
+                            </Badge>
+                          )}
+                        </div>
+                      
+                        <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
+                          {sensor.type === 'pipeline' && (
+                            <div>
+                              <span className="font-medium">Messages Published:</span>{' '}
+                              {sensor.messagesPublished.toLocaleString()}
                             </div>
-                          </td>
-                        </tr>
-                      )}
-                      </React.Fragment>
-                    )})}
-                  </tbody>
-                </table>
+                          )}
+                          <div>
+                            <span className="font-medium">Last Activity:</span>{' '}
+                            {sensor.lastActivity 
+                              ? new Date(sensor.lastActivity).toLocaleString()
+                              : 'Never'}
+                          </div>
+                          {sensor.health && sensor.health.errorCount > 0 && (
+                            <div>
+                              <span className="font-medium">Error Count:</span>{' '}
+                              <span className="text-red-600 font-semibold">{sensor.health.errorCount}</span>
+                            </div>
+                          )}
+                          {sensor.type === 'device' && sensor.lastDeployedAt && (
+                            <div>
+                              <span className="font-medium">Last Deployed:</span>{' '}
+                              {new Date(sensor.lastDeployedAt).toLocaleString()}
+                            </div>
+                          )}
+                          {sensor.type === 'device' && sensor.deploymentAttempts !== undefined && sensor.deploymentAttempts > 1 && (
+                            <div>
+                              <span className="font-medium">Deploy Attempts:</span>{' '}
+                              {sensor.deploymentAttempts}
+                            </div>
+                          )}
+                        </div>
+
+                        {sensor.lastError && sensor.state !== 'PENDING' && (
+                          <div className="mt-2 text-sm text-red-600">
+                            <span className="font-medium">Error:</span> {sensor.lastError}
+                          </div>
+                        )}
+
+                        {sensor.deploymentError && (
+                          <div className="mt-2 text-sm text-red-600">
+                            <span className="font-medium">Deployment Error:</span> {sensor.deploymentError}
+                          </div>
+                        )}
+                        
+                        {sensor.state === 'PENDING' && (
+                          <div className="mt-2 text-sm text-yellow-600">
+                            <span className="font-medium">Status:</span> Waiting for agent to initialize sensor...
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-3 ml-4">
+                        {/* Enable/Disable Select - only show for deployed sensors */}
+                        {sensor.type === 'device' && 
+                         sensor.deploymentStatus !== 'draft' && (
+                          <select
+                            value={sensor.enabled !== undefined ? (sensor.enabled ? 'enabled' : 'disabled') : 'enabled'}
+                            onChange={(e) => handleToggleSensorEnabled(sensor, e.target.value === 'enabled')}
+                            className="h-8 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                          >
+                            <option value="enabled">Enabled</option>
+                            <option value="disabled">Disabled</option>
+                          </select>
+                        )}
+                        
+                        {/* Edit Button */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedSensor(sensor);
+                            setDetailsDialogOpen(true);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4 mr-2" />
+                          Edit
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>
         </Card>
           </TabsContent>
 
-          {/* Anomaly Detection Tab */}
-          <TabsContent value="anomaly" className="space-y-6">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <Select value={anomalyFilterDevice} onValueChange={setAnomalyFilterDevice}>
-                    <SelectTrigger className="h-9 w-44 text-sm">
-                      <SelectValue placeholder="All devices" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All devices</SelectItem>
-                      {anomalyDeviceOptions.map(label => (
-                        <SelectItem key={label} value={label}>{label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={anomalyFilterMethod} onValueChange={setAnomalyFilterMethod}>
-                    <SelectTrigger className="h-9 w-40 text-sm">
-                      <SelectValue placeholder="All methods" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All methods</SelectItem>
-                      {anomalyMethodOptions.map(m => (
-                        <SelectItem key={m} value={m}>{m}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button onClick={() => anomalyAddRef.current?.()}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Metric
-                </Button>
-              </div>
-
-              <Card>
-                <CardHeader>
-                  <CardDescription>
-                    {anomalyMetricsSummary.total === 0
-                      ? 'No anomaly metrics configured yet.'
-                      : (() => {
-                          const hasFilters = anomalyFilterDevice !== 'all' || anomalyFilterMethod !== 'all';
-                          return hasFilters
-                            ? `${anomalyMetricsSummary.filtered} of ${anomalyMetricsSummary.total} anomaly metric(s) matching filters`
-                            : `${anomalyMetricsSummary.total} anomaly metric(s) configured`;
-                        })()}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <AnomalyMetricsTable
-                    inline
-                    addTriggerRef={anomalyAddRef}
-                    initialDeviceUuid={deviceUuid}
-                    open={true}
-                    onOpenChange={() => {}}
-                    filterDevice={anomalyFilterDevice}
-                    onFilterDeviceChange={setAnomalyFilterDevice}
-                    filterMethod={anomalyFilterMethod}
-                    onFilterMethodChange={setAnomalyFilterMethod}
-                    onFilterOptionsChange={(devices, methods) => {
-                      setAnomalyDeviceOptions(devices);
-                      setAnomalyMethodOptions(methods);
-                    }}
-                    onMetricsSummaryChange={setAnomalyMetricsSummary}
-                  />
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-          {false && (
+          {/* Profiles Tab */}
           <TabsContent value="profiles" className="space-y-6">
             {/* Protocol Filter with Add Profile Button */}
             <div className="flex items-center justify-between gap-4">
@@ -1758,7 +1384,6 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
               </CardContent>
             </Card>
           </TabsContent>
-          )}
         </Tabs>
 
         {/* Add Sensor Dialog */}
@@ -1780,11 +1405,8 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
         {/* Add Virtual Device Dialog */}
         <Dialog open={addVirtualDeviceDialogOpen} onOpenChange={setAddVirtualDeviceDialogOpen}>
-          <DialogContent
-            className="w-[min(96vw,1100px)] max-w-[96vw] !p-0 overflow-hidden flex flex-col"
-            style={{ height: '66vh', maxHeight: '66vh' }}
-          >
-            <DialogHeader className="px-6 py-4">
+          <DialogContent className="max-w-4xl w-full">
+            <DialogHeader>
               <DialogTitle>Add Device</DialogTitle>
               <DialogDescription>
                 Virtual devices are protocol simulators that run as sidecar containers.
@@ -1792,7 +1414,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4">
+            <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label htmlFor="virtual-name">Device Name</Label>
                 <Input
@@ -1873,7 +1495,7 @@ export const SensorsPage: React.FC<SensorsPageProps> = ({
 
             </div>
 
-            <DialogFooter className="px-6 py-4">
+            <DialogFooter>
               <Button 
                 variant="outline" 
                 onClick={() => setAddVirtualDeviceDialogOpen(false)} 

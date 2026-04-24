@@ -127,12 +127,12 @@ export function FleetsPage() {
   ];
 
   return (
-    <div className="flex-1 bg-background overflow-auto" data-testid="fleets-page">
+    <div className="flex-1 bg-background overflow-auto">
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground" data-testid="fleets-page-title">Fleet Management</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Fleet Management</h1>
             <p className="text-sm text-muted-foreground">
               Monitor and manage your device fleets
             </p>
@@ -247,7 +247,7 @@ export function FleetsPage() {
         </div>
 
         {/* Fleets List */}
-        <Card data-testid="fleets-list-card">
+        <Card>
           <CardHeader>
             <CardTitle>Fleets</CardTitle>
             <CardDescription>
@@ -256,108 +256,94 @@ export function FleetsPage() {
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <div className="text-center py-12 text-muted-foreground" data-testid="fleets-loading-state">
+              <div className="text-center py-12 text-muted-foreground">
                 <Server className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-2">Loading fleets...</p>
               </div>
             ) : fleets.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground" data-testid="fleets-empty-state">
+              <div className="text-center py-12 text-muted-foreground">
                 <Server className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="text-lg font-medium mb-2">No fleets yet</p>
                 <p className="text-sm">Create your first fleet to get started</p>
               </div>
             ) : filteredFleets.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground" data-testid="fleets-filtered-empty-state">
+              <div className="text-center py-12 text-muted-foreground">
                 No fleets match the selected filters.
               </div>
             ) : (
-              <div className="overflow-x-auto" data-testid="fleets-table-container">
-                <table className="w-full text-sm" data-testid="fleets-table">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Status</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Name</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Type</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Environment</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Devices</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Location</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Cost</th>
-                      <th className="text-left py-3 px-4 font-semibold text-sm text-foreground">Created</th>
-                      <th className="py-3 px-4 font-semibold text-sm text-foreground text-left">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredFleets.map((fleet) => (
-                      <tr
-                        key={fleet.fleet_id}
-                        data-testid={`fleet-row-${fleet.fleet_uuid || fleet.fleet_id}`}
-                        className="border-b border-border last:border-0 hover:bg-muted cursor-pointer"
-                        onClick={() => navigateToFleet(fleet.fleet_uuid || fleet.fleet_id)}
-                      >
-                        <td className="py-3 px-4">
-                          <Badge variant={fleet.status === 'active' ? 'default' : 'secondary'}>
-                            {fleet.status}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-4 font-medium text-foreground">
-                          <div className="flex items-center gap-2">
-                            <span>{fleet.fleet_name}</span>
-                            {fleet.fleet_uuid && (
-                              <span
-                                className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono cursor-pointer hover:bg-muted/80"
-                                title="Click to copy fleet UUID"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigator.clipboard.writeText(fleet.fleet_uuid!);
-                                  toast.success('Fleet UUID copied to clipboard');
-                                }}
-                              >
-                                {fleet.fleet_uuid.substring(0, 8)}...
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4">
-                          <Badge variant={fleet.fleet_type === 'virtual' ? 'default' : 'secondary'}>
-                            {fleet.fleet_type}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-4">
-                          <Badge variant="outline" className="text-xs">
-                            {fleet.environment}
-                          </Badge>
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground">
+              <div className="space-y-3">
+                {filteredFleets.map((fleet) => (
+                  <div
+                    key={fleet.fleet_id}
+                    className="flex items-center justify-between p-4 border border-border rounded-lg hover:border-muted-foreground/20 transition-colors cursor-pointer"
+                    onClick={() => navigateToFleet(fleet.fleet_uuid || fleet.fleet_id)}
+                  >
+                    <div key="content" className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className="text-lg font-semibold text-foreground">{fleet.fleet_name}</h3>
+                        <Badge key="type" variant={fleet.fleet_type === 'virtual' ? 'default' : 'secondary'}>
+                          {fleet.fleet_type}
+                        </Badge>
+                        <Badge key="status" variant={fleet.status === 'active' ? 'default' : 'secondary'}>
+                          {fleet.status}
+                        </Badge>
+                        <Badge key="environment" variant="outline" className="text-xs">
+                          {fleet.environment}
+                        </Badge>
+                      </div>
+
+                      <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
+                        <div key="devices">
+                          <span className="font-medium">Devices:</span>{' '}
                           {fleet.device_count} ({fleet.online_count} online)
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground">
-                          {fleet.location || '—'}
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground">
-                          {fleet.billing_enabled
-                            ? `$${fleet.current_cost}${fleet.budget_limit ? ` / $${fleet.budget_limit}` : ''}`
-                            : '—'}
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground">
+                        </div>
+                        {fleet.location && (
+                          <div key="location">
+                            <span className="font-medium">Location:</span>{' '}
+                            {fleet.location}
+                          </div>
+                        )}
+                        {fleet.billing_enabled && (
+                          <div key="cost">
+                            <span className="font-medium">Cost:</span>{' '}
+                            ${fleet.current_cost}
+                            {fleet.budget_limit && ` / $${fleet.budget_limit}`}
+                          </div>
+                        )}
+                        <div key="created">
+                          <span className="font-medium">Created:</span>{' '}
                           {new Date(fleet.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="py-3 px-4">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              handleEdit(fleet);
-                            }}
-                          >
-                            <Pencil className="h-4 w-4 mr-2" />
-                            Edit
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                        {fleet.fleet_uuid && (
+                          <div key="uuid">
+                            <span className="font-medium">UUID:</span>{' '}
+                            <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono cursor-pointer hover:bg-muted/80" title="Click to copy" onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(fleet.fleet_uuid!);
+                              toast.success('Fleet UUID copied to clipboard');
+                            }}>
+                              {fleet.fleet_uuid.substring(0, 8)}...
+                            </code>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div key="actions" className="flex items-center gap-2 ml-4">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleEdit(fleet);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Edit
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>

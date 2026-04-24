@@ -3,7 +3,7 @@ import { getDeviceTags, invalidateDeviceTagsCache } from "@/services/deviceTags"
 import { buildApiUrl } from "@/config/api";
 import { useFleet } from "@/contexts/FleetContext";
 import { useRouting } from "@/hooks/useRouting";
-import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, ChevronRight, Layers } from "lucide-react";
+import { Monitor, Smartphone, Server, Laptop, Search, Plus, Filter, Edit, X, ChevronRight, Container, Layers } from "lucide-react";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
@@ -28,7 +28,7 @@ export interface Device {
   id: string;
   deviceUuid: string;
   name: string;
-  type: string;
+  type: "desktop" | "laptop" | "mobile" | "server" | "gateway" | "edge-device" | "iot-hub" | "plc" | "controller" | "sensor-node" | "standalone" | "virtual";
   status: "online" | "offline" | "warning" | "pending";
   ipAddress: string;
   macAddress?: string;
@@ -62,7 +62,7 @@ const deviceIcons = {
   controller: Server,
   "sensor-node": Smartphone,
   standalone: Monitor,
-  virtual: Server,
+  virtual: Container, // Containerized K8s pod
 };
 
 const statusColors = {
@@ -400,14 +400,13 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
 
   return (
     <TooltipProvider>
-      <div data-testid="agent-sidebar" className="w-full lg:w-80 lg:border-r border-border bg-card h-full flex flex-col overflow-hidden">
+      <div className="w-full lg:w-80 lg:border-r border-border bg-card h-full flex flex-col overflow-hidden">
       {/* Fleet Filter */}
       {fleets.length > 0 && (
         <div className="px-4 py-3 border-b border-border flex-shrink-0">
           <div className="relative">
             <Layers className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <select
-              data-testid="agent-fleet-filter"
               value={selectedFleetId}
               onChange={(e) => {
                 const newFleetId = e.target.value;
@@ -445,7 +444,6 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
-            data-testid="agent-search"
             type="search"
             placeholder="Search agents..."
             value={searchQuery}
@@ -533,20 +531,18 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 space-y-3">
           {filteredDevices.map((device) => {
-            const Icon = deviceIcons[device.type as keyof typeof deviceIcons] || Server;
+            const Icon = deviceIcons[device.type];
             const isSelected = device.id === selectedDeviceId;
             
             return (
               <Card
                 key={device.id}
-                data-testid={`agent-row-${device.deviceUuid}`}
                 className={cn(
                   "p-4 transition-all hover:shadow-md relative group",
                   isSelected ? "ring-2 ring-blue-500 shadow-md" : ""
                 )}
               >
                 <div 
-                  data-testid={isSelected ? `agent-row-selected-${device.deviceUuid}` : undefined}
                   className="flex items-start gap-3 cursor-pointer"
                   onClick={() => onSelectDevice(device.id)}
                 >
@@ -566,7 +562,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <h3 data-testid={`agent-name-${device.deviceUuid}`} className="text-foreground truncate">
+                          <h3 className="text-foreground truncate">
                             {device.name.length > 15 
                               ? `${device.name.substring(0, 15)}...` 
                               : device.name}
@@ -589,7 +585,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
                           Pending
                         </Badge>
                       )}
-                      <span data-testid={`agent-ip-${device.deviceUuid}`} className="text-muted-foreground">{device.ipAddress}</span>
+                      <span className="text-muted-foreground">{device.ipAddress}</span>
                     </div>
 
                     <div className="space-y-1">
