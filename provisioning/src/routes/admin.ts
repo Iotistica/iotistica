@@ -542,17 +542,19 @@ router.post('/customers', async (req: Request, res: Response) => {
       email: string;
       company_name?: string;
       full_name?: string;
-      plan?: 'starter' | 'professional' | 'enterprise';
+      plan?: 'trial' | 'starter' | 'professional' | 'enterprise';
     };
 
     if (!email || typeof email !== 'string') {
       return res.status(400).json({ error: 'email is required' });
     }
 
-    const normalizedPlan = plan || 'starter';
-    if (!['starter', 'professional', 'enterprise'].includes(normalizedPlan)) {
+    const requestedPlan = plan || 'trial';
+    if (!['trial', 'starter', 'professional', 'enterprise'].includes(requestedPlan)) {
       return res.status(400).json({ error: 'Invalid plan' });
     }
+
+    const normalizedPlan = requestedPlan === 'trial' ? 'starter' : requestedPlan;
 
     const existing = await CustomerModel.getByEmail(email);
     if (existing) return res.status(409).json({ error: 'A customer with this email already exists' });
@@ -577,6 +579,7 @@ router.post('/customers', async (req: Request, res: Response) => {
       {
         customerId: customer.customer_id,
         email,
+        requestedPlan,
         plan: normalizedPlan,
         auth0UserCreated: auth0Provisioning.created,
         auth0PasswordSetupEmailSent: auth0Provisioning.passwordSetupEmailSent,
