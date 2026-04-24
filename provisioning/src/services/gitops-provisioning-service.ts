@@ -995,13 +995,25 @@ export class GitOpsProvisioningService {
         if (deleted) {
           console.log(`   ✅ Argo CD application client-${clientId} deleted or already absent`);
         } else {
-          throw new Error(`Argo CD API did not confirm deletion for client-${clientId}`);
+          console.log(`   ⚠️  Argo CD API did not confirm deletion for client-${clientId} (continuing)`);
+          logger.warn('Argo CD API did not confirm deletion; continuing deprovision', { clientId });
         }
       } catch (error: any) {
-        const errorMsg = `Argo CD application cleanup failed: ${error.message}`;
-        errors.push(errorMsg);
-        console.log(`   ❌ ${errorMsg}`);
-        logger.error('Argo CD application cleanup failed', { clientId, error: error.message });
+        const status = error?.statusCode ?? error?.response?.status;
+        const authOrMissing = status === 401 || status === 403 || status === 404;
+        if (authOrMissing) {
+          console.log(`   ⚠️  Argo CD cleanup skipped (${status}) - continuing`);
+          logger.warn('Argo CD cleanup skipped due to auth/not-found response', {
+            clientId,
+            status,
+            error: error.message,
+          });
+        } else {
+          const errorMsg = `Argo CD application cleanup failed: ${error.message}`;
+          errors.push(errorMsg);
+          console.log(`   ❌ ${errorMsg}`);
+          logger.error('Argo CD application cleanup failed', { clientId, error: error.message, status });
+        }
       }
 
       console.log('-'.repeat(80) + '\n');
@@ -1056,21 +1068,33 @@ export class GitOpsProvisioningService {
       console.log('-'.repeat(80) + '\n');
 
       // === STEP 4: Delete database ===
-      const deleteProviderLabel = this.dbProvider === 'postgres' ? 'POSTGRES' : 'TIGERDATA';
+      const effectiveDbProvider = ((customer?.db_provider || this.dbProvider) as 'tigerdata' | 'postgres' | 'cnpg');
+      const deleteProviderLabel =
+        effectiveDbProvider === 'cnpg'
+          ? 'CNPG'
+          : effectiveDbProvider === 'postgres'
+            ? 'POSTGRES'
+            : 'TIGERDATA';
       console.log(`STEP 4/5: DELETE ${deleteProviderLabel} DATABASE`);
       console.log('-'.repeat(80));
 
       try {
         if (customer?.db_service_id) {
           console.log(`   Database Service ID: ${customer.db_service_id}`);
-          if (this.dbProvider === 'postgres') {
+          if (effectiveDbProvider === 'postgres' || effectiveDbProvider === 'cnpg') {
             await this.postgresProvisioningService!.deleteDatabase(customer.db_service_id);
-            console.log('   Postgres database deleted successfully');
-            logger.info('Postgres database deleted', { serviceId: customer.db_service_id });
+            console.log(`   ${deleteProviderLabel} database deleted successfully`);
+            logger.info(`${deleteProviderLabel} database deleted`, {
+              serviceId: customer.db_service_id,
+              provider: effectiveDbProvider,
+            });
           } else {
             await this.tigerDataService.deleteDatabase(customer.db_service_id);
             console.log('   TigerData database deleted successfully');
-            logger.info('TigerData database deleted', { serviceId: customer.db_service_id });
+            logger.info('TigerData database deleted', {
+              serviceId: customer.db_service_id,
+              provider: effectiveDbProvider,
+            });
           }
           dbDeleted = true;
         } else {
@@ -1079,10 +1103,24 @@ export class GitOpsProvisioningService {
           dbDeleted = true; // Consider it "deleted" if it never existed
         }
       } catch (error: any) {
-        const errorMsg = `${deleteProviderLabel} cleanup failed: ${error.message}`;
-        errors.push(errorMsg);
-        console.log(`   ${errorMsg}`);
-        logger.error(`${deleteProviderLabel} cleanup failed`, { customerId, error: error.message });
+        if (this.isAlreadyDeletedError(error)) {
+          console.log(`   ⚠️  ${deleteProviderLabel} already deleted (continuing)`);
+          logger.warn(`${deleteProviderLabel} cleanup reports resource not found; treating as deleted`, {
+            customerId,
+            error: error.message,
+            provider: effectiveDbProvider,
+          });
+          dbDeleted = true;
+        } else {
+          const errorMsg = `${deleteProviderLabel} cleanup failed: ${error.message}`;
+          errors.push(errorMsg);
+          console.log(`   ${errorMsg}`);
+          logger.error(`${deleteProviderLabel} cleanup failed`, {
+            customerId,
+            error: error.message,
+            provider: effectiveDbProvider,
+          });
+        }
       }
 
       console.log('-'.repeat(80) + '\n');
@@ -1153,6 +1191,22 @@ export class GitOpsProvisioningService {
       });
       throw new Error(`Kubectl namespace deletion failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Returns true for provider errors that indicate the database/service is already removed.
+   */
+  private isAlreadyDeletedError(error: any): boolean {
+    const message = String(error?.message || '').toLowerCase();
+    const status = error?.statusCode ?? error?.response?.status;
+
+    return (
+      status === 404 ||
+      message.includes('not found') ||
+      message.includes('does not exist') ||
+      message.includes('unknown service') ||
+      message.includes('no such')
+    );
   }
 
   /**
