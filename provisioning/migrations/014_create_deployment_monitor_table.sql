@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS deployment_monitor (
   CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_deployment_monitor_customer ON deployment_monitor(customer_id);
-CREATE INDEX idx_deployment_monitor_monitoring ON deployment_monitor(polling_stopped_at) WHERE polling_stopped_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_deployment_monitor_customer ON deployment_monitor(customer_id);
+CREATE INDEX IF NOT EXISTS idx_deployment_monitor_monitoring ON deployment_monitor(polling_stopped_at) WHERE polling_stopped_at IS NULL;
 
 COMMENT ON TABLE deployment_monitor IS 'Tracks continuous Argo CD status during and after deployment';
 COMMENT ON COLUMN deployment_monitor.polling_stopped_at IS 'NULL while monitoring, set to timestamp when monitoring stops';
