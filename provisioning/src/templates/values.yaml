@@ -20,7 +20,7 @@ redis:
   tlsServerName: ""
   cluster: false
   auth:
-    enabled: true
+    enabled: false
     existingSecret: ""
     password: ""
     passwordKey: password
@@ -278,7 +278,7 @@ dashboard:
 
 # Node-RED - Visual flow automation
 nodered:
-  enabled: true
+  enabled: false
   image:
     repository: iotistic/nodered
     tag: "{{RELEASE_VERSION}}"
