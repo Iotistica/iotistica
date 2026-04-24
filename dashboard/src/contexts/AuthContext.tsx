@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else if (response.status === 401) {
           // Try to refresh token inline (avoid circular dependency)
           try {
-            const refreshResponse = await fetch(buildApiUrl('/api/v1/auth/refresh'), {
+            const [loading, setLoading] = useState(false);
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -214,13 +214,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let userInfo: any = null;
     try {
       userInfo = await userInfoResponse.json();
-    } catch {
-      throw new Error('Failed to fetch user info');
     }
-
-    if (!userInfoResponse.ok) {
-      throw new Error('Failed to fetch user information from Auth0');
-    }
+            // Universal Login: No local login, just redirect
+            const login = () => {
+              const config = getConfig();
+              const params = new URLSearchParams({
+                client_id: config.VITE_AUTH0_CLIENT_ID,
+                response_type: 'code',
+                redirect_uri: config.VITE_AUTH0_CALLBACK_URL,
+                scope: 'openid profile email',
+                audience: config.VITE_AUTH0_AUDIENCE || '',
+              });
+              window.location.href = `https://${config.VITE_AUTH0_DOMAIN}/authorize?${params.toString()}`;
+            };
 
     // Create local user object from Auth0 info
     const user: User = {
@@ -291,7 +297,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!response.ok) {
         return false;
       }
-
+              // This function is no longer needed as we are using Universal Login
+              // login(data.access_token, data.refresh_token || '', user);
       const data = await response.json();
       localStorage.setItem('accessToken', data.data.accessToken);
 
