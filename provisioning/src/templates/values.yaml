@@ -20,7 +20,7 @@ redis:
   tlsServerName: ""
   cluster: false
   auth:
-    enabled: false
+    enabled: true
     existingSecret: ""
     password: ""
     passwordKey: password
