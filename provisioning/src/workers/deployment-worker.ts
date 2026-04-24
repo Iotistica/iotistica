@@ -736,7 +736,7 @@ export class DeploymentWorker {
       console.log(`👤 Customer: ${customerId}`);
       console.log(`🏷️  Client: ${clientId}`);
       console.log(`🌐 URL: ${instanceUrl}`);
-      console.log(`✅ Status: Application is Healthy and Synced`);
+      console.log(`✅ Status: Application reached acceptable Argo CD ready state`);
       console.log(`⏱️  Completed at: ${new Date().toISOString()}`);
       console.log('='.repeat(80) + '\n');
 

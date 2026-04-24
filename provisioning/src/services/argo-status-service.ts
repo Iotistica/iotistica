@@ -54,8 +54,8 @@ export class ArgoStatusService {
     this.config = {
       baseUrl: process.env.ARGOCD_BASE_URL || 'https://argocd.iotistica.com',
       token: process.env.ARGOCD_TOKEN || '',
-      maxRetries: parseInt(process.env.ARGOCD_STATUS_MAX_RETRIES || '10'),
-      retryDelayMs: parseInt(process.env.ARGOCD_STATUS_RETRY_DELAY_MS || '5000'),
+      maxRetries: parseInt(process.env.ARGOCD_STATUS_MAX_RETRIES || '90'),
+      retryDelayMs: parseInt(process.env.ARGOCD_STATUS_RETRY_DELAY_MS || '10000'),
     };
 
     // Remove trailing slash from base URL
@@ -105,7 +105,11 @@ export class ArgoStatusService {
   }
 
   /**
-   * Check if Application is healthy and synced
+   * Check if Application has reached an acceptable ready state.
+   *
+   * Primary success condition is Synced + Healthy.
+   * Secondary success condition is Synced + operation Succeeded while health is
+   * still catching up in Argo CD aggregation (commonly Progressing/Unknown).
    */
   async isApplicationReady(clientId: string): Promise<boolean> {
     const app = await this.getApplicationStatus(clientId);
@@ -114,17 +118,20 @@ export class ArgoStatusService {
       return false;
     }
 
-    const isSynced = app.status.sync.status === 'Synced';
-    const isHealthy = app.status.health.status === 'Healthy';
+    const syncStatus = app.status.sync.status;
+    const healthStatus = app.status.health.status;
+    const operationPhase = app.status.operationState?.phase;
+    const isReady = this.isReadyState(syncStatus, healthStatus, operationPhase);
 
     logger.info('Application status check', {
       clientId,
-      syncStatus: app.status.sync.status,
-      healthStatus: app.status.health.status,
-      isReady: isSynced && isHealthy,
+      syncStatus,
+      healthStatus,
+      operationPhase,
+      isReady,
     });
 
-    return isSynced && isHealthy;
+    return isReady;
   }
 
   /**
@@ -165,8 +172,9 @@ export class ArgoStatusService {
             maxRetries: this.config.maxRetries,
           });
           
-          // Wait before retry
-          await this.sleep(this.config.retryDelayMs);
+          if (attempt < this.config.maxRetries) {
+            await this.sleep(this.config.retryDelayMs);
+          }
           continue;
         }
 
@@ -174,7 +182,6 @@ export class ArgoStatusService {
         const healthStatus = app.status.health.status;
         const operationPhase = app.status.operationState?.phase;
 
-        // Track last known status for graceful timeout handling
         lastKnownStatus = { syncStatus, healthStatus, operationPhase };
 
         logger.info('Application status', {
@@ -185,39 +192,61 @@ export class ArgoStatusService {
           operationPhase,
         });
 
-        // Check for failed states
-        if (healthStatus === 'Degraded' || healthStatus === 'Missing') {
-          logger.error('Application health check failed', {
+        if (this.isReadyState(syncStatus, healthStatus, operationPhase)) {
+          logger.info('Application reached ready state', {
+            clientId,
+            attempt,
+            revision: app.status.sync.revision,
+            syncStatus,
+            healthStatus,
+            operationPhase,
+          });
+
+          if (customerId) {
+            await CustomerModel.resetArgoRetry(customerId);
+            logger.info('Reset Argo CD retry count after successful deployment', {
+              customerId,
+            });
+          }
+
+          return true;
+        }
+
+        const isTerminalHealthFailure =
+          (healthStatus === 'Degraded' || healthStatus === 'Missing') &&
+          syncStatus === 'Synced' &&
+          operationPhase !== 'Running';
+
+        if (isTerminalHealthFailure) {
+          logger.error('Application health check failed after sync completed', {
             clientId,
             healthStatus,
             healthMessage: app.status.health.message,
+            syncStatus,
+            operationPhase,
           });
-          
-          // Increment retry count if customerId provided
+
           if (customerId) {
             const customer = await CustomerModel.incrementArgoRetry(customerId);
             const retryCount = customer.argo_retry_count || 0;
-            
+
             logger.info('Incremented Argo CD retry count', {
               customerId,
               retryCount,
             });
-            
-            // Check if max retries reached (3 automatic retries)
+
             if (retryCount >= 3) {
               logger.error('Max Argo CD retries reached, marking as argo_failed', {
                 customerId,
                 retryCount,
               });
-              
+
               await CustomerModel.updateDeploymentStatus(customerId, 'argo_failed', {
-                deploymentError: `Argo CD sync failed after ${retryCount} attempts: ${app.status.health.message}`,
+                deploymentError: `Argo CD health remained ${healthStatus} after sync: ${app.status.health.message}`,
               });
-              
-              return false;
             }
           }
-          
+
           return false;
         }
 
@@ -227,72 +256,46 @@ export class ArgoStatusService {
             operationPhase,
             operationMessage: app.status.operationState?.message,
           });
-          
-          // Increment retry count if customerId provided
+
           if (customerId) {
             const customer = await CustomerModel.incrementArgoRetry(customerId);
             const retryCount = customer.argo_retry_count || 0;
-            
+
             logger.info('Incremented Argo CD retry count', {
               customerId,
               retryCount,
             });
-            
-            // Check if max retries reached
+
             if (retryCount >= 3) {
               logger.error('Max Argo CD retries reached, marking as argo_failed', {
                 customerId,
                 retryCount,
               });
-              
+
               await CustomerModel.updateDeploymentStatus(customerId, 'argo_failed', {
                 deploymentError: `Argo CD operation ${operationPhase} after ${retryCount} attempts: ${app.status.operationState?.message}`,
               });
-              
-              return false;
             }
           }
-          
+
           return false;
         }
 
-        // Check if ready
-        if (syncStatus === 'Synced' && healthStatus === 'Healthy') {
-          logger.info('Application is ready', {
-            clientId,
-            attempt,
-            revision: app.status.sync.revision,
-          });
-          
-          // Reset retry count on success
-          if (customerId) {
-            await CustomerModel.resetArgoRetry(customerId);
-            logger.info('Reset Argo CD retry count after successful deployment', {
-              customerId,
-            });
-          }
-          
-          return true;
-        }
-
-        // Still progressing
         logger.info('Application still progressing, retrying...', {
           clientId,
           attempt,
           syncStatus,
           healthStatus,
+          operationPhase,
           nextRetryIn: `${this.config.retryDelayMs}ms`,
         });
 
-        // Wait before next retry
         if (attempt < this.config.maxRetries) {
           await this.sleep(this.config.retryDelayMs);
         }
-
       } catch (error: any) {
         const status = error.response?.status;
-        
-        // Only fail immediately on 401 (invalid token)
+
         if (status === 401) {
           logger.error('Authentication failed - invalid ARGOCD_TOKEN', {
             clientId,
@@ -300,9 +303,7 @@ export class ArgoStatusService {
           });
           return false;
         }
-        
-        // 403 can mean application doesn't exist yet (Argo CD security feature)
-        // Treat it like 404 and keep retrying
+
         if (status === 403 || status === 404) {
           logger.warn('Application not found or not accessible yet, retrying...', {
             clientId,
@@ -319,17 +320,30 @@ export class ArgoStatusService {
           });
         }
 
-        // Wait before retry
         if (attempt < this.config.maxRetries) {
           await this.sleep(this.config.retryDelayMs);
         }
       }
     }
 
-    // Max retries reached - check if it's a graceful timeout (still progressing) or actual failure
-    if (lastKnownStatus && 
+    if (lastKnownStatus && this.isReadyState(
+      lastKnownStatus.syncStatus,
+      lastKnownStatus.healthStatus,
+      lastKnownStatus.operationPhase
+    )) {
+      logger.warn('Argo CD monitoring timed out after sync completed, treating as success', {
+        clientId,
+        lastKnownStatus,
+        maxRetries: this.config.maxRetries,
+        totalWaitTime: `${(this.config.maxRetries * this.config.retryDelayMs) / 1000}s`,
+        note: 'Argo CD sync completed and operation succeeded, but health aggregation lagged.',
+      });
+
+      return true;
+    }
+
+    if (lastKnownStatus &&
         (lastKnownStatus.healthStatus === 'Progressing' || lastKnownStatus.operationPhase === 'Running')) {
-      
       logger.warn('Argo CD monitoring timed out, but application is still progressing', {
         clientId,
         lastKnownStatus,
@@ -338,14 +352,9 @@ export class ArgoStatusService {
         note: 'Argo CD will continue syncing in the background. Check Argo CD UI for progress.',
       });
 
-      // Keep customer status as 'deploying' - Argo CD continues in background
-      // No need to update status since it's already in deploying state
-
-      // Return true to not fail the deployment - Argo CD continues in background
       return true;
     }
 
-    // If we got here with no status or a bad status, it's a real failure
     logger.error('Application readiness check timed out', {
       clientId,
       lastKnownStatus,
@@ -354,6 +363,24 @@ export class ArgoStatusService {
     });
 
     return false;
+  }
+
+  private isReadyState(
+    syncStatus: string,
+    healthStatus: string,
+    operationPhase?: string
+  ): boolean {
+    if (syncStatus !== 'Synced') {
+      return false;
+    }
+
+    if (healthStatus === 'Healthy') {
+      return true;
+    }
+
+    return operationPhase === 'Succeeded' &&
+      healthStatus !== 'Degraded' &&
+      healthStatus !== 'Missing';
   }
 
   /**
