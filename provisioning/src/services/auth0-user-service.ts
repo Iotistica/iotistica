@@ -14,13 +14,6 @@ export interface Auth0UserProvisionResult {
   auth0Sub?: string;
 }
 
-interface Auth0ManagementConfig {
-  domain: string;
-  clientId: string;
-  clientSecret: string;
-  audience: string;
-}
-
 export class Auth0UserService {
   private static extractAuth0Sub(payload: unknown): string | undefined {
     if (!payload || typeof payload !== 'object') {
@@ -49,80 +42,6 @@ export class Auth0UserService {
 
   private static generateTemporaryPassword(): string {
     return `${crypto.randomBytes(24).toString('base64url')}Aa1!`;
-  }
-
-  private static getManagementConfig(): Auth0ManagementConfig | null {
-    const domain = process.env.AUTH0_DOMAIN;
-    const clientId = process.env.AUTH0_M2M_CLIENT_ID || process.env.AUTH0_CLIENT_ID;
-    const clientSecret = process.env.AUTH0_M2M_CLIENT_SECRET || process.env.AUTH0_CLIENT_SECRET;
-
-    if (!domain || !clientId || !clientSecret) {
-      return null;
-    }
-
-    return {
-      domain,
-      clientId,
-      clientSecret,
-      audience: `https://${domain}/api/v2/`,
-    };
-  }
-
-  private static async getManagementApiToken(config: Auth0ManagementConfig): Promise<string> {
-    const response = await axios.post(
-      `https://${config.domain}/oauth/token`,
-      {
-        grant_type: 'client_credentials',
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        audience: config.audience,
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 10000,
-      }
-    );
-
-    return response.data.access_token as string;
-  }
-
-  static async resolveAuth0SubByEmail(email: string): Promise<string | null> {
-    const config = this.getManagementConfig();
-    if (!config) {
-      logger.warn('[Auth0UserService] Management API config missing, skipping auth0_sub resolve', {
-        email,
-        hasDomain: Boolean(process.env.AUTH0_DOMAIN),
-        hasClientId: Boolean(process.env.AUTH0_M2M_CLIENT_ID || process.env.AUTH0_CLIENT_ID),
-        hasClientSecret: Boolean(process.env.AUTH0_M2M_CLIENT_SECRET || process.env.AUTH0_CLIENT_SECRET),
-      });
-      return null;
-    }
-
-    try {
-      const token = await this.getManagementApiToken(config);
-      const response = await axios.get(
-        `https://${config.domain}/api/v2/users-by-email`,
-        {
-          params: { email },
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 10000,
-        }
-      );
-
-      const users = response.data as Array<{ user_id?: string }>;
-      const userId = users.find((user) => typeof user.user_id === 'string' && user.user_id.length > 0)?.user_id;
-
-      return userId || null;
-    } catch (error) {
-      logger.warn('[Auth0UserService] Failed to resolve auth0_sub by email', {
-        email,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
-    }
   }
 
   static async ensureDatabaseUser(data: {
@@ -202,18 +121,17 @@ export class Auth0UserService {
     username?: string;
   }): Promise<Auth0UserProvisionResult> {
     const result = await this.ensureDatabaseUser(data);
-    await this.sendPasswordSetupEmail(data.email);
 
-    // Prefer direct Auth0 subject from signup response to avoid Management API dependency.
-    let auth0Sub = result.auth0Sub;
-    if (!auth0Sub) {
-      auth0Sub = await this.resolveAuth0SubByEmail(data.email) || undefined;
+    if (!result.auth0Sub) {
+      throw new Error('Auth0 signup did not return auth0_sub; refusing to continue without role mapping key');
     }
+
+    await this.sendPasswordSetupEmail(data.email);
 
     return {
       created: result.created,
       passwordSetupEmailSent: true,
-      auth0Sub: auth0Sub || undefined,
+      auth0Sub: result.auth0Sub,
     };
   }
 }

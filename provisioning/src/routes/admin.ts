@@ -563,21 +563,20 @@ router.post('/customers', async (req: Request, res: Response) => {
       username: email,
     });
 
-    const customer = await CustomerModel.create({ email, companyName: company_name, fullName: full_name });
-
-    if (auth0Provisioning.auth0Sub) {
-      await query(
-        `INSERT INTO user_tenant_roles (auth0_sub, customer_id, role, created_by, created_at)
-         VALUES ($1, $2, $3, $4, NOW())
-         ON CONFLICT (auth0_sub, customer_id) DO NOTHING`,
-        [auth0Provisioning.auth0Sub, customer.customer_id, 'admin', 'admin_create_customer']
-      );
-    } else {
-      logger.warn('[admin] Auth0 user created but auth0_sub was not resolved; role mapping will occur on first login', {
-        customerId: customer.customer_id,
-        email,
+    if (!auth0Provisioning.auth0Sub) {
+      return res.status(422).json({
+        error: 'Auth0 user did not return auth0_sub; cannot create tenant role mapping',
       });
     }
+
+    const customer = await CustomerModel.create({ email, companyName: company_name, fullName: full_name });
+
+    await query(
+      `INSERT INTO user_tenant_roles (auth0_sub, customer_id, role, created_by, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (auth0_sub, customer_id) DO NOTHING`,
+      [auth0Provisioning.auth0Sub, customer.customer_id, 'admin', 'admin_create_customer']
+    );
 
     const subscription = await StripeService.createTrialSubscription({
       customerId: customer.customer_id,
