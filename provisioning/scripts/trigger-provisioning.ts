@@ -61,6 +61,8 @@ async function triggerProvisioning(customerId: string) {
     
     console.log(`\n📂 Namespace: ${namespace}`);
     console.log(`\n🚀 Triggering provisioning...`);
+
+    const queuePlan = subscription.plan === 'trial' ? 'starter' : subscription.plan;
     
     // Add to deployment queue using the typed helper
     // Note: the worker fetches the license from the API itself; do not pass licenseKey here
@@ -69,7 +71,7 @@ async function triggerProvisioning(customerId: string) {
       email: customer.email,
       companyName: customer.company_name || customer.full_name || 'Customer',
       namespace,
-      plan: subscription.plan,
+      plan: queuePlan,
       domain: process.env.BASE_DOMAIN || 'iotistic.com',
     }, {
       attempts: 3,
