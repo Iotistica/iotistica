@@ -27,6 +27,7 @@ import { OnePasswordService } from './onepassword-service';
 import { CustomerModel } from '../db/customer-model';
 import { SecretBuilder } from './secret-builder';
 import { releaseService } from './release-service';
+import { ArgoStatusService } from './argo-status-service';
 
 interface ClientDeploymentData {
   clientId: string;           // Sanitized: dc5fec42901a (SHA256 hash)
@@ -74,6 +75,7 @@ export class GitOpsProvisioningService {
   private tigerDataService: TigerDataService;
   private postgresProvisioningService?: PostgresProvisioningService;
   private onePasswordService: OnePasswordService;
+  private argoStatusService: ArgoStatusService;
 
   constructor() {
     // Load configuration from environment
@@ -115,6 +117,7 @@ export class GitOpsProvisioningService {
       this.postgresProvisioningService = new PostgresProvisioningService();
     }
     this.onePasswordService = new OnePasswordService();
+    this.argoStatusService = new ArgoStatusService();
 
     if (!this.config.enabled) {
       logger.warn('GitOps mode disabled (GITOPS_ENABLED=false)');
@@ -981,27 +984,48 @@ export class GitOpsProvisioningService {
 
       console.log('-'.repeat(80) + '\n');
 
-      // === STEP 2: Wait for Argo CD prune (optional, best effort) ===
-      console.log('⏳ STEP 2/4: ARGO CD PRUNE (OPTIONAL)');
+      // === STEP 2: Delete Argo CD application (best effort) ===
+      console.log('⏳ STEP 2/4: DELETE ARGO CD APPLICATION');
       console.log('-'.repeat(80));
-      console.log('   ℹ️  Argo CD will automatically prune resources when Application is deleted');
-      console.log('   ℹ️  Skipping explicit wait (resources will be cleaned up asynchronously)');
+      console.log('   ℹ️  Git deletion remains the source of truth; API delete accelerates teardown');
+
+      try {
+        const deleted = await this.argoStatusService.deleteApplication(clientId);
+        if (deleted) {
+          console.log(`   ✅ Argo CD application client-${clientId} deleted or already absent`);
+        } else {
+          throw new Error(`Argo CD API did not confirm deletion for client-${clientId}`);
+        }
+      } catch (error: any) {
+        const errorMsg = `Argo CD application cleanup failed: ${error.message}`;
+        errors.push(errorMsg);
+        console.log(`   ❌ ${errorMsg}`);
+        logger.error('Argo CD application cleanup failed', { clientId, error: error.message });
+      }
+
       console.log('-'.repeat(80) + '\n');
 
-      // === STEP 3: Delete 1Password secret ===
-      console.log('🔐 STEP 3/4: DELETE 1PASSWORD SECRET');
+      // === STEP 3: Delete 1Password secret bundle ===
+      console.log('🔐 STEP 3/4: DELETE 1PASSWORD SECRET BUNDLE');
       console.log('-'.repeat(80));
       
       try {
-        if (customer?.secret_item_id) {
-          console.log(`   🔑 Secret Item ID: ${customer.secret_item_id}`);
+        const clientTag = `client-${clientId}`;
+        const deletedCount = await this.onePasswordService.deleteItemsByTag(clientTag);
+
+        if (deletedCount > 0) {
+          console.log(`   ✅ 1Password secret bundle deleted successfully (${deletedCount} item(s))`);
+          logger.info('1Password secret bundle deleted', { clientId, clientTag, deletedCount });
+          secretDeleted = true;
+        } else if (customer?.secret_item_id) {
+          console.log(`   ℹ️  No tagged bundle found, falling back to legacy secret item: ${customer.secret_item_id}`);
           await this.onePasswordService.deleteItem(customer.secret_item_id);
-          console.log('   ✅ 1Password secret deleted successfully');
-          logger.info('1Password secret deleted', { itemId: customer.secret_item_id });
+          console.log('   ✅ Legacy 1Password secret deleted successfully');
+          logger.info('Legacy 1Password secret deleted', { itemId: customer.secret_item_id, clientId });
           secretDeleted = true;
         } else {
-          console.log('   ⚠️  No secret_item_id found (already deleted or never created)');
-          logger.info('No 1Password secret to delete', { customerId });
+          console.log(`   ⚠️  No tagged bundle found for ${clientTag} and no legacy secret_item_id is stored`);
+          logger.info('No 1Password secret bundle to delete', { customerId, clientId, clientTag });
           secretDeleted = true; // Consider it "deleted" if it never existed
         }
       } catch (error: any) {

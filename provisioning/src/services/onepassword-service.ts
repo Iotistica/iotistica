@@ -30,6 +30,10 @@ export interface SecretItem {
   }>;
 }
 
+type TaggedItemOverview = ItemOverview & {
+  tags?: string[];
+};
+
 export class OnePasswordError extends Error {
   constructor(
     message: string,
@@ -383,6 +387,45 @@ export class OnePasswordService {
       console.error(`[OnePasswordService] Failed to delete item:`, error);
       throw new OnePasswordError(`Failed to delete item: ${error}`, error);
     }
+  }
+
+  /**
+   * List items in the vault by tag.
+   * @param tag - Tag to match exactly
+   */
+  async listItemsByTag(tag: string): Promise<ItemOverview[]> {
+    const items = await this.listItems();
+    return items.filter((item) => {
+      const taggedItem = item as TaggedItemOverview;
+      return taggedItem.tags?.includes(tag) ?? false;
+    });
+  }
+
+  /**
+   * Delete all items matching a given tag.
+   * @param tag - Tag to match exactly
+   * @returns Number of deleted items
+   */
+  async deleteItemsByTag(tag: string): Promise<number> {
+    console.log(`[OnePasswordService] Deleting items by tag: ${tag}`);
+
+    if (this.simulateMode) {
+      console.log(`[OnePasswordService] ⚠️  SIMULATION MODE - Not actually deleting tagged 1Password items for tag: ${tag}`);
+      return 0;
+    }
+
+    const items = await this.listItemsByTag(tag);
+    if (items.length === 0) {
+      console.log(`[OnePasswordService] No items found for tag: ${tag}`);
+      return 0;
+    }
+
+    for (const item of items) {
+      await this.deleteItem(item.id);
+    }
+
+    console.log(`[OnePasswordService] Deleted ${items.length} item(s) for tag: ${tag}`);
+    return items.length;
   }
 
   /**
