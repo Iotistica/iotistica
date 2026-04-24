@@ -23,9 +23,12 @@ export class Auth0UserService {
     const data = payload as Record<string, unknown>;
     const candidate = data.user_id || data._id || data.sub;
 
-    return typeof candidate === 'string' && candidate.length > 0
-      ? candidate
-      : undefined;
+    if (typeof candidate !== 'string' || candidate.length === 0) {
+      return undefined;
+    }
+
+    // Normalize legacy bare IDs so all RBAC mappings use canonical Auth0 subject format.
+    return candidate.includes('|') ? candidate : `auth0|${candidate}`;
   }
 
   private static getConfig(): Auth0Config {

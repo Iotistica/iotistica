@@ -15,6 +15,16 @@ import { timingSafeEqual } from 'crypto';
 
 const router = Router();
 
+function buildAuth0SubCandidates(auth0Sub: string): string[] {
+  const trimmed = (auth0Sub || '').trim();
+  if (!trimmed) return [];
+
+  const bare = trimmed.includes('|') ? trimmed.split('|').pop() || trimmed : trimmed;
+  const normalized = bare.includes('|') ? bare : `auth0|${bare}`;
+
+  return Array.from(new Set([trimmed, bare, normalized])).filter(Boolean);
+}
+
 /**
  * Middleware: Verify internal token
  * All endpoints require X-Internal-Token header matching INTERNAL_AUTH_TOKEN env var
@@ -76,6 +86,7 @@ router.use(verifyInternalToken);
 router.get('/users/:auth0_sub/tenants/:customer_id/role', async (req: Request, res: Response) => {
   try {
     const { auth0_sub, customer_id } = req.params;
+    const auth0SubCandidates = buildAuth0SubCandidates(auth0_sub);
 
     // Validate inputs
     if (!auth0_sub || !customer_id) {
@@ -98,8 +109,10 @@ router.get('/users/:auth0_sub/tenants/:customer_id/role', async (req: Request, r
         END as customer_status
       FROM user_tenant_roles utr
       JOIN customers c ON utr.customer_id = c.customer_id
-      WHERE utr.auth0_sub = $1 AND utr.customer_id = $2`,
-      [auth0_sub, customer_id]
+      WHERE utr.auth0_sub = ANY($1::text[]) AND utr.customer_id = $2
+      ORDER BY CASE WHEN utr.auth0_sub = $3 THEN 0 ELSE 1 END
+      LIMIT 1`,
+      [auth0SubCandidates, customer_id, auth0_sub]
     );
 
     if (result.rows.length === 0) {
@@ -209,6 +222,7 @@ router.put('/users/:auth0_sub/tenants/:customer_id/role', async (req: Request, r
   try {
     const { auth0_sub, customer_id } = req.params;
     const { role } = req.body;
+    const auth0SubCandidates = buildAuth0SubCandidates(auth0_sub);
 
     if (!role) {
       return res.status(400).json({ error: 'Missing role in request body' });
@@ -223,9 +237,9 @@ router.put('/users/:auth0_sub/tenants/:customer_id/role', async (req: Request, r
     const result = await query(
       `UPDATE user_tenant_roles 
        SET role = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE auth0_sub = $2 AND customer_id = $3
+       WHERE auth0_sub = ANY($2::text[]) AND customer_id = $3
        RETURNING *`,
-      [role, auth0_sub, customer_id]
+      [role, auth0SubCandidates, customer_id]
     );
 
     if (result.rows.length === 0) {
@@ -255,12 +269,13 @@ router.put('/users/:auth0_sub/tenants/:customer_id/role', async (req: Request, r
 router.delete('/users/:auth0_sub/tenants/:customer_id', async (req: Request, res: Response) => {
   try {
     const { auth0_sub, customer_id } = req.params;
+    const auth0SubCandidates = buildAuth0SubCandidates(auth0_sub);
 
     const result = await query(
       `DELETE FROM user_tenant_roles 
-       WHERE auth0_sub = $1 AND customer_id = $2
+       WHERE auth0_sub = ANY($1::text[]) AND customer_id = $2
        RETURNING auth0_sub, customer_id, role`,
-      [auth0_sub, customer_id]
+      [auth0SubCandidates, customer_id]
     );
 
     if (result.rows.length === 0) {

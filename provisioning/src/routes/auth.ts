@@ -18,6 +18,16 @@ import { signHs256Token, verifyHs256Token } from '../utils/hs256-jwt';
 const router = express.Router();
 const SIGNUP_STATE_TTL_MS = 10 * 60 * 1000;
 
+function buildAuth0SubCandidates(auth0Sub: string): string[] {
+  const trimmed = auth0Sub.trim();
+  if (!trimmed) return [];
+
+  const bare = trimmed.includes('|') ? trimmed.split('|').pop() || trimmed : trimmed;
+  const normalized = bare.includes('|') ? bare : `auth0|${bare}`;
+
+  return Array.from(new Set([trimmed, bare, normalized])).filter(Boolean);
+}
+
 /**
  * POST /api/auth/validate-reset-token
  * Validate password reset token (called by customer API instances)
@@ -226,6 +236,8 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
     logger.info('[Auth0] User authenticated', { auth0Sub, email });
 
     // Step 3: Resolve tenant + role from centralized RBAC table (Phase 3)
+    const auth0SubCandidates = buildAuth0SubCandidates(auth0Sub);
+
     let membershipResult = await query(
       `SELECT 
          utr.id,
@@ -238,8 +250,9 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
          c.is_active
        FROM user_tenant_roles utr
        JOIN customers c ON c.customer_id = utr.customer_id
-       WHERE utr.auth0_sub = $1
+       WHERE utr.auth0_sub = ANY($1::text[])
        ORDER BY
+         CASE WHEN utr.auth0_sub = $2 THEN 0 ELSE 1 END,
          CASE
            WHEN c.is_active = true AND c.deployment_status = 'ready' THEN 0
            WHEN c.is_active = true THEN 1
@@ -247,7 +260,7 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
          END,
          utr.updated_at DESC
        LIMIT 1`,
-      [auth0Sub]
+      [auth0SubCandidates, auth0Sub]
     );
 
     // Auto-link first login by matching customer email when no membership exists yet
@@ -257,9 +270,15 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
          SELECT $1, c.customer_id, 'admin', 'auth0_auto_link'
          FROM customers c
          WHERE LOWER(c.email) = LOWER($2)
+           AND NOT EXISTS (
+             SELECT 1
+             FROM user_tenant_roles existing
+             WHERE existing.customer_id = c.customer_id
+               AND existing.auth0_sub = ANY($3::text[])
+           )
          ON CONFLICT (auth0_sub, customer_id) DO NOTHING
          RETURNING id, auth0_sub, customer_id, role, created_at, updated_at`,
-        [auth0Sub, email]
+        [auth0Sub, email, auth0SubCandidates]
       );
 
       if (autoLink.rows.length > 0) {
@@ -295,6 +314,29 @@ router.post('/callback-auth0', async (req: Request, res: Response) => {
     }
 
     const membership = membershipResult.rows[0];
+
+    // Migrate legacy bare subject IDs to canonical Auth0 subject format when possible.
+    if (membership.auth0_sub !== auth0Sub) {
+      const migrated = await query(
+        `UPDATE user_tenant_roles
+         SET auth0_sub = $1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2
+           AND customer_id = $3
+           AND NOT EXISTS (
+             SELECT 1
+             FROM user_tenant_roles conflict
+             WHERE conflict.auth0_sub = $1
+               AND conflict.customer_id = $3
+           )
+         RETURNING auth0_sub`,
+        [auth0Sub, membership.id, membership.customer_id]
+      );
+
+      if (migrated.rows.length > 0) {
+        membership.auth0_sub = auth0Sub;
+      }
+    }
 
     if (!membership.is_active) {
       return res.status(403).json({
@@ -816,8 +858,8 @@ router.get('/signup-callback', async (req: Request, res: Response) => {
 
     // Check if user already has a tenant
     const existingMembership = await query(
-      `SELECT customer_id FROM user_tenant_roles WHERE auth0_sub = $1 LIMIT 1`,
-      [auth0Sub]
+      `SELECT customer_id FROM user_tenant_roles WHERE auth0_sub = ANY($1::text[]) LIMIT 1`,
+      [buildAuth0SubCandidates(auth0Sub)]
     );
 
     if (existingMembership.rows.length > 0) {
@@ -1229,8 +1271,8 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
     // Check if user already has a tenant
     if (auth0Sub) {
       const existingMembership = await query(
-        `SELECT customer_id FROM user_tenant_roles WHERE auth0_sub = $1 LIMIT 1`,
-        [auth0Sub]
+        `SELECT customer_id FROM user_tenant_roles WHERE auth0_sub = ANY($1::text[]) LIMIT 1`,
+        [buildAuth0SubCandidates(auth0Sub)]
       );
 
       if (existingMembership.rows.length > 0) {
