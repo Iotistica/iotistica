@@ -155,7 +155,7 @@ api:
 
   dbInit:
     enabled: true
-    adminSecretName: "provisioning-db-credentials-cnpg" # billing superuser in this namespace
+    adminSecretName: "cnpg-admin-credentials" # namespace-local secret materialized from the 1Password item
     adminOnePasswordItem:
       enabled: true
       itemPath: "vaults/iotistica/items/provisioning-db-credentials-cnpg"

@@ -683,8 +683,9 @@ export class PostgresProvisioningService {
    */
   generateCnpgCredentials(namespace: string): TigerDataDatabase {
     const password = this.generatePassword();
-    // PostgreSQL role names cannot contain hyphens — replace with underscores.
-    const username = namespace.replace(/-/g, '_');
+    // Keep the app role aligned with the client namespace. PostgreSQL accepts
+    // hyphenated role names when identifiers are quoted during CREATE/GRANT.
+    const username = namespace;
     const host =
       process.env.PROVISIONING_PG_HOST ||
       'iotistica-cnpg-cl01-pooler-rw.iotistica-cnpg-cl01.svc.cluster.local';
@@ -715,7 +716,7 @@ export class PostgresProvisioningService {
    *
    * Creates:
    *   - DATABASE  client-{id}
-   *   - ROLE      client-{id}  (with LOGIN and the generated password)
+  *   - ROLE      client-{id}-app  (with LOGIN and the generated password)
    * Grants all privileges on the new database to the new role.
    *
    * The operation is idempotent: if the database already exists the method
