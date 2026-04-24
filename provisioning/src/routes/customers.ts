@@ -469,7 +469,7 @@ router.post('/:id/deploy', authenticateAdmin, async (req, res) => {
 
 /**
  * GET /api/customers/:id/deployment/status
- * Get deployment status for a customer
+ * Get deployment status for a customer (includes real-time Argo CD monitoring)
  */
 router.get('/:id/deployment/status', async (req, res) => {
   try {
@@ -479,6 +479,10 @@ router.get('/:id/deployment/status', async (req, res) => {
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
+
+    // Import here to avoid circular dependencies
+    const { DeploymentMonitorModel } = await import('../db/deployment-monitor-model');
+    const monitor = await DeploymentMonitorModel.getByCustomerId(id);
 
     res.json({
       customerId: customer.customer_id,
@@ -497,6 +501,22 @@ router.get('/:id/deployment/status', async (req, res) => {
         name: customer.db_name,
         provisioned_at: customer.db_provisioned_at,
       },
+      // Real-time Argo CD monitoring status
+      monitoring: monitor ? {
+        clientId: monitor.client_id,
+        namespace: monitor.namespace,
+        healthStatus: monitor.health_status,
+        syncStatus: monitor.sync_status,
+        operationPhase: monitor.operation_phase,
+        isMonitoring: !monitor.polling_stopped_at,
+        lastPolledAt: monitor.last_polled_at,
+        pollingStoppedAt: monitor.polling_stopped_at,
+        pollCount: monitor.poll_count,
+        stoppedReason: monitor.stopped_reason,
+        readyAt: monitor.ready_at,
+        monitoringStartedAt: monitor.monitoring_started_at,
+        statusMessage: monitor.status_message,
+      } : null,
     });
   } catch (error: any) {
     console.error('Error getting deployment status:', error);

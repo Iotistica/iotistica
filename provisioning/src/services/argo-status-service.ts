@@ -473,6 +473,45 @@ export class ArgoStatusService {
   }
 
   /**
+   * Poll Application status once (for continuous monitoring)
+   * Returns current status snapshot without retries
+   */
+  async pollApplicationStatus(clientId: string): Promise<{
+    syncStatus: string;
+    healthStatus: string;
+    operationPhase?: string;
+    isReady: boolean;
+    message?: string;
+  } | null> {
+    try {
+      const app = await this.getApplicationStatus(clientId);
+
+      if (!app) {
+        return null;
+      }
+
+      const syncStatus = app.status.sync.status;
+      const healthStatus = app.status.health.status;
+      const operationPhase = app.status.operationState?.phase;
+      const isReady = this.isReadyState(syncStatus, healthStatus, operationPhase);
+
+      return {
+        syncStatus,
+        healthStatus,
+        operationPhase,
+        isReady,
+        message: app.status.health.message || app.status.operationState?.message,
+      };
+    } catch (error: any) {
+      logger.error('Failed to poll Application status', {
+        clientId,
+        error: error.message,
+      });
+      return null;
+    }
+  }
+
+  /**
    * Sleep utility
    */
   private sleep(ms: number): Promise<void> {

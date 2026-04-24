@@ -8,3 +8,4 @@ export * as CustomerModel from './customer-model';
 export * as SubscriptionModel from './subscription-model';
 export * as LicenseHistoryModel from './license-history-model';
 export * as UsageReportModel from './usage-report-model';
+export * as DeploymentMonitorModel from './deployment-monitor-model';

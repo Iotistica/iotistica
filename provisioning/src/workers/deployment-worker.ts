@@ -635,124 +635,237 @@ export class DeploymentWorker {
   // }
 
   /**
-   * Handle Argo CD monitoring job (runs separately from deployment)
-   * This picks up from 60% and completes to 100%
-   * Can block for 8-15 minutes without impacting deployment throughput
+   * Handle Argo CD monitoring job (runs continuously)
+   * 
+   * Continuously polls Argo CD every 10 seconds and records status
+   * Transitions to 'ready' when app becomes Synced + Healthy
+   * Continues running to detect any health degradation
+   * Stops when customer deleted or health becomes terminal
    */
   private async handleArgoMonitoring(job: Job<MonitorArgoJobData>) {
     const { customerId, clientId, namespace, instanceUrl } = job.data;
+    const pollIntervalMs = parseInt(process.env.MONITOR_POLL_INTERVAL_MS || '10000');
 
     console.log('\n' + '='.repeat(80));
-    console.log('👁️  STARTING ARGO CD MONITORING JOB');
+    console.log('👁️  STARTING CONTINUOUS ARGO CD MONITORING');
     console.log('='.repeat(80));
     console.log(`📋 Job ID: ${job.id}`);
     console.log(`👤 Customer ID: ${customerId}`);
     console.log(`🏷️  Client ID: ${clientId}`);
     console.log(`📦 Namespace: ${namespace}`);
-    console.log(`📊 Progress: Starting from 60% (deployment phase completed)`);
+    console.log(`🔄 Poll Interval: ${pollIntervalMs}ms`);
+    console.log(`📊 Status: Monitoring will run continuously until app is stable`);
     console.log('='.repeat(80) + '\n');
 
-    logger.info('Processing Argo CD monitoring', { customerId, clientId });
+    logger.info('Starting continuous Argo CD monitoring', { customerId, clientId, pollIntervalMs });
+
+    const { DeploymentMonitorModel } = await import('../db/deployment-monitor-model');
 
     try {
-      // Monitor job starts at 60% (where deploy job ended)
+      // Initialize monitoring record
       await job.progress(60);
+      const monitor = await DeploymentMonitorModel.initialize({
+        customer_id: customerId,
+        client_id: clientId,
+        namespace,
+        monitor_job_id: job.id?.toString(),
+      });
 
-      console.log('⏳ Waiting for Argo CD to sync and deploy application...');
-      console.log('   (This can take 8-15 minutes depending on cluster load)');
-      logger.info('Waiting for Argo CD to deploy Application', { clientId });
+      console.log('📊 Monitoring record initialized');
+      logger.info('Monitoring record initialized', { customerId, monitorId: monitor.id });
 
-      await job.progress(70);
-
-      // TEMPORARY: Use test client ID if configured (for testing while Argo CD integration is in progress)
+      // TEMPORARY: Use test client ID if configured
       const testClientId = process.env.ARGOCD_TEST_CLIENT_ID;
       const clientIdToMonitor = testClientId || clientId;
-      
+
       if (testClientId) {
         console.log(`⚠️  TEST MODE: Using existing Argo CD app: client-${testClientId}`);
-        logger.warn('Using test client ID for Argo CD monitoring', { 
+        logger.warn('Using test client ID for Argo CD monitoring', {
           actualClientId: clientId,
           testClientId,
           customerId,
         });
       }
 
-      // Wait for Argo CD (can block for 8-15 min - that's OK for this dedicated job)
-      const isReady = await argoStatusService.waitForApplicationReady(clientIdToMonitor, customerId);
+      let hasReachedReady = false;
+      let consecutiveSuccesses = 0;
+      const requiredStablePolls = 6; // 60s at 10s interval to confirm stable
 
-      await job.progress(90);
+      // Loop continuously
+      while (true) {
+        try {
+          // Check if customer still exists (might be deleted)
+          const customer = await CustomerModel.getById(customerId);
+          if (!customer) {
+            console.log('\n⚠️  Customer deleted, stopping monitoring');
+            logger.info('Customer deleted, stopping monitoring', { customerId });
+            await DeploymentMonitorModel.stopMonitoring(customerId, 'customer_deleted');
+            break;
+          }
 
-      // Check if deployment is actually ready or still progressing
-      const customer = await CustomerModel.getById(customerId);
-      const finalStatus = customer?.deployment_status;
-      
-      // If monitoring timed out but deployment is still progressing, that's OK
-      // (Argo CD continues syncing in the background)
-      if (!isReady && finalStatus !== 'deploying') {
-        throw new Error('Argo CD deployment did not reach healthy state within timeout');
+          // Poll Argo CD once
+          const status = await argoStatusService.pollApplicationStatus(clientIdToMonitor);
+
+          if (!status) {
+            console.log('⚠️  Application not found, retrying...');
+            logger.warn('Application not found during poll', { clientId: clientIdToMonitor });
+            await this.sleep(pollIntervalMs);
+            continue;
+          }
+
+          // Record status to database
+          await DeploymentMonitorModel.updateStatus(customerId, {
+            health_status: status.healthStatus,
+            sync_status: status.syncStatus,
+            operation_phase: status.operationPhase,
+            status_message: status.message,
+          });
+
+          const pollCount = (monitor.poll_count || 0) + 1;
+          const timestamp = new Date().toISOString();
+
+          console.log(`\n[${timestamp}] Poll #${pollCount}`);
+          console.log(`  📊 Health: ${status.healthStatus}`);
+          console.log(`  🔄 Sync: ${status.syncStatus}`);
+          console.log(`  ⚙️  Operation: ${status.operationPhase}`);
+          console.log(`  ✅ Ready: ${status.isReady}`);
+          if (status.message) {
+            console.log(`  💬 Message: ${status.message}`);
+          }
+
+          // Check readiness
+          if (status.isReady) {
+            if (!hasReachedReady) {
+              // First time reaching ready
+              hasReachedReady = true;
+              consecutiveSuccesses = 1;
+
+              await DeploymentMonitorModel.markReady(customerId);
+              await CustomerModel.updateDeploymentStatus(customerId, 'ready', {
+                instanceNamespace: namespace,
+                instanceUrl,
+                deploymentError: '',
+              });
+
+              console.log(`\n✅ Application is ready! (Poll #${pollCount})`);
+              console.log(`   Continuing to monitor for stability (need ${requiredStablePolls} consecutive polls)...`);
+              logger.info('Application reached ready state', { customerId, pollCount });
+            } else {
+              consecutiveSuccesses++;
+              console.log(`✅ Stable (${consecutiveSuccesses}/${requiredStablePolls})`);
+
+              // Stop after stable polling
+              if (consecutiveSuccesses >= requiredStablePolls) {
+                console.log('\n' + '='.repeat(80));
+                console.log('✅ CONTINUOUS MONITORING STOPPING - APPLICATION STABLE');
+                console.log('='.repeat(80));
+                console.log(`👤 Customer: ${customerId}`);
+                console.log(`🏷️  Client: ${clientId}`);
+                console.log(`🌐 URL: ${instanceUrl}`);
+                console.log(`✅ Final Status: ${status.healthStatus} / ${status.syncStatus}`);
+                console.log(`📊 Total Polls: ${pollCount}`);
+                console.log(`⏱️  Stopped at: ${timestamp}`);
+                console.log('='.repeat(80) + '\n');
+
+                logger.info('Monitoring stopped - application stable', {
+                  customerId,
+                  totalPolls: pollCount,
+                  consecutiveStable: consecutiveSuccesses,
+                });
+
+                await DeploymentMonitorModel.stopMonitoring(customerId, 'healthy');
+                await job.progress(100);
+
+                return {
+                  success: true,
+                  customerId,
+                  clientId,
+                  instanceUrl,
+                  stoppedAt: timestamp,
+                  reason: 'healthy',
+                  totalPolls: pollCount,
+                };
+              }
+            }
+          } else {
+            // Not ready, reset success counter
+            if (hasReachedReady && consecutiveSuccesses > 0) {
+              consecutiveSuccesses = 0;
+              console.log('⚠️  Health degraded, restarting stability check');
+              logger.warn('Health degraded after reaching ready', {
+                customerId,
+                status,
+              });
+            }
+
+            // Check for terminal health failure
+            const isTerminalFailure =
+              (status.healthStatus === 'Degraded' || status.healthStatus === 'Missing') &&
+              status.syncStatus === 'Synced' &&
+              status.operationPhase !== 'Running';
+
+            if (isTerminalFailure) {
+              console.log('\n' + '='.repeat(80));
+              console.log('❌ CONTINUOUS MONITORING STOPPING - HEALTH FAILED');
+              console.log('='.repeat(80));
+              console.log(`👤 Customer: ${customerId}`);
+              console.log(`🏷️  Client: ${clientId}`);
+              console.log(`❌ Health Status: ${status.healthStatus}`);
+              console.log(`💬 Message: ${status.message}`);
+              console.log(`📊 Total Polls: ${pollCount}`);
+              console.log(`⏱️  Stopped at: ${timestamp}`);
+              console.log('='.repeat(80) + '\n');
+
+              logger.error('Monitoring stopped - health failed', {
+                customerId,
+                pollCount,
+                healthStatus: status.healthStatus,
+                message: status.message,
+              });
+
+              await CustomerModel.updateDeploymentStatus(customerId, 'argo_failed', {
+                deploymentError: `Health failed: ${status.healthStatus} - ${status.message}`,
+              });
+
+              await DeploymentMonitorModel.stopMonitoring(customerId, 'degraded');
+              await job.progress(100);
+
+              return {
+                success: false,
+                customerId,
+                clientId,
+                stoppedAt: timestamp,
+                reason: 'degraded',
+                totalPolls: pollCount,
+                healthStatus: status.healthStatus,
+              };
+            }
+
+            console.log(`⏳ Still deploying, waiting...`);
+          }
+
+          // Wait before next poll
+          await this.sleep(pollIntervalMs);
+
+          // Update job progress periodically
+          const progressPercent = Math.min(90, 60 + (pollCount % 30));
+          await job.progress(progressPercent);
+        } catch (pollError: any) {
+          logger.error('Error during polling cycle', {
+            customerId,
+            error: pollError.message,
+          });
+
+          console.log(`\n⚠️  Poll error: ${pollError.message}`);
+          console.log('   Retrying in next cycle...\n');
+
+          // Continue monitoring even if single poll fails
+          await this.sleep(pollIntervalMs);
+        }
       }
-      
-      if (finalStatus === 'deploying') {
-        // Argo CD monitoring timed out but deployment is still progressing
-        console.log('\n' + '='.repeat(80));
-        console.log('⏳ ARGO CD MONITORING COMPLETED (Deployment Still Progressing)');
-        console.log('='.repeat(80));
-        console.log(`👤 Customer: ${customerId}`);
-        console.log(`🏷️  Client: ${clientId}`);
-        console.log(`🌐 URL: ${instanceUrl}`);
-        console.log(`⏳ Status: Argo CD is still syncing in the background`);
-        console.log(`📋 Note: Check Argo CD UI at https://argocd.iotistica.com for real-time progress`);
-        console.log(`⏱️  Monitoring stopped at: ${new Date().toISOString()}`);
-        console.log('='.repeat(80) + '\n');
-
-        logger.info('Argo CD monitoring completed (deployment still progressing)', { customerId, clientId });
-
-        await job.progress(100);
-
-        return {
-          success: true,
-          customerId,
-          clientId,
-          instanceUrl,
-          completedAt: new Date().toISOString(),
-          note: 'Deployment is still progressing in Argo CD',
-        };
-      }
-
-      // Update customer deployment status to 'ready'
-      console.log('\n🔄 Updating customer status to: ready');
-      console.log(`🌐 Instance URL: ${instanceUrl}`);
-      await CustomerModel.updateDeploymentStatus(customerId, 'ready', {
-        instanceNamespace: namespace,
-        instanceUrl,
-        deploymentError: '',
-      });
-
-      await job.progress(100);
-
-      console.log('\n' + '='.repeat(80));
-      console.log('✅ ARGO CD MONITORING COMPLETED (60% → 100%)');
-      console.log('='.repeat(80));
-      console.log(`👤 Customer: ${customerId}`);
-      console.log(`🏷️  Client: ${clientId}`);
-      console.log(`🌐 URL: ${instanceUrl}`);
-      console.log(`✅ Status: Application reached acceptable Argo CD ready state`);
-      console.log(`⏱️  Completed at: ${new Date().toISOString()}`);
-      console.log('='.repeat(80) + '\n');
-
-      logger.info('Argo CD monitoring completed successfully', { customerId, clientId });
-
-      return {
-        success: true,
-        customerId,
-        clientId,
-        instanceUrl,
-        completedAt: new Date().toISOString(),
-      };
-
     } catch (error: any) {
       console.log('\n' + '='.repeat(80));
-      console.log('❌ ARGO CD MONITORING FAILED');
+      console.log('❌ CONTINUOUS MONITORING FAILED');
       console.log('='.repeat(80));
       console.log(`👤 Customer ID: ${customerId}`);
       console.log(`🏷️  Client ID: ${clientId}`);
@@ -763,17 +876,27 @@ export class DeploymentWorker {
       }
       console.log('='.repeat(80) + '\n');
 
-      logger.error('Argo CD monitoring failed', { customerId, clientId, error: error.message, stack: error.stack });
-
-      // Update customer status to argo_failed (specific to Argo CD sync failures)
-      await CustomerModel.updateDeploymentStatus(
+      logger.error('Continuous monitoring failed', {
         customerId,
-        'argo_failed',
-        { deploymentError: `Argo CD sync failed: ${error.message}` }
-      );
+        clientId,
+        error: error.message,
+        stack: error.stack,
+      });
 
-      throw error; // Bull will handle retry
+      await DeploymentMonitorModel.stopMonitoring(customerId, 'manual_stop');
+      await CustomerModel.updateDeploymentStatus(customerId, 'argo_failed', {
+        deploymentError: `Monitoring failed: ${error.message}`,
+      });
+
+      throw error;
     }
+  }
+
+  /**
+   * Sleep utility
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   /**
