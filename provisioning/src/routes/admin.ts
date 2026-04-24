@@ -5,6 +5,8 @@ import { deploymentQueue, DeploymentJobData, DeleteJobData } from '../services/d
 import { APIMigrationService, PostgresProvisioningService } from '../services/postgres-provisioning-service';
 import { CustomerModel } from '../db/customer-model';
 import { SubscriptionModel } from '../db/subscription-model';
+import { StripeService } from '../services/stripe-service';
+import { Auth0UserService } from '../services/auth0-user-service';
 import { query } from '../db/connection';
 import { logger } from '../utils/logger';
 
@@ -531,7 +533,7 @@ router.get('/customers/:id', async (req: Request, res: Response) => {
 
 /**
  * POST /api/admin/customers
- * Manually create a customer (admin provisioning, no Stripe).
+ * Manually create a customer using the Stripe-backed onboarding path.
  * Body: { email, company_name, full_name?, plan? }
  */
 router.post('/customers', async (req: Request, res: Response) => {
@@ -547,18 +549,47 @@ router.post('/customers', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'email is required' });
     }
 
+    const normalizedPlan = plan || 'starter';
+    if (!['starter', 'professional', 'enterprise'].includes(normalizedPlan)) {
+      return res.status(400).json({ error: 'Invalid plan' });
+    }
+
     const existing = await CustomerModel.getByEmail(email);
     if (existing) return res.status(409).json({ error: 'A customer with this email already exists' });
 
+    const auth0Provisioning = await Auth0UserService.ensureUserAndSendPasswordSetup({
+      email,
+      fullName: full_name,
+      username: email,
+    });
+
     const customer = await CustomerModel.create({ email, companyName: company_name, fullName: full_name });
 
-    if (plan) {
-      await SubscriptionModel.createTrial(customer.customer_id, plan, 14);
-    }
+    const subscription = await StripeService.createTrialSubscription({
+      customerId: customer.customer_id,
+      plan: normalizedPlan,
+      trialDays: 14,
+      source: 'admin_create_customer',
+    });
 
-    insertAuditLog('admin_create_customer', { customerId: customer.customer_id, email, plan }, req).catch(() => {});
+    insertAuditLog(
+      'admin_create_customer',
+      {
+        customerId: customer.customer_id,
+        email,
+        plan: normalizedPlan,
+        auth0UserCreated: auth0Provisioning.created,
+        auth0PasswordSetupEmailSent: auth0Provisioning.passwordSetupEmailSent,
+        stripeSubscriptionId: subscription.stripe_subscription_id,
+      },
+      req
+    ).catch(() => {});
 
-    res.status(201).json({ customer });
+    res.status(201).json({
+      customer,
+      subscription,
+      auth0: auth0Provisioning,
+    });
   } catch (error) {
     logger.error('[admin] Failed to create customer', { error: error instanceof Error ? error.message : String(error) });
     res.status(500).json({ error: 'Failed to create customer' });

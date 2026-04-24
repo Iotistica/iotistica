@@ -1307,13 +1307,11 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
     // Trial flow: create Stripe trial subscription now (webhook will queue deployment)
     if (selectedPlan === 'trial') {
       const stripeSecret = process.env.STRIPE_SECRET_KEY;
-      const starterPrice = process.env.STRIPE_PRICE_STARTER;
 
-      if (!stripeSecret || !starterPrice) {
+      if (!stripeSecret) {
         logger.error('[Signup] Stripe configuration missing for trial signup', {
           customerId,
           hasStripeSecret: Boolean(stripeSecret),
-          hasStarterPrice: Boolean(starterPrice),
         });
         return res.status(500).json({
           error: 'Billing configuration error',
@@ -1321,51 +1319,16 @@ router.post('/complete-signup', async (req: Request, res: Response) => {
         });
       }
 
-      const stripe = require('stripe')(stripeSecret);
-
-      const existingStripeCustomers = await stripe.customers.list({ email, limit: 1 });
-      let stripeCustomerId: string;
-
-      if (existingStripeCustomers.data.length > 0) {
-        stripeCustomerId = existingStripeCustomers.data[0].id;
-      } else {
-        const stripeCustomer = await stripe.customers.create({
-          email,
-          name: companyName || name,
-          metadata: {
-            customer_id: customerId,
-            company_name: companyName,
-            source: 'complete_signup',
-          },
-        });
-        stripeCustomerId = stripeCustomer.id;
-      }
-
-      await query(
-        `UPDATE customers
-         SET stripe_customer_id = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE customer_id = $2`,
-        [stripeCustomerId, customerId]
-      );
-
-      const trialEndTimestamp = Math.floor(Date.now() / 1000) + (14 * 24 * 60 * 60);
-      const subscription = await stripe.subscriptions.create({
-        customer: stripeCustomerId,
-        items: [{ price: starterPrice }],
-        trial_end: trialEndTimestamp,
-        cancel_at_period_end: true,
-        metadata: {
-          customer_id: customerId,
-          plan: 'trial',
-          is_trial: 'true',
-          source: 'complete_signup',
-        },
+      const subscription = await StripeService.createTrialSubscription({
+        customerId,
+        plan: 'starter',
+        trialDays: 14,
+        source: 'complete_signup',
       });
 
       logger.info('[Signup] Trial subscription created from complete-signup', {
         customerId,
-        stripeCustomerId,
-        subscriptionId: subscription.id,
+        subscriptionId: subscription.stripe_subscription_id,
       });
     } else {
       // Paid flow: create checkout session, Stripe webhooks will create subscription and queue deployment

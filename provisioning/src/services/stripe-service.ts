@@ -21,6 +21,117 @@ const PRICE_IDS = {
 };
 
 export class StripeService {
+  private static getPriceId(plan: Subscription['plan']): string {
+    if (plan === 'professional') {
+      return PRICE_IDS.professional;
+    }
+
+    if (plan === 'enterprise') {
+      return PRICE_IDS.enterprise;
+    }
+
+    return PRICE_IDS.starter;
+  }
+
+  private static async ensureStripeCustomerId(customerId: string): Promise<string> {
+    const customer = await CustomerModel.getById(customerId);
+    if (!customer) {
+      throw new Error('Customer not found');
+    }
+
+    if (customer.stripe_customer_id) {
+      return customer.stripe_customer_id;
+    }
+
+    const stripeCustomer = await stripe.customers.create({
+      email: customer.email,
+      metadata: {
+        customer_id: customer.customer_id,
+      },
+    });
+
+    await CustomerModel.update(customer.customer_id, {
+      stripe_customer_id: stripeCustomer.id,
+    });
+
+    return stripeCustomer.id;
+  }
+
+  static async createTrialSubscription(data: {
+    customerId: string;
+    plan: Subscription['plan'];
+    trialDays?: number;
+    source?: string;
+  }): Promise<Subscription> {
+    const customer = await CustomerModel.getById(data.customerId);
+    if (!customer) {
+      throw new Error('Customer not found');
+    }
+
+    const stripeCustomerId = await this.ensureStripeCustomerId(customer.customer_id);
+    const trialDays = data.trialDays ?? 14;
+    const trialEndTimestamp = Math.floor(Date.now() / 1000) + trialDays * 24 * 60 * 60;
+
+    const stripeSubscription = await stripe.subscriptions.create({
+      customer: stripeCustomerId,
+      items: [{ price: this.getPriceId(data.plan) }],
+      trial_end: trialEndTimestamp,
+      cancel_at_period_end: true,
+      metadata: {
+        customer_id: customer.customer_id,
+        plan: data.plan,
+        is_trial: 'true',
+        source: data.source || 'provisioning',
+      },
+    });
+
+    const trialEndsAt = stripeSubscription.trial_end
+      ? new Date(stripeSubscription.trial_end * 1000)
+      : new Date(trialEndTimestamp * 1000);
+    const currentPeriodStart = new Date(stripeSubscription.current_period_start * 1000);
+    const currentPeriodEndsAt = new Date(stripeSubscription.current_period_end * 1000);
+    const existingSubscription = await SubscriptionModel.getByCustomerId(customer.customer_id);
+
+    if (existingSubscription) {
+      return SubscriptionModel.update(customer.customer_id, {
+        stripe_subscription_id: stripeSubscription.id,
+        plan: data.plan,
+        status: stripeSubscription.status as Subscription['status'],
+        current_period_start: currentPeriodStart,
+        current_period_ends_at: currentPeriodEndsAt,
+        trial_ends_at: trialEndsAt,
+      });
+    }
+
+    const result = await pool.query<Subscription>(
+      `INSERT INTO subscriptions (
+         customer_id,
+         stripe_subscription_id,
+         plan,
+         status,
+         current_period_start,
+         current_period_ends_at,
+         trial_ends_at,
+         cancel_at_period_end,
+         created_at,
+         updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       RETURNING *`,
+      [
+        customer.customer_id,
+        stripeSubscription.id,
+        data.plan,
+        stripeSubscription.status,
+        currentPeriodStart,
+        currentPeriodEndsAt,
+        trialEndsAt,
+        stripeSubscription.cancel_at_period_end || false,
+      ]
+    );
+
+    return result.rows[0];
+  }
+
   /**
    * Create checkout session for subscription
    */
@@ -35,22 +146,7 @@ export class StripeService {
       throw new Error('Customer not found');
     }
 
-    // Get or create Stripe customer
-    let stripeCustomerId = customer.stripe_customer_id;
-    if (!stripeCustomerId) {
-      const stripeCustomer = await stripe.customers.create({
-        email: customer.email,
-        metadata: {
-          customer_id: customer.customer_id,
-        },
-      });
-      stripeCustomerId = stripeCustomer.id;
-
-      // Update customer with Stripe ID
-      await CustomerModel.update(customer.customer_id, {
-        stripe_customer_id: stripeCustomerId,
-      });
-    }
+    const stripeCustomerId = await this.ensureStripeCustomerId(customer.customer_id);
 
     // Create checkout session
     const session = await stripe.checkout.sessions.create({
@@ -59,7 +155,7 @@ export class StripeService {
       payment_method_types: ['card'],
       line_items: [
         {
-          price: PRICE_IDS[data.plan],
+          price: this.getPriceId(data.plan),
           quantity: 1,
         },
       ],
