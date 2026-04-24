@@ -110,8 +110,8 @@ services:
       # Base configuration
       BASE_DOMAIN: ${BASE_DOMAIN:-iotistica.com}
       
-      # Database Provisioning Provider (tigerdata or postgres)
-      PROVISIONING_DB_PROVIDER: ${PROVISIONING_DB_PROVIDER:-tigerdata}
+      # Database Provisioning Provider (required: tigerdata|postgres|cnpg)
+      PROVISIONING_DB_PROVIDER: ${PROVISIONING_DB_PROVIDER}
 
       # TigerData API (TimescaleDB provisioning) – used when PROVISIONING_DB_PROVIDER=tigerdata
       TIGERDATA_API_URL: ${TIGERDATA_API_URL:-https://console.cloud.timescale.com/public/api/v1}
@@ -228,8 +228,8 @@ services:
       # Base configuration
       BASE_DOMAIN: ${BASE_DOMAIN:-iotistic.com}
       
-      # Database Provisioning Provider (tigerdata or postgres)
-      PROVISIONING_DB_PROVIDER: ${PROVISIONING_DB_PROVIDER:-tigerdata}
+      # Database Provisioning Provider (required: tigerdata|postgres|cnpg)
+      PROVISIONING_DB_PROVIDER: ${PROVISIONING_DB_PROVIDER}
 
       # TigerData API (TimescaleDB provisioning) – used when PROVISIONING_DB_PROVIDER=tigerdata
       TIGERDATA_API_URL: ${TIGERDATA_API_URL:-https://console.cloud.timescale.com/public/api/v1}

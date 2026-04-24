@@ -73,7 +73,7 @@ export class GitOpsProvisioningService {
   private config: GitOpsConfig;
   private initialized = false;
   private dbProvider: 'tigerdata' | 'postgres' | 'cnpg';
-  private tigerDataService: TigerDataService;
+  private tigerDataService?: TigerDataService;
   private postgresProvisioningService?: PostgresProvisioningService;
   private onePasswordService: OnePasswordService;
   private argoStatusService: ArgoStatusService;
@@ -101,17 +101,25 @@ export class GitOpsProvisioningService {
     });
 
     // Select database provisioning provider (PROVISIONING_DB_PROVIDER=tigerdata|postgres|cnpg)
-    const rawProvider = (process.env.PROVISIONING_DB_PROVIDER ?? 'tigerdata').toLowerCase();
+    // No fallback: provider must be explicitly configured.
+    const rawProvider = (process.env.PROVISIONING_DB_PROVIDER || '').trim().toLowerCase();
     if (rawProvider === 'cnpg') {
       this.dbProvider = 'cnpg';
     } else if (rawProvider === 'postgres') {
       this.dbProvider = 'postgres';
-    } else {
+    } else if (rawProvider === 'tigerdata') {
       this.dbProvider = 'tigerdata';
+    } else {
+      throw new Error(
+        `Invalid PROVISIONING_DB_PROVIDER value: '${process.env.PROVISIONING_DB_PROVIDER || ''}'. ` +
+          `Expected one of: tigerdata, postgres, cnpg`
+      );
     }
 
     // Initialize provisioning services
-    this.tigerDataService = new TigerDataService();
+    if (this.dbProvider === 'tigerdata') {
+      this.tigerDataService = new TigerDataService();
+    }
     if (this.dbProvider === 'postgres' || this.dbProvider === 'cnpg') {
       // postgres-provisioning-service is reused for cnpg: generateCnpgCredentials() only,
       // no DDL is executed (database + role creation is handled by CNPG operator + db-init job).
@@ -381,6 +389,9 @@ export class GitOpsProvisioningService {
           if (this.dbProvider === 'postgres') {
             dbResult = await this.postgresProvisioningService!.provisionDatabase(data.namespace);
           } else {
+            if (!this.tigerDataService) {
+              throw new Error('TigerData service is not initialized for provider=tigerdata');
+            }
             dbResult = await this.tigerDataService.provisionDatabase(data.namespace);
           }
 
@@ -405,6 +416,9 @@ export class GitOpsProvisioningService {
             if (this.dbProvider === 'postgres') {
               await this.postgresProvisioningService!.waitUntilReady(dbResult.serviceId);
             } else {
+              if (!this.tigerDataService) {
+                throw new Error('TigerData service is not initialized for provider=tigerdata');
+              }
               await this.tigerDataService.waitUntilReady(dbResult.serviceId);
             }
             console.log(`Database is ready!`);
@@ -1089,6 +1103,9 @@ export class GitOpsProvisioningService {
               provider: effectiveDbProvider,
             });
           } else {
+            if (!this.tigerDataService) {
+              throw new Error('TigerData service is not initialized for provider=tigerdata');
+            }
             await this.tigerDataService.deleteDatabase(customer.db_service_id);
             console.log('   TigerData database deleted successfully');
             logger.info('TigerData database deleted', {
