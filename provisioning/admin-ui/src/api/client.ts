@@ -56,7 +56,7 @@ export async function createCustomer(data: {
   email: string;
   company_name?: string;
   full_name?: string;
-  plan?: 'starter' | 'professional' | 'enterprise';
+  plan?: 'trial' | 'starter' | 'professional' | 'enterprise';
 }): Promise<{ customer: Customer }> {
   return request('/api/admin/customers', {
     method: 'POST',

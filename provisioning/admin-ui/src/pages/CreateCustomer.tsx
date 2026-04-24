@@ -7,7 +7,7 @@ export default function CreateCustomer() {
   const [email, setEmail] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [fullName, setFullName] = useState('');
-  const [plan, setPlan] = useState<'starter' | 'professional' | 'enterprise'>('starter');
+  const [plan, setPlan] = useState<'trial' | 'starter' | 'professional' | 'enterprise'>('trial');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -86,6 +86,7 @@ export default function CreateCustomer() {
               onChange={(e) => setPlan(e.target.value as typeof plan)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
+              <option value="trial">Trial</option>
               <option value="starter">Starter</option>
               <option value="professional">Professional</option>
               <option value="enterprise">Enterprise</option>
