@@ -68,5 +68,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     </AuthContext.Provider>
   );
 };
-  return context;
 }
