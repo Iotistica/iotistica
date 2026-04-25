@@ -7,9 +7,10 @@ import crypto from 'crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import { fetch } from 'undici';
 import { query } from '../../db/connection';
-import { jwtAuth, requireRole } from '../../middleware/jwt-auth';
+import { generateAccessToken, generateRefreshToken, jwtAuth, requireRole } from '../../middleware/jwt-auth';
 import { clearMqttAuthCaches } from '../../mqtt/auth-cache';
 import * as authService from '../../services/auth/auth';
+import { getTenantIdFromHost } from '../../services/auth/tenant-resolution';
 import logger from '../../utils/logger';
 import { hashPassword } from '../../utils/secret-hashing';
 
@@ -27,6 +28,10 @@ type RegisterBody = {
 type LoginBody = {
   username?: string;
   password?: string;
+};
+
+type Auth0ExchangeBody = {
+  auth0Token?: string;
 };
 
 type BootstrapAdminBody = {
@@ -211,6 +216,149 @@ const plugin: FastifyPluginAsync = async (fastify) => {
       reply.status(500).send({
         error: 'Internal Server Error',
         message: 'Login failed',
+      });
+    }
+  });
+
+  fastify.post<{ Body: Auth0ExchangeBody }>('/auth0-exchange', async (req, reply) => {
+    try {
+      const bodyToken = req.body?.auth0Token;
+      const authHeader = getHeaderValue(req.headers.authorization);
+      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+      const auth0Token = bodyToken || bearerToken;
+
+      if (!auth0Token) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'auth0Token is required',
+        });
+      }
+
+      const auth0Domain = process.env.AUTH0_DOMAIN;
+      if (!auth0Domain) {
+        return reply.status(500).send({
+          error: 'Internal Server Error',
+          message: 'AUTH0_DOMAIN is not configured',
+        });
+      }
+
+      const userInfoResponse = await fetch(`https://${auth0Domain}/userinfo`, {
+        headers: {
+          Authorization: `Bearer ${auth0Token}`,
+        },
+      });
+
+      if (!userInfoResponse.ok) {
+        return reply.status(401).send({
+          error: 'Unauthorized',
+          message: 'Invalid Auth0 token',
+        });
+      }
+
+      const userInfo = await userInfoResponse.json() as { sub?: string; email?: string; name?: string; nickname?: string };
+      const auth0Sub = userInfo.sub;
+      const email = userInfo.email;
+
+      if (!auth0Sub || !email) {
+        return reply.status(401).send({
+          error: 'Unauthorized',
+          message: 'Auth0 token is missing required claims',
+        });
+      }
+
+      let customerId: string;
+      try {
+        customerId = getTenantIdFromHost(req.hostname);
+      } catch {
+        const headerTenantId = getHeaderValue(req.headers['x-tenant-id']) || getHeaderValue(req.headers['x-customer-id']);
+        const envTenantId = process.env.CUSTOMER_ID || process.env.DEVELOPMENT_TENANT_ID;
+        customerId = headerTenantId || envTenantId || '';
+      }
+
+      if (!customerId) {
+        return reply.status(400).send({
+          error: 'Bad Request',
+          message: 'Unable to determine tenant context',
+        });
+      }
+
+      const provisioningApiUrl = process.env.PROVISIONING_API_URL || 'http://provisioning:3100';
+      const internalAuthToken = process.env.INTERNAL_AUTH_TOKEN || '';
+
+      const roleResponse = await fetch(
+        `${provisioningApiUrl}/api/internal/users/${encodeURIComponent(auth0Sub)}/tenants/${encodeURIComponent(customerId)}/role`,
+        {
+          headers: {
+            ...(internalAuthToken ? { 'X-Internal-Token': internalAuthToken } : {}),
+          },
+        }
+      );
+
+      if (roleResponse.status === 404) {
+        return reply.status(403).send({
+          error: 'Forbidden',
+          message: 'User is not assigned to this tenant',
+        });
+      }
+
+      if (!roleResponse.ok) {
+        const details = await roleResponse.text();
+        logger.error('Auth0 exchange RBAC lookup failed', {
+          status: roleResponse.status,
+          details,
+          customerId,
+          auth0Sub,
+        });
+        return reply.status(502).send({
+          error: 'Bad Gateway',
+          message: 'Failed to resolve tenant role',
+        });
+      }
+
+      const rolePayload = await roleResponse.json() as { data?: { role?: string; customer_status?: string } };
+      const role = rolePayload.data?.role || 'viewer';
+      const customerStatus = rolePayload.data?.customer_status;
+
+      if (customerStatus === 'suspended') {
+        return reply.status(403).send({
+          error: 'Forbidden',
+          message: 'Customer account is suspended',
+        });
+      }
+
+      const tokenUser = {
+        id: 0,
+        username: auth0Sub,
+        email,
+        role,
+        auth0Sub,
+        customerId,
+      };
+
+      const accessToken = generateAccessToken(tokenUser);
+      const refreshToken = generateRefreshToken(tokenUser);
+
+      return reply.status(200).send({
+        message: 'Auth0 token exchange successful',
+        data: {
+          accessToken,
+          refreshToken,
+          user: {
+            id: 0,
+            username: auth0Sub,
+            email,
+            role,
+            customerId,
+            auth0Sub,
+            name: userInfo.name || userInfo.nickname || email,
+          },
+        },
+      });
+    } catch (error: any) {
+      logger.error('Auth0 exchange error', { error: error.message, stack: error.stack });
+      return reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Auth0 token exchange failed',
       });
     }
   });

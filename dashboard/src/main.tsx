@@ -11,6 +11,7 @@ import { MetricsHistoryProvider } from "./contexts/MetricsHistoryContext";
 import { MqttProvider } from "./contexts/MqttContext";
 import { SystemMetricsProvider } from "./contexts/SystemMetricsContext";
 import { FleetProvider } from "./contexts/FleetContext";
+import { CallbackPage } from "./pages/CallbackPage";
 
 createRoot(document.getElementById("root")!).render(
   <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
@@ -22,6 +23,7 @@ createRoot(document.getElementById("root")!).render(
               <MqttProvider>
                 <BrowserRouter>
                   <Routes>
+                    <Route path="/auth/callback" element={<CallbackPage />} />
                     <Route path="/fleets/:fleetId/agents/:agentId/:view" element={<App />} />
                     <Route path="/fleets/:fleetId/agents/:agentId" element={<App />} />
                     <Route path="/fleets/:fleetId" element={<App />} />
