@@ -235,7 +235,9 @@ jobs:
           name: Provisioning ${{ needs.prepare.outputs.release_version }}
           body_path: changelog.txt
           draft: false
-          prerelease: ${{ contains(needs.prepare.outputs.release_version, '-rc.') }}
+          # Keep provisioning releases out of /releases/latest selection used by customer image resolver.
+          prerelease: true
+          make_latest: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

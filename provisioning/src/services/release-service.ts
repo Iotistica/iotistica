@@ -20,6 +20,24 @@ export class ReleaseService {
   private cachedVersion: string | null = null;
   private cacheTimestamp: number = 0;
   private cacheTTL = 5 * 60 * 1000; // 5 minutes
+  // Default accepts app tags like v1.2.3, v1.2.3-rc.1, v1.2.3+meta.
+  // Override with RELEASE_DEPLOYABLE_TAG_REGEX if needed.
+  private deployableTagPattern = new RegExp(
+    process.env.RELEASE_DEPLOYABLE_TAG_REGEX || '^v\\d+\\.\\d+\\.\\d+(?:[-+].*)?$'
+  );
+
+  private isDeployableTag(tag: string): boolean {
+    if (!tag) {
+      return false;
+    }
+
+    // Guardrail: never allow provisioning release tags for customer workload images.
+    if (tag.toLowerCase().startsWith('provisioning-')) {
+      return false;
+    }
+
+    return this.deployableTagPattern.test(tag);
+  }
 
   /**
    * Get the current stable release version from GitHub
@@ -53,12 +71,13 @@ export class ReleaseService {
 
       const release = response.data;
 
-      // Validate that it's a stable release (not draft or prerelease)
-      if (release.draft || release.prerelease) {
-        logger.warn('Latest release is draft or prerelease, fetching stable releases', {
+      // Validate that it's deployable (stable + allowed tag format).
+      if (release.draft || release.prerelease || !this.isDeployableTag(release.tag_name)) {
+        logger.warn('Latest release is not deployable, fetching stable deployable release', {
           tagName: release.tag_name,
           draft: release.draft,
           prerelease: release.prerelease,
+          deployable: this.isDeployableTag(release.tag_name),
         });
         return this.getLatestStableRelease();
       }
@@ -98,8 +117,8 @@ export class ReleaseService {
   }
 
   /**
-   * Get the latest stable release (non-draft, non-prerelease)
-   * Used as fallback when /releases/latest returns a prerelease
+   * Get the latest stable deployable release.
+   * Used as fallback when /releases/latest is not deployable.
    */
   private async getLatestStableRelease(): Promise<string> {
     try {
@@ -117,13 +136,13 @@ export class ReleaseService {
         }
       );
 
-      // Find first stable release (not draft, not prerelease)
+      // Find first stable deployable release.
       const stableRelease = response.data.find(
-        (release) => !release.draft && !release.prerelease
+        (release) => !release.draft && !release.prerelease && this.isDeployableTag(release.tag_name)
       );
 
       if (!stableRelease) {
-        throw new Error('No stable releases found');
+        throw new Error('No stable deployable releases found');
       }
 
       const version = stableRelease.tag_name;
