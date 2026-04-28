@@ -101,7 +101,7 @@ export class ReleaseService {
           prerelease: release.prerelease,
           deployable: this.isDeployableTag(release.tag_name),
         });
-        return this.getLatestStableRelease();
+        return await this.getLatestStableRelease();
       }
 
       // Validate that the iotistic/api image actually exists for this tag.
@@ -111,7 +111,7 @@ export class ReleaseService {
         logger.warn('Latest release has no iotistic/api image on Docker Hub, fetching stable deployable release', {
           tagName: release.tag_name,
         });
-        return this.getLatestStableRelease();
+        return await this.getLatestStableRelease();
       }
 
       const version = release.tag_name;
@@ -140,10 +140,6 @@ export class ReleaseService {
         return this.cachedVersion;
       }
 
-      // No cache available - fail with connection diagnostics
-      logger.error('GitHub connection failed and no cache available', {
-        hint: 'Run: provisioning/scripts/test-github-connection.ps1 to diagnose',
-      });
       throw new Error('Failed to fetch release version from GitHub and no cached version available');
     }
   }
@@ -160,18 +156,23 @@ export class ReleaseService {
           headers: {
             Accept: 'application/vnd.github.v3+json',
             'User-Agent': 'Iotistic-Provisioning-Service',
+            ...(process.env.GITOPS_PAT && {
+              Authorization: `Bearer ${process.env.GITOPS_PAT}`,
+            }),
           },
           params: {
-            per_page: 100, // Fetch up to 100 releases
+            per_page: 100,
           },
           timeout: 10000,
         }
       );
 
-      // Find first stable deployable release that also has a real iotistic/api image.
+      // Find first deployable release that also has a real iotistic/api image.
+      // Prereleases (e.g. rc.1) are allowed since all app releases may be prereleases;
+      // only drafts and provisioning-prefixed tags are excluded.
       let stableRelease: GitHubRelease | undefined;
       for (const release of response.data) {
-        if (release.draft || release.prerelease || !this.isDeployableTag(release.tag_name)) {
+        if (release.draft || !this.isDeployableTag(release.tag_name)) {
           continue;
         }
         // eslint-disable-next-line no-await-in-loop
@@ -186,7 +187,7 @@ export class ReleaseService {
       }
 
       if (!stableRelease) {
-        throw new Error('No stable deployable releases found with a published iotistic/api image');
+        throw new Error('No deployable releases found with a published iotistic/api image');
       }
 
       const version = stableRelease.tag_name;
@@ -212,7 +213,6 @@ export class ReleaseService {
         return this.cachedVersion;
       }
 
-      // No cache available - throw error
       throw new Error('Failed to fetch stable release from GitHub and no cached version available');
     }
   }
