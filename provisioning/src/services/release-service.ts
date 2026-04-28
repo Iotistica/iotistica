@@ -23,7 +23,7 @@ export class ReleaseService {
   // Default accepts app tags like v1.2.3, v1.2.3-rc.1, v1.2.3+meta.
   // Override with RELEASE_DEPLOYABLE_TAG_REGEX if needed.
   private deployableTagPattern = new RegExp(
-    process.env.RELEASE_DEPLOYABLE_TAG_REGEX || '^v\\d+\\.\\d+\\.\\d+(?:[-+].*)?$'
+    process.env.RELEASE_DEPLOYABLE_TAG_REGEX || '^v\\d+\\.\\d+\\.\\d+$'
   );
 
   private isDeployableTag(tag: string): boolean {
@@ -37,28 +37,6 @@ export class ReleaseService {
     }
 
     return this.deployableTagPattern.test(tag);
-  }
-
-  /**
-   * Validate that the iotistic/api image exists on Docker Hub for the given version.
-   * Prevents provisioning releases tagged with plain v*.*.* format from being
-   * used for customer app deployments (api, ingestion, dashboard, nodered).
-   */
-  private async appImageExists(version: string): Promise<boolean> {
-    try {
-      const response = await axios.get(
-        `https://hub.docker.com/v2/repositories/iotistic/api/tags/${encodeURIComponent(version)}/`,
-        {
-          timeout: 5000,
-          validateStatus: () => true, // don't throw on 404
-          headers: { 'User-Agent': 'Iotistica-Provisioning-Service' },
-        }
-      );
-      return response.status === 200;
-    } catch {
-      // Network error — assume image exists to avoid blocking deployment
-      return true;
-    }
   }
 
   /**
@@ -100,16 +78,6 @@ export class ReleaseService {
           draft: release.draft,
           prerelease: release.prerelease,
           deployable: this.isDeployableTag(release.tag_name),
-        });
-        return await this.getLatestStableRelease();
-      }
-
-      // Validate that the iotistic/api image actually exists for this tag.
-      // Prevents provisioning-only releases (e.g. v1.0.2) from being used for app images.
-      const imageExists = await this.appImageExists(release.tag_name);
-      if (!imageExists) {
-        logger.warn('Latest release has no iotistic/api image on Docker Hub, fetching stable deployable release', {
-          tagName: release.tag_name,
         });
         return await this.getLatestStableRelease();
       }
@@ -172,22 +140,15 @@ export class ReleaseService {
       // only drafts and provisioning-prefixed tags are excluded.
       let stableRelease: GitHubRelease | undefined;
       for (const release of response.data) {
-        if (release.draft || !this.isDeployableTag(release.tag_name)) {
+        if (release.draft || release.prerelease || !this.isDeployableTag(release.tag_name)) {
           continue;
         }
-        // eslint-disable-next-line no-await-in-loop
-        const imageExists = await this.appImageExists(release.tag_name);
-        if (imageExists) {
-          stableRelease = release;
-          break;
-        }
-        logger.warn('Skipping release — no iotistic/api image found on Docker Hub', {
-          tagName: release.tag_name,
-        });
+        stableRelease = release;
+        break;
       }
 
       if (!stableRelease) {
-        throw new Error('No deployable releases found with a published iotistic/api image');
+        throw new Error('No deployable releases found');
       }
 
       const version = stableRelease.tag_name;
