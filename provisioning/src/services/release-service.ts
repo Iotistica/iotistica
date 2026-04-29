@@ -4,14 +4,11 @@
  */
 
 import axios from 'axios';
+import semver from 'semver';
 import { logger } from '../utils/logger';
 
-interface GitHubRelease {
-  tag_name: string;
+interface GitHubTag {
   name: string;
-  draft: boolean;
-  prerelease: boolean;
-  published_at: string;
 }
 
 export class ReleaseService {
@@ -40,125 +37,58 @@ export class ReleaseService {
   }
 
   /**
-   * Get the current stable release version from GitHub
-   * Uses caching to avoid excessive API calls
+   * Get the current stable release version from GitHub.
+   * Uses git tags as the source of truth (GitHub Releases are not required).
    */
   async getCurrentStableRelease(): Promise<string> {
-    // Return cached version if still valid
     if (this.cachedVersion && Date.now() - this.cacheTimestamp < this.cacheTTL) {
       logger.info('Using cached release version', { version: this.cachedVersion });
       return this.cachedVersion;
     }
-
-    try {
-      logger.info('Fetching latest release from GitHub', {
-        repo: `${this.repoOwner}/${this.repoName}`,
-      });
-
-      const response = await axios.get<GitHubRelease>(
-        `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/releases/latest`,
-        {
-          headers: {
-            Accept: 'application/vnd.github.v3+json',
-            'User-Agent': 'Iotistic-Provisioning-Service',
-            ...(process.env.GITOPS_PAT && {
-              Authorization: `Bearer ${process.env.GITOPS_PAT}`,
-            }),
-          },
-          timeout: 10000, // 10 second timeout
-        }
-      );
-
-      const release = response.data;
-
-      // Validate that it's deployable (stable + allowed tag format).
-      if (release.draft || release.prerelease || !this.isDeployableTag(release.tag_name)) {
-        logger.warn('Latest release is not deployable, fetching stable deployable release', {
-          tagName: release.tag_name,
-          draft: release.draft,
-          prerelease: release.prerelease,
-          deployable: this.isDeployableTag(release.tag_name),
-        });
-        return await this.getLatestStableRelease();
-      }
-
-      const version = release.tag_name;
-      logger.info('Fetched latest stable release', {
-        version,
-        name: release.name,
-        publishedAt: release.published_at,
-      });
-
-      // Cache the version
-      this.cachedVersion = version;
-      this.cacheTimestamp = Date.now();
-
-      return version;
-    } catch (error: any) {
-      logger.error('Failed to fetch release from GitHub', {
-        error: error.message,
-        repo: `${this.repoOwner}/${this.repoName}`,
-      });
-
-      // Fallback to cached version if available
-      if (this.cachedVersion) {
-        logger.warn('Using stale cached version due to fetch error', {
-          version: this.cachedVersion,
-        });
-        return this.cachedVersion;
-      }
-
-      throw new Error('Failed to fetch release version from GitHub and no cached version available');
-    }
+    return this.getLatestStableRelease();
   }
 
   /**
-   * Get the latest stable deployable release.
-   * Used as fallback when /releases/latest is not deployable.
+   * Fetch all git tags from GitHub (paginated) and return the highest semver-sorted
+   * deployable tag. Git tags are the source of truth — GitHub Release objects are
+   * not required.
    */
   private async getLatestStableRelease(): Promise<string> {
     try {
-      const response = await axios.get<GitHubRelease[]>(
-        `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/releases`,
-        {
-          headers: {
-            Accept: 'application/vnd.github.v3+json',
-            'User-Agent': 'Iotistic-Provisioning-Service',
-            ...(process.env.GITOPS_PAT && {
-              Authorization: `Bearer ${process.env.GITOPS_PAT}`,
-            }),
-          },
-          params: {
-            per_page: 100,
-          },
-          timeout: 10000,
-        }
-      );
+      logger.info('Fetching tags from GitHub', {
+        repo: `${this.repoOwner}/${this.repoName}`,
+      });
 
-      // Find first deployable release that also has a real iotistic/api image.
-      // Prereleases (e.g. rc.1) are allowed since all app releases may be prereleases;
-      // only drafts and provisioning-prefixed tags are excluded.
-      let stableRelease: GitHubRelease | undefined;
-      for (const release of response.data) {
-        if (release.draft || release.prerelease || !this.isDeployableTag(release.tag_name)) {
-          continue;
-        }
-        stableRelease = release;
-        break;
+      const headers = {
+        Accept: 'application/vnd.github.v3+json',
+        'User-Agent': 'Iotistic-Provisioning-Service',
+        ...(process.env.GITOPS_PAT && {
+          Authorization: `Bearer ${process.env.GITOPS_PAT}`,
+        }),
+      };
+
+      const allTags: string[] = [];
+      for (let page = 1; page <= 10; page++) {
+        const response = await axios.get<GitHubTag[]>(
+          `https://api.github.com/repos/${this.repoOwner}/${this.repoName}/tags`,
+          { headers, params: { per_page: 100, page }, timeout: 10000 }
+        );
+        const tags = response.data;
+        allTags.push(...tags.map((t) => t.name));
+        if (tags.length < 100) break;
       }
 
-      if (!stableRelease) {
+      const stableTags = allTags
+        .filter((tag) => this.isDeployableTag(tag))
+        .sort((a, b) => semver.rcompare(semver.clean(a)!, semver.clean(b)!));
+
+      if (stableTags.length === 0) {
         throw new Error('No deployable releases found');
       }
 
-      const version = stableRelease.tag_name;
-      logger.info('Found latest stable release', {
-        version,
-        name: stableRelease.name,
-        publishedAt: stableRelease.published_at,
-      });
+      const version = stableTags[0];
+      logger.info('Found latest stable release from tags', { version });
 
-      // Cache the version
       this.cachedVersion = version;
       this.cacheTimestamp = Date.now();
 
@@ -166,7 +96,6 @@ export class ReleaseService {
     } catch (error: any) {
       logger.error('Failed to fetch stable releases', { error: error.message });
 
-      // Fallback to cached version if available
       if (this.cachedVersion) {
         logger.warn('Using cached version due to fetch error', {
           version: this.cachedVersion,
