@@ -216,9 +216,9 @@ export async function remove(network: Network) {
 }
 
 const {
-	supervisorNetworkInterface: iface,
-	supervisorNetworkGateway: gateway,
-	supervisorNetworkSubnet: subnet,
+	agentNetworkInterface: iface,
+	agentNetworkGateway: gateway,
+	agentNetworkSubnet: subnet,
 } = constants;
 
 export async function supervisorNetworkReady(): Promise<boolean> {
