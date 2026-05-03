@@ -108,7 +108,7 @@ services:
             - DB_PASSWORD=${DB_PASSWORD:-w2qm8tm693xd3b9v}
             - DB_POOL_SIZE=${DB_POOL_SIZE:-50}
             - DB_SSL=${DB_SSL:-true}
-            - DB_SSL_REJECT_UNAUTHORIZED=${DB_SSL_REJECT_UNAUTHORIZED:-false} 
+            - DB_SSL_REJECT_UNAUTHORIZED=${DB_SSL_REJECT_UNAUTHORIZED:-false}
             - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
             - MQTT_TLS_REJECT_UNAUTHORIZED=${MQTT_TLS_REJECT_UNAUTHORIZED:-false}
             - MQTT_USERNAME=${MQTT_USERNAME:-admin}
@@ -148,11 +148,6 @@ services:
             - MODBUS_TCP_HOST=${MODBUS_TCP_HOST:-iotistic-modbus-sim}
             - TAILSCALE_ENABLED=false
             # Broker Monitor (runs inside api, Redis leader election controls which replica)
-            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
-            - MQTT_USERNAME=${MQTT_USERNAME:-nodered}
-            - MQTT_PASSWORD=${MQTT_PASSWORD:-secret}
-            - MQTT_PERSIST_DB=${MQTT_PERSIST_DB:-true}
-            - MQTT_DB_SYNC_INTERVAL=${MQTT_DB_SYNC_INTERVAL:-30000}
             - MQTT_METRICS_UPDATE_INTERVAL=${MQTT_METRICS_UPDATE_INTERVAL:-5000}
             - MQTT_TOPIC_TREE_UPDATE_INTERVAL=${MQTT_TOPIC_TREE_UPDATE_INTERVAL:-5000}
             - MQTT_MAX_PAYLOAD_BYTES=${MQTT_MAX_PAYLOAD_BYTES:-65536}

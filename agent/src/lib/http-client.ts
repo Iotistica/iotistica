@@ -63,6 +63,7 @@ export interface HttpClient {
 	get<T = any>(url: string, options?: {
 		headers?: Record<string, string>;
 		timeout?: number;
+		signal?: AbortSignal;
 	}): Promise<HttpResponse<T>>;
 	
 	/**
@@ -157,6 +158,18 @@ export class FetchHttpClient implements HttpClient {
 		}
 	}
 
+	private combineSignals(signal1?: AbortSignal, signal2?: AbortSignal): AbortSignal | undefined {
+		if (!signal1 && !signal2) return undefined;
+		if (!signal1) return signal2;
+		if (!signal2) return signal1;
+		// Both signals present — combine so either abort cancels the request
+		if (typeof AbortSignal.any === 'function') {
+			return AbortSignal.any([signal1, signal2]);
+		}
+		// Fallback for runtimes without AbortSignal.any: prefer the external signal
+		return signal1;
+	}
+
 	/**
 	 * Create AbortSignal with timeout
 	 * undici supports AbortSignal natively
@@ -179,6 +192,7 @@ export class FetchHttpClient implements HttpClient {
 		options?: {
 			headers?: Record<string, string>;
 			timeout?: number;
+			signal?: AbortSignal;
 			compress?: boolean;
 			onCompressionStats?: (stats: CompressionStats) => void;
 		}
@@ -200,7 +214,7 @@ export class FetchHttpClient implements HttpClient {
 			method,
 			headers: finalHeaders,
 			body: finalBody,
-			signal: this.createAbortSignal(timeout),
+			signal: this.combineSignals(options?.signal, this.createAbortSignal(timeout)),
 			dispatcher: this.dispatcher,
 		});
 
@@ -210,6 +224,7 @@ export class FetchHttpClient implements HttpClient {
 	async get<T = any>(url: string, options?: {
 		headers?: Record<string, string>;
 		timeout?: number;
+		signal?: AbortSignal;
 	}): Promise<HttpResponse<T>> {
 		return this.request<T>('GET', url, undefined, options);
 	}

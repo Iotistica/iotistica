@@ -2,7 +2,7 @@ import type { AgentInitContext } from './context.js';
 import * as deviceActions from '../api/actions.js';
 import { LogComponents } from '../logging/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
-import { CloudSync } from '../managers/cloud-sync.js';
+import { CloudSync } from '../cloud-sync/index.js';
 import { initAnomalyDetection } from './ai.js';
 
 export async function initSync(ctx: AgentInitContext): Promise<void> {

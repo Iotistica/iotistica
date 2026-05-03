@@ -14,7 +14,7 @@ import ContainerManager from "./docker/container-manager.js";
 import { DeviceManager } from "./managers/index.js";
 import type { DeviceInfo } from "./managers/types.js";
 import { DeviceAPI } from "./api/index.js";
-import { CloudSync } from "./managers/cloud-sync.js";
+import { CloudSync } from "./cloud-sync/index.js";
 import { AgentLogger } from "./logging/agent-logger.js";
 import { LogComponents } from "./logging/types.js";
 import { CloudMqttClient } from "./mqtt";

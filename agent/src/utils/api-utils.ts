@@ -127,7 +127,7 @@ export function buildApiEndpoint(
  * buildDeviceEndpoint('http://7f05d0d2.localhost/api', 'abc-123', '/jobs/next')
  * // => 'http://7f05d0d2.localhost/api/v1/device/abc-123/jobs/next'
  */
-export function buildDeviceEndpoint(
+export function buildAgentEndpoint(
 	cloudApiEndpoint: string,
 	deviceUuid: string,
 	path: string
