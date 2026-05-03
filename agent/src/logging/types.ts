@@ -186,3 +186,92 @@ export interface ContainerLogAttachment {
 	/** Detach from container logs */
 	detach: () => Promise<void>;
 }
+
+// ============================================================================
+// Cloud Log Backend types
+// ============================================================================
+
+import type { HttpClient } from '../lib/http-client';
+
+/**
+ * Summary of dropped logs for analysis.
+ * Captures key metadata without storing full log content.
+ */
+export interface DroppedLogSummary {
+	droppedAt: number;
+	timeRange: {
+		start: number;
+		end: number;
+	};
+	totalCount: number;
+	levelCounts: {
+		error: number;
+		warn: number;
+		info: number;
+		debug: number;
+	};
+	serviceCounts: Record<string, number>;
+	errorSamples: Array<{
+		timestamp: number;
+		serviceName: string;
+		message: string;
+	}>;
+	warningSamples: Array<{
+		timestamp: number;
+		serviceName: string;
+		message: string;
+	}>;
+	estimatedBytes: number;
+	reason: 'network_failure' | 'buffer_overflow' | 'retry_exhausted' | 'storage_budget';
+}
+
+/**
+ * Cloud Log Backend Configuration
+ */
+export interface CloudLogBackendConfig {
+	cloudEndpoint: string;
+	deviceUuid: string;
+	deviceApiKey?: string;
+	/** Optional shared HTTP client for connection pooling */
+	httpClient?: HttpClient;
+	compression?: boolean;
+	batchSize?: number;
+	maxRetries?: number;
+	bufferSize?: number;
+	flushInterval?: number;
+	reconnectInterval?: number;
+	maxReconnectInterval?: number;
+	/** Path to spool directory (e.g. /var/lib/agent/log-spool) */
+	spoolPath?: string;
+	/** Max spool file size before rotation (default: 50 MB) */
+	maxSpoolSizeMb?: number;
+	/** Max total size across all spool segment files (default: 200 MB) */
+	maxTotalSpoolSizeMb?: number;
+	/** Hard cap across RAM+disk logging data (default: 256 MB) */
+	maxLogStorageMb?: number;
+	samplingRates?: {
+		error?: number;  // Default: 1.0 (100%)
+		warn?: number;   // Default: 1.0 (100%)
+		info?: number;   // Default: 1.0 (100%)
+		debug?: number;  // Default: 0.05 (5%)
+	};
+}
+
+/**
+ * Batch metadata for ACK-based durability guarantee.
+ */
+export interface LogBatch {
+	batchId: string;
+	logs: LogMessage[];
+	createdAt: number;
+	attempts: number;
+	approxBytes?: number;
+}
+
+/**
+ * ACK cursor state — tracks what has been successfully delivered to the cloud.
+ */
+export interface AckCursor {
+	lastAckBatchId?: string;
+	lastAckTime: number;
+}

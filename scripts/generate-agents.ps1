@@ -67,6 +67,9 @@ param(
     
     # Build Mode - build from source instead of using pre-built image
     [switch]$BuildFromSource,
+
+    # Force full regeneration even when existing containers are detected (skips rebuild short-circuit)
+    [switch]$Force,
     
     # Network Mode - use host network for discovery (default: true)
     [bool]$UseHostNetwork = $true,
@@ -417,6 +420,41 @@ function Resolve-StartIndex {
 
     return Get-NextAvailableAgentIndex -OutputFile $OutputFile
 }
+
+# ─── Rebuild mode detection ───────────────────────────────────────────────────
+# When a StartIndex is explicitly provided and containers already exist for that
+# range, this is a rebuild (source changed, not a new provisioning). Skip all
+# interactive prompts and just rebuild + restart using the existing compose file.
+# Pass -Force to override and do a full regeneration instead.
+if (
+    -not $Force.IsPresent -and
+    -not $Cleanup.IsPresent -and
+    $PSBoundParameters.ContainsKey('StartIndex') -and
+    (Test-AgentResourcesExist -StartIndex $StartIndex -Count $Count -OutputFile $OutputFile)
+) {
+    $composeFile = Join-Path $PSScriptRoot ".." $OutputFile
+    if (Test-Path $composeFile) {
+        Write-Host "Rebuild mode: agent-$StartIndex already exists — skipping provisioning and profile prompts." -ForegroundColor Cyan
+        Write-Host "  Compose file : $OutputFile" -ForegroundColor Gray
+        Write-Host "  Build source : $(if ($BuildFromSource) { 'yes (--build)' } else { 'no (image pull)' })" -ForegroundColor Gray
+        if ($Run) {
+            $buildFlag = if ($BuildFromSource) { '--build' } else { '' }
+            if ($buildFlag) {
+                docker compose -f $composeFile up -d --build
+            } else {
+                docker compose -f $composeFile up -d
+            }
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Write-Host "Agent(s) rebuilt and restarted." -ForegroundColor Green
+        } else {
+            Write-Host "Add -Run to start the rebuilt container." -ForegroundColor Yellow
+        }
+        exit 0
+    }
+    # Compose file missing — fall through to full generation so it gets created.
+    Write-Host "Compose file not found; running full generation..." -ForegroundColor Yellow
+}
+# ──────────────────────────────────────────────────────────────────────────────
 
 $ResolvedEnvironmentProfile = Resolve-EnvironmentProfile -RequestedProfile $EnvironmentProfile
 Apply-EnvironmentProfile -ProfileName $ResolvedEnvironmentProfile

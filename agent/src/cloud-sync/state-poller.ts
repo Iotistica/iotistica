@@ -131,8 +131,12 @@ export class StatePoller extends EventEmitter {
 
 		try {
 			this.abortController = new AbortController();
-			const executed = await this.lock.tryExecute(() => this.pollTargetState(this.abortController!.signal));
-			if (executed === undefined) {
+			let pollRan = false;
+			await this.lock.tryExecute(async () => {
+				await this.pollTargetState(this.abortController!.signal);
+				pollRan = true;
+			});
+			if (!pollRan) {
 				this.logger?.warnSync('Poll already in progress, skipping', {
 					component: LogComponents.cloudSync,
 					operation: 'poll-skip-locked',

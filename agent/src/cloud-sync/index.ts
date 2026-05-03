@@ -24,6 +24,8 @@ export class CloudSync extends EventEmitter {
 	private readonly reporter: StateReporter;
 
 	private isStarted = false;
+	private startedAt = 0;
+	private static readonly STARTUP_GRACE_MS = 30_000; // allow first poll + report to complete
 	private endpointsRef?: any;
 
 	private devicesCache: any[] | null = null;
@@ -219,6 +221,7 @@ export class CloudSync extends EventEmitter {
 			return;
 		}
 		this.isStarted = true;
+		this.startedAt = Date.now();
 
 		await this.transport.initQueue();
 		this.setupConnectionEventListeners();
@@ -280,9 +283,15 @@ export class CloudSync extends EventEmitter {
 	}
 
 	public isOperational(): boolean {
+		if (!this.isStarted) return false;
+
+		// During the startup grace window, report healthy so the health arbiter doesn't
+		// fire false-positive failures before the first poll/report have had a chance to run.
+		const withinGrace = (Date.now() - this.startedAt) < CloudSync.STARTUP_GRACE_MS;
+		if (withinGrace) return true;
+
 		const state = this.connectionMonitor.getState();
 		return (
-			this.isStarted &&
 			state.successfulPolls > 0 &&
 			state.successfulReports > 0 &&
 			this.connectionMonitor.isOnline()
