@@ -241,7 +241,7 @@ export class BACnetAdapter extends EventEmitter {
       });
 
       this.emit('device-connected', deviceConfig.name);
-      this.logger.debug(`BACnet device ${deviceConfig.name} initialized`);
+      this.logger.debug(`BACnet device ${deviceConfig.name} initialized successfully`);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

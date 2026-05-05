@@ -390,7 +390,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       // Check if reads were successful
       if (!valueResult.statusCode.isGood()) {
         invalid.push(dp.nodeId);
-        this.logger.warn(`✗ NodeID validation failed: ${dp.nodeId} (${dp.name})`, {
+        this.logger.warn(`NodeID validation failed: ${dp.nodeId} (${dp.name})`, {
           deviceName,
           statusCode: valueResult.statusCode.name,
           description: valueResult.statusCode.description
@@ -423,7 +423,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
       // Skip nodes that should be ignored (non-Variable nodes)
       if (classified === 'ignore') {
-        this.logger.debug(`⊘ Skipping non-Variable node: ${dp.nodeId} (${dp.name})`, {
+        this.logger.debug(`Skipping non-Variable node: ${dp.nodeId} (${dp.name})`, {
           deviceName,
           nodeClass
         });

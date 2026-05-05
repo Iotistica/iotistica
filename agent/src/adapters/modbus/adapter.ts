@@ -73,7 +73,7 @@ export class ModbusAdapter extends EventEmitter {
       
       const enabledDevices = this.config.devices.filter(d => d.enabled);
       
-      this.logger.debug(`Initializing ${enabledDevices.length} Modbus devices in parallel (concurrency: 10)...`);
+      this.logger.debug(`Initializing ${enabledDevices.length} Modbus devices...`);
       
       // Use allSettled to ensure one device failure doesn't block others
       const results = await Promise.allSettled(
@@ -87,9 +87,9 @@ export class ModbusAdapter extends EventEmitter {
       const failed = results.filter(r => r.status === 'rejected').length;
       
       if (failed > 0) {
-        this.logger.warn(`Device initialization complete: ${successful} succeeded, ${failed} failed`);
+        this.logger.warn(`Modbus device initialization: ${successful} succeeded, ${failed} failed`);
       } else {
-        this.logger.debug(`All ${successful} devices initialized successfully`);
+        this.logger.debug(`All ${successful} Modbus devices initialized successfully`);
       }
 
       this.running = true;
@@ -124,7 +124,7 @@ export class ModbusAdapter extends EventEmitter {
       // Disconnect all devices
       const disconnectPromises = Array.from(this.clients.values()).map(client => 
         client.disconnect().catch(error => 
-          this.logger.warn(`Error disconnecting device: ${error}`)
+          this.logger.warn(`Error disconnecting Modbus device: ${error}`)
         )
       );
       await Promise.all(disconnectPromises);
@@ -279,7 +279,7 @@ export class ModbusAdapter extends EventEmitter {
    */
   private async initializeDevice(deviceConfig: ModbusDevice): Promise<void> {
     try {
-      this.logger.debug(`Initializing device: ${deviceConfig.name}`);
+      this.logger.debug(`Initializing Modbus device: ${deviceConfig.name}`);
 
       // Create Modbus client
       const client = new ModbusClient(deviceConfig, this.logger);
@@ -303,12 +303,12 @@ export class ModbusAdapter extends EventEmitter {
 
       // Global poll loop will handle polling automatically
 
-      this.logger.debug(`Device ${deviceConfig.name} initialized successfully`);
+      this.logger.debug(`Modbus device ${deviceConfig.name} initialized successfully`);
       this.emit('device-connected', deviceConfig.name);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to initialize device ${deviceConfig.name}: ${errorMessage}`);
+      this.logger.error(`Failed to initialize Modbus device ${deviceConfig.name}: ${errorMessage}`);
 
       // Update device status
       const status = this.deviceStatuses.get(deviceConfig.name)!;
@@ -459,7 +459,7 @@ export class ModbusAdapter extends EventEmitter {
     try {
       const client = this.clients.get(deviceConfig.name);
       if (!client) {
-        this.logger.error(`No client found for ${deviceConfig.name}`);
+        this.logger.warn(`No client found for Modbus device ${deviceConfig.name}`);
         return;
       }
 
@@ -509,7 +509,7 @@ export class ModbusAdapter extends EventEmitter {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Error polling device ${deviceConfig.name}: ${errorMessage}`);
+      this.logger.warn(`Error polling Modbus device ${deviceConfig.name}: ${errorMessage}`);
       
       const pollTime = Date.now() - startTime;
 

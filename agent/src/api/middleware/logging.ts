@@ -27,7 +27,16 @@ export function setLogger(agentLogger?: AgentLogger) {
 
 export default function logging(req: Request, res: Response, next: NextFunction) {
 	const start = Date.now();
-	
+
+	// Log incoming mutating requests immediately so they appear before any async work they trigger
+	if (logger && !isHealthCheckPath(req.path) && req.method !== 'GET') {
+		logger.debugSync(`${req.method} ${req.path} received`, {
+			component: LogComponents.deviceApi,
+			method: req.method,
+			path: req.path
+		});
+	}
+
 	res.on('finish', () => {
 		const duration = Date.now() - start;
 		const logMessage = `${req.method} ${req.path}`;
@@ -48,10 +57,8 @@ export default function logging(req: Request, res: Response, next: NextFunction)
 				logger.errorSync(logMessage, undefined, context);
 			} else if (res.statusCode >= 400) {
 				logger.warnSync(logMessage, context);
-			} else if (!suppressDebugLog) {
-				// Use debug for routine successful requests to reduce cloud log volume
-				logger.debugSync(logMessage, context);
 			}
+			// 2xx: incoming request was already logged on arrival — no duplicate needed
 		} else if (!logger && !isHealthCheck && !suppressDebugLog) {
 			// Fallback to console if logger not available (skip health checks)
 			console.log(`${logMessage} - ${res.statusCode} (${duration}ms)`);

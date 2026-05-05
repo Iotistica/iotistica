@@ -114,7 +114,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
     // Get discovery targets from endpoints (those with endpointUrl but no dataPoints)
     const discoveryTargets = this.configManager?.getDiscoveryTargets?.('opcua') || [];
     
-		this.logger?.infoSync('=== OPC UA DISCOVERY PLUGIN: RECEIVED TARGETS ===', {
+		this.logger?.debugSync('OPC-UA discovery targets received', {
 			component: LogComponents.discovery + "] [" + this.protocol as any,
 			protocol: this.protocol,
 			targetCount: discoveryTargets.length,
@@ -128,7 +128,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 		});
 		
 		if (discoveryTargets.length === 0) {
-			this.logger?.warnSync('No OPC-UA discovery targets configured (need endpointUrl without dataPoints)', {
+			this.logger?.debugSync('No OPC-UA discovery targets configured (need endpointUrl without dataPoints)', {
 				component: LogComponents.discovery + "] [" + this.protocol as any,
 				protocol: this.protocol
 			});
@@ -315,7 +315,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 				
 				// Log sample of discovered nodes for verification
 				if (dataPoints.length > 0) {
-					this.logger?.infoSync(`OPC UA nodes discovered and ready to save`, {
+					this.logger?.debugSync(`OPC UA nodes discovered and ready to save`, {
 						component: LogComponents.discovery + "] [" + this.protocol as any,
 						endpointUrl: url,
 						totalNodes: dataPoints.length,

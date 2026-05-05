@@ -267,14 +267,6 @@ export class DiscoveryService extends EventEmitter {
   private async _runDiscovery(options: DiscoveryOptions, traceId: string): Promise<DiscoveredDevice[]> {
     const { trigger, validate = false, forceRun = false, protocols } = options;
 
-    this.logger?.debugSync('Discovery requested', {
-      component: LogComponents.discovery,
-      trigger,
-      validate,
-      forceRun,
-      protocols: protocols || 'all'
-    });
-
     // Check rate limiting
     if (!forceRun && !this.shouldRunDiscovery(trigger)) {
       this.logger?.debugSync('Discovery skipped due to rate limiting', {
@@ -324,7 +316,7 @@ export class DiscoveryService extends EventEmitter {
 
       // Check if plugin is available on this platform
       if (!(await plugin.isAvailable())) {
-        this.logger?.debugSync(`Plugin ${protocol} not available`, {
+        this.logger?.debugSync(`Plugin '${protocol}' not available on this platform`, {
           component: LogComponents.discovery,
           traceId
         });
@@ -350,20 +342,9 @@ export class DiscoveryService extends EventEmitter {
      
         allDiscovered.push(...discovered);
 
-        // Log discovered devices and data info
+        // Log per-protocol result only when devices were actually found
         if (discovered.length > 0) {
           this.logger?.infoSync(`${protocol.toUpperCase()} found ${discovered.length} device(s)`, {
-            component: LogComponents.discovery,
-            protocol,
-            traceId
-          });
-        }
-
-        
-
-        // Log warning if enabled protocol found zero devices (helps catch simulator/server issues)
-        if (discovered.length === 0) {
-          this.logger?.warnSync(`${protocol.toUpperCase()} discovery found 0 devices - check server is reachable`, {
             component: LogComponents.discovery,
             protocol,
             traceId
@@ -452,7 +433,7 @@ export class DiscoveryService extends EventEmitter {
 
     const duration = Date.now() - startTime;
 
-    this.logger?.debugSync(`Discovery complete: ${allDiscovered.length} devices found in ${duration}ms`, {
+    this.logger?.infoSync(`Discovery complete: ${allDiscovered.length} devices found in ${duration}ms`, {
       component: LogComponents.discovery,
       traceId,
       validated: validate,
