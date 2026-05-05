@@ -59,7 +59,7 @@ export const LogComponents = {
   cloudApi: 'CloudAPI',
   
   // Provisioning
-  deviceManager: 'DeviceManager',
+  agentManager: 'AgentManager',
   
   // Security
   security: 'Security',

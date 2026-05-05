@@ -5,6 +5,7 @@ import type { AgentUpdater } from '../updater.js';
 import type { AgentFirewall } from '../network/firewall.js';
 import type { ConfigManager } from '../managers/config.js';
 import type { PipelineService } from '../features/pipeline/index.js';
+import type { AnomalyDetectionService } from '../anomaly/index.js';
 
 export interface AgentInitContext {
 	agent: {
@@ -15,7 +16,7 @@ export interface AgentInitContext {
 	agentLogger?: AgentLogger;
 	sharedHttpClient?: ReturnType<typeof import('../lib/http-client.js').createHttpClient>;
 	deviceManager?: any;
-	deviceInfo?: any;
+	agentInfo?: any;
 	containerManager?: any;
 	logMonitor?: any;
 	deviceAPI?: any;
@@ -23,7 +24,7 @@ export interface AgentInitContext {
 	firewall?: AgentFirewall;
 	updater?: AgentUpdater;
 	featureInitializer?: FeatureInitializer;
-	anomalyService?: any;
+	anomalyService?: AnomalyDetectionService;
 	pipelineService?: PipelineService;
 	simulationOrchestrator?: any;
 	discoveryService?: DiscoveryService;

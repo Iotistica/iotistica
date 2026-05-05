@@ -7,8 +7,8 @@
  */
 
 import { MockHttpClient } from '../../helpers/mock-http-client';
-import { CloudSync } from '../../../src/cloud-sync';
-import { createMockDeviceInfo, createMockTargetStateResponse } from '../../helpers/fixtures';
+import { CloudSync } from '../../../src/sync';
+import { createMockAgentInfo, createMockTargetStateResponse } from '../../helpers/fixtures';
 import { stub } from 'sinon';
 import { EventEmitter } from 'events';
 
@@ -16,9 +16,9 @@ describe('Example: Refactored Testing Pattern', () => {
 	it('should demonstrate clean, testable code', async () => {
 		// 1. Create mock dependencies
 		const mockHttpClient = new MockHttpClient();
-		const mockDeviceInfo = createMockDeviceInfo();
+		const mockAgentInfo = createMockAgentInfo();
 		const mockDeviceManager = {
-			getDeviceInfo: () => mockDeviceInfo
+			getAgentInfo: () => mockAgentInfo
 		};
 		const mockStateReconciler = new EventEmitter() as any;
 		mockStateReconciler.setTarget = stub().resolves();
@@ -42,7 +42,7 @@ describe('Example: Refactored Testing Pattern', () => {
 		);
 		
 		// 3. Configure mock behavior
-		const targetState = createMockTargetStateResponse(mockDeviceInfo.uuid);
+		const targetState = createMockTargetStateResponse(mockAgentInfo.uuid);
 		mockHttpClient.mockGetSuccess(targetState, { etag: 'abc123' });
 		
 		// 4. Execute test
@@ -55,8 +55,8 @@ describe('Example: Refactored Testing Pattern', () => {
 		// 6. Verify HTTP request details
 		const [url, options] = mockHttpClient.getStub.firstCall.args;
 		expect(url).toContain('/api/v1/device');
-		expect(url).toContain(mockDeviceInfo.uuid);
-		expect(options.headers['X-Device-API-Key']).toBe(mockDeviceInfo.apiKey);
+		expect(url).toContain(mockAgentInfo.uuid);
+		expect(options.headers['X-Device-API-Key']).toBe(mockAgentInfo.apiKey);
 		// Note: timeout is passed to HttpClient but not visible in stubbed args
 	});
 	
@@ -65,7 +65,7 @@ describe('Example: Refactored Testing Pattern', () => {
 		const mockHttpClient = new MockHttpClient();
 		const cloudSync: any = new CloudSync(
 			{} as any,
-			{ getDeviceInfo: () => createMockDeviceInfo() } as any,
+			{ getAgentInfo: () => createMockAgentInfo() } as any,
 			{ cloudApiEndpoint: 'http://api:3002', apiTimeout: 30000 } as any,
 			undefined, undefined, undefined, undefined,
 			mockHttpClient
@@ -83,7 +83,7 @@ describe('Example: Refactored Testing Pattern', () => {
 		const mockHttpClient = new MockHttpClient();
 		const cloudSync: any = new CloudSync(
 			{} as any,
-			{ getDeviceInfo: () => createMockDeviceInfo() } as any,
+			{ getAgentInfo: () => createMockAgentInfo() } as any,
 			{ cloudApiEndpoint: 'http://api:3002', apiTimeout: 30000 } as any,
 			undefined, undefined, undefined, undefined,
 			mockHttpClient

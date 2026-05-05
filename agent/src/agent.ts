@@ -12,9 +12,9 @@
 import { StateManager } from "./managers/state.js";
 import ContainerManager from "./docker/container-manager.js";
 import { DeviceManager } from "./managers/index.js";
-import type { DeviceInfo } from "./managers/types.js";
+import type { AgentInfo } from "./managers/types.js";
 import { DeviceAPI } from "./api/index.js";
-import { CloudSync } from "./cloud-sync/index.js";
+import { CloudSync } from "./sync/index.js";
 import { AgentLogger } from "./logging/agent-logger.js";
 import { LogComponents } from "./logging/types.js";
 import { CloudMqttClient } from "./mqtt";
@@ -53,7 +53,7 @@ export default class Agent {
   private stateReconciler!: StateManager; // Main state manager
   private containerManager!: ContainerManager; // Keep for backward compatibility with DeviceAPI
   private deviceManager!: DeviceManager;
-  private deviceInfo!: DeviceInfo; // Cache device info after initialization
+  private agentInfo!: AgentInfo; // Cache device info after initialization
   private deviceAPI!: DeviceAPI;
   private cloudSync?: CloudSync;
   public agentLogger!: AgentLogger; // Structured logging for agent-level events (public for external access)
@@ -64,7 +64,7 @@ export default class Agent {
   private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
   private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
   private configManager!: ConfigManager; // Configuration manager (centralized config access)
-  private dictionaryManager?: import('./managers/dictionary.js').DictionaryManager; // MQTT message key compaction (top-level service)
+  private dictionaryManager?: import('./mqtt/dictionary.js').DictionaryManager; // MQTT message key compaction (top-level service)
   private sharedHttpClient?: import('./lib/http-client').HttpClient; // Shared HTTP client for connection pooling
 
   // System settings (config-driven with env var defaults)
@@ -121,7 +121,7 @@ export default class Agent {
         agentLogger: this.agentLogger,
         sharedHttpClient: this.sharedHttpClient,
         deviceManager: this.deviceManager,
-        deviceInfo: this.deviceInfo,
+        agentInfo: this.agentInfo,
         containerManager: this.containerManager,
         logMonitor: (this as any).logMonitor,
         deviceAPI: this.deviceAPI,
@@ -191,7 +191,7 @@ export default class Agent {
     this.lifecycle.setLogger(this.agentLogger);
     this.sharedHttpClient = ctx.sharedHttpClient;
     this.deviceManager = ctx.deviceManager;
-    this.deviceInfo = ctx.deviceInfo;
+    this.agentInfo = ctx.agentInfo;
     this.containerManager = ctx.containerManager;
     (this as any).logMonitor = ctx.logMonitor;
     this.deviceAPI = ctx.deviceAPI;
@@ -276,7 +276,7 @@ export default class Agent {
   }
 
   private logStartupSummary(): void {
-    const mode = this.deviceInfo.provisioned ? "Cloud-connected" : "Standalone";
+    const mode = this.agentInfo.provisioned ? "Cloud-connected" : "Standalone";
     const intervals = this.configManager.getIntervalConfig();
 
     this.agentLogger.infoSync("Device Agent initialized", {
@@ -285,7 +285,7 @@ export default class Agent {
       deviceApiPort: this.configManager.getDeviceApiPort(),
       reconciliationInterval: intervals.reconciliationIntervalMs,
       cloudApiEndpoint: this.configManager.getCloudApiEndpoint(),
-      cloudFeaturesEnabled: this.deviceInfo.provisioned && !!this.cloudSync,
+      cloudFeaturesEnabled: this.agentInfo.provisioned && !!this.cloudSync,
     });
   }
 
@@ -658,7 +658,7 @@ export default class Agent {
   }
 
   public isProvisioned(): boolean {
-    return this.deviceInfo?.provisioned === true;
+    return this.agentInfo?.provisioned === true;
   }
 
   /**
@@ -680,11 +680,11 @@ export default class Agent {
     const checks = {
       database: !!this.stateReconciler,
       logging: !!this.agentLogger,
-      deviceInfo: !!this.deviceInfo,
+      deviceInfo: !!this.agentInfo,
       // For already-provisioned devices (state loaded from SQLite), the agent must continue
       // running even if the local API is unavailable. For unprovisioned devices, keep the API
       // startup-critical so provisioning/setup flows still require it.
-      deviceAPI: !!this.deviceInfo?.provisioned || !!this.deviceAPI,
+      deviceAPI: !!this.agentInfo?.provisioned || !!this.deviceAPI,
       containerManager: !!this.containerManager,
       // MQTT connectivity is not startup-critical. A provisioned device must continue running
       // and buffering local state/data when broker auth or the API backing auth is unavailable.
@@ -693,7 +693,7 @@ export default class Agent {
       // Only require the instance to exist (provisioning config was valid + service was wired).
       // Whether it is currently connected is a runtime/health concern - a cloud outage must not
       // prevent the agent from sending READY=1 or operating as a standalone device.
-      cloudSync: isCiMode || !this.deviceInfo?.provisioned || !!this.cloudSync
+      cloudSync: isCiMode || !this.agentInfo?.provisioned || !!this.cloudSync
     };
 
     const now = Date.now();

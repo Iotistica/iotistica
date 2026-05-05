@@ -6,15 +6,17 @@
  */
 
 import type { AgentLogger } from '../logging/agent-logger';
-import type { DeviceInfo } from '../managers/types.js';
+import type { AgentInfo } from '../managers/types.js';
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/monitor.js';
 import { DiscoveryService } from '../adapters/discovery/service.js';
 
 import { DevicePublishFeature } from '../features/publish/index.js';
-import { AdapterManager, type AdapterConfig } from '../adapters/index.js';
+import type { AdapterManager } from '../adapters/index.js';
 import type { PipelineService } from '../features/pipeline/index.js';
+import type { AnomalyDetectionService } from '../anomaly/index.js';
+import { AdapterInitializer } from './adapters.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
@@ -24,7 +26,7 @@ import { getPackageVersion } from '../utils/api-utils.js';
 
 export interface FeatureContext {
   logger: AgentLogger;
-  deviceInfo: DeviceInfo;
+  deviceInfo: AgentInfo;
   mqttManager: CloudMqttClient;
   httpClient: any; // Shared HTTP client with connection pooling (singleton pattern)
   containerManager: any;
@@ -35,7 +37,7 @@ export interface FeatureContext {
   configProtocols?: Record<string, any>; // New: protocols section from target state
   cloudApiEndpoint: string;
   deviceApiPort: number;
-  anomalyService?: any;
+  anomalyService?: AnomalyDetectionService;
   discoveryService?: any; // Discovery service for endpoint auto-reload
   dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
   pipelineService?: PipelineService; // Node-RED payload transform pipeline (optional)
@@ -44,7 +46,7 @@ export interface FeatureContext {
 
 export interface InitializedFeatures {
   jobs?: JobsFeature;
-  sensorPublish?: DevicePublishFeature;
+  devicePublish?: DevicePublishFeature;
   sensors?: AdapterManager;
   updater?: AgentUpdater;
   firewall?: AgentFirewall;
@@ -66,31 +68,42 @@ export class FeatureInitializer {
   private features: InitializedFeatures = {};
   private currentProtocols: Record<string, any> | null = null;
   private cloudSync?: any; // CloudSync reference for updating endpoints after auto-reload
+  private adapterInitializer: AdapterInitializer;
 
   constructor(context: FeatureContext) {
     this.context = context;
+    this.adapterInitializer = new AdapterInitializer(
+      context,
+      () => this.initDevicePublish(),
+      async () => {
+        if (this.features.devicePublish) {
+          await this.features.devicePublish.stop();
+          this.features.devicePublish = undefined;
+        }
+      },
+      () => this.cloudSync
+    );
   }
 
   /**
-   * Initialize sensor features (can run in parallel)
+   * Initialize device features (can run in parallel)
    * - Protocol Adapters: Create Unix sockets for data output (Modbus, OPC-UA, etc.)
-   * - SensorPublish: Connect to Unix sockets and publish to MQTT
+   * - DevicePublishFeature: Connect to Unix sockets and publish to MQTT
    */
-  async initSensorFeatures(): Promise<void> {
+  async initDeviceFeatures(): Promise<void> {
     // Initialize protocol adapters FIRST (they create the Unix sockets)
-    await this.initProtocolAdapters();
-    
-    // Initialize sensor publish (connects to sockets created by protocol adapters)
+    await this.adapterInitializer.initProtocolAdapters();
+
+    // Initialize Device Publish (connects to sockets created by protocol adapters)
     await this.initDevicePublish();
-    
+
     // Store discoveryService reference if available
     if (this.context.discoveryService) {
       this.features.discoveryService = this.context.discoveryService;
     }
-    
-    // Watch for new enabled endpoints from discovery (auto-reload Sensor Publish)
-    // Protocol enablement is now driven by endpoints, not config.protocols
-    this.setupEndpointAutoReloadListener();
+
+    // Watch for new enabled endpoints from discovery (auto-reload Device Publish)
+    this.adapterInitializer.setupEndpointAutoReloadListener();
   }
 
   /**
@@ -116,22 +129,25 @@ export class FeatureInitializer {
    * Get initialized features
    */
   getFeatures(): InitializedFeatures {
-    return this.features;
+    return {
+      ...this.features,
+      sensors: this.adapterInitializer.getFeatures().sensors
+    };
   }
 
-  public setAnomalyService(anomalyService?: any): void {
+  public setAnomalyService(anomalyService?: AnomalyDetectionService): void {
     this.context.anomalyService = anomalyService;
-    this.features.sensorPublish?.setAnomalyService?.(anomalyService);
+    this.features.devicePublish?.setAnomalyService?.(anomalyService);
   }
 
   public setPipelineService(pipeline?: PipelineService): void {
     this.context.pipelineService = pipeline;
-    this.features.sensorPublish?.setPipelineService?.(pipeline);
+    this.features.devicePublish?.setPipelineService?.(pipeline);
   }
 
   public setLiveDataInterceptor(interceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[]): void {
     this.context.liveDataInterceptor = interceptor;
-    this.features.sensorPublish?.setLiveDataInterceptor?.(interceptor);
+    this.features.devicePublish?.setLiveDataInterceptor?.(interceptor);
   }
 
   private isDevicePublishEnabled(): boolean {
@@ -170,7 +186,7 @@ export class FeatureInitializer {
     const { logger, deviceInfo, configSettings, cloudApiEndpoint, configFeatures } = this.context;
 
     const deviceJobsEnabled = configFeatures?.enableDeviceJobs !== false;
-    const deviceApiKey = deviceInfo.deviceApiKey || deviceInfo.apiKey;
+    const deviceApiKey = deviceInfo.apiKey;
 
     if (!deviceJobsEnabled) {
       logger.infoSync('Jobs Feature skipped by feature toggle', {
@@ -239,17 +255,17 @@ export class FeatureInitializer {
 
     const devicePublishEnabled = this.isDevicePublishEnabled();
     if (!devicePublishEnabled) {
-      const wasRunning = !!this.features.sensorPublish;
+      const wasRunning = !!this.features.devicePublish;
       if (wasRunning) {
         try {
-          await this.features.sensorPublish!.stop();
+          await this.features.devicePublish!.stop();
         } catch (error) {
           logger.warnSync('Failed to stop Device Publish while disabled by feature toggle', {
             component: LogComponents.agent,
             error: error instanceof Error ? error.message : String(error)
           });
         }
-        this.features.sensorPublish = undefined;
+        this.features.devicePublish = undefined;
         // Dynamic runtime disable — log at INFO so operators know it was explicitly turned off
         logger.infoSync('Device Publish Feature disabled by feature toggle', {
           component: LogComponents.agent,
@@ -346,7 +362,7 @@ export class FeatureInitializer {
       const useKeyCompactionPoc = process.env.USE_KEY_COMPACTION_POC === 'true';
       const useDeflatePoc = process.env.USE_DEFLATE_COMPRESSION === 'true';
 
-      this.features.sensorPublish = new DevicePublishFeature(
+      this.features.devicePublish = new DevicePublishFeature(
         AdapterConfig as any,
         logger,
         deviceInfo.uuid,
@@ -358,14 +374,14 @@ export class FeatureInitializer {
       );
 
       if (this.context.pipelineService) {
-        this.features.sensorPublish.setPipelineService(this.context.pipelineService);
+        this.features.devicePublish.setPipelineService(this.context.pipelineService);
       }
 
       if (this.context.liveDataInterceptor) {
-        this.features.sensorPublish.setLiveDataInterceptor(this.context.liveDataInterceptor);
+        this.features.devicePublish.setLiveDataInterceptor(this.context.liveDataInterceptor);
       }
 
-      await this.features.sensorPublish.start();
+      await this.features.devicePublish.start();
 
       logger.debugSync('Device Publish Feature initialized', {
         component: LogComponents.agent,
@@ -377,393 +393,9 @@ export class FeatureInitializer {
     } catch (error) {
       logger.errorSync('Failed to initialize Device Publish Feature', error as Error, {
         component: LogComponents.agent,
-        note: 'Continuing without Sensor Publish'
+        note: 'Continuing without Device Publish'
       });
-      this.features.sensorPublish = undefined;
-    }
-  }
-
-  private async initProtocolAdapters(): Promise<void> {
-    const { logger, deviceInfo } = this.context;
-
-    try {
-      // Protocol enablement is now database-driven (based on config.endpoints)
-      // No more config.protocols or config.protocolAdapters - endpoints determine which protocols are enabled
-      
-      // Initialize base config with all protocols disabled
-      const devicesConfig: AdapterConfig & Record<string, any> = {
-        modbus: { enabled: false },
-        opcua: { enabled: false },
-        snmp: { enabled: false },
-        can: { enabled: false },
-        mqtt: { enabled: false }
-      };
-
-  
-      // Check database for enabled endpoints - this enables the protocol adapter
-      const { EndpointModel: EndpointModel } = await import('../db/models/endpoint.model.js');
-      const enabledProtocols: string[] = [];
-      
-      for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'mqtt']) {
-        const devices = await EndpointModel.getEnabled(protocol);
-        const validDevices = devices.filter((d: any) => !!d.uuid);
-
-        if (validDevices.length > 0) {
-          enabledProtocols.push(protocol);
-          // Enable the protocol adapter since we have enabled endpoints
-          if (!devicesConfig[protocol]) {
-            devicesConfig[protocol] = { enabled: true };
-          } else {
-            devicesConfig[protocol].enabled = true;
-          }
-        } else if (devices.length > 0) {
-          logger.warnSync('Ignoring enabled endpoints without UUID for protocol startup', {
-            component: LogComponents.agent,
-            protocol,
-            invalidCount: devices.length
-          });
-        }
-      }
-
-      // MQTT adapter starts whenever MQTT_BROKER_URL is set, even with zero DB endpoints.
-      // It connects as a superuser to mosquitto-agent for device data collection and discovery.
-      // The startMQTTAdapter() implementation already handles the zero-devices case gracefully.
-      if (!enabledProtocols.includes('mqtt') && process.env.MQTT_BROKER_URL) {
-        enabledProtocols.push('mqtt');
-        devicesConfig.mqtt = { enabled: true };
-        logger.infoSync('Enabling MQTT adapter via MQTT_BROKER_URL (no DB endpoints required)', {
-          component: LogComponents.agent,
-          brokerUrl: process.env.MQTT_BROKER_URL
-        });
-      }
-      
-      // ALWAYS create AdapterManager even if no protocols are enabled initially
-      // This ensures health reporting works when endpoints are discovered later
-      this.features.sensors = new AdapterManager(
-        devicesConfig,
-        logger,
-        deviceInfo.uuid
-      );
-
-      if (enabledProtocols.length === 0) {
-        logger.debugSync('No protocols enabled initially, AdapterManager created but not started', {
-          component: LogComponents.agent,
-          note: 'Will be started when endpoints are enabled via discovery or config'
-        });
-        // Don't return - we still need to set up listeners and make feature available
-      } else {
-        await this.features.sensors.start();
-      }
-      
-      // Make sensors feature available to device API
-      const { setAdapterManager } = await import('../api/actions.js');
-      setAdapterManager(this.features.sensors);
-
-      // Wire up rediscovery-needed listener on each new AdapterManager instance.
-      // When the OPC-UA server switches profiles (e.g., simulator hot-reload), all stored
-      // NodeIDs become invalid. The adapter detects the high failure rate and emits this
-      // event so we can re-browse the server and update the database with fresh nodes.
-      // Calling runDiscovery() directly bypasses pre-discovery, so sensorPublish keeps running.
-      // If savedCount > 0, discovery-complete fires and handles the full adapter reload.
-      // If savedCount = 0 (server still mid-reload), the adapter retries via its own backoff
-      // and will re-emit rediscovery-needed after the 30-second cooldown.
-      if (this.features.discoveryService) {
-        this.features.sensors.on('rediscovery-needed', async (data: { deviceName: string; endpointUrl: string }) => {
-          logger.warnSync('OPC-UA adapter detected stale NodeIDs - triggering targeted rediscovery', {
-            component: LogComponents.agent,
-            deviceName: data.deviceName,
-            endpointUrl: data.endpointUrl,
-            note: 'Server may have switched profiles; will re-browse after brief stabilization delay'
-          });
-          try {
-            // Short delay to let the server finish reloading after a profile switch
-            await new Promise<void>(resolve => setTimeout(resolve, 3000));
-            await this.features.discoveryService!.runDiscovery({
-              trigger: 'manual',
-              protocols: ['opcua'],
-              validate: true,
-              forceRun: true
-            });
-          } catch (error) {
-            logger.errorSync('Rediscovery triggered by OPC-UA adapter failed', error as Error, {
-              component: LogComponents.agent,
-              deviceName: data.deviceName
-            });
-          }
-        });
-      }
-    } catch (error) {
-      logger.errorSync('Failed to initialize Protocol Adapters', error as Error, {
-        component: LogComponents.agent,
-        note: 'Continuing without Protocol Adapters'
-      });
-      this.features.sensors = undefined;
-    }
-  }
-
-  /**
-   * Setup listener for endpoint-enabled events from discovery
-   * Automatically reloads Sensor Publish when new enabled endpoints are discovered
-   */
-  private setupEndpointAutoReloadListener(): void {
-    const { logger } = this.context;
-    
-    if (!this.features.discoveryService) {
-      logger.debugSync('Discovery service not available, skipping endpoint auto-reload setup', {
-        component: LogComponents.agent
-      });
-      return;
-    }
-
-    // Listen for pre-discovery event (stops features before discovery runs)
-    // This frees up IPC connection slots to prevent "max clients reached" errors
-    this.features.discoveryService.on('pre-discovery', async (data: any) => {
-      logger.infoSync('Preparing for discovery - stopping Sensor Publish to free connection slots', {
-        component: LogComponents.agent,
-        protocols: data.protocols,
-        trigger: data.trigger
-      });
-
-      try {
-        if (this.features.sensorPublish) {
-          await this.features.sensorPublish.stop();
-          logger.debugSync('Stopped Sensor Publish before discovery', {
-            component: LogComponents.agent
-          });
-          this.features.sensorPublish = undefined;
-        }
-      } catch (error) {
-        logger.errorSync('Failed to stop Sensor Publish before discovery', error as Error, {
-          component: LogComponents.agent
-        });
-      }
-    });
-
-    // Listen for individual endpoint-enabled events (real-time updates from discovery)
-    this.features.discoveryService.on('endpoint-enabled', async (data: any) => {
-      // Skip individual reloads during batch discovery - discovery-complete handler will reload everything
-      if (data.isBatchDiscovery) {
-        logger.debugSync('Skipping individual reload during batch discovery', {
-          component: LogComponents.agent,
-          protocol: data.protocol,
-          endpoint: data.name,
-          note: 'Will reload after discovery completes'
-        });
-        return;
-      }
-
-      logger.infoSync('New enabled endpoint discovered, reloading Sensor Publish', {
-        component: LogComponents.agent,
-        protocol: data.protocol,
-        endpoint: data.name,
-        source: data.source
-      });
-
-      try {
-        // Stop existing Sensor Publish if not already stopped (e.g., direct-connection endpoints)
-        // Note: For discovery targets, pre-discovery event already stopped it
-        if (this.features.sensorPublish) {
-          await this.features.sensorPublish.stop();
-          logger.debugSync('Stopped Sensor Publish for reload', {
-            component: LogComponents.agent
-          });
-          this.features.sensorPublish = undefined;
-        }
-
-        // Reinitialize with new endpoints (DB already synced before event emission)
-        await this.initDevicePublish();
-
-        logger.infoSync('Sensor Publish reloaded successfully', {
-          component: LogComponents.agent,
-          newEndpoint: data.name
-        });
-      } catch (error) {
-        logger.errorSync('Failed to reload Sensor Publish', error as Error, {
-          component: LogComponents.agent,
-          endpoint: data.name
-        });
-      }
-    });
-
-    // Listen for discovery-complete events (batch reload after discovery OR direct-connection endpoints)
-    // This event is emitted by:
-    // 1. Discovery service after scanning for devices with slaveRange
-    // 2. ConfigManager after direct-connection endpoints (slaveId only) are added
-    this.features.discoveryService.on('discovery-complete', async (data: any) => {
-
-      // Reload whenever discovery actually wrote data to the database.
-      // For config-change: reconciliation-complete fires first (before discovery finishes),
-      // so adapters get started with empty data_points. discovery-complete fires AFTER
-      // discovery writes the real data_points — this is the only correct moment to reload.
-      const shouldReload = data.savedCount > 0;
-      
-      if (shouldReload) {
-        try {
-          logger.infoSync('Reloading protocol adapters and Sensor Publish after endpoint changes', {
-            component: LogComponents.agent,
-            trigger: data.trigger,
-            savedCount: data.savedCount,
-            skippedCount: data.skippedCount,
-            reason: data.trigger === 'config-change' ? 'DB already synced by reconcile' : 'new devices discovered'
-          });
-
-          // Stop protocol adapters
-          if (this.features.sensors) {
-            await this.features.sensors.stop();
-            this.features.sensors = undefined;
-          }
-
-          // Stop Sensor Publish
-          if (this.features.sensorPublish) {
-            await this.features.sensorPublish.stop();
-            this.features.sensorPublish = undefined;
-          }
-
-          // Reinitialize protocol adapters (will read endpoints from database)
-          await this.initProtocolAdapters();
-
-          // Reinitialize Sensor Publish (will read endpoints from database)
-          await this.initDevicePublish();
-
-          // CRITICAL: Update CloudSync's endpoints reference to new AdapterManager instance
-          // Without this, CloudSync tries to collect health from the old (stopped) instance
-          if (this.cloudSync && this.features.sensors) {
-            this.cloudSync.setDevices(this.features.sensors);
-          }
-
-        } catch (error) {
-          logger.errorSync('Failed to reload protocol adapters after discovery', error as Error, {
-            component: LogComponents.agent
-          });
-        }
-      } else {
-        logger.debugSync('Skipping reload - no new devices discovered', {
-          component: LogComponents.agent,
-          trigger: data.trigger,
-          savedCount: data.savedCount,
-          skippedCount: data.skippedCount
-        });
-
-        // pre-discovery stopped SensorPublish before discovery ran; restart it so
-        // existing endpoints keep publishing even when no new devices were saved.
-        if (!this.features.sensorPublish) {
-          try {
-            await this.initDevicePublish();
-            if (this.cloudSync && this.features.sensors) {
-              this.cloudSync.setDevices(this.features.sensors);
-            }
-            logger.infoSync('Restarted Sensor Publish after discovery (no new devices)', {
-              component: LogComponents.agent,
-              trigger: data.trigger
-            });
-          } catch (error) {
-            logger.errorSync('Failed to restart Sensor Publish after discovery', error as Error, {
-              component: LogComponents.agent
-            });
-          }
-        }
-      }
-    });
-
-    logger.infoSync('Endpoint auto-reload watcher initialized', {
-      component: LogComponents.agent,
-      note: 'Sensor Publish will reload automatically when discovery finds new enabled endpoints'
-    });
-
-    // Listen for reconciliation-complete to reload after config changes.
-    // IMPORTANT: If discovery is currently running (e.g., a new OPC-UA device was just added),
-    // we must NOT reload here — the DB still has empty data_points at this point.
-    // discovery-complete will fire once discovery writes the real data_points and will
-    // handle the reload at that point.
-    if (this.context.stateReconciler) {
-      this.context.stateReconciler.on('reconciliation-complete', async (hasEndpointChanges: boolean) => {
-        if (!hasEndpointChanges) {
-          logger.debugSync('Skipping adapter reload on reconciliation-complete — no endpoint changes', {
-            component: LogComponents.agent,
-          });
-          return;
-        }
-
-        if (this.features.discoveryService?.isDiscoveryRunning()) {
-          logger.infoSync('Skipping adapter reload on reconciliation-complete — discovery in progress; will reload on discovery-complete', {
-            component: LogComponents.agent
-          });
-          return;
-        }
-
-        try {
-          // Hot-update path: MQTT adapter is already connected — diff subscriptions in-place.
-          // Only the endpoint UUID map and broker subscriptions change; no reconnect needed.
-          // SensorPublish keeps reading from the same IPC socket without interruption.
-          if (this.features.sensors?.getAdapter('mqtt')) {
-            logger.infoSync('Hot-reloading MQTT adapter after endpoint changes (no reconnect)', {
-              component: LogComponents.agent,
-              trigger: 'reconciliation-complete'
-            });
-
-            await this.features.sensors.reloadMQTTAdapter();
-
-            // Start SensorPublish if this is the first endpoint being added
-            if (!this.features.sensorPublish) {
-              await this.initDevicePublish();
-            }
-
-            if (this.cloudSync && this.features.sensors) {
-              this.cloudSync.setDevices(this.features.sensors);
-            }
-
-            logger.infoSync('MQTT adapter hot-reloaded after reconciliation', {
-              component: LogComponents.agent
-            });
-            return;
-          }
-
-          // Full reinit path: no adapter running yet, or non-MQTT-only adapter changes.
-          logger.infoSync('Reloading protocol adapters after reconciliation complete', {
-            component: LogComponents.agent,
-            trigger: 'reconciliation-complete'
-          });
-
-          // Stop protocol adapters
-          if (this.features.sensors) {
-            await this.features.sensors.stop();
-            this.features.sensors = undefined;
-          }
-
-          // Stop Sensor Publish
-          if (this.features.sensorPublish) {
-            await this.features.sensorPublish.stop();
-            this.features.sensorPublish = undefined;
-          }
-
-          // Reinitialize protocol adapters (will read endpoints from database)
-          await this.initProtocolAdapters();
-
-          // Reinitialize Sensor Publish (will read endpoints from database)
-          await this.initDevicePublish();
-
-          // Update CloudSync's endpoints reference
-          if (this.cloudSync && this.features.sensors) {
-            this.cloudSync.setDevices(this.features.sensors);
-            logger.infoSync('Updated CloudSync endpoints reference after reload', {
-              component: LogComponents.agent
-            });
-          }
-
-          logger.infoSync('Protocol adapters reloaded after reconciliation', {
-            component: LogComponents.agent
-          });
-        } catch (error) {
-          logger.errorSync('Failed to reload after reconciliation', error as Error, {
-            component: LogComponents.agent
-          });
-        }
-      });
-
-      logger.infoSync('Reconciliation reload watcher initialized', {
-        component: LogComponents.agent,
-        note: 'Protocol adapters reload after reconciliation completes (not during discovery)'
-      });
+      this.features.devicePublish = undefined;
     }
   }
 
@@ -916,15 +548,15 @@ export class FeatureInitializer {
   async cleanup(preserveShell: boolean = false): Promise<void> {
     const { logger } = this.context;
 
-    // Stop Sensor Publish
-    if (this.features.sensorPublish) {
-      await this.features.sensorPublish.stop();
-      logger.debugSync('Sensor Publish stopped', {
+    // Stop Device Publish
+    if (this.features.devicePublish) {
+      await this.features.devicePublish.stop();
+      logger.debugSync('Device Publish stopped', {
         component: LogComponents.agent,
       });
     }
 
-    // Stop pipeline (after sensorPublish so no in-flight transforms at shutdown)
+    // Stop pipeline (after devicePublish so no in-flight transforms at shutdown)
     if (this.context.pipelineService) {
       await this.context.pipelineService.stop();
       logger.debugSync('Pipeline stopped', {
@@ -933,8 +565,9 @@ export class FeatureInitializer {
     }
 
     // Stop Protocol Adapters
-    if (this.features.sensors) {
-      await this.features.sensors.stop();
+    const currentSensors = this.adapterInitializer.getFeatures().sensors;
+    if (currentSensors) {
+      await currentSensors.stop();
       logger.debugSync('Protocol Adapters stopped', {
         component: LogComponents.agent,
       });
@@ -989,7 +622,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 
 	const featureContext: FeatureContext = {
 		logger: agentLogger,
-    deviceInfo: ctx.deviceInfo,
+    deviceInfo: ctx.agentInfo,
     deviceManager: ctx.deviceManager,
     stateReconciler: ctx.stateReconciler,
     mqttManager: (await import('../mqtt/manager.js')).CloudMqttClient.getInstance(),
@@ -1019,11 +652,11 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
     initializer.setPipelineService(ctx.pipelineService);
   }
 
-	await initializer.initSensorFeatures();
+	await initializer.initDeviceFeatures();
 	await initializer.initJobsFeature();
 
 	// Anomaly detection must be initialized before simulation so producer-mode scenarios can feed the shared pipeline.
-  const { initAnomalyDetection } = await import('./ai.js');
+  const { initAnomalyDetection } = await import('./anomaly.js');
   await initAnomalyDetection(ctx);
 
   const { initSimulationMode } = await import('./simulation.js');
@@ -1036,7 +669,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
     component: LogComponents.agent,
     jobs: !!initializedFeatures.jobs,
     sensors: !!initializedFeatures.sensors,
-    sensorPublish: !!initializedFeatures.sensorPublish,
+    devicePublish: !!initializedFeatures.devicePublish,
     updater: !!initializedFeatures.updater,
     firewall: !!initializedFeatures.firewall,
     discovery: !!ctx.discoveryService,

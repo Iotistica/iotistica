@@ -8,17 +8,14 @@
  */
 export type ProvisioningState = 'new' | 'registering' | 'registered' | 'key-exchanging' | 'provisioned';
 
-export interface DeviceInfo {
+export interface AgentInfo {
 	uuid: string;
-	deviceName?: string;
-	deviceType?: string;
+	name?: string;
+	type?: string;
 	
 	// Two-phase authentication keys
-	deviceApiKey?: string;        // Device-specific key (permanent)
+	apiKey?: string;              // Device-specific API key (permanent)
 	provisioningApiKey?: string;  // Fleet/provisioning key (temporary)
-	
-	// Legacy field for backward compatibility
-	apiKey?: string;
 	
 	apiEndpoint?: string;
 	registeredAt?: number;
@@ -66,8 +63,8 @@ export interface ApiTlsConfig {
 
 export interface ProvisioningConfig {
 	uuid?: string;
-	deviceName?: string;
-	deviceType?: string;
+	name?: string;
+	type?: string;
 	apiEndpoint?: string;
 	
 	// Two-phase auth
@@ -85,8 +82,8 @@ export interface ProvisioningConfig {
 
 export interface ProvisionRequest {
 	uuid: string;
-	deviceName: string;
-	deviceType: string;
+	name: string;
+	type: string;
 	deviceApiKey: string;          // Pre-generated device key
 	devicePublicKey?: string;      // Ed25519 public key for PoP (PEM format)
 	applicationId?: number;
@@ -98,8 +95,8 @@ export interface ProvisionRequest {
 export interface ProvisionResponse {
 	id: number;                    // Server-assigned device ID
 	uuid: string;
-	deviceName: string;
-	deviceType: string;
+	name: string;
+	type: string;
 	tenantId?: string;             // Tenant ID for MQTT topic construction
 	applicationId?: number;        // Deprecated: for backward compatibility only
 	challenge?: string;            // Server nonce for proof-of-possession

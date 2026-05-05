@@ -5,7 +5,7 @@
 
 import ContainerManager from '../docker/container-manager';
 import type { DeviceManager } from '../managers';
-import type { CloudSync } from '../cloud-sync';
+import type { CloudSync } from '../sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../anomaly';
 import type { SimulationOrchestrator } from '../anomaly/simulator';
@@ -137,7 +137,7 @@ export async function getBufferStatusPayload(): Promise<{
 	agentLogLastFlushSuccess?: string;
 	agentLogLastFlushError?: string;
 }> {
-	const info = deviceManager.getDeviceInfo();
+	const info = deviceManager.getAgentInfo();
 	const mqttConnected = CloudMqttClient.getInstance().isConnected();
 	const cloudOnline = cloudSync?.isOnline() === true;
 	const mqttStats = MessageBufferModel.getStats();
@@ -405,12 +405,12 @@ export const getApp = async (appId: number) => {
  * Used by: GET /v1/device
  */
 export const getDeviceState = async () => {
-	const deviceInfo = deviceManager.getDeviceInfo();
+	const agentInfo = deviceManager.getAgentInfo();
 	const currentState = await containerManager.getCurrentState();
 	const isOnline = cloudSync?.isOnline?.() ?? false;
 	
 	return {
-		...deviceInfo,
+		...agentInfo,
 		apps: Object.keys(currentState.apps).length,
 		is_online: isOnline,
 		status: 'Idle',
@@ -479,7 +479,7 @@ export const provisionDevice = async (config: {
 	applicationId?: number;
 }) => {
 	logger?.infoSync('Provisioning device', {
-		component: LogComponents.deviceManager,
+		component: LogComponents.agentManager,
 		operation: 'provision',
 		deviceName: config.deviceName,
 		apiEndpoint: config.apiEndpoint
@@ -488,7 +488,7 @@ export const provisionDevice = async (config: {
 	const result = await deviceManager.provision(config);
 	
 	logger?.infoSync('Agent provisioned successfully', {
-		component: LogComponents.deviceManager,
+		component: LogComponents.agentManager,
 		operation: 'provision',
 		uuid: result.uuid,
 		provisioned: result.provisioned
@@ -498,7 +498,7 @@ export const provisionDevice = async (config: {
 		success: true,
 		device: {
 			uuid: result.uuid,
-			deviceName: result.deviceName,
+			deviceName: result.name,
 			provisioned: result.provisioned,
 			mqttBrokerUrl: result.mqttBrokerConfig ? `${result.mqttBrokerConfig.protocol}://${result.mqttBrokerConfig.host}:${result.mqttBrokerConfig.port}` : undefined
 		}
@@ -510,17 +510,17 @@ export const provisionDevice = async (config: {
  * Used by: GET /v1/provision/status
  */
 export const getProvisionStatus = async () => {
-	const deviceInfo = deviceManager.getDeviceInfo();
+	const agentInfo = deviceManager.getAgentInfo();
 	
 	return {
-		provisioned: deviceInfo.provisioned,
-		uuid: deviceInfo.uuid,
-		deviceName: deviceInfo.deviceName,
-		apiEndpoint: deviceInfo.apiEndpoint,
-		hasProvisioningKey: !!deviceInfo.provisioningApiKey,
-		mqttConfigured: !!(deviceInfo.mqttBrokerConfig?.username && deviceInfo.mqttBrokerConfig?.password),
-		mqttBrokerUrl: deviceInfo.mqttBrokerConfig 
-			? `${deviceInfo.mqttBrokerConfig.protocol}://${deviceInfo.mqttBrokerConfig.host}:${deviceInfo.mqttBrokerConfig.port}` 
+		provisioned: agentInfo.provisioned,
+		uuid: agentInfo.uuid,
+		deviceName: agentInfo.name,
+		apiEndpoint: agentInfo.apiEndpoint,
+		hasProvisioningKey: !!agentInfo.provisioningApiKey,
+		mqttConfigured: !!(agentInfo.mqttBrokerConfig?.username && agentInfo.mqttBrokerConfig?.password),
+		mqttBrokerUrl: agentInfo.mqttBrokerConfig 
+			? `${agentInfo.mqttBrokerConfig.protocol}://${agentInfo.mqttBrokerConfig.host}:${agentInfo.mqttBrokerConfig.port}` 
 			: undefined
 	};
 };
@@ -531,14 +531,14 @@ export const getProvisionStatus = async () => {
  */
 export const deprovisionDevice = async () => {
 	logger?.infoSync('Deprovisioning device', {
-		component: LogComponents.deviceManager,
+		component: LogComponents.agentManager,
 		operation: 'deprovision'
 	});
 
 	await deviceManager.reset();
 	
 	logger?.infoSync('Device deprovisioned successfully', {
-		component: LogComponents.deviceManager,
+		component: LogComponents.agentManager,
 		operation: 'deprovision'
 	});
 };
@@ -568,7 +568,7 @@ export const getDevices = async (protocol?: string) => {
  */
 export const factoryResetDevice = async () => {
 	logger?.warnSync('Factory reset requested', {
-		component: LogComponents.deviceManager,
+		component: LogComponents.agentManager,
 		operation: 'factoryReset',
 		warning: 'This will delete all apps, services, and data'
 	});
@@ -576,7 +576,7 @@ export const factoryResetDevice = async () => {
 	await deviceManager.factoryReset();
 	
 	logger?.warnSync('Factory reset completed', {
-		component: LogComponents.deviceManager,
+		component: LogComponents.agentManager,
 		operation: 'factoryReset'
 	});
 };

@@ -1,6 +1,5 @@
-import msgpack from 'msgpack-lite';
 import { DictionaryModel } from '../db/models/index.js';
-import { agentTopic } from '../mqtt/topics.js';
+import { agentTopic } from './topics.js';
 
 /**
  * MQTT Message Dictionary Manager
@@ -89,7 +88,7 @@ import { agentTopic } from '../mqtt/topics.js';
  * See: docs/MQTT-KEY-COMPACTION-STRATEGY.md (Alternative 6)
  */
 
-import type { CloudMqttClient } from '../mqtt/manager.js';
+import type { CloudMqttClient } from './manager.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 

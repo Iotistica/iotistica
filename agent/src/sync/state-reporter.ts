@@ -19,9 +19,9 @@ export interface StateReporterDeps {
 	stateManager: StateManager;
 	transport: CloudTransport;
 	connectionMonitor: ConnectionMonitor;
-	getDeviceInfo: () => {
+	getAgentInfo: () => {
 		uuid: string;
-		deviceApiKey?: string;
+		apiKey?: string;
 		provisioned: boolean;
 		osVersion?: string;
 		agentVersion?: string;
@@ -297,9 +297,9 @@ export class StateReporter {
 	}
 
 	private async reportCurrentState(): Promise<void> {
-		const deviceInfo = this.deps.getDeviceInfo();
+		const agentInfo = this.deps.getAgentInfo();
 
-		if (!deviceInfo.provisioned) {
+		if (!agentInfo.provisioned) {
 			this.deps.logger?.debugSync('Agent not provisioned, skipping state report', {
 				component: LogComponents.cloudSync,
 				operation: 'report',
@@ -318,9 +318,9 @@ export class StateReporter {
 		const currentState = await this.deps.stateManager.getCurrentState();
 		const includeMetrics = timeSinceLastMetrics >= this.deps.getConfig().metricsInterval;
 
-		const osVersionChanged = deviceInfo.osVersion !== this.lastOsVersion;
-		// Single canonical source: prefer agentUpdater (live value) over deviceInfo snapshot.
-		const agentVersion = this.deps.agentUpdater?.getCurrentVersion() ?? deviceInfo.agentVersion;
+		const osVersionChanged = agentInfo.osVersion !== this.lastOsVersion;
+		// Single canonical source: prefer agentUpdater (live value) over agentInfo snapshot.
+		const agentVersion = this.deps.agentUpdater?.getCurrentVersion() ?? agentInfo.agentVersion;
 		const agentVersionChanged = agentVersion !== this.lastAgentVersion;
 		const architecture = this.deps.platformArch;
 		const architectureChanged = architecture !== this.lastArchitecture;
@@ -355,14 +355,14 @@ export class StateReporter {
 
 		// Build full report (may include metrics, health, etc.)
 		const stateReport: AgentStateReport = {
-			[deviceInfo.uuid]: {
+			[agentInfo.uuid]: {
 				apps: currentState.apps,
 				is_online: this.deps.connectionMonitor.isOnline(),
 				version: effectiveVersion,
 			},
 		};
 
-		stateReport[deviceInfo.uuid].config = runtimeConfig;
+		stateReport[agentInfo.uuid].config = runtimeConfig;
 
 		if (configChanged) {
 			this.deps.logger?.infoSync('Devices config changed - including in report', {
@@ -375,23 +375,23 @@ export class StateReporter {
 		}
 
 		if (hasEndpointHealthData && (healthChanged || includeMetrics)) {
-			stateReport[deviceInfo.uuid].endpoints_health = endpointHealth;
+			stateReport[agentInfo.uuid].endpoints_health = endpointHealth;
 		}
 
 		if (devicesChanged) {
-			stateReport[deviceInfo.uuid].devices = devicesForReport;
+			stateReport[agentInfo.uuid].devices = devicesForReport;
 		}
 
 		if (osVersionChanged || this.lastOsVersion === undefined) {
-			stateReport[deviceInfo.uuid].os_version = deviceInfo.osVersion;
-			this.lastOsVersion = deviceInfo.osVersion;
+			stateReport[agentInfo.uuid].os_version = agentInfo.osVersion;
+			this.lastOsVersion = agentInfo.osVersion;
 		}
 		if (agentVersionChanged || this.lastAgentVersion === undefined) {
-			stateReport[deviceInfo.uuid].agent_version = agentVersion;
+			stateReport[agentInfo.uuid].agent_version = agentVersion;
 			this.lastAgentVersion = agentVersion;
 		}
 		if (architectureChanged || this.lastArchitecture === undefined) {
-			stateReport[deviceInfo.uuid].architecture = architecture;
+			stateReport[agentInfo.uuid].architecture = architecture;
 			this.lastArchitecture = architecture;
 		}
 
@@ -405,19 +405,19 @@ export class StateReporter {
 					elapsedMs: Date.now() - metricsStartTime,
 				});
 
-				stateReport[deviceInfo.uuid].cpu_usage = metrics.cpu_usage;
-				stateReport[deviceInfo.uuid].memory_usage = metrics.memory_usage;
-				stateReport[deviceInfo.uuid].memory_total = metrics.memory_total;
-				stateReport[deviceInfo.uuid].storage_usage = metrics.storage_usage ?? undefined;
-				stateReport[deviceInfo.uuid].storage_total = metrics.storage_total ?? undefined;
-				stateReport[deviceInfo.uuid].temperature = metrics.cpu_temp ?? undefined;
-				stateReport[deviceInfo.uuid].uptime = metrics.uptime;
-				stateReport[deviceInfo.uuid].network_interfaces = metrics.network_interfaces ?? [];
+				stateReport[agentInfo.uuid].cpu_usage = metrics.cpu_usage;
+				stateReport[agentInfo.uuid].memory_usage = metrics.memory_usage;
+				stateReport[agentInfo.uuid].memory_total = metrics.memory_total;
+				stateReport[agentInfo.uuid].storage_usage = metrics.storage_usage ?? undefined;
+				stateReport[agentInfo.uuid].storage_total = metrics.storage_total ?? undefined;
+				stateReport[agentInfo.uuid].temperature = metrics.cpu_temp ?? undefined;
+				stateReport[agentInfo.uuid].uptime = metrics.uptime;
+				stateReport[agentInfo.uuid].network_interfaces = metrics.network_interfaces ?? [];
 
 				const primaryInterface = metrics.network_interfaces.find((i: any) => i.default);
 				const currentIp = primaryInterface?.ip4;
 				if (currentIp && (currentIp !== this.lastLocalIp || this.lastLocalIp === undefined)) {
-					stateReport[deviceInfo.uuid].local_ip = currentIp;
+					stateReport[agentInfo.uuid].local_ip = currentIp;
 					this.lastLocalIp = currentIp;
 				}
 
@@ -432,7 +432,7 @@ export class StateReporter {
 
 			if (this.deps.devicePublish) {
 				try {
-					stateReport[deviceInfo.uuid].publish_health = this.deps.devicePublish.getStats();
+					stateReport[agentInfo.uuid].publish_health = this.deps.devicePublish.getStats();
 				} catch (error) {
 					this.deps.logger?.warnSync('Failed to collect publish pipeline stats', {
 						component: LogComponents.cloudSync,
@@ -442,12 +442,12 @@ export class StateReporter {
 				}
 			}
 
-			if (deviceInfo.provisioned && deviceInfo.vpnEnabled) {
+			if (agentInfo.provisioned && agentInfo.vpnEnabled) {
 				try {
 					const { TailscaleManager } = await import('../network/vpn/tailscale-manager.js');
 					const tailscale = new TailscaleManager(this.deps.logger);
 					const vpnHealth = await tailscale.getHealth();
-					stateReport[deviceInfo.uuid].vpn_health = vpnHealth;
+					stateReport[agentInfo.uuid].vpn_health = vpnHealth;
 					tailscale.logHealthIssues(vpnHealth);
 				} catch (error) {
 					this.deps.logger?.warnSync('Failed to collect VPN health stats', {
@@ -461,29 +461,29 @@ export class StateReporter {
 
 		// Build state-only view for diff comparison (no metrics)
 		const stateOnlyReport: AgentStateReport = {
-			[deviceInfo.uuid]: {
+			[agentInfo.uuid]: {
 				apps: currentState.apps,
 				is_online: this.deps.connectionMonitor.isOnline(),
 				version: effectiveVersion,
 			},
 		};
-		if (stateReport[deviceInfo.uuid].config) {
-			stateOnlyReport[deviceInfo.uuid].config = stateReport[deviceInfo.uuid].config;
+		if (stateReport[agentInfo.uuid].config) {
+			stateOnlyReport[agentInfo.uuid].config = stateReport[agentInfo.uuid].config;
 		}
-		if ((healthChanged || includeMetrics) && stateReport[deviceInfo.uuid].endpoints_health) {
-			stateOnlyReport[deviceInfo.uuid].endpoints_health = stateReport[deviceInfo.uuid].endpoints_health;
+		if ((healthChanged || includeMetrics) && stateReport[agentInfo.uuid].endpoints_health) {
+			stateOnlyReport[agentInfo.uuid].endpoints_health = stateReport[agentInfo.uuid].endpoints_health;
 		}
-		if (devicesChanged && stateReport[deviceInfo.uuid].devices) {
-			stateOnlyReport[deviceInfo.uuid].devices = stateReport[deviceInfo.uuid].devices;
+		if (devicesChanged && stateReport[agentInfo.uuid].devices) {
+			stateOnlyReport[agentInfo.uuid].devices = stateReport[agentInfo.uuid].devices;
 		}
-		if (stateReport[deviceInfo.uuid].os_version !== undefined) {
-			stateOnlyReport[deviceInfo.uuid].os_version = stateReport[deviceInfo.uuid].os_version;
+		if (stateReport[agentInfo.uuid].os_version !== undefined) {
+			stateOnlyReport[agentInfo.uuid].os_version = stateReport[agentInfo.uuid].os_version;
 		}
-		if (stateReport[deviceInfo.uuid].architecture !== undefined) {
-			stateOnlyReport[deviceInfo.uuid].architecture = stateReport[deviceInfo.uuid].architecture;
+		if (stateReport[agentInfo.uuid].architecture !== undefined) {
+			stateOnlyReport[agentInfo.uuid].architecture = stateReport[agentInfo.uuid].architecture;
 		}
 		// Always include agent_version in stateOnlyReport for stable diff tracking.
-		stateOnlyReport[deviceInfo.uuid].agent_version = agentVersion;
+		stateOnlyReport[agentInfo.uuid].agent_version = agentVersion;
 
 		const diff = calculateStateDiff(this.lastReport, stateOnlyReport);
 		const shouldReport = Object.keys(diff).length > 0 || includeMetrics || configChanged || healthChanged || devicesChanged || this.forceNextReport;
@@ -492,58 +492,58 @@ export class StateReporter {
 
 		// Build final payload
 		const reportToSend: AgentStateReport = {
-			[deviceInfo.uuid]: {
+			[agentInfo.uuid]: {
 				apps: currentState.apps,
 				is_online: this.deps.connectionMonitor.isOnline(),
 				version: effectiveVersion,
 			},
 		};
 
-		if (stateReport[deviceInfo.uuid].config) {
-			reportToSend[deviceInfo.uuid].config = stateReport[deviceInfo.uuid].config;
+		if (stateReport[agentInfo.uuid].config) {
+			reportToSend[agentInfo.uuid].config = stateReport[agentInfo.uuid].config;
 		}
 		if (healthChanged || includeMetrics) {
-			reportToSend[deviceInfo.uuid].endpoints_health = endpointHealth;
+			reportToSend[agentInfo.uuid].endpoints_health = endpointHealth;
 		}
 		if (devicesChanged) {
-			reportToSend[deviceInfo.uuid].devices = devicesForReport;
+			reportToSend[agentInfo.uuid].devices = devicesForReport;
 		}
 		if (osVersionChanged || this.lastOsVersion === undefined) {
-			reportToSend[deviceInfo.uuid].os_version = deviceInfo.osVersion;
+			reportToSend[agentInfo.uuid].os_version = agentInfo.osVersion;
 		}
 		if (architectureChanged || this.lastArchitecture === undefined) {
-			reportToSend[deviceInfo.uuid].architecture = architecture;
+			reportToSend[agentInfo.uuid].architecture = architecture;
 		}
 		if (agentVersionChanged || this.lastAgentVersion === undefined) {
-			reportToSend[deviceInfo.uuid].agent_version = agentVersion;
+			reportToSend[agentInfo.uuid].agent_version = agentVersion;
 		}
-		if (includeMetrics && stateReport[deviceInfo.uuid].cpu_usage !== undefined) {
-			reportToSend[deviceInfo.uuid].cpu_usage = stateReport[deviceInfo.uuid].cpu_usage;
-			reportToSend[deviceInfo.uuid].memory_usage = stateReport[deviceInfo.uuid].memory_usage;
-			reportToSend[deviceInfo.uuid].memory_total = stateReport[deviceInfo.uuid].memory_total;
-			reportToSend[deviceInfo.uuid].storage_usage = stateReport[deviceInfo.uuid].storage_usage;
-			reportToSend[deviceInfo.uuid].storage_total = stateReport[deviceInfo.uuid].storage_total;
-			reportToSend[deviceInfo.uuid].temperature = stateReport[deviceInfo.uuid].temperature;
-			reportToSend[deviceInfo.uuid].uptime = stateReport[deviceInfo.uuid].uptime;
-			reportToSend[deviceInfo.uuid].network_interfaces = stateReport[deviceInfo.uuid].network_interfaces;
-			reportToSend[deviceInfo.uuid].local_ip = stateReport[deviceInfo.uuid].local_ip;
+		if (includeMetrics && stateReport[agentInfo.uuid].cpu_usage !== undefined) {
+			reportToSend[agentInfo.uuid].cpu_usage = stateReport[agentInfo.uuid].cpu_usage;
+			reportToSend[agentInfo.uuid].memory_usage = stateReport[agentInfo.uuid].memory_usage;
+			reportToSend[agentInfo.uuid].memory_total = stateReport[agentInfo.uuid].memory_total;
+			reportToSend[agentInfo.uuid].storage_usage = stateReport[agentInfo.uuid].storage_usage;
+			reportToSend[agentInfo.uuid].storage_total = stateReport[agentInfo.uuid].storage_total;
+			reportToSend[agentInfo.uuid].temperature = stateReport[agentInfo.uuid].temperature;
+			reportToSend[agentInfo.uuid].uptime = stateReport[agentInfo.uuid].uptime;
+			reportToSend[agentInfo.uuid].network_interfaces = stateReport[agentInfo.uuid].network_interfaces;
+			reportToSend[agentInfo.uuid].local_ip = stateReport[agentInfo.uuid].local_ip;
 		}
-		if (includeMetrics && stateReport[deviceInfo.uuid].publish_health) {
-			reportToSend[deviceInfo.uuid].publish_health = stateReport[deviceInfo.uuid].publish_health;
+		if (includeMetrics && stateReport[agentInfo.uuid].publish_health) {
+			reportToSend[agentInfo.uuid].publish_health = stateReport[agentInfo.uuid].publish_health;
 		}
-		if (includeMetrics && stateReport[deviceInfo.uuid].vpn_health) {
-			reportToSend[deviceInfo.uuid].vpn_health = stateReport[deviceInfo.uuid].vpn_health;
+		if (includeMetrics && stateReport[agentInfo.uuid].vpn_health) {
+			reportToSend[agentInfo.uuid].vpn_health = stateReport[agentInfo.uuid].vpn_health;
 		}
 
 		// Skip entirely empty reports
 		const hasAnyData =
-			reportToSend[deviceInfo.uuid].config !== undefined ||
-			(reportToSend[deviceInfo.uuid].apps && Object.keys(reportToSend[deviceInfo.uuid].apps).length > 0) ||
-			reportToSend[deviceInfo.uuid].endpoints_health !== undefined ||
-			reportToSend[deviceInfo.uuid].devices !== undefined ||
-			reportToSend[deviceInfo.uuid].cpu_usage !== undefined ||
-			reportToSend[deviceInfo.uuid].publish_health !== undefined ||
-			reportToSend[deviceInfo.uuid].vpn_health !== undefined;
+			reportToSend[agentInfo.uuid].config !== undefined ||
+			(reportToSend[agentInfo.uuid].apps && Object.keys(reportToSend[agentInfo.uuid].apps).length > 0) ||
+			reportToSend[agentInfo.uuid].endpoints_health !== undefined ||
+			reportToSend[agentInfo.uuid].devices !== undefined ||
+			reportToSend[agentInfo.uuid].cpu_usage !== undefined ||
+			reportToSend[agentInfo.uuid].publish_health !== undefined ||
+			reportToSend[agentInfo.uuid].vpn_health !== undefined;
 
 		if (!hasAnyData) {
 			this.deps.logger?.infoSync('Skipping empty state report (no data to send)', {
@@ -578,9 +578,9 @@ export class StateReporter {
 				transport,
 				includeMetrics,
 				version: effectiveVersion,
-				configIncluded: reportToSend[deviceInfo.uuid].config !== undefined,
-				endpointHealthIncluded: reportToSend[deviceInfo.uuid].endpoints_health !== undefined,
-				reportKeys: Object.keys(reportToSend[deviceInfo.uuid] || {}),
+				configIncluded: reportToSend[agentInfo.uuid].config !== undefined,
+				endpointHealthIncluded: reportToSend[agentInfo.uuid].endpoints_health !== undefined,
+				reportKeys: Object.keys(reportToSend[agentInfo.uuid] || {}),
 				endpointHealthCount,
 				configuredEndpointCount: Array.isArray(runtimeConfig.endpoints) ? runtimeConfig.endpoints.length : 0,
 				runtimeHealthEndpointCount: endpointHealthCount,

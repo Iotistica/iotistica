@@ -72,8 +72,8 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 			dbInstance,
 			ctx.agentLogger,
 			CloudMqttClient.getInstance(),
-			ctx.deviceInfo.uuid,
-			ctx.deviceInfo.deviceName,
+			ctx.agentInfo.uuid,
+			ctx.agentInfo.deviceName,
 			'system'
 		);
 
@@ -108,7 +108,7 @@ export async function configureAnomalyFeed(ctx: AgentInitContext): Promise<void>
 	configureSystemMetrics(ctx.anomalyService);
 
 	ctx.featureInitializer?.setAnomalyService?.(ctx.anomalyService);
-	ctx.featureInitializer?.getFeatures()?.sensorPublish?.setAnomalyService?.(ctx.anomalyService);
+	ctx.featureInitializer?.getFeatures()?.devicePublish?.setAnomalyService?.(ctx.anomalyService);
 
 	ctx.agentLogger?.debugSync('Anomaly detection configured for system metrics and endpoints', {
 		component: LogComponents.agent,

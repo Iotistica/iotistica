@@ -22,11 +22,11 @@ import { EventEmitter } from 'events';
 import { MockHttpClient } from '../../helpers/mock-http-client';
 import {
 	createMockTargetStateResponse,
-	createMockDeviceInfo,
+	createMockAgentInfo,
 	createMinimalTargetState,
 	createTargetStateWithSensors,
 	createTargetStateWithPartialConfig,
-	createUnprovisionedDeviceInfo,
+	createUnprovisionedAgentInfo,
 	createCompleteConfigScenario,
 	createPartialConfigScenario
 } from '../../helpers/fixtures';
@@ -43,11 +43,11 @@ describe('CloudSync.pollTargetState', () => {
 		mockHttpClient = new MockHttpClient();
 		
 		// Mock device info to return synchronously
-		const mockDeviceInfo = createMockDeviceInfo();
+		const mockAgentInfo = createMockAgentInfo();
 		
 		// Mock dependencies
 		mockDeviceManager = {
-			getDeviceInfo: () => mockDeviceInfo,  // Sync, not async!
+			getAgentInfo: () => mockAgentInfo,  // Sync, not async!
 		};
 		
 		mockStateReconciler = new EventEmitter() as any;
@@ -86,8 +86,8 @@ describe('CloudSync.pollTargetState', () => {
 	
 	describe('Network Communication', () => {
 		it('should send GET request with correct headers', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid);
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			
@@ -96,13 +96,13 @@ describe('CloudSync.pollTargetState', () => {
 			expect(mockHttpClient.getStub.callCount).toBe(1);
 			const [url, options] = mockHttpClient.getStub.firstCall.args;
 			expect(url).toContain('/api/v1/device');
-			expect(url).toContain(deviceInfo.uuid);
-		expect(options.headers['X-Device-API-Key']).toBe(deviceInfo.deviceApiKey);
+			expect(url).toContain(agentInfo.uuid);
+		expect(options.headers['X-Device-API-Key']).toBe(agentInfo.apiKey);
 	});
 	
 	it('should handle HTTP 200 response with state update', async () => {
-		const deviceInfo = createMockDeviceInfo();
-		const targetState = createMockTargetStateResponse(deviceInfo.uuid);
+		const agentInfo = createMockAgentInfo();
+		const targetState = createMockTargetStateResponse(agentInfo.uuid);
 		
 		mockHttpClient.mockGetSuccess(targetState);
 		
@@ -133,8 +133,8 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should send If-None-Match header after first response with ETag', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid);
 			
 			// First request with ETag
 			mockHttpClient.mockGetSuccess(targetState, { etag: 'abc123' });
@@ -149,16 +149,16 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should extract device UUID from deviceManager', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid);
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			
 			await cloudSync.pollTargetState();
 			
-			// deviceManager.getDeviceInfo is called synchronously, just verify it worked
+			// deviceManager.getAgentInfo is called synchronously, just verify it worked
 			const [url] = mockHttpClient.getStub.firstCall.args;
-			expect(url).toContain(deviceInfo.uuid);
+			expect(url).toContain(agentInfo.uuid);
 		});
 	});
 	
@@ -168,7 +168,7 @@ describe('CloudSync.pollTargetState', () => {
 	
 	describe('State Transformation', () => {
 		it('should extract config fields from API response', async () => {
-			const deviceInfo = createMockDeviceInfo();
+			const agentInfo = createMockAgentInfo();
 			const { targetState } = createCompleteConfigScenario();
 			
 			mockHttpClient.mockGetSuccess(targetState);
@@ -181,7 +181,7 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should preserve all 4 config fields', async () => {
-			const deviceInfo = createMockDeviceInfo();
+			const agentInfo = createMockAgentInfo();
 			const { targetState } = createCompleteConfigScenario();
 			
 			mockHttpClient.mockGetSuccess(targetState);
@@ -196,7 +196,7 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should handle API returning only 2 config fields (bug scenario)', async () => {
-			const deviceInfo = createMockDeviceInfo();
+			const agentInfo = createMockAgentInfo();
 			const { targetState } = createPartialConfigScenario();
 			
 			mockHttpClient.mockGetSuccess(targetState);
@@ -212,8 +212,8 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should extract apps from target state', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid, {
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid, {
 				apps: {
 					'1001': {
 						appId: '1001',
@@ -232,8 +232,8 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should extract sensors array from config', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createTargetStateWithSensors(deviceInfo.uuid, 3);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createTargetStateWithSensors(agentInfo.uuid, 3);
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			
@@ -244,9 +244,9 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should handle minimal target state (no apps, minimal config)', async () => {
-			const deviceInfo = createMockDeviceInfo();
+			const agentInfo = createMockAgentInfo();
 			const targetState = {
-				[deviceInfo.uuid]: {
+				[agentInfo.uuid]: {
 					apps: {},
 					config: {
 						logging: { level: 'info' } // Minimal but non-empty
@@ -267,8 +267,8 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should handle partial config (missing some fields)', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createTargetStateWithPartialConfig(deviceInfo.uuid);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createTargetStateWithPartialConfig(agentInfo.uuid);
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			
@@ -285,8 +285,8 @@ describe('CloudSync.pollTargetState', () => {
 	
 	describe('State Reconciliation', () => {
 		it('should call stateReconciler.setTarget with extracted state', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid);
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			
@@ -301,8 +301,8 @@ describe('CloudSync.pollTargetState', () => {
 			const eventSpy = jest.fn();
 			mockStateReconciler.on('target-state-changed', eventSpy);
 			
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid);
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			
@@ -317,7 +317,7 @@ describe('CloudSync.pollTargetState', () => {
 		it('should not call setTarget when device is not provisioned', async () => {
 			// Create new CloudSync with unprovisioned device
 			const unprovisionedDeviceManager = {
-				getDeviceInfo: () => createUnprovisionedDeviceInfo()
+				getAgentInfo: () => createUnprovisionedAgentInfo()
 			};
 			
 			const unprovisionedCloudSync: any = new CloudSync(
@@ -342,8 +342,8 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should pass version number to setTarget', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid, { version: 5 });
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid, { version: 5 });
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			
@@ -354,10 +354,10 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should update state even when config partially matches current', async () => {
-			const deviceInfo = createMockDeviceInfo();
+			const agentInfo = createMockAgentInfo();
 			
 			// First update
-			let targetState = createMockTargetStateResponse(deviceInfo.uuid);
+			let targetState = createMockTargetStateResponse(agentInfo.uuid);
 			mockHttpClient.mockGetSuccess(targetState);
 			await cloudSync.pollTargetState();
 			
@@ -365,7 +365,7 @@ describe('CloudSync.pollTargetState', () => {
 			mockHttpClient.reset();
 			
 			// Second update with different config (change logging level)
-			targetState = createMockTargetStateResponse(deviceInfo.uuid, { 
+			targetState = createMockTargetStateResponse(agentInfo.uuid, { 
 				version: 2,
 				config: {
 					logging: { level: 'debug', enabled: true },
@@ -418,7 +418,7 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should warn when device UUID not in response', async () => {
-			const deviceInfo = createMockDeviceInfo();
+			const agentInfo = createMockAgentInfo();
 			const targetState = {
 				'different-uuid': {
 					apps: {},
@@ -442,8 +442,8 @@ describe('CloudSync.pollTargetState', () => {
 	
 	describe('ETag Caching', () => {
 		it('should store ETag from first response', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid);
 			const etag = 'abc123';
 			
 			mockHttpClient.mockGetSuccess(targetState, { etag });
@@ -464,8 +464,8 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should not call setTarget on 304 response', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid);
 			
 			// First poll with ETag
 			mockHttpClient.mockGetSuccess(targetState, { etag: 'abc123' });
@@ -482,8 +482,8 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should handle response without ETag header', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid);
 			
 			// Response without ETag
 			mockHttpClient.mockGetSuccess(targetState);
@@ -501,8 +501,8 @@ describe('CloudSync.pollTargetState', () => {
 	
 	describe('Version Tracking', () => {
 		it('should extract version from response', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid, { version: 3 });
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid, { version: 3 });
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			
@@ -512,9 +512,9 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should default to version 1 if not provided', async () => {
-			const deviceInfo = createMockDeviceInfo();
+			const agentInfo = createMockAgentInfo();
 			const targetState = {
-				[deviceInfo.uuid]: {
+				[agentInfo.uuid]: {
 					apps: {},
 					config: {
 						logging: { level: 'info', enabled: true },
@@ -534,10 +534,10 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should handle version increment', async () => {
-			const deviceInfo = createMockDeviceInfo();
+			const agentInfo = createMockAgentInfo();
 			
 			// Version 1
-			let targetState = createMockTargetStateResponse(deviceInfo.uuid, { version: 1 });
+			let targetState = createMockTargetStateResponse(agentInfo.uuid, { version: 1 });
 			mockHttpClient.mockGetSuccess(targetState);
 			await cloudSync.pollTargetState();
 			
@@ -545,7 +545,7 @@ describe('CloudSync.pollTargetState', () => {
 			mockHttpClient.reset();
 			
 			// Version 2 with different config (to trigger state change)
-			targetState = createMockTargetStateResponse(deviceInfo.uuid, { 
+			targetState = createMockTargetStateResponse(agentInfo.uuid, { 
 				version: 2,
 				config: {
 					logging: { level: 'debug', enabled: true },
@@ -567,8 +567,8 @@ describe('CloudSync.pollTargetState', () => {
 	
 	describe('Edge Cases', () => {
 		it('should handle empty apps object', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createMockTargetStateResponse(deviceInfo.uuid, { apps: {} });
+			const agentInfo = createMockAgentInfo();
+			const targetState = createMockTargetStateResponse(agentInfo.uuid, { apps: {} });
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			
@@ -579,9 +579,9 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should handle null config gracefully', async () => {
-			const deviceInfo = createMockDeviceInfo();
+			const agentInfo = createMockAgentInfo();
 			const targetState = {
-				[deviceInfo.uuid]: {
+				[agentInfo.uuid]: {
 					apps: { '1001': { appId: '1001', appName: 'test', services: [] } }, // Add an app to trigger state change
 					config: null as any, // Simulate bad API response
 					version: 1
@@ -599,8 +599,8 @@ describe('CloudSync.pollTargetState', () => {
 		});
 		
 		it('should handle large sensor arrays', async () => {
-			const deviceInfo = createMockDeviceInfo();
-			const targetState = createTargetStateWithSensors(deviceInfo.uuid, 100);
+			const agentInfo = createMockAgentInfo();
+			const targetState = createTargetStateWithSensors(agentInfo.uuid, 100);
 			
 			mockHttpClient.mockGetSuccess(targetState);
 			

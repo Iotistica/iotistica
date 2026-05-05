@@ -32,9 +32,9 @@ export class StatePoller extends EventEmitter {
 		private readonly stateManager: StateManager,
 		private readonly cloudApiEndpoint: string,
 		private readonly getConfig: () => { pollInterval: number; apiTimeout: number },
-		private readonly getDeviceInfo: () => {
+		private readonly getAgentInfo: () => {
 			uuid: string;
-			deviceApiKey?: string;
+			apiKey?: string;
 			provisioned: boolean;
 			apiTlsConfig?: any;
 		},
@@ -59,8 +59,8 @@ export class StatePoller extends EventEmitter {
 		this.isRunning = true;
 
 		try {
-			const deviceInfo = this.getDeviceInfo();
-			const etagKey = `target_state_etag_${deviceInfo.uuid}`;
+			const agentInfo = this.getAgentInfo();
+			const etagKey = `target_state_etag_${agentInfo.uuid}`;
 			const persisted = await MetadataModel.get(etagKey);
 			if (persisted) {
 				this.targetStateETag = persisted;
@@ -195,9 +195,9 @@ export class StatePoller extends EventEmitter {
 	}
 
 	private async pollTargetState(signal?: AbortSignal): Promise<void> {
-		const deviceInfo = this.getDeviceInfo();
+		const agentInfo = this.getAgentInfo();
 
-		if (!deviceInfo.provisioned) {
+		if (!agentInfo.provisioned) {
 			this.logger?.debugSync('Device not provisioned, skipping target state poll', {
 				component: LogComponents.cloudSync,
 				operation: 'poll',
@@ -205,8 +205,8 @@ export class StatePoller extends EventEmitter {
 			return;
 		}
 
-		const endpoint = buildAgentEndpoint(this.cloudApiEndpoint, deviceInfo.uuid, '/state');
-		const apiKey = deviceInfo.deviceApiKey;
+		const endpoint = buildAgentEndpoint(this.cloudApiEndpoint, agentInfo.uuid, '/state');
+		const apiKey = agentInfo.apiKey;
 
 		this.logger?.infoSync('Polling target state', {
 			component: LogComponents.cloudSync,
@@ -238,7 +238,7 @@ export class StatePoller extends EventEmitter {
 		const etag = response.headers.get('etag');
 		if (etag) {
 			this.targetStateETag = etag;
-			const etagKey = `target_state_etag_${deviceInfo.uuid}`;
+			const etagKey = `target_state_etag_${agentInfo.uuid}`;
 			// Note: MetadataModel.set is not atomic. This is acceptable for a single-instance
 			// edge agent; if multi-instance is ever needed, replace with compare-and-set.
 			try {
@@ -254,13 +254,13 @@ export class StatePoller extends EventEmitter {
 		this.requireFullRefresh = false;
 
 		const targetStateResponse = await response.json() as TargetStateResponse;
-		const deviceState = targetStateResponse[deviceInfo.uuid];
+		const deviceState = targetStateResponse[agentInfo.uuid];
 
 		if (!deviceState) {
 			this.logger?.warnSync('No target state for this device in response', {
 				component: LogComponents.cloudSync,
 				operation: 'poll',
-				deviceUuid: deviceInfo.uuid,
+				deviceUuid: agentInfo.uuid,
 				availableUUIDs: Object.keys(targetStateResponse),
 			});
 			return;

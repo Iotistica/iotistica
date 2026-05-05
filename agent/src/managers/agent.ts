@@ -15,7 +15,7 @@
  */
 
 import type { 
-	DeviceInfo, 
+	AgentInfo, 
 	ProvisioningConfig, 
 	ProvisionRequest, 
 	ProvisionResponse,
@@ -38,8 +38,8 @@ import type { DatabaseClient } from '../db/client.js';
 import { SqliteDatabaseClient } from '../db/client.js';
 import { PopCryptoManager } from '../security/pop-crypto.js';
 
-export class DeviceManager {
-	private deviceInfo: DeviceInfo | null = null;
+export class AgentManager {
+	private agentInfo: AgentInfo | null = null;
 	private logger?: AgentLogger;
 	private httpClient: HttpClient;
 	private dbClient: DatabaseClient;
@@ -100,7 +100,7 @@ export class DeviceManager {
 		for (let attempt = 0; attempt <= this.MAX_RETRY_ATTEMPTS; attempt++) {
 			try {
 				this.logger?.infoSync(`Attempting ${operationName}`, {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'retryWithBackoff',
 					attempt: attempt + 1,
 					maxAttempts: this.MAX_RETRY_ATTEMPTS + 1,
@@ -112,7 +112,7 @@ export class DeviceManager {
 				
 				if (attempt > 0) {
 					this.logger?.infoSync(`${operationName} succeeded after retries`, {
-						component: LogComponents.deviceManager,
+						component: LogComponents.agentManager,
 						operation: 'retryWithBackoff',
 						attempt: attempt + 1,
 					});
@@ -124,7 +124,7 @@ export class DeviceManager {
 				
 				if (attempt < this.MAX_RETRY_ATTEMPTS) {
 					this.logger?.warnSync(`${operationName} failed, retrying`, {
-						component: LogComponents.deviceManager,
+						component: LogComponents.agentManager,
 						operation: 'retryWithBackoff',
 						attempt: attempt + 1,
 						delayMs: delay,
@@ -139,7 +139,7 @@ export class DeviceManager {
 						`${operationName} failed after ${this.MAX_RETRY_ATTEMPTS + 1} attempts`,
 						lastError,
 						{
-							component: LogComponents.deviceManager,
+							component: LogComponents.agentManager,
 							operation: 'retryWithBackoff',
 						}
 					);
@@ -193,25 +193,25 @@ export class DeviceManager {
 		this.popCrypto = new PopCryptoManager(dataDir, this.logger);
 		await this.popCrypto.initialize();
 
-		await this.loadDeviceInfo();
+		await this.loadAgentInfo();
 
-		if (!this.deviceInfo) {
+		if (!this.agentInfo) {
 			// Create new device with generated UUID and deviceApiKey
 			const newApiKey = generateAPIKey('v2'); // Generate v2 versioned key
 			const keyMetadata = parseAPIKey(newApiKey);
 			
-			this.deviceInfo = {
+				this.agentInfo = {
 				uuid: process.env.DEVICE_UUID || this.uuidGenerator.generate(), // Use pre-assigned UUID for virtual agents
-				deviceApiKey: newApiKey,
+				apiKey: newApiKey,
 				provisioned: false,
 				provisioningState: 'new',
 				agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
 			};
-			await this.saveDeviceInfo();
+			await this.saveAgentInfo();
 			this.logger?.infoSync('New device created with versioned API key', {
-				component: LogComponents.deviceManager,
+				component: LogComponents.agentManager,
 				operation: 'initialize',
-				uuid: this.deviceInfo.uuid,
+				uuid: this.agentInfo.uuid,
 				keyVersion: keyMetadata?.version,
 				keyFingerprint: getAPIKeyFingerprint(newApiKey),
 				keyId: keyMetadata?.kid,
@@ -219,12 +219,12 @@ export class DeviceManager {
 		} else {
 			// Update agent version on every startup (BEFORE logging)
 			const currentVersion = process.env.AGENT_VERSION || getPackageVersion();
-			if (this.deviceInfo.agentVersion !== currentVersion) {
-				const oldVersion = this.deviceInfo.agentVersion;
-				this.deviceInfo.agentVersion = currentVersion;
-				await this.saveDeviceInfo();
+			if (this.agentInfo.agentVersion !== currentVersion) {
+				const oldVersion = this.agentInfo.agentVersion;
+				this.agentInfo.agentVersion = currentVersion;
+				await this.saveAgentInfo();
 				this.logger?.infoSync('Agent version updated', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'initialize',
 					oldVersion,
 					newVersion: currentVersion,
@@ -232,23 +232,23 @@ export class DeviceManager {
 			}
 			
 			// Log device info with key metadata (safe fingerprint, no secrets)
-			const keyMetadata = this.deviceInfo.deviceApiKey 
-				? parseAPIKey(this.deviceInfo.deviceApiKey) 
+			const keyMetadata = this.agentInfo.apiKey 
+				? parseAPIKey(this.agentInfo.apiKey) 
 				: null;
 			
 			this.logger?.infoSync('Device loaded', {
-				component: LogComponents.deviceManager,
+				component: LogComponents.agentManager,
 				operation: 'initialize',
-				uuid: this.deviceInfo.uuid,
-				provisioned: this.deviceInfo.provisioned,
-				provisioningState: this.deviceInfo.provisioningState || 'unknown',
-				hasDeviceApiKey: !!this.deviceInfo.deviceApiKey,
+				uuid: this.agentInfo.uuid,
+				provisioned: this.agentInfo.provisioned,
+				provisioningState: this.agentInfo.provisioningState || 'unknown',
+				hasDeviceApiKey: !!this.agentInfo.apiKey,
 				keyVersion: keyMetadata?.version,
-				keyFingerprint: this.deviceInfo.deviceApiKey 
-					? getAPIKeyFingerprint(this.deviceInfo.deviceApiKey) 
+				keyFingerprint: this.agentInfo.apiKey 
+					? getAPIKeyFingerprint(this.agentInfo.apiKey) 
 					: undefined,
-				hasProvisioningKey: !!this.deviceInfo.provisioningApiKey,
-				agentVersion: this.deviceInfo.agentVersion,
+				hasProvisioningKey: !!this.agentInfo.provisioningApiKey,
+				agentVersion: this.agentInfo.agentVersion,
 			});
 		}
 	}
@@ -256,12 +256,12 @@ export class DeviceManager {
 	/**
 	 * Load device info from database
 	 */
-	private async loadDeviceInfo(): Promise<void> {
+	private async loadAgentInfo(): Promise<void> {
 		const record = await this.dbClient.loadDevice();
 		if (record) {
 			// Debug: log record before parsing
 			this.logger?.debugSync('Record loaded from database', {
-				component: LogComponents.deviceManager,
+				component: LogComponents.agentManager,
 				operation: 'loadDeviceInfo',
 				hasRecord: !!record,
 				hasApiTlsConfig: !!record.apiTlsConfig,
@@ -269,13 +269,12 @@ export class DeviceManager {
 				apiTlsConfigLength: record.apiTlsConfig?.length
 			});
 
-			this.deviceInfo = {
+			this.agentInfo = {
 				uuid: record.uuid,
-				deviceName: record.name || undefined,
-				deviceType: record.type || undefined,
-				deviceApiKey: record.deviceApiKey || undefined,
+				name: record.name || undefined,
+				type: record.type || undefined,
+				apiKey: record.apiKey || record.deviceApiKey || undefined,
 				provisioningApiKey: record.provisioningApiKey || undefined,
-				apiKey: record.apiKey || undefined, // Legacy field
 				apiEndpoint: record.apiEndpoint || undefined,
 				registeredAt: record.registeredAt || undefined,
 				provisioned: !!record.provisioned,
@@ -295,34 +294,29 @@ export class DeviceManager {
 	/**
 	 * Save device info to database
 	 */
-	private async saveDeviceInfo(): Promise<void> {
-		if (!this.deviceInfo) {
+	private async saveAgentInfo(): Promise<void> {
+		if (!this.agentInfo) {
 			throw new Error('No device info to save');
 		}
 
-		// Ensure backward compatibility: sync deviceApiKey to apiKey field
-		if (this.deviceInfo.deviceApiKey && !this.deviceInfo.apiKey) {
-			this.deviceInfo.apiKey = this.deviceInfo.deviceApiKey;
-		}
-
 		const data = {
-			uuid: this.deviceInfo.uuid,
-			name: this.deviceInfo.deviceName || null,
-			type: this.deviceInfo.deviceType || null,
-			deviceApiKey: this.deviceInfo.deviceApiKey || null,
-			provisioningApiKey: this.deviceInfo.provisioningApiKey || null,
-			apiKey: this.deviceInfo.apiKey || null, // Legacy (synced from deviceApiKey)
-			apiEndpoint: this.deviceInfo.apiEndpoint || null,
-			registeredAt: this.deviceInfo.registeredAt || null,
-			provisioned: this.deviceInfo.provisioned,
-			provisioningState: this.deviceInfo.provisioningState || 'new',
-			tenantId: this.deviceInfo.tenantId || null,
-			applicationId: this.deviceInfo.applicationId || null,
-			macAddress: this.deviceInfo.macAddress || null,
-			osVersion: this.deviceInfo.osVersion || null,
-			agentVersion: this.deviceInfo.agentVersion || null,
-			mqttBrokerConfig: this.deviceInfo.mqttBrokerConfig ? JSON.stringify(this.deviceInfo.mqttBrokerConfig) : null,
-			apiTlsConfig: this.deviceInfo.apiTlsConfig ? JSON.stringify(this.deviceInfo.apiTlsConfig) : null,
+			uuid: this.agentInfo.uuid,
+			name: this.agentInfo.name || null,
+			type: this.agentInfo.type || null,
+			deviceApiKey: this.agentInfo.apiKey || null,
+			provisioningApiKey: this.agentInfo.provisioningApiKey || null,
+			apiKey: this.agentInfo.apiKey || null,
+			apiEndpoint: this.agentInfo.apiEndpoint || null,
+			registeredAt: this.agentInfo.registeredAt || null,
+			provisioned: this.agentInfo.provisioned,
+			provisioningState: this.agentInfo.provisioningState || 'new',
+			tenantId: this.agentInfo.tenantId || null,
+			applicationId: this.agentInfo.applicationId || null,
+			macAddress: this.agentInfo.macAddress || null,
+			osVersion: this.agentInfo.osVersion || null,
+			agentVersion: this.agentInfo.agentVersion || null,
+			mqttBrokerConfig: this.agentInfo.mqttBrokerConfig ? JSON.stringify(this.agentInfo.mqttBrokerConfig) : null,
+			apiTlsConfig: this.agentInfo.apiTlsConfig ? JSON.stringify(this.agentInfo.apiTlsConfig) : null,
 			updatedAt: new Date().toISOString(),
 		};
 		
@@ -333,36 +327,30 @@ export class DeviceManager {
 	 * Persist tenantId for already provisioned devices (migration/repair path)
 	 */
 	async setTenantId(tenantId: string): Promise<void> {
-		if (!this.deviceInfo) {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 
-		this.deviceInfo.tenantId = tenantId;
-		await this.saveDeviceInfo();
+		this.agentInfo.tenantId = tenantId;
+		await this.saveAgentInfo();
 	}
 
 	/**
 	 * Get current device info
 	 */
-	getDeviceInfo(): DeviceInfo {
-		if (!this.deviceInfo) {
+	getAgentInfo(): AgentInfo {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 		
-		// Ensure backward compatibility: populate apiKey from deviceApiKey if not set
-		const info = { ...this.deviceInfo };
-		if (!info.apiKey && info.deviceApiKey) {
-			info.apiKey = info.deviceApiKey;
-		}
-		
-		return info;
+		return { ...this.agentInfo };
 	}
 
 	/**
 	 * Check if device is provisioned
 	 */
 	isProvisioned(): boolean {
-		return this.deviceInfo?.provisioned === true;
+		return this.agentInfo?.provisioned === true;
 	}
 
 	/**
@@ -398,24 +386,24 @@ export class DeviceManager {
 	 * Mark device as running in local mode (no cloud provisioning needed)
 	 */
 	async markAsLocalMode(): Promise<void> {
-		if (!this.deviceInfo) {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 
-		this.deviceInfo.provisioned = false; // Explicitly mark as NOT cloud-provisioned
-		this.deviceInfo.provisioningState = 'new';
-		this.deviceInfo.deviceName = this.deviceInfo.deviceName || `agent-${this.deviceInfo.uuid.slice(0, 8)}`;
-		this.deviceInfo.deviceType = this.deviceInfo.deviceType || 'standalone';
-		this.deviceInfo.agentVersion = process.env.AGENT_VERSION || getPackageVersion(); // Update agent version
+		this.agentInfo.provisioned = false; // Explicitly mark as NOT cloud-provisioned
+		this.agentInfo.provisioningState = 'new';
+		this.agentInfo.name = this.agentInfo.name || `agent-${this.agentInfo.uuid.slice(0, 8)}`;
+		this.agentInfo.type = this.agentInfo.type || 'standalone';
+		this.agentInfo.agentVersion = process.env.AGENT_VERSION || getPackageVersion(); // Update agent version
 		
-		await this.saveDeviceInfo();
+		await this.saveAgentInfo();
 
 		this.logger?.infoSync('Device configured for local mode', {
-			component: LogComponents.deviceManager,
+			component: LogComponents.agentManager,
 			operation: 'markAsLocalMode',
-			uuid: this.deviceInfo.uuid,
-			deviceName: this.deviceInfo.deviceName,
-			agentVersion: this.deviceInfo.agentVersion,
+			uuid: this.agentInfo.uuid,
+			deviceName: this.agentInfo.name,
+			agentVersion: this.agentInfo.agentVersion,
 		});
 	}
 
@@ -424,8 +412,8 @@ export class DeviceManager {
 	 * Phase 1: Register device using provisioningApiKey
 	 * Phase 2: Exchange keys and remove provisioning key
 	 */
-	async provision(config: ProvisioningConfig): Promise<DeviceInfo> {
-		if (!this.deviceInfo) {
+	async provision(config: ProvisioningConfig): Promise<AgentInfo> {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 
@@ -434,32 +422,32 @@ export class DeviceManager {
 		}
 
 		// Ensure device API key exists (generate v2 if missing)
-		if (!this.deviceInfo.deviceApiKey) {
-			this.deviceInfo.deviceApiKey = generateAPIKey('v2');
-			const keyMetadata = parseAPIKey(this.deviceInfo.deviceApiKey);
+		if (!this.agentInfo.apiKey) {
+			this.agentInfo.apiKey = generateAPIKey('v2');
+			const keyMetadata = parseAPIKey(this.agentInfo.apiKey);
 			this.logger?.infoSync('Generated new API key for provisioning', {
-				component: LogComponents.deviceManager,
+				component: LogComponents.agentManager,
 				operation: 'provision',
 				keyVersion: keyMetadata?.version,
 				keyId: keyMetadata?.kid,
-				keyFingerprint: getAPIKeyFingerprint(this.deviceInfo.deviceApiKey),
+				keyFingerprint: getAPIKeyFingerprint(this.agentInfo.apiKey),
 			});
 		}
 
 			// Update device metadata
-		this.deviceInfo.deviceName = config.deviceName || this.deviceInfo.deviceName || `agent-${this.deviceInfo.uuid.slice(0, 8)}`;
-		this.deviceInfo.deviceType = config.deviceType || this.deviceInfo.deviceType || 'generic';
-		this.deviceInfo.apiEndpoint = config.apiEndpoint || this.deviceInfo.apiEndpoint;
-		this.deviceInfo.provisioningApiKey = config.provisioningApiKey;
-		this.deviceInfo.applicationId = config.applicationId;
-		this.deviceInfo.macAddress = config.macAddress;
-		this.deviceInfo.osVersion = config.osVersion;
-		this.deviceInfo.agentVersion = config.agentVersion;
+		this.agentInfo.name = config.name || this.agentInfo.name || `agent-${this.agentInfo.uuid.slice(0, 8)}`;
+		this.agentInfo.type = config.type || this.agentInfo.type || 'generic';
+		this.agentInfo.apiEndpoint = config.apiEndpoint || this.agentInfo.apiEndpoint;
+		this.agentInfo.provisioningApiKey = config.provisioningApiKey;
+		this.agentInfo.applicationId = config.applicationId;
+		this.agentInfo.macAddress = config.macAddress;
+		this.agentInfo.osVersion = config.osVersion;
+		this.agentInfo.agentVersion = config.agentVersion;
 
 		// UUID is immutable after cloud registration (prevents device identity hijacking)
 		// Only allow UUID override for new/unprovisioned devices
-		if (config.uuid && config.uuid !== this.deviceInfo.uuid) {
-			const currentState = this.deviceInfo.provisioningState || 'new';
+		if (config.uuid && config.uuid !== this.agentInfo.uuid) {
+			const currentState = this.agentInfo.provisioningState || 'new';
 			const isRegistered = currentState !== 'new' && currentState !== 'registering';
 			
 			if (isRegistered) {
@@ -468,39 +456,39 @@ export class DeviceManager {
 					'Attempt to change UUID after cloud registration (rejected)',
 					new Error('UUID is immutable after provisioning'),
 					{
-						component: LogComponents.deviceManager,
+						component: LogComponents.agentManager,
 						operation: 'provision',
-						currentUuid: this.deviceInfo.uuid,
+						currentUuid: this.agentInfo.uuid,
 						attemptedUuid: config.uuid,
 						provisioningState: currentState,
 					}
 				);
 				throw new Error(
 					`UUID cannot be changed after cloud registration. ` +
-					`Current UUID: ${this.deviceInfo.uuid}, ` +
+					`Current UUID: ${this.agentInfo.uuid}, ` +
 					`Attempted UUID: ${config.uuid}. ` +
 					`Use factory reset to re-provision with a new UUID.`
 				);
 			} else {
 				// Device not yet registered - UUID change allowed
 				this.logger?.warnSync('Changing device UUID before registration', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
-					oldUuid: this.deviceInfo.uuid,
+					oldUuid: this.agentInfo.uuid,
 					newUuid: config.uuid,
 					note: 'UUID override allowed only before cloud registration',
 				});
-				this.deviceInfo.uuid = config.uuid;
+				this.agentInfo.uuid = config.uuid;
 			}
 		}
 
 		try {
-			const currentState = this.deviceInfo.provisioningState || 'new';
+			const currentState = this.agentInfo.provisioningState || 'new';
 			
 			// Check if we're resuming from a partial failure
 			if (currentState !== 'new' && currentState !== 'provisioned') {
 				this.logger?.warnSync('Resuming incomplete provisioning', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 					currentState,
 					note: 'Previous provisioning attempt failed mid-flight - resuming from last checkpoint',
@@ -512,39 +500,39 @@ export class DeviceManager {
 			
 			if (currentState === 'new' || currentState === 'registering') {
 				this.logger?.infoSync('Phase 1: Registering device with provisioning key', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 					state: 'registering',
 				});
 				
 				// Mark as registering before API call
-				this.deviceInfo.provisioningState = 'registering';
-				await this.saveDeviceInfo();
+				this.agentInfo.provisioningState = 'registering';
+				await this.saveAgentInfo();
 				
 				// Capture values for closure (TypeScript can't track through await/closures)
-				const apiEndpoint = this.deviceInfo.apiEndpoint || 'http://localhost:3002';
-				const uuid = this.deviceInfo.uuid;
-				const deviceName = this.deviceInfo.deviceName!; // Guaranteed by line 401
-				const deviceType = this.deviceInfo.deviceType!; // Guaranteed by line 402
-				const deviceApiKey = this.deviceInfo.deviceApiKey!; // Guaranteed by line 387-396
-				const applicationId = this.deviceInfo.applicationId;
-				const macAddress = this.deviceInfo.macAddress;
-				const osVersion = this.deviceInfo.osVersion;
-				const agentVersion = this.deviceInfo.agentVersion;
-				const provisioningApiKey = this.deviceInfo.provisioningApiKey!; // Guaranteed by line 381
+				const apiEndpoint = this.agentInfo.apiEndpoint || 'http://localhost:3002';
+				const uuid = this.agentInfo.uuid;
+				const deviceName = this.agentInfo.name!; // Guaranteed by line 401
+				const deviceType = this.agentInfo.type!; // Guaranteed by line 402
+				const deviceApiKey = this.agentInfo.apiKey!; // Guaranteed by line 387-396
+				const applicationId = this.agentInfo.applicationId;
+				const macAddress = this.agentInfo.macAddress;
+				const osVersion = this.agentInfo.osVersion;
+				const agentVersion = this.agentInfo.agentVersion;
+				const provisioningApiKey = this.agentInfo.provisioningApiKey!; // Guaranteed by line 381
 				
 				// Get public key for PoP if crypto initialized
 				const devicePublicKey = this.popCrypto?.getPublicKey();
 				
 				if (devicePublicKey) {
 					this.logger?.infoSync('Registering with PoP public key', {
-						component: LogComponents.deviceManager,
+						component: LogComponents.agentManager,
 						operation: 'provision',
 						keyFingerprint: this.popCrypto?.getKeyFingerprint()
 					});
 				} else {
 					this.logger?.warnSync('⚠️ Registering without PoP (using legacy bcrypt)', {
-						component: LogComponents.deviceManager,
+						component: LogComponents.agentManager,
 						operation: 'provision',
 						reason: 'PoP crypto not initialized'
 					});
@@ -556,8 +544,8 @@ export class DeviceManager {
 						apiEndpoint,
 						{
 							uuid,
-							deviceName,
-							deviceType,
+							name: deviceName,
+							type: deviceType,
 							deviceApiKey,
 							devicePublicKey,
 							applicationId,
@@ -571,9 +559,9 @@ export class DeviceManager {
 				);
 
 				// Save server-assigned tenant ID and credentials
-				this.deviceInfo.tenantId = response.tenantId; // Save tenant ID for MQTT topic construction
-				this.deviceInfo.mqttBrokerConfig = response.mqtt.brokerConfig;
-				this.deviceInfo.apiTlsConfig = response.api?.tlsConfig;
+				this.agentInfo.tenantId = response.tenantId; // Save tenant ID for MQTT topic construction
+				this.agentInfo.mqttBrokerConfig = response.mqtt.brokerConfig;
+				this.agentInfo.apiTlsConfig = response.api?.tlsConfig;
 				
 				// Cache tenant ID immediately for MQTT topic construction
 				if (response.tenantId) {
@@ -583,16 +571,16 @@ export class DeviceManager {
 				
 				// Update device name/type from server response (critical for virtual agents)
 				// Virtual agents have pre-assigned names in the database that must be preserved
-				if (response.deviceName) {
-					this.deviceInfo.deviceName = response.deviceName;
+				if (response.name) {
+					this.agentInfo.name = response.name;
 				}
-				if (response.deviceType) {
-					this.deviceInfo.deviceType = response.deviceType;
+				if (response.type) {
+					this.agentInfo.type = response.type;
 				}
 
 				// Log full provisioning response for troubleshooting
 				this.logger?.infoSync('Provisioning response received', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 					responseKeys: Object.keys(response),
 					tenantId: response.tenantId,
@@ -607,37 +595,37 @@ export class DeviceManager {
 				});
 				
 				this.logger?.infoSync('Phase 1 complete: Device registered', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 					state: 'registered',
-					uuid: this.deviceInfo.uuid,
+					uuid: this.agentInfo.uuid,
 				});
 			} else {
 				// Resume from registered state - device already exists in cloud
 				this.logger?.infoSync('Phase 1: Skipping registration (already registered)', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 					state: currentState,
-					uuid: this.deviceInfo.uuid,
+					uuid: this.agentInfo.uuid,
 				});
 			}
 
 			// Phase 2: Exchange keys - verify device can authenticate with deviceApiKey
 			if (currentState !== 'provisioned') {
 				this.logger?.infoSync('Phase 2: Exchanging keys', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 					state: 'key-exchanging',
           });
         
         // Mark as key-exchanging before API call
-        this.deviceInfo.provisioningState = 'key-exchanging';
-        await this.saveDeviceInfo();
+        this.agentInfo.provisioningState = 'key-exchanging';
+        await this.saveAgentInfo();
         
         // Capture values for closure (TypeScript can't track through await/closures)
-        const apiEndpoint = this.deviceInfo.apiEndpoint || 'http://localhost:3002';
-        const uuid = this.deviceInfo.uuid;
-        const deviceApiKey = this.deviceInfo.deviceApiKey!; // Guaranteed by line 387-396
+        const apiEndpoint = this.agentInfo.apiEndpoint || 'http://localhost:3002';
+        const uuid = this.agentInfo.uuid;
+        const agentApiKey = this.agentInfo.apiKey!; // Guaranteed by line 387-396
         const challenge = response?.challenge; // Server-provided nonce for PoP
         
         // Wrap with retry logic for unreliable edge networks
@@ -645,45 +633,45 @@ export class DeviceManager {
           () => this.exchangeKeys(
             apiEndpoint,
             uuid,
-            deviceApiKey,
+            agentApiKey,
             challenge  // Pass challenge for proof-of-possession
           ),
           'Key Exchange'
         );
 				
 				this.logger?.infoSync('Phase 2 complete: Key exchange successful', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 				});
 			}
 
 			// Phase 3: Remove provisioning key (one-time use complete)
 			this.logger?.infoSync('Phase 3: Removing provisioning key', {
-				component: LogComponents.deviceManager,
+				component: LogComponents.agentManager,
 				operation: 'provision',
 			});
-			this.deviceInfo.provisioningApiKey = undefined;
+			this.agentInfo.provisioningApiKey = undefined;
 
 			// Mark as provisioned (all phases complete)
-			this.deviceInfo.provisioned = true;
-			this.deviceInfo.provisioningState = 'provisioned';
-			this.deviceInfo.registeredAt = Date.now();
+			this.agentInfo.provisioned = true;
+			this.agentInfo.provisioningState = 'provisioned';
+			this.agentInfo.registeredAt = Date.now();
 			
 			// Store VPN status from provisioning response
 			const vpnConfig = response?.vpn;
-			this.deviceInfo.vpnEnabled = !!(vpnConfig?.enabled);
+			this.agentInfo.vpnEnabled = !!(vpnConfig?.enabled);
 
 			// Save to database
-			await this.saveDeviceInfo();
+			await this.saveAgentInfo();
 
 			this.logger?.infoSync('Device provisioned successfully', {
-				component: LogComponents.deviceManager,
+				component: LogComponents.agentManager,
 				operation: 'provision',
 				state: 'provisioned',
-				uuid: this.deviceInfo.uuid,
-				deviceName: this.deviceInfo.deviceName,
-				applicationId: this.deviceInfo.applicationId,
-				mqttBrokerHost: this.deviceInfo.mqttBrokerConfig?.host,
+				uuid: this.agentInfo.uuid,
+				agentName: this.agentInfo.name,
+				applicationId: this.agentInfo.applicationId,
+				mqttBrokerHost: this.agentInfo.mqttBrokerConfig?.host,
 				vpnEnabled: vpnConfig?.enabled ?? false,
 				vpnType: vpnConfig?.type,
 				vpnData: vpnConfig?.type === 'tailscale' ? {
@@ -699,7 +687,7 @@ export class DeviceManager {
 		// Phase 4: Setup Tailscale VPN if provided in response
 		if (vpnConfig?.enabled && vpnConfig.type === 'tailscale') {
 			this.logger?.infoSync('Setting up Tailscale VPN', {
-				component: LogComponents.deviceManager,
+				component: LogComponents.agentManager,
 				operation: 'provision',
 				tailnetName: vpnConfig.tailscale.tailnetName,
 			});
@@ -718,7 +706,7 @@ export class DeviceManager {
 				await tailscaleManager.configure({
 					authKey: vpnConfig.tailscale.authKey,
 					tailnetName: vpnConfig.tailscale.tailnetName,
-					hostname: this.deviceInfo.deviceName,
+					hostname: this.agentInfo.name,
 					shieldsUp: vpnConfig.tailscale.shieldsUp ?? true,
 					acceptRoutes: vpnConfig.tailscale.acceptRoutes ?? false,
 					acceptDNS: vpnConfig.tailscale.acceptDNS ?? false,
@@ -728,7 +716,7 @@ export class DeviceManager {
 				const tailscaleIP = await tailscaleManager.getIP();
 
 				this.logger?.infoSync('Tailscale VPN tunnel established successfully', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 					tailscaleIP,
 					tailnetName: vpnConfig.tailscale.tailnetName,
@@ -736,35 +724,35 @@ export class DeviceManager {
 			} catch (vpnError) {
 				// VPN setup failure is non-critical - device can still operate
 				this.logger?.warnSync('Tailscale VPN setup failed (device will continue without VPN)', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 					error: vpnError instanceof Error ? vpnError.message : String(vpnError),
 				});
 			}
 		}
 
-			return this.getDeviceInfo();
+			return this.getAgentInfo();
 		} catch (error: any) {
 			// Reset to last successful state for idempotent retry
-			const currentState = this.deviceInfo.provisioningState;
+			const currentState = this.agentInfo.provisioningState;
 			if (currentState === 'registering') {
 				// Phase 1 failed - reset to 'new' for full retry
-				this.deviceInfo.provisioningState = 'new';
-				await this.saveDeviceInfo();
+				this.agentInfo.provisioningState = 'new';
+				await this.saveAgentInfo();
 			} else if (currentState === 'key-exchanging') {
 				// Phase 2 failed - reset to 'registered' for partial retry
-				this.deviceInfo.provisioningState = 'registered';
-				await this.saveDeviceInfo();
+				this.agentInfo.provisioningState = 'registered';
+				await this.saveAgentInfo();
 			}
 			
 			this.logger?.errorSync(
 				'Provisioning failed',
 				error instanceof Error ? error : new Error(String(error)),
 				{
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'provision',
 					state: currentState,
-					resetTo: this.deviceInfo.provisioningState,
+					resetTo: this.agentInfo.provisioningState,
 					note: 'State reset for idempotent retry',
 				}
 			);
@@ -781,7 +769,7 @@ export class DeviceManager {
 		provisionRequest: ProvisionRequest,
 		provisioningApiKey: string
 	): Promise<ProvisionResponse> {
-		if (!this.deviceInfo) {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 
@@ -789,15 +777,15 @@ export class DeviceManager {
 		
 		// Generate idempotency key based on device UUID
 		// Same UUID = same idempotency key = safe retries
-		const idempotencyKey = `register-${this.deviceInfo.uuid}`;
+		const idempotencyKey = `register-${this.agentInfo.uuid}`;
 		
 		this.logger?.infoSync('Registering device with API', {
-			component: LogComponents.deviceManager,
+			component: LogComponents.agentManager,
 			operation: 'registerWithAPI',
 			url,
 			uuid: provisionRequest.uuid,
-			deviceName: provisionRequest.deviceName,
-			deviceType: provisionRequest.deviceType,
+			deviceName: provisionRequest.name,
+			deviceType: provisionRequest.type,
 			idempotencyKey,
 		});
 
@@ -822,7 +810,7 @@ export class DeviceManager {
 				'Registration failed',
 				error instanceof Error ? error : new Error(String(error)),
 				{
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'registerWithAPI',
 				}
 			);
@@ -871,7 +859,7 @@ export class DeviceManager {
 		}
 		
 		this.logger?.infoSync('Exchanging keys for device', {
-			component: LogComponents.deviceManager,
+			component: LogComponents.agentManager,
 			operation: 'exchangeKeys',
 			uuid,
 			authMethod: 'proof-of-possession',
@@ -893,7 +881,7 @@ export class DeviceManager {
 			headers['X-Idempotency-Key'] = idempotencyKey;
 			
 			this.logger?.infoSync('Using Ed25519 PoP signature', {
-				component: LogComponents.deviceManager,
+				component: LogComponents.agentManager,
 				operation: 'exchangeKeys',
 				challengeLength: challenge.length,
 				signatureLength: signature.length,
@@ -909,7 +897,7 @@ export class DeviceManager {
 
 		const result = await response.json();
 		this.logger?.infoSync('Key exchange successful', {
-			component: LogComponents.deviceManager,
+			component: LogComponents.agentManager,
 			operation: 'exchangeKeys',
 			authMethod: 'proof-of-possession',
 		});
@@ -951,7 +939,7 @@ export class DeviceManager {
 				'Failed to fetch device',
 				error instanceof Error ? error : new Error(String(error)),
 				{
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'fetchDevice',
 				}
 			);
@@ -962,37 +950,37 @@ export class DeviceManager {
 	/**
 	 * Update device name
 	 */
-	async updateDeviceName(name: string): Promise<void> {
-		if (!this.deviceInfo) {
+	async updateAgentName(name: string): Promise<void> {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 
-		this.deviceInfo.deviceName = name;
-		await this.saveDeviceInfo();
+		this.agentInfo.name = name;
+		await this.saveAgentInfo();
 	}
 
 	/**
 	 * Update API endpoint
 	 */
 	async updateAPIEndpoint(endpoint: string): Promise<void> {
-		if (!this.deviceInfo) {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 
-		this.deviceInfo.apiEndpoint = endpoint;
-		await this.saveDeviceInfo();
+		this.agentInfo.apiEndpoint = endpoint;
+		await this.saveAgentInfo();
 	}
 
 	/**
 	 * Update agent version
 	 */
 	async updateAgentVersion(version: string): Promise<void> {
-		if (!this.deviceInfo) {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 
-		this.deviceInfo.agentVersion = version;
-		await this.saveDeviceInfo();
+		this.agentInfo.agentVersion = version;
+		await this.saveAgentInfo();
 	}
 
 	/**
@@ -1001,27 +989,27 @@ export class DeviceManager {
 	 * Keeps UUID and deviceApiKey, clears server registration and MQTT credentials
 	 */
 	async reset(): Promise<void> {
-		if (!this.deviceInfo) {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 
 		// Clear server-assigned values
-		this.deviceInfo.deviceName = undefined;
-		this.deviceInfo.provisioningApiKey = undefined;
-		this.deviceInfo.apiKey = undefined;
-		this.deviceInfo.apiEndpoint = undefined;
-		this.deviceInfo.registeredAt = undefined;
-		this.deviceInfo.provisioned = false;
-		this.deviceInfo.provisioningState = 'new';
-		this.deviceInfo.applicationId = undefined;
+		this.agentInfo.name = undefined;
+		this.agentInfo.provisioningApiKey = undefined;
+		this.agentInfo.apiKey = undefined;
+		this.agentInfo.apiEndpoint = undefined;
+		this.agentInfo.registeredAt = undefined;
+		this.agentInfo.provisioned = false;
+		this.agentInfo.provisioningState = 'new';
+		this.agentInfo.applicationId = undefined;
 		
 		// Clear MQTT credentials (these are cloud-assigned)
-		this.deviceInfo.mqttBrokerConfig = undefined;
+		this.agentInfo.mqttBrokerConfig = undefined;
 
-		await this.saveDeviceInfo();
+		await this.saveAgentInfo();
 
 		this.logger?.infoSync('Device reset (unprovisioned)', {
-			component: LogComponents.deviceManager,
+			component: LogComponents.agentManager,
 			operation: 'reset',
 			note: 'UUID and deviceApiKey preserved for re-registration. MQTT credentials cleared.',
 		});
@@ -1033,46 +1021,46 @@ export class DeviceManager {
 	 * Only UUID will be preserved for hardware identification
 	 */
 	async factoryReset(): Promise<void> {
-		if (!this.deviceInfo) {
+		if (!this.agentInfo) {
 			throw new Error('Device manager not initialized');
 		}
 
 		this.logger?.warnSync('Performing factory reset - all data will be deleted', {
-			component: LogComponents.deviceManager,
+			component: LogComponents.agentManager,
 			operation: 'factoryReset',
 		});
 
 		// First, deprovision from cloud if device is provisioned
 		// This notifies the cloud API so the device can be re-provisioned later
-		if (this.deviceInfo.provisioned && this.deviceInfo.apiEndpoint) {
+		if (this.agentInfo.provisioned && this.agentInfo.apiEndpoint) {
 			try {
 				this.logger?.infoSync('Deprovisioning from cloud before factory reset', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'factoryReset',
-					apiEndpoint: this.deviceInfo.apiEndpoint,
+					apiEndpoint: this.agentInfo.apiEndpoint,
 				});
 				
-				const url = buildApiEndpoint(this.deviceInfo.apiEndpoint, `/devices/${this.deviceInfo.uuid}`);
+				const url = buildApiEndpoint(this.agentInfo.apiEndpoint, `/devices/${this.agentInfo.uuid}`);
 				const response = await this.httpClient.get(url, {
-					headers: this.createAuthHeaders(this.deviceInfo.deviceApiKey!),
+					headers: this.createAuthHeaders(this.agentInfo.apiKey!),
 				});
 
 				if (!response.ok) {
 					this.logger?.warnSync('Cloud deprovision failed, continuing with local reset', {
-						component: LogComponents.deviceManager,
+						component: LogComponents.agentManager,
 						operation: 'factoryReset',
 						status: response.status,
 						note: 'Device will be reset locally. Cloud may still think device is provisioned.',
 					});
 				} else {
 					this.logger?.infoSync('Cloud deprovision successful', {
-						component: LogComponents.deviceManager,
+						component: LogComponents.agentManager,
 						operation: 'factoryReset',
 					});
 				}
 			} catch (error: any) {
 				this.logger?.warnSync('Cloud deprovision error, continuing with local reset', {
-					component: LogComponents.deviceManager,
+					component: LogComponents.agentManager,
 					operation: 'factoryReset',
 					error: error.message,
 					note: 'Device will be reset locally. Cloud may still think device is provisioned.',
@@ -1089,28 +1077,28 @@ export class DeviceManager {
 		await dbFactoryReset(this.logger);
 		
 		// Reset device info but preserve UUID for hardware identification
-		const preservedUuid = this.deviceInfo.uuid;
+		const preservedUuid = this.agentInfo.uuid;
 		
-		this.deviceInfo.deviceName = undefined;
-		this.deviceInfo.deviceType = undefined;
-		this.deviceInfo.deviceApiKey = undefined; // Also clear device key for full reset
-		this.deviceInfo.provisioningApiKey = undefined;
-		this.deviceInfo.apiKey = undefined;
-		this.deviceInfo.apiEndpoint = undefined;
-		this.deviceInfo.registeredAt = undefined;
-		this.deviceInfo.provisioned = false;
-		this.deviceInfo.provisioningState = 'new';
-		this.deviceInfo.applicationId = undefined;
-		this.deviceInfo.macAddress = undefined;
-		this.deviceInfo.osVersion = undefined;
-		this.deviceInfo.agentVersion = undefined;
-		this.deviceInfo.mqttBrokerConfig = undefined;
-		this.deviceInfo.uuid = preservedUuid; // Restore UUID
+		this.agentInfo.name = undefined;
+		this.agentInfo.type = undefined;
+		this.agentInfo.apiKey = undefined; // Also clear device key for full reset
+		this.agentInfo.provisioningApiKey = undefined;
+		this.agentInfo.apiKey = undefined;
+		this.agentInfo.apiEndpoint = undefined;
+		this.agentInfo.registeredAt = undefined;
+		this.agentInfo.provisioned = false;
+		this.agentInfo.provisioningState = 'new';
+		this.agentInfo.applicationId = undefined;
+		this.agentInfo.macAddress = undefined;
+		this.agentInfo.osVersion = undefined;
+		this.agentInfo.agentVersion = undefined;
+		this.agentInfo.mqttBrokerConfig = undefined;
+		this.agentInfo.uuid = preservedUuid; // Restore UUID
 
-		await this.saveDeviceInfo();
+		await this.saveAgentInfo();
 
 		this.logger?.warnSync('Factory reset complete - device returned to initial state', {
-			component: LogComponents.deviceManager,
+			component: LogComponents.agentManager,
 			operation: 'factoryReset',
 			uuid: preservedUuid,
 			note: 'Only UUID preserved. All apps, services, and data deleted. Device can be re-provisioned.',
@@ -1118,7 +1106,7 @@ export class DeviceManager {
 	}
 }
 
-export default DeviceManager;
+export default AgentManager;
 
 
 

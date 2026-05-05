@@ -19,7 +19,7 @@ export class CloudTransport {
 		private readonly mqttManager: CloudSyncMqttManager | undefined,
 		private httpClient: HttpClient,
 		private readonly cloudApiEndpoint: string,
-		private readonly getDeviceInfo: () => { uuid: string; deviceApiKey?: string; provisioned: boolean },
+		private readonly getAgentInfo: () => { uuid: string; apiKey?: string; provisioned: boolean },
 		private readonly getPublishMode: () => import('../mqtt/manager.js').PublishMode,
 		private readonly logger: AgentLogger | undefined,
 		private readonly getApiTimeout: () => number,
@@ -41,7 +41,7 @@ export class CloudTransport {
 	 * Throws CloudTransportBufferedError when publish mode is 'buffer-only'.
 	 */
 	async sendReport(report: AgentStateReport): Promise<'mqtt' | 'http'> {
-		const deviceInfo = this.getDeviceInfo();
+		const agentInfo = this.getAgentInfo();
 		const publishMode = this.getPublishMode();
 
 		if (publishMode === 'buffer-only') {
@@ -50,7 +50,7 @@ export class CloudTransport {
 
 		let topic: string | null = null;
 		try {
-			topic = agentTopic(deviceInfo.uuid, 'state');
+			topic = agentTopic(agentInfo.uuid, 'state');
 		} catch (error) {
 			this.logger?.warnSync('Tenant ID missing for MQTT topic, using HTTP', {
 				component: LogComponents.cloudSync,
@@ -87,7 +87,7 @@ export class CloudTransport {
 
 		const endpoint = buildApiEndpoint(this.cloudApiEndpoint, '/device/state');
 		const protocol = endpoint.startsWith('https://') ? 'https' : 'http';
-		const apiKey = deviceInfo.deviceApiKey;
+		const apiKey = agentInfo.apiKey;
 
 		const response = await this.httpClient.patch(endpoint, report, {
 			headers: apiKey ? { 'X-Device-API-Key': apiKey } : undefined,

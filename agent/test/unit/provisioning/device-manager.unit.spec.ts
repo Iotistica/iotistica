@@ -8,14 +8,14 @@
  * - Clean, isolated tests with predictable behavior
  */
 
-import { DeviceManager } from '../../../src/managers/device';
+import { AgentManager } from '../../../src/managers/agent';
 import { MockHttpClient } from '../../helpers/mock-http-client';
 import { MockDatabaseClient, MockUuidGenerator } from '../../helpers/mock-database-client';
 import type { DeviceRecord } from '../../../src/db/client';
 import type { ProvisionResponse } from '../../../src/managers/types';
 
 describe('DeviceManager - Refactored Testability', () => {
-	let deviceManager: DeviceManager;
+	let deviceManager: AgentManager;
 	let mockHttpClient: MockHttpClient;
 	let mockDbClient: MockDatabaseClient;
 	let mockUuidGenerator: MockUuidGenerator;
@@ -25,7 +25,7 @@ describe('DeviceManager - Refactored Testability', () => {
 		mockDbClient = new MockDatabaseClient();
 		mockUuidGenerator = new MockUuidGenerator();
 		mockUuidGenerator.setUuid('test-uuid-123');
-		deviceManager = new DeviceManager(undefined, mockHttpClient, mockDbClient, mockUuidGenerator);
+		deviceManager = new AgentManager(undefined, mockHttpClient, mockDbClient, mockUuidGenerator);
 	});
 
 	afterEach(() => {
@@ -45,10 +45,10 @@ describe('DeviceManager - Refactored Testability', () => {
 
 			await deviceManager.initialize();
 
-			const deviceInfo = deviceManager.getDeviceInfo();
-			expect(deviceInfo.uuid).toBeTruthy();
-			expect(deviceInfo.deviceApiKey).toBeTruthy();
-			expect(deviceInfo.provisioned).toBe(false);
+			const agentInfo = deviceManager.getAgentInfo();
+			expect(agentInfo.uuid).toBeTruthy();
+			expect(agentInfo.apiKey).toBeTruthy();
+			expect(agentInfo.provisioned).toBe(false);
 			expect(mockDbClient.saveDeviceStub.callCount).toBe(1);
 		});
 
@@ -78,10 +78,10 @@ describe('DeviceManager - Refactored Testability', () => {
 
 			await deviceManager.initialize();
 
-			const deviceInfo = deviceManager.getDeviceInfo();
-			expect(deviceInfo.uuid).toBe('test-uuid-123');
-			expect(deviceInfo.deviceName).toBe('Test Device');
-			expect(deviceInfo.provisioned).toBe(true);
+			const agentInfo = deviceManager.getAgentInfo();
+			expect(agentInfo.uuid).toBe('test-uuid-123');
+			expect(agentInfo.name).toBe('Test Device');
+			expect(agentInfo.provisioned).toBe(true);
 			expect(mockDbClient.loadDeviceStub.callCount).toBe(1);
 		});
 	});
@@ -101,8 +101,8 @@ describe('DeviceManager - Refactored Testability', () => {
 			const provisionResponse: ProvisionResponse = {
 				id: 123,
 				uuid: 'test-uuid',
-				deviceName: 'Test Device',
-				deviceType: 'sensor',
+				name: 'Test Device',
+				type: 'sensor',
 				challenge: 'test-challenge-nonce-12345',
 				createdAt: new Date().toISOString(),
 				mqtt: {
@@ -139,8 +139,8 @@ describe('DeviceManager - Refactored Testability', () => {
 			const result = await deviceManager.provision({
 				provisioningApiKey: 'provisioning-key-123',
 				apiEndpoint: 'http://api:3002',
-				deviceName: 'Test Device',
-				deviceType: 'sensor',
+				name: 'Test Device',
+				type: 'sensor',
 				applicationId: 100,
 			});
 
@@ -182,8 +182,8 @@ describe('DeviceManager - Refactored Testability', () => {
 			const provisionResponse: ProvisionResponse = {
 				id: 123,
 				uuid: 'test-uuid',
-				deviceName: 'Test Device',
-				deviceType: 'sensor',
+				name: 'Test Device',
+				type: 'sensor',
 				challenge: 'test-challenge-nonce-12345',
 				createdAt: new Date().toISOString(),
 				mqtt: {
@@ -229,8 +229,8 @@ describe('DeviceManager - Refactored Testability', () => {
 			const provisionResponse: ProvisionResponse = {
 				id: 123,
 				uuid: 'test-uuid',
-				deviceName: 'Test Device',
-				deviceType: 'sensor',
+				name: 'Test Device',
+				type: 'sensor',
 				challenge: 'test-challenge-nonce-12345',
 				createdAt: new Date().toISOString(),
 				mqtt: {
@@ -282,10 +282,10 @@ describe('DeviceManager - Refactored Testability', () => {
 			mockDbClient.mockSuccessfulSave();
 			await deviceManager.initialize();
 
-			await deviceManager.updateDeviceName('New Device Name');
+			await deviceManager.updateAgentName('New Device Name');
 
-			const deviceInfo = deviceManager.getDeviceInfo();
-			expect(deviceInfo.deviceName).toBe('New Device Name');
+			const agentInfo = deviceManager.getAgentInfo();
+			expect(agentInfo.name).toBe('New Device Name');
 			expect(mockDbClient.saveDeviceStub.callCount).toBeGreaterThan(0);
 		});
 
@@ -296,8 +296,8 @@ describe('DeviceManager - Refactored Testability', () => {
 
 			await deviceManager.updateAPIEndpoint('http://new-api:3002');
 
-			const deviceInfo = deviceManager.getDeviceInfo();
-			expect(deviceInfo.apiEndpoint).toBe('http://new-api:3002');
+			const agentInfo = deviceManager.getAgentInfo();
+			expect(agentInfo.apiEndpoint).toBe('http://new-api:3002');
 		});
 
 		it('should reset device (unprovision)', async () => {
@@ -328,10 +328,10 @@ describe('DeviceManager - Refactored Testability', () => {
 
 			await deviceManager.reset();
 
-			const deviceInfo = deviceManager.getDeviceInfo();
-			expect(deviceInfo.provisioned).toBe(false);
-			expect(deviceInfo.uuid).toBe('test-uuid'); // UUID preserved
-			expect(deviceInfo.deviceApiKey).toBe('api-key-123'); // API key preserved
+			const agentInfo = deviceManager.getAgentInfo();
+			expect(agentInfo.provisioned).toBe(false);
+			expect(agentInfo.uuid).toBe('test-uuid'); // UUID preserved
+			expect(agentInfo.apiKey).toBe('api-key-123'); // API key preserved
 		});
 	});
 
@@ -340,9 +340,9 @@ describe('DeviceManager - Refactored Testability', () => {
 	// ============================================================================
 
 	describe('Error Handling', () => {
-		it('should throw error if getDeviceInfo called before initialize', () => {
-			const uninitializedManager = new DeviceManager(undefined, mockHttpClient, mockDbClient);
-			expect(() => uninitializedManager.getDeviceInfo()).toThrow('Device manager not initialized');
+		it('should throw error if getAgentInfo called before initialize', () => {
+			const uninitializedManager = new AgentManager(undefined, mockHttpClient, mockDbClient);
+			expect(() => uninitializedManager.getAgentInfo()).toThrow('Device manager not initialized');
 		});
 
 		it('should handle database save failure', async () => {

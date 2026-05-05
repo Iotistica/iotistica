@@ -2,5 +2,5 @@
  * Provisioning module exports
  */
 
-export { DeviceManager } from './device';
-export type { DeviceInfo, ProvisioningConfig, ProvisionRequest, ProvisionResponse } from './types';
+export { AgentManager as DeviceManager } from './agent';
+export type { AgentInfo as DeviceInfo, ProvisioningConfig, ProvisionRequest, ProvisionResponse } from './types';

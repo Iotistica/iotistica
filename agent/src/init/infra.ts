@@ -13,18 +13,18 @@ export async function initInfrastructure(ctx: AgentInitContext): Promise<void> {
 
 export async function initializeMqttManager(ctx: AgentInitContext): Promise<void> {
 	try {
-		if (!ctx.deviceInfo?.mqttBrokerConfig) {
+		if (!ctx.agentInfo?.mqttBrokerConfig) {
 			return;
 		}
 
-		const config = ctx.deviceInfo.mqttBrokerConfig;
+		const config = ctx.agentInfo.mqttBrokerConfig;
 		const mqttBrokerUrl = `${config.protocol || 'mqtt'}://${config.host}:${config.port}`;
 		const mqttManager = CloudMqttClient.getInstance();
 
 		mqttManager.setLogger(ctx.agentLogger!);
 
 		const mqttOptions: any = {
-			clientId: config.clientIdPrefix ? `${config.clientIdPrefix}_${ctx.deviceInfo.uuid}` : `device_${ctx.deviceInfo.uuid}`,
+			clientId: config.clientIdPrefix ? `${config.clientIdPrefix}_${ctx.agentInfo.uuid}` : `device_${ctx.agentInfo.uuid}`,
 			clean: config.cleanSession ?? true,
 			reconnectPeriod: config.reconnectPeriod ?? 5000,
 			keepalive: config.keepAlive ?? 60,
@@ -44,7 +44,7 @@ export async function initializeMqttManager(ctx: AgentInitContext): Promise<void
 			}
 		}
 
-		await mqttManager.connect(mqttBrokerUrl, mqttOptions, ctx.deviceInfo.uuid, {
+		await mqttManager.connect(mqttBrokerUrl, mqttOptions, ctx.agentInfo.uuid, {
 			bufferSync: true,
 		});
 
@@ -76,10 +76,10 @@ export async function initializeDictionaryManager(ctx: AgentInitContext): Promis
 	}
 
 	try {
-		const { DictionaryManager } = await import('../managers/dictionary.js');
+		const { DictionaryManager } = await import('../mqtt/dictionary.js');
 		const mqttManager = CloudMqttClient.getInstance();
 
-		ctx.dictionaryManager = new DictionaryManager(mqttManager, ctx.agentLogger, ctx.deviceInfo.uuid);
+		ctx.dictionaryManager = new DictionaryManager(mqttManager, ctx.agentLogger, ctx.agentInfo.uuid);
 		await ctx.dictionaryManager.initialize();
 
 		ctx.agentLogger?.infoSync('Dictionary manager initialized', {

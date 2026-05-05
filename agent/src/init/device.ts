@@ -32,8 +32,8 @@ export async function initializeCloudLogging(ctx: AgentInitContext): Promise<voi
 
 	if (
 		!cloudApiEndpoint ||
-		!ctx.deviceInfo?.provisioned ||
-		!ctx.deviceInfo?.deviceApiKey
+		!ctx.agentInfo?.provisioned ||
+		!ctx.agentInfo?.apiKey
 	) {
 		return;
 	}
@@ -44,8 +44,8 @@ export async function initializeCloudLogging(ctx: AgentInitContext): Promise<voi
 		const cloudLogBackend = new CloudLogBackend(
 			{
 				cloudEndpoint: cloudApiEndpoint,
-				deviceUuid: ctx.deviceInfo.uuid,
-				deviceApiKey: ctx.deviceInfo.apiKey,
+				deviceUuid: ctx.agentInfo.uuid,
+				deviceApiKey: ctx.agentInfo.apiKey,
 				httpClient: ctx.sharedHttpClient,
 				compression: loggingConfig.enableCompression,
 				batchSize: loggingConfig.logBatchSize,
@@ -100,7 +100,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 				agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
 			});
 			deviceInfo = ctx.deviceManager.getDeviceInfo();
-			ctx.deviceInfo = deviceInfo;
+			ctx.agentInfo = deviceInfo;
 		} catch (error: any) {
 			ctx.agentLogger?.errorSync(
 				'Auto-provisioning failed',
@@ -132,10 +132,10 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 		deviceInfo = ctx.deviceManager.getDeviceInfo();
 	}
 
-	ctx.deviceInfo = deviceInfo;
+	ctx.agentInfo = deviceInfo;
 
-	if (ctx.deviceInfo.provisioned) {
-		const tenantId = ctx.deviceInfo.tenantId?.trim();
+	if (ctx.agentInfo.provisioned) {
+		const tenantId = ctx.agentInfo.tenantId?.trim();
 		if (!tenantId) {
 			throw new Error('Provisioned device is missing tenantId. Re-provision device to receive tenant-aware configuration.');
 		}
@@ -145,22 +145,22 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 	}
 
 	const currentVersion = process.env.AGENT_VERSION || getPackageVersion();
-	if (ctx.deviceInfo.agentVersion !== currentVersion) {
+	if (ctx.agentInfo.agentVersion !== currentVersion) {
 		await ctx.deviceManager.updateAgentVersion(currentVersion);
-		ctx.deviceInfo = ctx.deviceManager.getDeviceInfo();
+		ctx.agentInfo = ctx.deviceManager.getDeviceInfo();
 	}
 
-	ctx.agentLogger?.setDeviceId(ctx.deviceInfo.uuid);
+	ctx.agentLogger?.setDeviceId(ctx.agentInfo.uuid);
 
 	ctx.agentLogger?.infoSync('Device manager initialized', {
 		component: LogComponents.agent,
-		provisioned: ctx.deviceInfo.provisioned,
-		mode: ctx.deviceInfo.provisioned ? 'cloud' : 'local',
+		provisioned: ctx.agentInfo.provisioned,
+		mode: ctx.agentInfo.provisioned ? 'cloud' : 'local',
 	});
 }
 
 export async function initializeVpnReconnection(ctx: AgentInitContext): Promise<void> {
-	if (!ctx.deviceInfo?.provisioned || !ctx.deviceInfo?.vpnEnabled) {
+	if (!ctx.agentInfo?.provisioned || !ctx.agentInfo?.vpnEnabled) {
 		return;
 	}
 

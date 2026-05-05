@@ -78,7 +78,7 @@ export async function initPipeline(ctx: AgentInitContext): Promise<void> {
 
 		const pipeline = new PipelineService({
 			flows: resolvedFlows,
-			agentUuid: ctx.deviceInfo?.uuid ?? '',
+			agentUuid: ctx.agentInfo?.uuid ?? '',
 			timeoutMs,
 			logger: pipelineLogger,
 		});

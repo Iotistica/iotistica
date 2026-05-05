@@ -2,8 +2,8 @@ import type { AgentInitContext } from './context.js';
 import * as deviceActions from '../api/actions.js';
 import { LogComponents } from '../logging/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
-import { CloudSync } from '../cloud-sync/index.js';
-import { initAnomalyDetection } from './ai.js';
+import { CloudSync } from '../sync/index.js';
+import { initAnomalyDetection } from './anomaly.js';
 
 export async function initSync(ctx: AgentInitContext): Promise<void> {
 	await initDeviceSync(ctx);
@@ -46,12 +46,12 @@ export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
 		return;
 	}
 
-	if (!ctx.deviceInfo?.provisioned || !ctx.deviceInfo?.deviceApiKey) {
+	if (!ctx.agentInfo?.provisioned || !ctx.agentInfo?.apiKey) {
 		ctx.agentLogger?.warnSync('Device not provisioned - cloud sync disabled', {
 			component: LogComponents.agent,
 			note: 'Device must be provisioned with valid API key before enabling cloud features',
-			provisioned: ctx.deviceInfo?.provisioned,
-			hasApiKey: !!ctx.deviceInfo?.deviceApiKey,
+			provisioned: ctx.agentInfo?.provisioned,
+			hasApiKey: !!ctx.agentInfo?.apiKey,
 		});
 		return;
 	}

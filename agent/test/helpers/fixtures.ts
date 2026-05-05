@@ -7,7 +7,7 @@
  * 
  * Usage:
  *   const response = createMockTargetStateResponse();
- *   const deviceInfo = createMockDeviceInfo({ provisioned: false });
+ *   const agentInfo = createmockAgentInfo({ provisioned: false });
  */
 
 import type { DeviceState } from '../../src/orchestrator/state-reconciler';
@@ -45,11 +45,10 @@ export interface DeviceStateReport {
 	};
 }
 
-export interface MockDeviceInfo {
+export interface MockAgentInfo {
 	uuid: string;
 	provisioned: boolean;
-	deviceApiKey: string;  // Device-specific key (two-phase auth)
-	apiKey?: string;       // Legacy field for backward compatibility
+	apiKey: string;        // Device-specific API key
 	osVersion: string;
 	agentVersion: string;
 }
@@ -253,19 +252,18 @@ export const createDeviceStateWithOnlySensors = (): DeviceState => ({
 // ============================================================================
 
 /**
- * Create mock device info (what deviceManager.getDeviceInfo returns)
+ * Create mock device info (what deviceManager.getAgentInfo returns)
  * 
  * @example
- * const deviceInfo = createMockDeviceInfo();
- * const unprovisionedDevice = createMockDeviceInfo({ provisioned: false });
+ * const agentInfo = createmockAgentInfo();
+ * const unprovisionedDevice = createmockAgentInfo({ provisioned: false });
  */
-export const createMockDeviceInfo = (
-	overrides?: Partial<MockDeviceInfo>
-): MockDeviceInfo => ({
+export const createMockAgentInfo = (
+	overrides?: Partial<MockAgentInfo>
+): MockAgentInfo => ({
 	uuid: 'device-uuid-123',
 	provisioned: true,
-	deviceApiKey: 'test-api-key-abc123',  // Two-phase auth key
-	apiKey: 'test-api-key-abc123',        // Legacy fallback
+	apiKey: 'test-api-key-abc123',
 	osVersion: 'Debian 11',
 	agentVersion: '1.0.0',
 	...overrides
@@ -275,10 +273,9 @@ export const createMockDeviceInfo = (
  * Create unprovisioned device info
  * Useful for testing provisioning flow
  */
-export const createUnprovisionedDeviceInfo = (): MockDeviceInfo => ({
+export const createUnprovisionedAgentInfo = (): MockAgentInfo => ({
 	uuid: 'device-uuid-123',
 	provisioned: false,
-	deviceApiKey: '',
 	apiKey: '',
 	osVersion: 'Debian 11',
 	agentVersion: '1.0.0'
@@ -434,7 +431,7 @@ export const createMockStateReport = (
  * Device starts up for the first time and receives initial config
  */
 export const createFirstBootScenario = () => ({
-	deviceInfo: createMockDeviceInfo(),
+	agentInfo: createMockAgentInfo(),
 	targetState: createMockTargetStateResponse(),
 	previousState: createEmptyDeviceState()
 });
@@ -444,7 +441,7 @@ export const createFirstBootScenario = () => ({
  * Device receives new sensor configuration
  */
 export const createConfigUpdateScenario = () => ({
-	deviceInfo: createMockDeviceInfo(),
+	agentInfo: createMockAgentInfo(),
 	previousState: createMockDeviceState(),
 	newTargetState: createTargetStateWithSensors('device-uuid-123', 5)
 });
@@ -454,7 +451,7 @@ export const createConfigUpdateScenario = () => ({
  * Target state version changes from 1 to 2
  */
 export const createVersionIncrementScenario = () => ({
-	deviceInfo: createMockDeviceInfo(),
+	agentInfo: createMockAgentInfo(),
 	previousVersion: 1,
 	newVersion: 2,
 	targetStateV1: createTargetStateWithVersion(1),
@@ -466,7 +463,7 @@ export const createVersionIncrementScenario = () => ({
  * Device cannot reach cloud API
  */
 export const createNetworkFailureScenario = () => ({
-	deviceInfo: createMockDeviceInfo(),
+	agentInfo: createMockAgentInfo(),
 	error: createNetworkError(),
 	expectedBackoff: 15000 // 15 seconds
 });
@@ -476,7 +473,7 @@ export const createNetworkFailureScenario = () => ({
  * Device has not completed provisioning yet
  */
 export const createUnprovisionedScenario = () => ({
-	deviceInfo: createUnprovisionedDeviceInfo(),
+	agentInfo: createUnprovisionedAgentInfo(),
 	shouldSkipPoll: true,
 	shouldSkipReport: true
 });
@@ -486,7 +483,7 @@ export const createUnprovisionedScenario = () => ({
  * Subsequent poll returns 304 with same ETag
  */
 export const createETagCachedScenario = () => ({
-	deviceInfo: createMockDeviceInfo(),
+	agentInfo: createMockAgentInfo(),
 	firstResponse: createMockFetchResponse(
 		createMockTargetStateResponse(),
 		{ etag: 'abc123' }
@@ -500,7 +497,7 @@ export const createETagCachedScenario = () => ({
  * API returns only 2 of 4 config fields
  */
 export const createPartialConfigScenario = () => ({
-	deviceInfo: createMockDeviceInfo(),
+	agentInfo: createMockAgentInfo(),
 	targetState: createTargetStateWithPartialConfig(),
 	expectedConfigKeys: ['logging', 'sensors'], // Only these 2 fields
 	missingConfigKeys: ['features', 'settings'] // These 2 should be missing
@@ -511,7 +508,7 @@ export const createPartialConfigScenario = () => ({
  * API returns all 4 config fields
  */
 export const createCompleteConfigScenario = () => ({
-	deviceInfo: createMockDeviceInfo(),
+	agentInfo: createMockAgentInfo(),
 	targetState: createMockTargetStateResponse(),
 	expectedConfigKeys: ['logging', 'sensors', 'features', 'settings'] // All 4 fields
 });

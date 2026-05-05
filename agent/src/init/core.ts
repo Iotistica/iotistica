@@ -28,7 +28,7 @@ export function setupConfigEventListeners(ctx: AgentInitContext): void {
 				logger?.infoSync('Starting Anomaly Detection Service (dynamically enabled)', {
 					component: LogComponents.agent
 				});
-				const { initAnomalyDetection } = await import('./ai.js');
+				const { initAnomalyDetection } = await import('./anomaly.js');
 				await initAnomalyDetection(ctx);
 
 				// Simulation init runs before target state is available (in features.ts).
@@ -55,10 +55,10 @@ export function setupConfigEventListeners(ctx: AgentInitContext): void {
 				});
 
 				try {
-					const sensorPublish = ctx.featureInitializer?.getFeatures()?.sensorPublish;
-					if (sensorPublish) {
-						await sensorPublish.stop();
-						ctx.featureInitializer!.getFeatures().sensorPublish = undefined;
+					const devicePublish = ctx.featureInitializer?.getFeatures()?.devicePublish;
+					if (devicePublish) {
+						await devicePublish.stop();
+						ctx.featureInitializer!.getFeatures().devicePublish = undefined;
 					}
 				} catch (error) {
 					logger?.errorSync(

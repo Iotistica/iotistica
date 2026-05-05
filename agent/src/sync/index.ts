@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import type { StateManager } from '../managers/state.js';
-import type { DeviceManager } from '../managers/device.js';
+import type { AgentManager } from '../managers/agent.js';
 import type { HttpClient } from '../lib/http-client.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
@@ -85,7 +85,7 @@ export class CloudSync extends EventEmitter {
 
 	constructor(
 		private readonly stateManager: StateManager,
-		private readonly deviceManager: DeviceManager,
+		private readonly deviceManager: AgentManager,
 		config: CloudSyncConfig,
 		private readonly logger?: AgentLogger,
 		private readonly devicePublish?: any,
@@ -114,7 +114,7 @@ export class CloudSync extends EventEmitter {
 			mqttManager,
 			resolvedHttpClient,
 			this.config.cloudApiEndpoint,
-			() => this.deviceManager.getDeviceInfo(),
+			() => this.deviceManager.getAgentInfo(),
 			() => this.getPublishMode(),
 			logger,
 			() => this.config.apiTimeout,
@@ -125,7 +125,7 @@ export class CloudSync extends EventEmitter {
 			stateManager,
 			this.config.cloudApiEndpoint,
 			() => ({ pollInterval: this.config.pollInterval, apiTimeout: this.config.apiTimeout }),
-			() => this.deviceManager.getDeviceInfo(),
+			() => this.deviceManager.getAgentInfo(),
 			logger,
 		);
 
@@ -146,7 +146,7 @@ export class CloudSync extends EventEmitter {
 			stateManager,
 			transport: this.transport,
 			connectionMonitor: this.connectionMonitor,
-			getDeviceInfo: () => this.deviceManager.getDeviceInfo(),
+			getAgentInfo: () => this.deviceManager.getAgentInfo(),
 			getConfig: () => ({
 				reportInterval: this.config.reportInterval,
 				metricsInterval: this.config.metricsInterval,
@@ -173,8 +173,8 @@ export class CloudSync extends EventEmitter {
 	}
 
 	private createHttpClient(): HttpClient {
-		const deviceInfo = this.deviceManager.getDeviceInfo();
-		const apiTlsConfig = deviceInfo?.apiTlsConfig;
+		const agentInfo = this.deviceManager.getAgentInfo();
+		const apiTlsConfig = agentInfo?.apiTlsConfig;
 		return createHttpClient(this.config.cloudApiEndpoint, {
 			defaultTimeout: this.config.apiTimeout,
 			defaultHeaders: { 'Content-Type': 'application/json' },

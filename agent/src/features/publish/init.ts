@@ -2,6 +2,7 @@ import { BaseFeature } from '../index.js';
 import { AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
 import type { Protocol } from '../../anomaly/types.js';
+import type { AnomalyDetectionService } from '../../anomaly/index.js';
 import type { PipelineService } from '../pipeline/index.js';
 import {
   DevicePublishConfig,
@@ -22,7 +23,7 @@ export class DevicePublishFeature extends BaseFeature {
   private readonly useMsgpackPoc: boolean;
   private readonly useKeyCompactionPoc: boolean;
   private readonly useDeflatePoc: boolean;
-  private anomalyService?: any;
+  private anomalyService?: AnomalyDetectionService;
   private pipelineService?: PipelineService;
   private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
 
@@ -34,7 +35,7 @@ export class DevicePublishFeature extends BaseFeature {
     useMsgpackPoc: boolean = false, // Enable MessagePack compression POC
     useKeyCompactionPoc: boolean = false, // Enable dictionary key compaction POC
     useDeflatePoc: boolean = false, // Enable DEFLATE compression POC
-    anomalyService?: any,
+    anomalyService?: AnomalyDetectionService,
   ) {
     super(
       config,
@@ -52,7 +53,7 @@ export class DevicePublishFeature extends BaseFeature {
     this.anomalyService = anomalyService;
   }
 
-  public setAnomalyService(anomalyService?: any): void {
+  public setAnomalyService(anomalyService?: AnomalyDetectionService): void {
     this.anomalyService = anomalyService;
     for (const sensor of this.sensors) {
       sensor.setAnomalyService(anomalyService);
