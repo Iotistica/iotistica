@@ -37,7 +37,7 @@ import {
 } from './init/core.js';
 import type { AgentInitContext } from './init/context.js';
 import { initLogging as runInitLogging } from './init/logging.js';
-import { initDevice as runInitDevice } from './init/device.js';
+import { initDevice as runInitDevice } from './init/agent.js';
 import {
   initInfrastructure as runInitInfrastructure,
 } from './init/infra.js';
