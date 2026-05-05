@@ -81,7 +81,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 	);
 	await ctx.deviceManager.initialize();
 
-	let deviceInfo = ctx.deviceManager.getDeviceInfo();
+	let deviceInfo = ctx.deviceManager.getAgentInfo();
 	const provisioningApiKey = normalizeOptionalEnvValue(process.env.PROVISIONING_KEY);
 	const cloudEndpoint = process.env.IOTISTICA_API || ctx.configManager!.getCloudApiEndpoint();
 
@@ -99,7 +99,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 				osVersion,
 				agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
 			});
-			deviceInfo = ctx.deviceManager.getDeviceInfo();
+			deviceInfo = ctx.deviceManager.getAgentInfo();
 			ctx.agentInfo = deviceInfo;
 		} catch (error: any) {
 			ctx.agentLogger?.errorSync(
@@ -110,7 +110,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 					note: 'Device will remain unprovisioned. Check PROVISIONING_KEY or boot config file.',
 				}
 			);
-			deviceInfo = ctx.deviceManager.getDeviceInfo();
+			deviceInfo = ctx.deviceManager.getAgentInfo();
 		}
 	} else if (!deviceInfo.provisioned && cloudEndpoint && !provisioningApiKey) {
 		ctx.agentLogger?.warnSync('Device not provisioned', {
@@ -122,14 +122,14 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 			component: LogComponents.agent,
 		});
 		await ctx.deviceManager.markAsLocalMode();
-		deviceInfo = ctx.deviceManager.getDeviceInfo();
+		deviceInfo = ctx.deviceManager.getAgentInfo();
 	} else if (deviceInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
 		ctx.agentLogger?.infoSync('Switching to local mode (no cloud connection)', {
 			component: LogComponents.agent,
 			note: 'Device was previously provisioned but IOTISTICA_API is not set',
 		});
 		await ctx.deviceManager.markAsLocalMode();
-		deviceInfo = ctx.deviceManager.getDeviceInfo();
+		deviceInfo = ctx.deviceManager.getAgentInfo();
 	}
 
 	ctx.agentInfo = deviceInfo;
@@ -147,7 +147,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 	const currentVersion = process.env.AGENT_VERSION || getPackageVersion();
 	if (ctx.agentInfo.agentVersion !== currentVersion) {
 		await ctx.deviceManager.updateAgentVersion(currentVersion);
-		ctx.agentInfo = ctx.deviceManager.getDeviceInfo();
+		ctx.agentInfo = ctx.deviceManager.getAgentInfo();
 	}
 
 	ctx.agentLogger?.setDeviceId(ctx.agentInfo.uuid);
