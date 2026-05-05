@@ -1,4 +1,4 @@
-import { SensorsFeature, SensorConfig } from '../../../src/features/adapters';
+import { AdapterManager, AdapterConfig } from '../../../src/adapters';
 import { AgentLogger } from '../../../src/logging/agent-logger';
 
 // Mock DeviceEndpointModel to avoid database dependencies in unit tests
@@ -8,9 +8,9 @@ jest.mock('../../../src/db/models/endpoint.model', () => ({
   }
 }));
 
-describe('SensorsFeature - Simple Tests', () => {
+describe('AdapterManager - Simple Tests', () => {
   let mockLogger: any;
-  let config: SensorConfig;
+  let config: AdapterConfig;
 
   beforeEach(() => {
     mockLogger = {
@@ -20,25 +20,23 @@ describe('SensorsFeature - Simple Tests', () => {
       error: jest.fn()
     };
 
-    config = {
-      enabled: true
-    };
+    config = {};
   });
 
   it('should create instance', () => {
-    const feature = new SensorsFeature(config, mockLogger as any, 'test-123');
-    expect(feature).toBeDefined();
+    const manager = new AdapterManager(config, mockLogger as any, 'test-123');
+    expect(manager).toBeDefined();
   });
 
   it('should return empty statuses initially', async () => {
-    const feature = new SensorsFeature(config, mockLogger as any, 'test-123');
-    const statuses = await feature.getAllDeviceStatuses();
+    const manager = new AdapterManager(config, mockLogger as any, 'test-123');
+    const statuses = await manager.getAllDeviceStatuses();
     expect(Object.keys(statuses).length).toBe(0);
   });
 
   it('should have undefined modbus adapter initially', () => {
-    const feature = new SensorsFeature(config, mockLogger as any, 'test-123');
-    const adapter = feature.getModbusAdapter();
+    const manager = new AdapterManager(config, mockLogger as any, 'test-123');
+    const adapter = manager.getAdapter('modbus');
     expect(adapter).toBeUndefined();
   });
 });

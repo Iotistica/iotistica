@@ -2,15 +2,14 @@ import { EventEmitter } from 'events';
 import { BACnetAdapterConfig, BACnetDevice } from './types';
 import { BACnetClient } from './client';
 import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
-import { DeviceMetrics } from '../metrics.js';
-import { DeviceModel } from '../../../db/models/device.model.js';
-import { pLimit } from '../../../lib/p-limit.js';
+import { DeviceModel } from '../../db/models/device.model.js';
+import { pLimit } from '../../lib/p-limit.js';
 
 /**
  * Main BACnet Adapter class that coordinates BACnet devices
  * 
  * Architecture: This adapter is socket-agnostic. It polls BACnet devices and emits
- * 'data' events with sensor readings. The parent SensorsFeature manages SocketServer
+ * 'data' events with sensor readings. The parent AdapterManager manages SocketServer
  * and routes data to the appropriate socket based on protocol.
  * 
  * Events:
@@ -26,7 +25,6 @@ export class BACnetAdapter extends EventEmitter {
   private logger: Logger;
   private clients: Map<string, BACnetClient> = new Map();
   private deviceStatuses: Map<string, DeviceStatus> = new Map();
-  private deviceMetrics: Map<string, DeviceMetrics> = new Map();
   private running = false;
   private pollLoopRunning = false;
 
@@ -264,6 +262,8 @@ export class BACnetAdapter extends EventEmitter {
    */
   private startGlobalPollLoop(): void {
     this.pollLoopRunning = true;
+    // Create limiter once and reuse across ticks — concurrency limit is constant
+    const limit = pLimit(this.config.maxConcurrentDevices);
 
     const pollTick = async () => {
       if (!this.pollLoopRunning) {
@@ -289,8 +289,6 @@ export class BACnetAdapter extends EventEmitter {
       }
 
       if (devicesToPoll.length > 0) {
-        // Poll devices in parallel with concurrency limit
-        const limit = pLimit(this.config.maxConcurrentDevices);
 
         await Promise.all(
           devicesToPoll.map(deviceConfig =>
@@ -399,7 +397,7 @@ export class BACnetAdapter extends EventEmitter {
       });
 
       this.recordPollResult(deviceName, false);
-      this.emit('device-error', { deviceName, error: errorMessage });
+      this.emit('device-error', deviceName, errorMessage);
 
       this.logger.warn(`Error polling BACnet device ${deviceName}: ${errorMessage}`);
     }

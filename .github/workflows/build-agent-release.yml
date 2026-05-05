@@ -200,6 +200,8 @@ jobs:
           promote_blob "agent/agent-latest-x86_64.tar.gz.sha256" "agent/versions/agent-${VERSION}-x86_64.tar.gz.sha256" || exit 1
           promote_blob "agent/agent-latest-arm64.tar.gz" "agent/versions/agent-${VERSION}-arm64.tar.gz" || exit 1
           promote_blob "agent/agent-latest-arm64.tar.gz.sha256" "agent/versions/agent-${VERSION}-arm64.tar.gz.sha256" || exit 1
+          promote_blob "agent/agent-latest.tar.gz" "agent/versions/agent-${VERSION}.tar.gz" || exit 1
+          promote_blob "agent/agent-latest.tar.gz.sha256" "agent/versions/agent-${VERSION}.tar.gz.sha256" || exit 1
 
           promote_blob "agent/agent-latest-build-meta.json" "agent/versions/${VERSION}/agent-build-meta.json" || exit 1
 

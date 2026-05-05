@@ -1,4 +1,4 @@
-import { randomUUID, randomBytes } from 'crypto';
+import { randomUUID, randomBytes, createHmac } from 'crypto';
 import * as mqtt from 'mqtt';
 import { query } from '../../db/connection';
 import { logAuditEvent, AuditEventType, AuditSeverity } from '../../utils/audit-logger';
@@ -73,6 +73,8 @@ export interface AgentTargetState {
       version?: string;
       update_scheduled_at?: string;
       update_force?: boolean;
+      update_issued_at?: number;
+      update_expires_at?: number;
       update_signature?: string;
     };
     endpoints?: any[];
@@ -1789,6 +1791,33 @@ export interface TriggerUpdateParams {
   force?: boolean;
 }
 
+/**
+ * Sign an agent update command with HMAC-SHA256.
+ * Uses the same canonical string format as the on-device verifyCommandSignature().
+ */
+export function signAgentUpdate(params: {
+  version: string;
+  issuedAt: number;
+  expiresAt?: number;
+  scheduledTime?: string;
+  force?: boolean;
+}): string | undefined {
+  const secret = process.env.UPDATE_COMMAND_SECRET;
+  if (!secret) return undefined;
+
+  const { version, issuedAt, expiresAt, scheduledTime, force } = params;
+  const canonicalString = [
+    'update',
+    version,
+    issuedAt.toString(),
+    expiresAt?.toString() || '',
+    scheduledTime || '',
+    force?.toString() || ''
+  ].join('|');
+
+  return createHmac('sha256', secret).update(canonicalString).digest('hex');
+}
+
 export async function triggerAgentUpdate(
   uuid: string,
   params: TriggerUpdateParams,
@@ -1848,13 +1877,26 @@ export async function triggerAgentUpdate(
 
   const tenantId = getTenantId();
   const updateTopic = mqttDeviceTopic(tenantId, uuid, 'agent', 'update');
-  const updateCommand = {
+  const issuedAt = Date.now();
+  const expiresAt = issuedAt + 24 * 60 * 60 * 1000; // 24 hours
+  const signature = signAgentUpdate({
+    version: version || 'latest',
+    issuedAt,
+    expiresAt,
+    scheduledTime: scheduled_time,
+    force,
+  });
+
+  const updateCommand: Record<string, unknown> = {
     action: 'update',
     version: version || 'latest',
     scheduled_time,
     force,
-    timestamp: Date.now(),
+    issued_at: issuedAt,
+    expires_at: expiresAt,
+    timestamp: issuedAt,
   };
+  if (signature) updateCommand.signature = signature;
 
   await new Promise<void>((resolve, reject) => {
     mqttClient.publish(

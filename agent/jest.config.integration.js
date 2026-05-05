@@ -29,5 +29,5 @@ module.exports = {
     '^.+\\.tsx?$': ['ts-jest', {
       tsconfig: '<rootDir>/test/tsconfig.json'
     }]
-  }
+  },
 };

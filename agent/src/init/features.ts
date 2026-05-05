@@ -10,10 +10,10 @@ import type { DeviceInfo } from '../managers/types.js';
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/monitor.js';
-import { DiscoveryService } from '../features/adapters/discovery-service.js';
+import { DiscoveryService } from '../adapters/discovery/service.js';
 
 import { DevicePublishFeature } from '../features/publish/index.js';
-import { SensorsFeature, type SensorConfig } from '../features/adapters/index.js';
+import { AdapterManager, type AdapterConfig } from '../adapters/index.js';
 import type { PipelineService } from '../features/pipeline/index.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
@@ -45,7 +45,7 @@ export interface FeatureContext {
 export interface InitializedFeatures {
   jobs?: JobsFeature;
   sensorPublish?: DevicePublishFeature;
-  sensors?: SensorsFeature;
+  sensors?: AdapterManager;
   updater?: AgentUpdater;
   firewall?: AgentFirewall;
   shellHandler?: any; // Shell handler for remote terminal access
@@ -336,7 +336,7 @@ export class FeatureInitializer {
         return;
       }
 
-      const sensorConfig = {
+      const AdapterConfig = {
         enabled: true,
         endpoints: devices,
       };
@@ -347,7 +347,7 @@ export class FeatureInitializer {
       const useDeflatePoc = process.env.USE_DEFLATE_COMPRESSION === 'true';
 
       this.features.sensorPublish = new DevicePublishFeature(
-        sensorConfig as any,
+        AdapterConfig as any,
         logger,
         deviceInfo.uuid,
         this.context.dictionaryManager,
@@ -391,13 +391,11 @@ export class FeatureInitializer {
       // No more config.protocols or config.protocolAdapters - endpoints determine which protocols are enabled
       
       // Initialize base config with all protocols disabled
-      const devicesConfig: SensorConfig = {
-        enabled: true,
+      const devicesConfig: AdapterConfig & Record<string, any> = {
         modbus: { enabled: false },
         opcua: { enabled: false },
         snmp: { enabled: false },
         can: { enabled: false },
-        comap: { enabled: false },
         mqtt: { enabled: false }
       };
 
@@ -439,16 +437,16 @@ export class FeatureInitializer {
         });
       }
       
-      // ALWAYS create SensorsFeature even if no protocols are enabled initially
+      // ALWAYS create AdapterManager even if no protocols are enabled initially
       // This ensures health reporting works when endpoints are discovered later
-      this.features.sensors = new SensorsFeature(
+      this.features.sensors = new AdapterManager(
         devicesConfig,
         logger,
         deviceInfo.uuid
       );
 
       if (enabledProtocols.length === 0) {
-        logger.debugSync('No protocols enabled initially, SensorsFeature created but not started', {
+        logger.debugSync('No protocols enabled initially, AdapterManager created but not started', {
           component: LogComponents.agent,
           note: 'Will be started when endpoints are enabled via discovery or config'
         });
@@ -458,10 +456,10 @@ export class FeatureInitializer {
       }
       
       // Make sensors feature available to device API
-      const { setSensorsFeature } = await import('../api/actions.js');
-      setSensorsFeature(this.features.sensors);
+      const { setAdapterManager } = await import('../api/actions.js');
+      setAdapterManager(this.features.sensors);
 
-      // Wire up rediscovery-needed listener on each new SensorsFeature instance.
+      // Wire up rediscovery-needed listener on each new AdapterManager instance.
       // When the OPC-UA server switches profiles (e.g., simulator hot-reload), all stored
       // NodeIDs become invalid. The adapter detects the high failure rate and emits this
       // event so we can re-browse the server and update the database with fresh nodes.
@@ -627,7 +625,7 @@ export class FeatureInitializer {
           // Reinitialize Sensor Publish (will read endpoints from database)
           await this.initDevicePublish();
 
-          // CRITICAL: Update CloudSync's endpoints reference to new SensorsFeature instance
+          // CRITICAL: Update CloudSync's endpoints reference to new AdapterManager instance
           // Without this, CloudSync tries to collect health from the old (stopped) instance
           if (this.cloudSync && this.features.sensors) {
             this.cloudSync.setDevices(this.features.sensors);
@@ -697,7 +695,7 @@ export class FeatureInitializer {
           // Hot-update path: MQTT adapter is already connected — diff subscriptions in-place.
           // Only the endpoint UUID map and broker subscriptions change; no reconnect needed.
           // SensorPublish keeps reading from the same IPC socket without interruption.
-          if (this.features.sensors?.getMQTTAdapter()) {
+          if (this.features.sensors?.getAdapter('mqtt')) {
             logger.infoSync('Hot-reloading MQTT adapter after endpoint changes (no reconnect)', {
               component: LogComponents.agent,
               trigger: 'reconciliation-complete'

@@ -649,3 +649,32 @@ export function showVersion(): void {
 
   logger.info('iotctl - IoT Control CLI', { version: '1.0.0' });
 }
+
+export async function agentUpdate(version?: string): Promise<void> {
+  const args = process.argv.slice(2);
+  const targetVersion = version || args.find((a) => !a.startsWith('-')) || 'latest';
+  const force = args.includes('--force') || args.includes('-f');
+
+  logger.info('Triggering agent update', { version: targetVersion, force });
+
+  try {
+    const result = await apiRequest(`${DEVICE_API_V1}/update`, {
+      method: 'POST',
+      body: JSON.stringify({ version: targetVersion, force }),
+    });
+
+    logger.info('Update triggered', {
+      status: result.status,
+      version: result.version,
+      note: 'The agent will restart when the update script completes.',
+    });
+  } catch (error: any) {
+    const status = error?.status || error?.statusCode;
+    if (status === 503) {
+      throw new CLIError('Agent updater is not available on this device', 1, {
+        hint: 'Ensure the agent is running as a systemd service and UPDATE_COMMAND_SECRET is configured.',
+      });
+    }
+    throw error;
+  }
+}

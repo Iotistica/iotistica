@@ -476,6 +476,8 @@ export class StateManager extends EventEmitter {
 				targetVersion: agentConfig.version,
 				scheduledAt: agentConfig.update_scheduled_at,
 				force: agentConfig.update_force || false,
+				issuedAt: agentConfig.update_issued_at,
+				expiresAt: agentConfig.update_expires_at,
 				signature: agentConfig.update_signature,
 			});
 		} catch (error) {

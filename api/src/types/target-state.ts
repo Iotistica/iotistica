@@ -121,6 +121,8 @@ export interface AgentUpdateConfig {
   version?: string;                  // Required/desired agent version
   update_scheduled_at?: string;      // ISO 8601 timestamp for scheduled updates
   update_force?: boolean;            // Override downgrade protection
+  update_issued_at?: number;         // Unix timestamp when update was issued (required for signature verification)
+  update_expires_at?: number;        // Unix timestamp when update command expires
   update_signature?: string;         // HMAC-SHA256 signature for verification
 }
 

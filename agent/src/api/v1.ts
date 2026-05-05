@@ -557,12 +557,12 @@ router.post('/v1/vpn/tailscale/ping', async (req: Request, res: Response, next: 
  */
 router.get('/v1/modbus/devices', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const sensorsFeature = actions.getSensorsFeature();
-		if (!sensorsFeature) {
+		const adapterManager = actions.getAdapterManager();
+		if (!adapterManager) {
 			return res.status(503).json({ error: 'Sensors feature not initialized' });
 		}
 
-		const modbusAdapter = sensorsFeature.getAdapter('modbus');
+		const modbusAdapter = adapterManager.getAdapter('modbus');
 		if (!modbusAdapter) {
 			return res.status(404).json({ error: 'Modbus adapter not running' });
 		}
@@ -581,13 +581,13 @@ router.get('/v1/modbus/devices', async (req: Request, res: Response, next: NextF
 router.get('/v1/modbus/devices/:deviceName', async (req: Request, res: Response, next: NextFunction) => {
 	try {
 		const { deviceName } = req.params;
-		const sensorsFeature = actions.getSensorsFeature();
+		const adapterManager = actions.getAdapterManager();
 		
-		if (!sensorsFeature) {
+		if (!adapterManager) {
 			return res.status(503).json({ error: 'Sensors feature not initialized' });
 		}
 
-		const modbusAdapter = sensorsFeature.getAdapter('modbus');
+		const modbusAdapter = adapterManager.getAdapter('modbus');
 		if (!modbusAdapter) {
 			return res.status(404).json({ error: 'Modbus adapter not running' });
 		}
@@ -610,13 +610,13 @@ router.get('/v1/modbus/devices/:deviceName', async (req: Request, res: Response,
 router.get('/v1/modbus/devices/:deviceName/metrics', async (req: Request, res: Response, next: NextFunction) => {
 	try {
 		const { deviceName } = req.params;
-		const sensorsFeature = actions.getSensorsFeature();
+		const adapterManager = actions.getAdapterManager();
 		
-		if (!sensorsFeature) {
+		if (!adapterManager) {
 			return res.status(503).json({ error: 'Sensors feature not initialized' });
 		}
 
-		const modbusAdapter = sensorsFeature.getAdapter('modbus');
+		const modbusAdapter = adapterManager.getAdapter('modbus');
 		if (!modbusAdapter) {
 			return res.status(404).json({ error: 'Modbus adapter not running' });
 		}
@@ -638,12 +638,12 @@ router.get('/v1/modbus/devices/:deviceName/metrics', async (req: Request, res: R
  */
 router.get('/v1/modbus/metrics', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const sensorsFeature = actions.getSensorsFeature();
-		if (!sensorsFeature) {
+		const adapterManager = actions.getAdapterManager();
+		if (!adapterManager) {
 			return res.status(503).json({ error: 'Sensors feature not initialized' });
 		}
 
-		const modbusAdapter = sensorsFeature.getAdapter('modbus');
+		const modbusAdapter = adapterManager.getAdapter('modbus');
 		if (!modbusAdapter) {
 			return res.status(404).json({ error: 'Modbus adapter not running' });
 		}
@@ -686,6 +686,31 @@ router.get('/v1/devices', async (req: Request, res: Response, next: NextFunction
 		const devices = await actions.getDevices(req.query.protocol as string | undefined);
 		return res.status(200).json({ devices });
 	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/update
+ * Trigger an OTA agent self-update.
+ * Body: { version: string, force?: boolean }
+ * - version: target version string or "latest"
+ * - force: skip same-version guard (default false)
+ */
+router.post('/v1/update', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { version, force } = req.body as { version?: string; force?: boolean };
+
+		if (!version || typeof version !== 'string' || version.trim() === '') {
+			return res.status(400).json({ error: 'version is required (string)' });
+		}
+
+		await actions.triggerUpdate(version.trim(), force === true);
+		return res.status(202).json({ status: 'update_triggered', version: version.trim() });
+	} catch (error: any) {
+		if (error?.message === 'Agent updater not available') {
+			return res.status(503).json({ error: 'Agent updater not available' });
+		}
 		next(error);
 	}
 });

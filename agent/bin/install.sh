@@ -740,11 +740,11 @@ echo ""
     fi
 
     # Install update script
-    if [ -f /opt/iotistic/agent/bin/update-agent-systemd.sh ]; then
+    if [ -f /opt/iotistic/agent/bin/update.sh ]; then
         echo ""
         echo "Installing update script..."
-        cp /opt/iotistic/agent/bin/update-agent-systemd.sh /usr/local/bin/update-agent-systemd.sh
-        chmod +x /usr/local/bin/update-agent-systemd.sh
+        cp /opt/iotistic/agent/bin/update.sh /usr/local/bin/update.sh
+        chmod +x /usr/local/bin/update.sh
         echo "✓ Update script installed"
     fi
 

@@ -489,11 +489,6 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
             nodeId: dp.nodeId,
             updatedAt: timestamp,
           });
-
-          this.logger.debug(`✓ Metadata read: ${dp.name} = ${dataValue.value?.value}`, {
-            deviceName,
-            nodeId: dp.nodeId,
-          });
         } else {
           this.logger.warn(`Failed to read metadata: ${dp.name}`, {
             deviceName,
@@ -513,7 +508,6 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
     // Emit metadata on separate channel (not 'data')
     if (metadataRecords.length > 0) {
       this.emit('metadata', metadataRecords);
-      this.logger.debug(`Emitted ${metadataRecords.length} metadata records for ${deviceName}`);
     }
   }
 
@@ -656,12 +650,6 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
           });
 
           sessionWrapper.monitoredItems.set(dp.nodeId, monitoredItem);
-
-          this.logger.debug(`Created monitored item for ${dp.name}`, {
-            deviceName,
-            nodeId: dp.nodeId,
-            subscriptionIndex: subIdx + 1,
-          });
         } catch (error) {
           this.logger.error(`Failed to create monitored item for ${dp.name}: ${error}`, {
             deviceName,
@@ -676,7 +664,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       });
 
       subscription.on('keepalive', () => {
-        this.logger.debug(`Subscription ${subIdx + 1} keepalive for ${deviceName}`);
+        // keepalive: subscription is healthy, no action needed
       });
     }
   }

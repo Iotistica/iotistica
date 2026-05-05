@@ -29,7 +29,7 @@ import {
 } from "./system/memory.js";
 import { AnomalyDetectionService } from "./anomaly/index.js";
 import { SimulationOrchestrator } from "./anomaly/simulator.js";
-import { DiscoveryService } from "./features/adapters/discovery-service.js";
+import { DiscoveryService } from "./adapters/discovery/service.js";
 import { FeatureInitializer } from "./init/features.js";
 import type { ConfigManager } from "./managers/config.js";
 import {

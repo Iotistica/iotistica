@@ -220,23 +220,4 @@ export class DeviceMetrics {
   }
 }
 
-/**
- * Utility function to calculate percentile from array
- * Useful for one-off calculations without DeviceMetrics instance
- */
-export function calculatePercentile(values: number[], percentile: number): number {
-  if (values.length === 0) return 0;
-  
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.ceil((percentile / 100) * sorted.length) - 1;
-  
-  return sorted[Math.max(0, index)];
-}
 
-/**
- * Utility function to calculate average
- */
-export function calculateAverage(values: number[]): number {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, val) => sum + val, 0) / values.length;
-}

@@ -9,11 +9,12 @@ import type { CloudSync } from '../cloud-sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../anomaly';
 import type { SimulationOrchestrator } from '../anomaly/simulator';
-import type { SensorsFeature } from '../features/adapters';
+import type { AdapterManager } from '../adapters';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/health-arbiter';
 import { MessageBufferModel } from '../db/models/buffer.model';
 import { CloudMqttClient } from '../mqtt/manager';
+import type { AgentUpdater } from '../updater';
 
 let containerManager: ContainerManager;
 let deviceManager: DeviceManager;
@@ -21,10 +22,11 @@ let cloudSync: CloudSync | undefined;
 let logger: AgentLogger | undefined;
 let anomalyService: AnomalyDetectionService | undefined;
 let simulationOrchestrator: SimulationOrchestrator | undefined;
-let sensorsFeature: SensorsFeature | undefined;
-let discoveryService: import('../features/adapters/discovery-service').DiscoveryService | undefined;
+let adapterManager: AdapterManager | undefined;
+let discoveryService: import('../adapters/discovery/service').DiscoveryService | undefined;
 let agentInstance: any | undefined;
 let healthReporter: (() => HealthReport) | undefined;
+let agentUpdater: AgentUpdater | undefined;
 
 export function setAgent(agent: any): void {
 	agentInstance = agent;
@@ -206,17 +208,17 @@ export function initialize(
 }
 
 /**
- * Set sensors feature (called by agent after initialization)
+ * Set adapter manager (called by agent after initialization)
  */
-export function setSensorsFeature(feature: SensorsFeature | undefined) {
-	sensorsFeature = feature;
+export function setAdapterManager(feature: AdapterManager | undefined) {
+	adapterManager = feature;
 }
 
 /**
- * Get sensors feature (for accessing protocol adapters)
+ * Get adapter manager (for accessing protocol adapters)
  */
-export function getSensorsFeature(): SensorsFeature | undefined {
-	return sensorsFeature;
+export function getAdapterManager(): AdapterManager | undefined {
+	return adapterManager;
 }
 
 /**
@@ -236,15 +238,26 @@ export function getSimulationOrchestrator(): SimulationOrchestrator | undefined 
 /**
  * Set discovery service (called by agent after initialization)
  */
-export function setDiscoveryService(service: import('../features/adapters/discovery-service').DiscoveryService | undefined) {
+export function setDiscoveryService(service: import('../adapters/discovery/service').DiscoveryService | undefined) {
 	discoveryService = service;
 }
 
 /**
  * Get discovery service (for accessing discovery functionality)
  */
-export function getDiscoveryService(): import('../features/adapters/discovery-service').DiscoveryService | undefined {
+export function getDiscoveryService(): import('../adapters/discovery/service').DiscoveryService | undefined {
 	return discoveryService;
+}
+
+export function setUpdater(updater: AgentUpdater | undefined): void {
+	agentUpdater = updater;
+}
+
+export async function triggerUpdate(targetVersion: string, force = false): Promise<void> {
+	if (!agentUpdater) {
+		throw new Error('Agent updater not available');
+	}
+	await agentUpdater.reconcileVersion({ targetVersion, force });
 }
 
 /**

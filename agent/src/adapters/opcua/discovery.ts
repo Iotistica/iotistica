@@ -5,12 +5,12 @@
  * Uses OPC-UA's built-in discovery mechanism
  */
 
-import type { AgentLogger } from '../../../logging/agent-logger';
+import type { AgentLogger } from '../../logging/agent-logger';
 import { createHash } from 'crypto';
-import { LogComponents } from '../../../logging/types';
-import { BaseDiscoveryPlugin, DiscoveredDevice } from '../base.discovery';
+import { LogComponents } from '../../logging/types';
+import { BaseDiscoveryPlugin, DiscoveredDevice } from '../types';
 import { generateOPCUAFingerprint } from '../fingerprint';
-import type { ConfigManager } from '../../../managers/config.js';
+import type { ConfigManager } from '../../managers/config.js';
 
 export interface OPCUADiscoveryOptions {
   discoveryUrls?: string[]; // e.g., ['opc.tcp://localhost:4840']

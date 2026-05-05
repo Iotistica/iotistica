@@ -4,15 +4,15 @@ import { ModbusDevice } from './types';
 import { ModbusClient } from './client';
 import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
 import { DeviceMetrics, MetricsSummary } from '../metrics.js';
-import { EndpointModel } from '../../../db/models/endpoint.model.js';
-import { DeviceModel } from '../../../db/models/device.model.js';
-import { pLimit } from '../../../lib/p-limit.js';
+import { EndpointModel } from '../../db/models/endpoint.model.js';
+import { DeviceModel } from '../../db/models/device.model.js';
+import { pLimit } from '../../lib/p-limit.js';
 
 /**
  * Main Modbus Adapter class that coordinates Modbus devices
  * 
  * Architecture: This adapter is socket-agnostic. It polls Modbus devices and emits
- * 'data' events with sensor readings. The parent SensorsFeature manages SocketServer
+ * 'data' events with sensor readings. The parent AdapterManager manages SocketServer
  * and routes data to the appropriate socket based on protocol.
  * 
  * Events:
@@ -144,15 +144,7 @@ export class ModbusAdapter extends EventEmitter {
    * Get status of all devices
    */
   getDeviceStatuses(): DeviceStatus[] {
-    const statuses = Array.from(this.deviceStatuses.values());
-    this.logger.debug(`getDeviceStatuses() returning ${statuses.length} statuses`, {
-      running: this.running,
-      pollLoopRunning: this.pollLoopRunning,
-      deviceCount: this.config.devices.length,
-      enabledCount: this.config.devices.filter(d => d.enabled).length,
-      statuses: statuses.map(s => ({ name: s.deviceName, connected: s.connected, quality: s.communicationQuality }))
-    });
-    return statuses;
+    return Array.from(this.deviceStatuses.values());
   }
 
   /**
@@ -369,6 +361,8 @@ export class ModbusAdapter extends EventEmitter {
     this.pollLoopRunning = true;
     
     const pollLoop = async () => {
+      // Create limiter once and reuse across ticks — concurrency limit is constant
+      const limit = pLimit(this.POLL_CONCURRENCY);
       while (this.pollLoopRunning) {
         const tickStart = Date.now();
         
@@ -377,11 +371,6 @@ export class ModbusAdapter extends EventEmitter {
           const devicesToPoll = this.getDevicesDueForPoll();
           
           if (devicesToPoll.length > 0) {
-            this.logger.debug(`Global poll tick: ${devicesToPoll.length} devices due for poll`);
-            
-            // Poll devices with concurrency control
-            const limit = pLimit(this.POLL_CONCURRENCY);
-            
             const pollPromises = devicesToPoll.map(deviceConfig => 
               limit(() => this.pollDevice(deviceConfig))
             );
@@ -467,14 +456,10 @@ export class ModbusAdapter extends EventEmitter {
     // Update last poll time
     this.lastPollTimes.set(deviceConfig.name, startTime);
     
-    this.logger.debug(
-      `[RECOVERY] Poll cycle starting for ${deviceConfig.name}`
-    );
-    
     try {
       const client = this.clients.get(deviceConfig.name);
       if (!client) {
-        this.logger.error(`[RECOVERY] No client found for ${deviceConfig.name}`);
+        this.logger.error(`No client found for ${deviceConfig.name}`);
         return;
       }
 
@@ -484,13 +469,8 @@ export class ModbusAdapter extends EventEmitter {
         resolvedDisplayName ? pts.map(p => ({ ...p, resolvedDisplayName })) : pts;
       
       const isConnected = client.isConnected();
-      this.logger.debug(
-        `[RECOVERY] Device ${deviceConfig.name} isConnected()=${isConnected}`
-      );
       
       if (!isConnected) {
-        this.logger.debug(`[RECOVERY] Device ${deviceConfig.name} offline, attempting read (will auto-reconnect)`);
-        
         // Record failed poll
         this.recordPollResult(deviceConfig.name, false);
         
@@ -502,16 +482,8 @@ export class ModbusAdapter extends EventEmitter {
           this.emit('data', dataPoints);
         }
       } else {
-        // Read all registers (measure time)
-        this.logger.debug(
-          `[RECOVERY] Device ${deviceConfig.name} connected, calling readAllRegisters()`
-        );
         const dataPoints = enrich(await client.readAllRegisters());
         const responseTime = Date.now() - startTime;
-
-        this.logger.debug(
-          `[RECOVERY] ✅ Device ${deviceConfig.name} read succeeded! Got ${dataPoints.length} data points in ${responseTime}ms`
-        );
 
         // Track register changes
         const registersUpdated = this.trackRegisterChanges(deviceConfig.name, dataPoints);

@@ -4,7 +4,10 @@
 		"types": ["jest", "node"],
 		"isolatedModules": true,
 		"rootDir": "..",
-		"noEmit": true
+		"noEmit": true,
+		"module": "CommonJS",
+		"moduleResolution": "node",
+		"ignoreDeprecations": "6.0"
 	},
 	"include": [
 		"**/*.ts",

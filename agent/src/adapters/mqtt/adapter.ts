@@ -4,8 +4,8 @@ import * as mqttPattern from 'mqtt-pattern';
 import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
 import { MqttAdapterConfig, MqttDevice, MqttMetricConfig } from './types.js';
 import { parsePayload, coerceType } from './payload.js';
-import { agentTopic } from '../../../mqtt/topics.js';
-import { EndpointModel } from '../../../db/models/endpoint.model.js';
+import { agentTopic } from '../../mqtt/topics.js';
+import { EndpointModel } from '../../db/models/endpoint.model.js';
 
 /**
  * MQTT Adapter
@@ -13,7 +13,7 @@ import { EndpointModel } from '../../../db/models/endpoint.model.js';
  * Architecture: This adapter is socket-agnostic. It subscribes to MQTT topics
  * from external publishers (ESP32, PLCs, IoT devices) publishing to the local
  * Mosquitto broker and emits 'data' events with sensor readings. The parent
- * SensorsFeature manages SocketServer and routes data to the appropriate socket.
+ * AdapterManager manages SocketServer and routes data to the appropriate socket.
  * 
  * Pattern: Mosquitto broker acts as the ENDPOINT (data aggregation point),
  *          just like a Modbus gateway or OPC-UA server.
@@ -336,12 +336,9 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
     const stableClientId = this.resolveStableClientId();
     this.brokerStatusTopic = this.resolveBrokerStatusTopic();
     
-    this.logger.info(`Creating MQTT client for broker: ${brokerUrl}`, { 
+    this.logger.debug(`Creating MQTT client for broker: ${brokerUrl}`, { 
       clientId: stableClientId,
       reconnectPeriod: this.currentReconnectPeriod,
-      reconnectStrategy: this.getReconnectStrategy(),
-      reconnectMaxPeriod: this.getMaxReconnectPeriod(),
-      reconnectJitterRatio: this.getReconnectJitterRatio(),
     });
 
     // Cleanup old client before creating new one (prevents listener leaks)
@@ -421,9 +418,8 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 
     this.client.on('reconnect', () => {
       const nextReconnectDelayMs = this.scheduleNextReconnectBackoff();
-      this.logger.info('MQTT reconnecting to broker...', {
+      this.logger.debug('MQTT reconnecting to broker', {
         attempt: this.reconnectAttemptCount,
-        strategy: this.getReconnectStrategy(),
         nextReconnectDelayMs,
       });
     });
@@ -645,8 +641,6 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
         }
 
         this.subscriptions.set(topic, device);
-        
-        this.logger.info(`Subscribed to MQTT topic: ${topic} (QoS ${qos})`);
         resolve();
       });
     });
@@ -700,11 +694,11 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
       status.communicationQuality = 'good';
       status.lastSeen = now;
       status.lastPoll = now;
-      this.logger.info(`LWT: device online`, { deviceId, deviceName });
+      this.logger.debug(`LWT: device online`, { deviceId, deviceName });
     } else if (statusText === 'offline') {
       status.connected = false;
       status.communicationQuality = 'offline';
-      this.logger.info(`LWT: device offline`, { deviceId, deviceName });
+      this.logger.debug(`LWT: device offline`, { deviceId, deviceName });
     }
   }
 
@@ -1133,8 +1127,6 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
    * @param retain - Retained message flag (true = stale/historical data)
    */
   private handleMessage(topic: string, payload: Buffer, retain: boolean = false): void {
-    this.logger.debug(`[MQTT] handleMessage: topic=${topic}, retain=${retain}, payloadSize=${payload.length}`);
-    
     // Production fix #8: Max payload size guard
     // Protects against memory exhaustion from malicious/corrupt messages
     if (payload.length > LocalBrokerMqttAdapter.MAX_PAYLOAD_BYTES) {

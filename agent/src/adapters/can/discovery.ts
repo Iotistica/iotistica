@@ -5,9 +5,9 @@
  * Passive discovery - listens to CAN bus traffic
  */
 
-import type { AgentLogger } from '../../../logging/agent-logger';
-import { LogComponents } from '../../../logging/types';
-import { BaseDiscoveryPlugin, DiscoveredDevice } from '../base.discovery';
+import type { AgentLogger } from '../../logging/agent-logger';
+import { LogComponents } from '../../logging/types';
+import { BaseDiscoveryPlugin, DiscoveredDevice } from '../types';
 import { generateCANFingerprint } from '../fingerprint';
 
 export interface CANDiscoveryOptions {

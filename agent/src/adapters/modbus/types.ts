@@ -141,7 +141,7 @@ export type ModbusDevice = z.infer<typeof ModbusDeviceSchema>;
 
 /**
  * Modbus Adapter Configuration Schema
- * Note: output config is now optional - managed by SensorsFeature
+ * Note: output config is now optional - managed by AdapterManager
  */
 export const ModbusAdapterConfigSchema = z.object({
   devices: z.array(ModbusDeviceSchema).min(1),

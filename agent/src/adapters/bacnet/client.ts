@@ -1,6 +1,6 @@
 import { BACnetDevice, BACnetObject, BACnetProperty } from './types';
 import { Logger } from '../types';
-import { pLimit } from '../../../lib/p-limit.js';
+import { pLimit } from '../../lib/p-limit.js';
 
 interface BACnetReadResult {
   objectId: {

@@ -172,6 +172,44 @@ const SYSTEM_METRIC_NAMES = new Set([
   'uptime',
 ]);
 
+/**
+ * Sign the agent.version update command embedded in target-state config.
+ * Computes an HMAC-SHA256 signature using the same canonical format as the
+ * on-device verifyCommandSignature(), so the reconcile path has equal security
+ * to the MQTT push path.
+ */
+function signAgentConfig(config: any): any {
+  if (!config?.agent?.version) return config;
+
+  const secret = process.env.UPDATE_COMMAND_SECRET;
+  if (!secret) return config;
+
+  const { version, update_scheduled_at, update_force } = config.agent;
+  const issuedAt = Date.now();
+  const expiresAt = issuedAt + 24 * 60 * 60 * 1000; // 24 hours
+
+  const canonicalString = [
+    'update',
+    version,
+    issuedAt.toString(),
+    expiresAt.toString(),
+    update_scheduled_at || '',
+    update_force?.toString() || ''
+  ].join('|');
+
+  const signature = crypto.createHmac('sha256', secret).update(canonicalString).digest('hex');
+
+  return {
+    ...config,
+    agent: {
+      ...config.agent,
+      update_issued_at: issuedAt,
+      update_expires_at: expiresAt,
+      update_signature: signature,
+    }
+  };
+}
+
 function normalizeAnomalyMetricNames(config: any, deviceUuid: string): any {
   if (!config || typeof config !== 'object') {
     return config;
@@ -502,6 +540,7 @@ fastify.post<{ Params: AgentUuidParams; Body: TargetStateBody }>('/agents/:uuid/
     config = await applyPendingMqttAuth(config || {});
     config = sanitizeAnomalyExpectedRanges(config);
     config = normalizeAnomalyMetricNames(config, uuid);
+    config = signAgentConfig(config);
 
     // Get old state for diff
     const oldTargetState = await AgentTargetStateModel.get(uuid);
@@ -604,6 +643,7 @@ fastify.put<{ Params: AgentUuidParams; Body: TargetStateBody }>('/agents/:uuid/t
     config = await applyPendingMqttAuth(config || {});
     config = sanitizeAnomalyExpectedRanges(config);
     config = normalizeAnomalyMetricNames(config, uuid);
+    config = signAgentConfig(config);
 
     // Get old state for diff
     const oldTargetState = await AgentTargetStateModel.get(uuid);

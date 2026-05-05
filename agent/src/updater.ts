@@ -18,9 +18,8 @@ import { agentTopic } from './mqtt/topics.js';
 
 const execAsync = promisify(exec);
 
-// Update script paths (immutable, hardcoded for security)
-const UPDATE_SCRIPT_DOCKER = '/app/bin/update-agent-docker.sh';
-const UPDATE_SCRIPT_SYSTEMD = '/usr/local/bin/update-agent-systemd.sh';
+// Update script path (immutable, hardcoded for security)
+const UPDATE_SCRIPT_SYSTEMD = '/usr/local/bin/update.sh';
 
 // Update lock file path (prevents concurrent updates)
 const UPDATE_LOCK_FILE = '/var/lib/iotistic/agent/update.lock';
@@ -240,9 +239,90 @@ export class AgentUpdater {
     targetVersion: string;
     scheduledAt?: string;
     force?: boolean;
+    issuedAt?: number;
+    expiresAt?: number;
     signature?: string;
   }): Promise<void> {
-    const { targetVersion, scheduledAt, force = false } = params;
+    const { targetVersion, scheduledAt, force = false, issuedAt, expiresAt, signature } = params;
+
+    // Verify signature using the same logic as the MQTT push path
+    const secret = process.env.UPDATE_COMMAND_SECRET;
+    if (secret) {
+      if (!signature || !issuedAt) {
+        this.logger.errorSync(
+          'Reconcile update rejected: signature or issued_at missing',
+          new Error('Missing signature'),
+          {
+            component: LogComponents.agentUpdater,
+            operation: 'reconcile-version',
+            targetVersion,
+            note: 'Set UPDATE_COMMAND_SECRET on the API side to auto-sign target state updates'
+          }
+        );
+        await this.publishStatus({
+          type: 'update_rejected',
+          reason: 'missing_signature',
+          target_version: targetVersion,
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      // Check expiry
+      if (expiresAt && Date.now() > expiresAt) {
+        this.logger.warnSync('Reconcile update rejected: command expired', {
+          component: LogComponents.agentUpdater,
+          operation: 'reconcile-version',
+          targetVersion,
+          expires_at: new Date(expiresAt).toISOString(),
+          age_seconds: Math.floor((Date.now() - expiresAt) / 1000)
+        });
+        await this.publishStatus({
+          type: 'update_rejected',
+          reason: 'command_expired',
+          target_version: targetVersion,
+          expires_at: new Date(expiresAt).toISOString(),
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      // Reconstruct UpdateCommand and verify HMAC
+      const command: UpdateCommand = {
+        action: 'update',
+        version: targetVersion,
+        issued_at: issuedAt,
+        expires_at: expiresAt,
+        scheduled_time: scheduledAt,
+        force,
+        signature
+      };
+
+      if (!verifyCommandSignature(command, secret)) {
+        this.logger.errorSync(
+          'Reconcile update rejected: invalid signature',
+          new Error('Invalid signature'),
+          {
+            component: LogComponents.agentUpdater,
+            operation: 'reconcile-version',
+            targetVersion,
+            issued_at: issuedAt
+          }
+        );
+        await this.publishStatus({
+          type: 'update_rejected',
+          reason: 'invalid_signature',
+          target_version: targetVersion,
+          timestamp: Date.now()
+        });
+        return;
+      }
+    } else {
+      this.logger.warnSync('UPDATE_COMMAND_SECRET not set, skipping reconcile signature verification', {
+        component: LogComponents.agentUpdater,
+        note: 'Reconcile updates accepted without verification (INSECURE)'
+      });
+    }
     
     this.logger.infoSync('Reconciling agent version', {
       component: LogComponents.agentUpdater,
@@ -612,8 +692,7 @@ export class AgentUpdater {
       return;
     }
 
-    // Detect deployment type (must be set explicitly by installer)
-    const deploymentType = process.env.DEPLOYMENT_TYPE || 'systemd';
+    const deploymentType = 'systemd';
     
     this.logger.infoSync("Starting agent self-update", {
       component: LogComponents.agentUpdater,
@@ -639,25 +718,22 @@ export class AgentUpdater {
       });
     }
 
-    // Determine update script path (hardcoded for security)
-    const updateScript = deploymentType === 'docker'
-      ? UPDATE_SCRIPT_DOCKER
-      : UPDATE_SCRIPT_SYSTEMD;
+    // Update script path (hardcoded for security)
+    const updateScript = UPDATE_SCRIPT_SYSTEMD;
     
     // Verify script integrity (prevents local compromise → remote root execution)
     const scriptIntegrityCheck = this.verifyScriptIntegrity(updateScript);
     if (!scriptIntegrityCheck.valid) {
       // Gracefully skip update in development environments without update scripts
-      if (scriptIntegrityCheck.reason === 'Script not found' && deploymentType === 'systemd') {
+      if (scriptIntegrityCheck.reason === 'Script not found') {
         this.logger.warnSync(
           "Update skipped - running in development mode without update script",
           {
             component: LogComponents.agentUpdater,
             updateScript,
-            deploymentType,
             currentVersion: this.currentVersion,
             targetVersion: version,
-            note: "Set DEPLOYMENT_TYPE=docker or install update script for production updates"
+            note: "Install update script for production updates"
           }
         );
         
@@ -667,7 +743,7 @@ export class AgentUpdater {
           script_path: updateScript,
           current_version: this.currentVersion,
           target_version: version,
-          note: 'Install update script or set DEPLOYMENT_TYPE appropriately',
+          note: 'Install update script at /usr/local/bin/update.sh',
           timestamp: Date.now()
         });
         
@@ -1316,11 +1392,11 @@ export class AgentUpdater {
   private verifyScriptIntegrity(scriptPath: string): { valid: boolean; reason?: string; details?: any } {
     try {
       // Verify script is in hardcoded location (no path traversal)
-      if (scriptPath !== UPDATE_SCRIPT_DOCKER && scriptPath !== UPDATE_SCRIPT_SYSTEMD) {
+      if (scriptPath !== UPDATE_SCRIPT_SYSTEMD) {
         return {
           valid: false,
           reason: 'Script path not in allowed list',
-          details: { scriptPath, allowed: [UPDATE_SCRIPT_DOCKER, UPDATE_SCRIPT_SYSTEMD] }
+          details: { scriptPath, allowed: [UPDATE_SCRIPT_SYSTEMD] }
         };
       }
 

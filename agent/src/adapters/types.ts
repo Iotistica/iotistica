@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { AgentLogger } from '../logging/agent-logger';
 
 /**
  * Unix Socket Output Configuration Schema (Protocol-agnostic)
@@ -30,7 +31,7 @@ export interface DeviceDataPoint {
   qualityCode?: string;  // Error code when quality is BAD (e.g., 'ETIMEDOUT', 'DEVICE_OFFLINE')
   protocol?: string;  // Protocol context for enum namespacing (modbus, snmp, opcua, mqtt, bacnet)
   nodeType?: 'metric' | 'metadata';  // Node classification (OPC UA only)
-  resolvedDisplayName?: string;  // Human-readable name resolved from the protocol server (e.g. OPC-UA DisplayName, SNMP sysName, BACnet objectName, or metadata.displayName config override). Used by SensorsFeature as the base of the final unique display name instead of the raw config name.
+  resolvedDisplayName?: string;  // Human-readable name resolved from the protocol server (e.g. OPC-UA DisplayName, SNMP sysName, BACnet objectName, or metadata.displayName config override). Used by AdapterManager as the base of the final unique display name instead of the raw config name.
   anomaly_score?: number;  // anomaly score (0.0 = normal, 1.0 = max anomaly)
   anomaly_threshold?: number;  // Confidence threshold used for alerting (e.g., 0.7)
   baseline_samples?: number;  // Number of samples in baseline buffer
@@ -89,4 +90,80 @@ export interface Logger {
   info(message: string, ...args: any[]): void;
   warn(message: string, ...args: any[]): void;
   error(message: string, ...args: any[]): void;
+}
+
+// ---------------------------------------------------------------------------
+// Discovery types (previously base.discovery.ts)
+// ---------------------------------------------------------------------------
+
+export interface ValidationResult {
+  deviceInfo?: any;
+  manufacturer?: string;
+  modelNumber?: string;
+  firmwareVersion?: string;
+  capabilities?: string[];
+
+  dataPointValidation?: {
+    result: 'config_match' | 'config_mismatch' | 'degraded' | 'unknown';
+    state: 'idle' | 'active' | 'unknown';
+    responseConfidence: number;
+    dataConfidence: number;
+    readableCount: number;
+    errorCount: number;
+    zeroCount: number;
+    totalPoints: number;
+    details?: string;
+    guidance?: string;
+    meiVendor?: string;
+    meiModel?: string;
+  };
+}
+
+export interface DiscoveredDevice {
+  protocol: 'modbus' | 'opcua' | 'can' | 'snmp' | 'mqtt' | 'bacnet';
+  name: string;
+  fingerprint: string;
+  uuid?: string;
+  connection: Record<string, any>;
+  dataPoints: any[];
+  confidence: 'low' | 'medium' | 'high';
+  discoveredAt: string;
+  validated: boolean;
+  validationData?: ValidationResult;
+  metadata?: Record<string, any>;
+}
+
+export interface DiscoveryResult {
+  devices: DiscoveredDevice[];
+  duration: number;
+  errors?: string[];
+}
+
+export interface PluginInfo {
+  protocol: string;
+  version: string;
+  description: string;
+  capabilities?: string[];
+}
+
+export abstract class BaseDiscoveryPlugin {
+  protected logger?: AgentLogger;
+  readonly protocol: string;
+
+  constructor(protocol: string, logger?: AgentLogger) {
+    this.protocol = protocol;
+    this.logger = logger;
+  }
+
+  abstract discover(options?: any): Promise<DiscoveredDevice[]>;
+  abstract validate(device: DiscoveredDevice, timeout?: number): Promise<any>;
+  abstract isAvailable(): Promise<boolean>;
+
+  getInfo(): PluginInfo {
+    return {
+      protocol: this.protocol,
+      version: '1.0.0',
+      description: `Discovery plugin for ${this.protocol}`,
+    };
+  }
 }
