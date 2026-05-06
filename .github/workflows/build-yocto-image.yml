@@ -82,6 +82,18 @@ jobs:
           echo "=== Disk Space After Cleanup ==="
           df -h
 
+      - name: Enable unprivileged user namespaces for BitBake
+        run: |
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            echo "=== AppArmor User Namespace Setting Before ==="
+            cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+            echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+            echo "=== AppArmor User Namespace Setting After ==="
+            cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          else
+            echo "kernel.apparmor_restrict_unprivileged_userns not present on this runner"
+          fi
+
       - name: Restore Yocto cache
         uses: actions/cache@v4
         with:
