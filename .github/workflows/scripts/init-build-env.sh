@@ -20,6 +20,8 @@ if [ "$YOCTO_VERSION" = "kirkstone" ]; then
 fi
 
 # Source Yocto environment
+set +u
 source oe-init-build-env build
+set -u
 
 echo "✓ Build environment initialized"

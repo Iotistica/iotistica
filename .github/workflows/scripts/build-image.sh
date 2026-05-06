@@ -14,7 +14,9 @@ if [ "$YOCTO_VERSION" = "kirkstone" ]; then
 fi
 
 # Source build environment
+set +u
 source oe-init-build-env build
+set -u
 
 if [ "$CLEAN_BUILD" = "true" ]; then
   echo "=== CLEAN BUILD MODE ENABLED ==="

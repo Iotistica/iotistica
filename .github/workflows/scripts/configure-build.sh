@@ -20,7 +20,9 @@ if [ "$YOCTO_VERSION" = "kirkstone" ]; then
 fi
 
 # Source build environment
+set +u
 source oe-init-build-env build
+set -u
 
 # Show current layers
 echo "=== Current layers ==="
