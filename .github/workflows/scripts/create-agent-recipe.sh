@@ -29,7 +29,7 @@ S = "${WORKDIR}/agent-src"
 
 inherit systemd
 
-SYSTEMD_SERVICE:${PN} = "iotistic-agent.service"
+SYSTEMD_SERVICE:${PN} = "iotistica-agent.service"
 SYSTEMD_AUTO_ENABLE = "enable"
 
 do_install() {
@@ -55,32 +55,58 @@ do_install() {
     # Production dependencies will be installed during do_compile
     # No need to copy node_modules
     
-    # Install systemd service
+        # Install systemd service
     install -d ${D}${systemd_system_unitdir}
-    cat > ${D}${systemd_system_unitdir}/iotistic-agent.service << 'SERVICE'
+        cat > ${D}${systemd_system_unitdir}/iotistica-agent.service << 'SERVICE'
 [Unit]
 Description=Iotistic Device Agent
-After=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
 Wants=network-online.target
 
 [Service]
-Type=forking
+Type=simple
 User=iotistic
 Group=iotistic
 WorkingDirectory=/opt/iotistic/agent
 EnvironmentFile=/etc/iotistic/agent.env
-ExecStart=/usr/bin/pm2 start /opt/iotistic/agent/dist/index.js --name iotistic-agent --update-env
-ExecStop=/usr/bin/pm2 stop iotistic-agent
-ExecReload=/usr/bin/pm2 reload iotistic-agent
+ExecStart=/usr/local/bin/iotistica-agent-start.sh
 Restart=always
-RestartSec=10
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=iotistic-agent
+SyslogIdentifier=iotistica-agent
 
 [Install]
 WantedBy=multi-user.target
 SERVICE
+
+        # Install startup wrapper that matches install.sh runtime behavior
+        install -d ${D}/usr/local/bin
+        cat > ${D}/usr/local/bin/iotistica-agent-start.sh << 'STARTSCRIPT'
+#!/bin/sh
+set -e
+
+NODE_PATH="$(command -v node)"
+if [ -z "$NODE_PATH" ]; then
+    echo "node binary not found"
+    exit 1
+fi
+
+if [ -f /opt/iotistic/agent/dist/app.js ]; then
+    APP_JS_PATH="/opt/iotistic/agent/dist/app.js"
+elif [ -f /opt/iotistic/agent/dist/src/app.js ]; then
+    APP_JS_PATH="/opt/iotistic/agent/dist/src/app.js"
+elif [ -f /opt/iotistic/agent/dist/index.js ]; then
+    APP_JS_PATH="/opt/iotistic/agent/dist/index.js"
+else
+    echo "No known agent entrypoint found in /opt/iotistic/agent/dist"
+    exit 1
+fi
+
+exec "$NODE_PATH" "$APP_JS_PATH"
+STARTSCRIPT
+        chmod 0755 ${D}/usr/local/bin/iotistica-agent-start.sh
     
     # Create directories
     install -d ${D}/var/lib/iotistic/agent
@@ -92,16 +118,18 @@ SERVICE
 # Iotistic Agent Configuration
 NODE_ENV=production
 LOG_LEVEL=info
-IOTISTICA_API=https://api.iotistica.com
-IOTISTIC_DEVICE_PORT=48484
+DEVICE_API_PORT=48484
+ORCHESTRATOR_TYPE=docker-compose
 ORCHESTRATOR_INTERVAL=30000
 POLL_INTERVAL_MS=30000
 REPORT_INTERVAL_MS=60000
+DATA_DIR=/var/lib/iotistic/agent
 
-# Read-only rootfs: Use /data partition for writable data
-DATABASE_PATH=/data/iotistic/device.sqlite
-LOG_DIR=/data/logs
-STATE_FILE=/data/iotistic/target-state.json
+# Installer-aligned default data paths
+DATABASE_PATH=/var/lib/iotistic/agent/agent.sqlite
+STATE_FILE=/var/lib/iotistic/agent/target-state.json
+LOG_DIR=/var/log/iotistic
+IOTISTICA_API=https://api.iotistica.com
 
 # Provisioning: Multiple methods supported (priority order)
 # 1. PROVISIONING_KEY environment variable (highest priority - for manual override)
@@ -139,18 +167,6 @@ pkg_postinst:${PN}() {
             echo "⚠ WARNING: docker group not found - agent won't be able to manage containers"
         fi
         
-        # Install PM2 globally (process manager for agent)
-        if command -v npm >/dev/null 2>&1; then
-            npm install -g pm2
-            echo "✓ PM2 installed globally"
-            
-            # Install docker-compose (not available as Yocto package)
-            npm install -g docker-compose
-            echo "✓ docker-compose installed globally"
-        else
-            echo "⚠ WARNING: npm not found - PM2 and docker-compose not installed"
-        fi
-        
         # NOTE: /var/lib/iotistic and /var/log/iotistic are created as symlinks
         # by iotistic-init-data.service on first boot (see resin-init recipe)
         # This ensures writable data on read-only root filesystem
@@ -165,7 +181,8 @@ FILES:${PN} += "/opt/iotistic/agent/*"
 FILES:${PN} += "/var/lib/iotistic/*"
 FILES:${PN} += "/var/log/iotistic/*"
 FILES:${PN} += "/etc/iotistic/*"
-FILES:${PN} += "${systemd_system_unitdir}/iotistic-agent.service"
+FILES:${PN} += "/usr/local/bin/iotistica-agent-start.sh"
+FILES:${PN} += "${systemd_system_unitdir}/iotistica-agent.service"
 EOF
 
 echo "✓ Agent recipe created"
