@@ -10,7 +10,7 @@
  */
 
 import { StateManager } from "./managers/state.js";
-import ContainerManager from "./docker/container-manager.js";
+import ContainerManager from "./containers/container-manager.js";
 import { DeviceManager } from "./managers/index.js";
 import type { AgentInfo } from "./managers/types.js";
 import { DeviceAPI } from "./api/index.js";

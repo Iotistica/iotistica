@@ -25,7 +25,7 @@ import type {
   ConfigStep,
   ConfigReconciliationResult,
   ProtocolAdapterDevice,
-} from "../docker/types.js";
+} from "../containers/types.js";
 
 // ==================== CONFIG TYPES ====================
 

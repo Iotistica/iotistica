@@ -66,9 +66,11 @@ export class IotHubMqttClient extends EventEmitter implements MqttConnection {
 	private client: MqttClient | null = null;
 	private connected = false;
 	private renewalTimer: NodeJS.Timeout | null = null;
+	private readonly parsed: ParsedConnStr;
 
 	/** SAS token TTL in seconds (default: 1 hour). */
 	private readonly tokenTtlSeconds: number;
+	private readonly maxPublishRetries = 3;
 
 	constructor(
 		private readonly connectionString: string,
@@ -76,29 +78,29 @@ export class IotHubMqttClient extends EventEmitter implements MqttConnection {
 		tokenTtlSeconds = 3600,
 	) {
 		super();
-		this.tokenTtlSeconds = tokenTtlSeconds;
-	}
-
-	// ─── MqttConnection ──────────────────────────────────────────────────────
-
-	public async connect(): Promise<void> {
-		const parsed = parseConnectionString(this.connectionString);
+		const parsed = parseConnectionString(connectionString);
 		if (!parsed) {
 			throw new Error(
 				'Invalid Azure IoT Hub connection string. ' +
 				'Expected: HostName=...;DeviceId=...;SharedAccessKey=...',
 			);
 		}
+		this.parsed = parsed;
+		this.tokenTtlSeconds = tokenTtlSeconds;
+	}
 
-		await this._openConnection(parsed);
+	// ─── MqttConnection ──────────────────────────────────────────────────────
+
+	public async connect(): Promise<void> {
+		await this._openConnection(this.parsed);
 
 		this.logger?.infoSync('IotHub MQTT connected', {
 			component: LogComponents.agent,
-			hostName: parsed.hostName,
-			deviceId: parsed.deviceId,
+			hostName: this.parsed.hostName,
+			deviceId: this.parsed.deviceId,
 		});
 
-		this._scheduleRenewal(parsed);
+		this._scheduleRenewal(this.parsed);
 	}
 
 	public async disconnect(): Promise<void> {
@@ -122,15 +124,36 @@ export class IotHubMqttClient extends EventEmitter implements MqttConnection {
 		// (e.g. "iot/uuid/endpoints/modbus" → "modbus") and encode it as an IoT Hub
 		// message property so routing rules can filter by endpoint without parsing the payload.
 		const endpoint = topic.split('/').pop() || 'telemetry';
-		const iotHubTopic = `devices/${this._deviceId()}/messages/events/endpoint=${encodeURIComponent(endpoint)}`;
-		return new Promise((resolve, reject) => {
-			this.client!.publish(
-				iotHubTopic,
-				payload,
-				{ qos: options?.qos ?? 1 },
-				(err) => (err ? reject(err) : resolve()),
-			);
-		});
+		const iotHubTopic =
+			`devices/${this._deviceId()}/messages/events/?` +
+			`endpoint=${encodeURIComponent(endpoint)}` +
+			`&%24.ct=${encodeURIComponent('application/json')}` +
+			`&%24.ce=${encodeURIComponent('utf-8')}`;
+
+		let lastError: Error | null = null;
+		for (let attempt = 0; attempt < this.maxPublishRetries; attempt++) {
+			try {
+				await this._publishOnce(iotHubTopic, payload, options?.qos ?? 1);
+				return;
+			} catch (error) {
+				const asError = error instanceof Error ? error : new Error(String(error));
+				lastError = asError;
+				if (!this._isTransientPublishError(asError) || attempt === this.maxPublishRetries - 1) {
+					throw asError;
+				}
+
+				const delayMs = this._retryDelayMs(attempt);
+				this.logger?.warnSync('IotHub publish transient failure, retrying', {
+					component: LogComponents.agent,
+					attempt: attempt + 1,
+					nextDelayMs: delayMs,
+					error: asError.message,
+				});
+				await this._sleep(delayMs);
+			}
+		}
+
+		throw lastError || new Error('IotHub publish failed after retries');
 	}
 
 	public isConnected(): boolean {
@@ -149,8 +172,44 @@ export class IotHubMqttClient extends EventEmitter implements MqttConnection {
 	// ─── Internal ────────────────────────────────────────────────────────────
 
 	private _deviceId(): string {
-		const parsed = parseConnectionString(this.connectionString);
-		return parsed?.deviceId ?? 'unknown';
+		return this.parsed.deviceId;
+	}
+
+	private _publishOnce(
+		iotHubTopic: string,
+		payload: string | Buffer,
+		qos: 0 | 1 | 2,
+	): Promise<void> {
+		return new Promise((resolve, reject) => {
+			this.client!.publish(iotHubTopic, payload, { qos }, (err) =>
+				err ? reject(err) : resolve(),
+			);
+		});
+	}
+
+	private _retryDelayMs(attempt: number): number {
+		// 250ms, 500ms, 1000ms
+		return Math.min(250 * 2 ** attempt, 1000);
+	}
+
+	private _isTransientPublishError(error: Error): boolean {
+		const anyError = error as Error & { code?: string };
+		const code = (anyError.code || '').toUpperCase();
+		if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EAI_AGAIN' || code === 'ENOTFOUND') {
+			return true;
+		}
+
+		const message = (error.message || '').toLowerCase();
+		return (
+			message.includes('timeout') ||
+			message.includes('temporarily unavailable') ||
+			message.includes('throttle') ||
+			message.includes('server busy')
+		);
+	}
+
+	private _sleep(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
 	private async _openConnection(parsed: ParsedConnStr): Promise<void> {
@@ -166,6 +225,8 @@ export class IotHubMqttClient extends EventEmitter implements MqttConnection {
 			username: `${hostName}/${deviceId}/?api-version=2021-04-12`,
 			password: sasToken,
 			rejectUnauthorized: true,
+			keepalive: 60,
+			clean: true,
 			reconnectPeriod: 5000,
 			connectTimeout: 30000,
 		};
@@ -188,6 +249,19 @@ export class IotHubMqttClient extends EventEmitter implements MqttConnection {
 
 			client.once('connect', onConnect);
 			client.once('error', onError);
+
+			client.on('error', (err) => {
+				this.logger?.errorSync(
+					'IotHub MQTT client error',
+					err instanceof Error ? err : new Error(String(err)),
+					{
+						component: LogComponents.agent,
+						hostName,
+						deviceId,
+					},
+				);
+				this.emit('error', err);
+			});
 
 			client.on('disconnect', () => {
 				this.connected = false;
@@ -217,7 +291,7 @@ export class IotHubMqttClient extends EventEmitter implements MqttConnection {
 				component: LogComponents.agent,
 				deviceId: parsed.deviceId,
 			});
-			if (this.client) {
+			if (this.client && this.connected) {
 				this.disconnect()
 					.then(() => this._openConnection(parsed))
 					.then(() => this._scheduleRenewal(parsed))
@@ -226,6 +300,9 @@ export class IotHubMqttClient extends EventEmitter implements MqttConnection {
 							component: LogComponents.agent,
 						});
 					});
+			} else {
+				// If currently disconnected, avoid forced churn and reschedule renewal.
+				this._scheduleRenewal(parsed);
 			}
 		}, renewAfterMs);
 	}

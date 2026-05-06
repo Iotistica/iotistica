@@ -9,7 +9,7 @@ import type Docker from 'dockerode';
 import type { LogMessage, LogStreamOptions, ContainerLogAttachment, LogBackend } from './types';
 import { AgentLogger } from './agent-logger';
 import { LogComponents } from './types';
-import { RetryManager, DOCKER_POLICY } from '../docker/retry-manager';
+import { RetryManager, DOCKER_POLICY } from '../containers/retry-manager';
 
 // Edge device safety: Prevent unbounded memory growth from noisy containers
 const MAX_BUFFER_SIZE = 1024 * 1024; // 1MB max buffer per container

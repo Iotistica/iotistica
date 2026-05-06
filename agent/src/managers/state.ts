@@ -19,9 +19,9 @@ import { cloneDeep, deepEqual } from '../lib/collection-utils.js';
 import { StateSnapshotModel } from '../db/models/index.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
-import { ContainerManager } from '../docker/container-manager.js';
+import { ContainerManager } from '../containers/container-manager.js';
 import { ConfigManager } from './config.js';
-import type { DeviceConfig } from '../docker/types.js';
+import type { DeviceConfig } from '../containers/types.js';
 import semver from 'semver';
 
 /**

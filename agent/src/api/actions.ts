@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import ContainerManager from '../docker/container-manager';
+import ContainerManager from '../containers/container-manager';
 import type { DeviceManager } from '../managers';
 import type { CloudSync } from '../sync';
 import type { AgentLogger } from '../logging/agent-logger';

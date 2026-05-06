@@ -48,8 +48,7 @@ services:
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
-      - PUBLISH_TARGET=iothub
-      - AZURE_IOTHUB_CONNECTION_STRING=HostName=iotistica.azure-devices.net;DeviceId=device-1;SharedAccessKey=HSVByMHieDCmA2UYyEiB4ubwNvTvEB/6wvFznkNqieo=
+      - PUBLISH_TARGET=iotistica
 volumes:
   agent-36-data:
     driver: local
