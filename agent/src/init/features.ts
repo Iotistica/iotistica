@@ -42,6 +42,11 @@ export interface FeatureContext {
   dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
   pipelineService?: PipelineService; // Node-RED payload transform pipeline (optional)
   liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
+  /**
+   * When set, sensor data is routed through this connection (IoT Hub, AWS, GCP, …)
+   * instead of the default Iotistica CloudMqttClient.
+   */
+  sensorConnection?: import('../features/publish/types.js').MqttConnection;
 }
 
 export interface InitializedFeatures {
@@ -371,6 +376,7 @@ export class FeatureInitializer {
         useKeyCompactionPoc,
         useDeflatePoc,
         anomalyService,
+        this.context.sensorConnection, // Route sensor data to external cloud if configured
       );
 
       if (this.context.pipelineService) {
@@ -431,7 +437,6 @@ export class FeatureInitializer {
 
   async initShellHandler(): Promise<void> {
     const { logger, deviceInfo, mqttManager } = this.context;
-
     const deviceRemoteAccessEnabled = this.isDeviceRemoteAccessEnabled();
     if (!deviceRemoteAccessEnabled) {
       if (this.features.shellHandler) {
@@ -636,6 +641,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
     anomalyService: ctx.anomalyService,
     dictionaryManager: ctx.dictionaryManager,
     pipelineService: ctx.pipelineService,
+    sensorConnection: ctx.sensorConnection,
 	};
 
 	const initializer = new FeatureInitializer(featureContext);

@@ -505,14 +505,14 @@ services:
         environment:
             - MQTT_BROKER_URL=${MQTT_SIM_BROKER_URL:-mqtt://mosquitto-agent:1883}
             - MQTT_USERNAME=mqtt-user-1
-            - MQTT_PASSWORD=test123
-            - MQTT_CLIENT_ID=mqtt-device-1
-            - MQTT_DEVICE_UUID=a6c87211-7e40-4229-8632-d238daf58296
-            - MQTT_TOPIC=i/c-3dOFzo/a/Onleo1J2Rn6nM3EVXYR9Jw/d/-QhISF5nTXuuDkIr-4IXtQ
+            - MQTT_PASSWORD=secret123
+            - MQTT_CLIENT_ID=my-sensor
+            - MQTT_DEVICE_UUID=8ea50582-a1db-4ec3-8f5e-da2e605b5a6d
+            - MQTT_TOPIC=i/c-3dOFzo/a/6p3UitaOQKyg8z6STjCeFA/d/jqUFgqHbTsOPXtouYFtabQ
             - MQTT_METRIC_NAMES=temperature,humidity
             - MQTT_QOS=${MQTT_SIM_QOS:-0}
             - MQTT_RETAIN=${MQTT_SIM_RETAIN:-false}
-            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-1000}
+            - PUBLISH_INTERVAL_MS=${MQTT_SIM_INTERVAL_MS:-10000}
             - LOG_LEVEL=${MQTT_SIM_LOG_LEVEL:-INFO}
         depends_on:
             mosquitto-agent:

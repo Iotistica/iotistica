@@ -24,6 +24,12 @@
 .PARAMETER ProvisioningKey
     Optional existing provisioning key to reuse for all generated agents. If omitted in an interactive session,
     the script prompts once before auto-generating unique keys.
+.PARAMETER PublishTarget
+    Publish target for agent telemetry. Leave empty (default) to use Iotistica MQTT.
+    Set to 'iothub' to publish directly to Azure IoT Hub (requires -AzureIothubConnectionString).
+.PARAMETER AzureIothubConnectionString
+    Azure IoT Hub device connection string used when -PublishTarget iothub is set.
+    Format: HostName=...;DeviceId=...;SharedAccessKey=...
 .EXAMPLE
     .\generate-agents.ps1 -Count 100
 .EXAMPLE
@@ -135,7 +141,14 @@ param(
     #VPN
     [string]$EnableTailscale = "false",
 
-    [string]$LogLevel = "debug"
+    [string]$LogLevel = "debug",
+
+    # Publish Target
+    # Set to 'iothub' to send telemetry to Azure IoT Hub instead of Iotistica.
+    # Leave empty (default) to use the standard Iotistica MQTT broker.
+    [ValidateSet('', 'iotistica', 'iothub')]
+    [string]$PublishTarget = "",
+    [string]$AzureIothubConnectionString = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -437,6 +450,28 @@ if (
         Write-Host "Rebuild mode: agent-$StartIndex already exists — skipping provisioning and profile prompts." -ForegroundColor Cyan
         Write-Host "  Compose file : $OutputFile" -ForegroundColor Gray
         Write-Host "  Build source : $(if ($BuildFromSource) { 'yes (--build)' } else { 'no (image pull)' })" -ForegroundColor Gray
+
+        # Patch publish target env vars in-place if explicitly supplied.
+        if ($PSBoundParameters.ContainsKey('PublishTarget') -or $PSBoundParameters.ContainsKey('AzureIothubConnectionString')) {
+            $composeLines = Get-Content $composeFile
+            # Strip any existing publish target lines so we don't duplicate them.
+            $composeLines = $composeLines | Where-Object {
+                $_ -notmatch '^\s+- PUBLISH_TARGET=' -and $_ -notmatch '^\s+- AZURE_IOTHUB_CONNECTION_STRING='
+            }
+            # Re-insert after the last fixed env var (AGENT_SHELL_MAX_SESSION_MS).
+            $anchor = '      - AGENT_SHELL_MAX_SESSION_MS=3600000'
+            $patched = @()
+            foreach ($line in $composeLines) {
+                $patched += $line
+                if ($line -eq $anchor) {
+                    if ($PublishTarget -ne '')             { $patched += "      - PUBLISH_TARGET=$PublishTarget" }
+                    if ($AzureIothubConnectionString -ne '') { $patched += "      - AZURE_IOTHUB_CONNECTION_STRING=$AzureIothubConnectionString" }
+                }
+            }
+            $patched | Set-Content $composeFile
+            Write-Host "  Updated compose file with publish target settings." -ForegroundColor Gray
+        }
+
         if ($Run) {
             $buildFlag = if ($BuildFromSource) { '--build' } else { '' }
             if ($buildFlag) {
@@ -1389,6 +1424,14 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
                 "      - AGENT_SHELL_HMAC_KEY=$agentShellHmacKeyEnv",
                 '      - AGENT_SHELL_MAX_SESSION_MS=3600000'
         )
+
+        # Optional publish target override — only emit when explicitly set.
+        if ($PublishTarget -ne "") {
+            $serviceLines += "      - PUBLISH_TARGET=$PublishTarget"
+        }
+        if ($AzureIothubConnectionString -ne "") {
+            $serviceLines += "      - AZURE_IOTHUB_CONNECTION_STRING=$AzureIothubConnectionString"
+        }
         $service = [string]::Join("`n", $serviceLines)
     
     $services += $service

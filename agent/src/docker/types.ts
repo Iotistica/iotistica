@@ -561,11 +561,30 @@ export interface ProtocolAdapterDevice {
 }
 
 /**
+ * Publish target configuration.
+ * Set `target: 'iothub'` to publish telemetry to Azure IoT Hub instead of
+ * the Iotistica MQTT broker.  CloudSync is automatically disabled in that mode.
+ * Env vars PUBLISH_TARGET and AZURE_IOTHUB_CONNECTION_STRING take priority.
+ */
+export interface IotisticaPublishingConfig {
+	target: 'iotistica';
+}
+export interface IotHubPublishingConfig {
+	target: 'iothub';
+	iothub: {
+		connectionString: string;
+	};
+}
+export type PublishingConfig = IotisticaPublishingConfig | IotHubPublishingConfig;
+
+/**
  * Device configuration state
  */
 export interface DeviceConfig {
 	endpoints?: ProtocolAdapterDevice[];
 	features?: Record<string, any>;
+	/** Optional publish target override. Defaults to 'iotistica'. */
+	publishing?: PublishingConfig;
 	[key: string]: any;
 }
 

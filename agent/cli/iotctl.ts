@@ -7,7 +7,7 @@ import { dbBackup, dbList, dbPrune, dbRestore, dbVerify } from './commands/db';
 import { configGet, configGetApi, configReset, configSet, configSetApi, configShow } from './commands/config';
 import { appsInfo, appsList, appsPurge, appsRestart, appsStart, appsStop } from './commands/apps';
 import { servicesInfo, servicesList, servicesLogs, servicesRestart, servicesStart, servicesStop } from './commands/services';
-import { devicesList, discover, endpointsList, endpointsShow } from './commands/discovery';
+import { devicesList, discover, endpointsList, endpointsShow, endpointsAdd, endpointsRemove, endpointsClean } from './commands/discovery';
 import { factoryReset, mqttListUsers, provisionStatus, provisionWithKey, deprovision } from './commands/provision';
 import { bufferStatus, memoryDiagnostics, restart, runDiagnostics, showLogs, showStatusEnhanced, showVersion, agentUpdate } from './commands/system';
 
@@ -71,6 +71,9 @@ function buildCommands(args: string[]): CommandMap {
     endpoints: {
       list: endpointsList,
       show: endpointsShow,
+      add: endpointsAdd,
+      remove: endpointsRemove,
+      clean: endpointsClean,
       _default: endpointsList,
     },
     mqtt: {

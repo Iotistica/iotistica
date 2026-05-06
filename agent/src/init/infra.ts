@@ -2,72 +2,136 @@ import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 
+
 export async function initInfrastructure(ctx: AgentInitContext): Promise<void> {
 	await Promise.all([
-		initializeMqttManager(ctx),
+		initializeConnections(ctx),
 		initContainerManager(ctx),
 	]);
 
 	await initDeviceAPI(ctx);
 }
 
-export async function initializeMqttManager(ctx: AgentInitContext): Promise<void> {
+/**
+ * Connect the Iotistica CloudMqttClient (for cloud features: shell, jobs, CloudSync)
+ * and — when an external publish target is configured — also connect the appropriate
+ * cloud-bridge client and store it as ctx.sensorConnection for sensor data routing.
+ *
+ * Adding a new cloud target (AWS, GCP, …):
+ *  1. Add a new client class in agent/src/mqtt/
+ *  2. Add a branch in _connectExternalTarget() below
+ */
+export async function initializeConnections(ctx: AgentInitContext): Promise<void> {
 	try {
-		if (!ctx.agentInfo?.mqttBrokerConfig) {
-			return;
-		}
+		// Always connect Iotistica CloudMqttClient if broker config is available.
+		// Shell handler, jobs, updater, and CloudSync all depend on this.
+		await _connectIotisticaMqtt(ctx);
 
-		const config = ctx.agentInfo.mqttBrokerConfig;
-		const mqttBrokerUrl = `${config.protocol || 'mqtt'}://${config.host}:${config.port}`;
-		const mqttManager = CloudMqttClient.getInstance();
-
-		mqttManager.setLogger(ctx.agentLogger!);
-
-		const mqttOptions: any = {
-			clientId: config.clientIdPrefix ? `${config.clientIdPrefix}_${ctx.agentInfo.uuid}` : `device_${ctx.agentInfo.uuid}`,
-			clean: config.cleanSession ?? true,
-			reconnectPeriod: config.reconnectPeriod ?? 5000,
-			keepalive: config.keepAlive ?? 60,
-			connectTimeout: config.connectTimeout ?? 30000,
-			username: config.username,
-			password: config.password,
-		};
-
-		if (config.useTls) {
-			const hasCaCert = !!config.caCert;
-			const rejectUnauthorized = hasCaCert ? (config.verifyCertificate ?? true) : false;
-			mqttOptions.rejectUnauthorized = rejectUnauthorized;
-
-			if (config.caCert) {
-				const caCert = config.caCert.replace(/\\n/g, '\n');
-				mqttOptions.ca = caCert;
-			}
-		}
-
-		await mqttManager.connect(mqttBrokerUrl, mqttOptions, ctx.agentInfo.uuid, {
-			bufferSync: true,
-		});
-
-		if (process.env.MQTT_DEBUG === 'true') {
-			mqttManager.setDebug(true);
-		}
-
-		ctx.agentLogger?.infoSync('MQTT manager initialized', {
-			component: LogComponents.agent,
-			broker: mqttBrokerUrl,
-		});
+		// If an external publish target is configured, connect it and store as
+		// the sensor data connection.  Iotistica is used as fallback when absent.
+		const externalConn = await _connectExternalTarget(ctx);
+		ctx.sensorConnection = externalConn ?? undefined;
 
 		await initializeDictionaryManager(ctx);
 	} catch (error) {
 		ctx.agentLogger?.errorSync(
-			'Failed to initialize MQTT Manager',
+			'Failed to initialize connections',
 			error instanceof Error ? error : new Error(String(error)),
-			{
-				component: LogComponents.agent,
-				note: 'MQTT features will be unavailable',
-			}
+			{ component: LogComponents.agent },
 		);
 	}
+}
+
+/**
+ * Connect the Iotistica CloudMqttClient singleton.
+ * No-ops when no broker config is present (agent not yet provisioned).
+ */
+async function _connectIotisticaMqtt(ctx: AgentInitContext): Promise<void> {
+	if (!ctx.agentInfo?.mqttBrokerConfig) return;
+
+	const mqttManager = CloudMqttClient.getInstance();
+	if (mqttManager.isConnected()) return;
+
+	const config = ctx.agentInfo.mqttBrokerConfig;
+	const brokerUrl = `${config.protocol || 'mqtt'}://${config.host}:${config.port}`;
+
+	const mqttOptions: Record<string, any> = {
+		clientId: config.clientIdPrefix
+			? `${config.clientIdPrefix}_${ctx.agentInfo.uuid}`
+			: `device_${ctx.agentInfo.uuid}`,
+		clean: config.cleanSession ?? true,
+		reconnectPeriod: config.reconnectPeriod ?? 5000,
+		keepalive: config.keepAlive ?? 60,
+		connectTimeout: config.connectTimeout ?? 30000,
+		username: config.username,
+		password: config.password,
+	};
+
+	if (config.useTls) {
+		mqttOptions.rejectUnauthorized = config.caCert ? (config.verifyCertificate ?? true) : false;
+		if (config.caCert) mqttOptions.ca = config.caCert.replace(/\\n/g, '\n');
+	}
+
+	await mqttManager.connect(brokerUrl, mqttOptions, ctx.agentInfo.uuid, { bufferSync: true });
+	ctx.agentLogger?.infoSync('Iotistica MQTT connected', {
+		component: LogComponents.agent,
+		broker: brokerUrl,
+	});
+}
+
+/**
+ * Connect an external cloud publish target when configured via env / agentInfo.
+ * Returns the connected MqttConnection, or null when using Iotistica.
+ */
+async function _connectExternalTarget(ctx: AgentInitContext): Promise<import('../features/publish/types.js').MqttConnection | null> {
+	const targetType = (
+		process.env.PUBLISH_TARGET ||
+		ctx.agentInfo?.publishing?.target ||
+		'iotistica'
+	).toLowerCase();
+
+	if (targetType === 'iotistica' || targetType === '') return null;
+
+	if (targetType === 'iothub') {
+		const connStr =
+			process.env.AZURE_IOTHUB_CONNECTION_STRING ||
+			ctx.agentInfo?.publishing?.connectionString;
+
+		if (!connStr) {
+			ctx.agentLogger?.warnSync('PUBLISH_TARGET=iothub but no connection string provided — falling back to Iotistica', {
+				component: LogComponents.agent,
+				hint: 'Set AZURE_IOTHUB_CONNECTION_STRING',
+			});
+			return null;
+		}
+
+		const { IotHubMqttClient } = await import('../mqtt/iothub-client.js');
+		const client = new IotHubMqttClient(connStr, ctx.agentLogger);
+		await client.connect();
+		ctx.agentLogger?.infoSync('IoT Hub MQTT connected (sensor data target)', {
+			component: LogComponents.agent,
+		});
+		return client;
+	}
+
+	ctx.agentLogger?.warnSync(`Unknown PUBLISH_TARGET="${targetType}" — falling back to Iotistica`, {
+		component: LogComponents.agent,
+	});
+	return null;
+}
+
+/**
+ * @deprecated Call initializeConnections instead.
+ */
+export async function initializePublishTarget(ctx: AgentInitContext): Promise<void> {
+	return initializeConnections(ctx);
+}
+
+/**
+ * @deprecated Call initializeConnections instead.
+ */
+export async function initializeMqttManager(ctx: AgentInitContext): Promise<void> {
+	return initializeConnections(ctx);
 }
 
 export async function initializeDictionaryManager(ctx: AgentInitContext): Promise<void> {

@@ -6,6 +6,7 @@ import type { AgentFirewall } from '../network/firewall.js';
 import type { ConfigManager } from '../managers/config.js';
 import type { PipelineService } from '../features/pipeline/index.js';
 import type { AnomalyDetectionService } from '../anomaly/index.js';
+import type { MqttConnection } from '../features/publish/types.js';
 
 export interface AgentInitContext {
 	agent: {
@@ -30,4 +31,5 @@ export interface AgentInitContext {
 	discoveryService?: DiscoveryService;
 	dictionaryManager?: any;
 	scheduledRestartTimer?: NodeJS.Timeout;
+	sensorConnection?: MqttConnection;
 }

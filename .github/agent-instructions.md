@@ -480,6 +480,27 @@ async reportCurrentState(): Promise<void> {
 
 **MQTT Update Trigger**: Cloud can publish to `agent/{uuid}/update` to trigger immediate poll
 
+### Azure IoT Hub Message Monitoring
+
+When the agent is configured to publish to Azure IoT Hub, monitor device-to-cloud messages in real time from the hub's built-in endpoint.
+
+**Install the Azure IoT CLI extension** (if not already installed):
+```bash
+az extension add --name azure-iot
+```
+
+**Monitor live telemetry for the hub**:
+```bash
+az iot hub monitor-events --hub-name <your-hub-name>
+```
+
+**Filter by device**:
+```bash
+az iot hub monitor-events --hub-name <hub> --device-id <device-id>
+```
+
+This streams telemetry as the device sends it and is the fastest way to verify end-to-end publishing during development.
+
 ---
 
 ## Logging Architecture

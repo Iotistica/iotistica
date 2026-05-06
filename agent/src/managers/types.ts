@@ -82,10 +82,10 @@ export interface ProvisioningConfig {
 
 export interface ProvisionRequest {
 	uuid: string;
-	name: string;
-	type: string;
-	agentApiKey: string;          // Pre-generated agent key
-	agentPublicKey?: string;      // Ed25519 public key for PoP (PEM format)
+	deviceName: string;
+	deviceType: string;
+	deviceApiKey: string;          // Pre-generated agent key
+	devicePublicKey?: string;      // Ed25519 public key for PoP (PEM format)
 	applicationId?: number;
 	macAddress?: string;
 	osVersion?: string;

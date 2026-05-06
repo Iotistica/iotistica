@@ -18,7 +18,7 @@ export interface Agent {
   uuid: string;
   name?: string | null;
   type?: string | null;
-  agentApiKey?: string | null;
+  deviceApiKey?: string | null;
   provisioningApiKey?: string | null;
   apiKey?: string | null;
   apiEndpoint?: string | null;
@@ -50,7 +50,7 @@ export class AgentModel {
     'uuid',
     'name',
     'type',
-    'agentApiKey',
+    'deviceApiKey',
     'provisioningApiKey',
     'apiKey',
     'apiEndpoint',

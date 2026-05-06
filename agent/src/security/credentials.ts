@@ -508,7 +508,7 @@ export class CredentialManager extends EventEmitter {
 		const now = Date.now();
 		await this.dbClient.saveAgent({
 			...device,
-			agentApiKey: newKey,
+			deviceApiKey: newKey,
 			apiKey: newKey, // Sync to legacy field for backward compatibility
 			// Note: lastRotatedAt and rotationReason require database migration
 			// For now, we track them in-memory. Future: add columns to device table.

@@ -15,6 +15,7 @@ import { DeviceManager } from "./managers/index.js";
 import type { AgentInfo } from "./managers/types.js";
 import { DeviceAPI } from "./api/index.js";
 import { CloudSync } from "./sync/index.js";
+
 import { AgentLogger } from "./logging/agent-logger.js";
 import { LogComponents } from "./logging/types.js";
 import { CloudMqttClient } from "./mqtt";
@@ -657,6 +658,12 @@ export default class Agent {
     return this.cloudSync;
   }
 
+  /** Returns true when sensor data is routed to an external cloud (IoT Hub, AWS, GCP) instead of Iotistica. */
+  public isExternalPublishTarget(): boolean {
+    const t = (process.env.PUBLISH_TARGET || '').toLowerCase();
+    return t !== '' && t !== 'iotistica';
+  }
+
   public isProvisioned(): boolean {
     return this.agentInfo?.provisioned === true;
   }
@@ -693,7 +700,9 @@ export default class Agent {
       // Only require the instance to exist (provisioning config was valid + service was wired).
       // Whether it is currently connected is a runtime/health concern - a cloud outage must not
       // prevent the agent from sending READY=1 or operating as a standalone agent.
+      // Also skip when the active publish target doesn't use Iotistica (e.g. iothub).
       cloudSync: isCiMode || !this.agentInfo?.provisioned || !!this.cloudSync
+        || this.isExternalPublishTarget()
     };
 
     const now = Date.now();

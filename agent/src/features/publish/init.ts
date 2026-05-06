@@ -6,7 +6,8 @@ import type { AnomalyDetectionService } from '../../anomaly/index.js';
 import type { PipelineService } from '../pipeline/index.js';
 import {
   DevicePublishConfig,
-  DeviceConfig
+  DeviceConfig,
+  MqttConnection,
 } from './types.js';
 import { PublishManager } from './manager.js';
 
@@ -26,6 +27,8 @@ export class DevicePublishFeature extends BaseFeature {
   private anomalyService?: AnomalyDetectionService;
   private pipelineService?: PipelineService;
   private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
+  /** External cloud connection; overrides CloudMqttClient for sensor telemetry routing. */
+  private sensorConnection?: MqttConnection;
 
   constructor(
     config: DevicePublishConfig & { enabled: boolean },
@@ -36,6 +39,7 @@ export class DevicePublishFeature extends BaseFeature {
     useKeyCompactionPoc: boolean = false, // Enable dictionary key compaction POC
     useDeflatePoc: boolean = false, // Enable DEFLATE compression POC
     anomalyService?: AnomalyDetectionService,
+    sensorConnection?: MqttConnection, // External cloud target (IoT Hub, AWS, GCP)
   ) {
     super(
       config,
@@ -51,6 +55,7 @@ export class DevicePublishFeature extends BaseFeature {
     this.useKeyCompactionPoc = useKeyCompactionPoc;
     this.useDeflatePoc = useDeflatePoc;
     this.anomalyService = anomalyService;
+    this.sensorConnection = sensorConnection;
   }
 
   public setAnomalyService(anomalyService?: AnomalyDetectionService): void {
@@ -254,7 +259,7 @@ export class DevicePublishFeature extends BaseFeature {
 
     return new PublishManager(
       config,
-      this.mqttConnection!,
+      this.sensorConnection ?? this.mqttConnection!,
       protocolLogger,
       this.deviceUuid,
       this.dictionaryManager,

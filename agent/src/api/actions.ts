@@ -3,6 +3,7 @@
  * Core actions for agent management
  */
 
+import { randomUUID } from 'crypto';
 import ContainerManager from '../docker/container-manager';
 import type { DeviceManager } from '../managers';
 import type { CloudSync } from '../sync';
@@ -10,10 +11,13 @@ import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../anomaly';
 import type { SimulationOrchestrator } from '../anomaly/simulator';
 import type { AdapterManager } from '../adapters';
+import type { ConfigManager } from '../managers/config';
+import type { StateManager } from '../managers/state';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/health-arbiter';
 import { MessageBufferModel } from '../db/models/buffer.model';
 import { CloudMqttClient } from '../mqtt/manager';
+import { encodeIfUuid } from '../mqtt/codec';
 import type { AgentUpdater } from '../updater';
 
 let containerManager: ContainerManager;
@@ -23,6 +27,8 @@ let logger: AgentLogger | undefined;
 let anomalyService: AnomalyDetectionService | undefined;
 let simulationOrchestrator: SimulationOrchestrator | undefined;
 let adapterManager: AdapterManager | undefined;
+let configManager: ConfigManager | undefined;
+let stateManager: StateManager | undefined;
 let discoveryService: import('../adapters/discovery/service').DiscoveryService | undefined;
 let agentInstance: any | undefined;
 let healthReporter: (() => HealthReport) | undefined;
@@ -212,6 +218,41 @@ export function initialize(
  */
 export function setAdapterManager(feature: AdapterManager | undefined) {
 	adapterManager = feature;
+}
+
+/**
+ * Set config manager (called by agent after initialization)
+ */
+export function setConfigManager(cm: ConfigManager | undefined): void {
+	configManager = cm;
+}
+
+/**
+ * Set state manager (canonical target-state owner)
+ */
+export function setStateManager(sm: StateManager | undefined): void {
+	stateManager = sm;
+}
+
+async function applyConfigUpdate(mutator: (config: Record<string, any>) => void): Promise<void> {
+	if (stateManager) {
+		const currentTarget = stateManager.getTargetState?.() ?? { apps: {}, config: {} };
+		const nextConfig = { ...(currentTarget.config || {}) };
+		mutator(nextConfig);
+		await stateManager.setTarget({
+			apps: currentTarget.apps || {},
+			config: nextConfig,
+		});
+		return;
+	}
+
+	if (!configManager) {
+		throw new Error('Config manager not initialized');
+	}
+
+	const config = configManager.getTargetConfig() as Record<string, any>;
+	mutator(config);
+	await configManager.setTarget(config as any);
 }
 
 /**
@@ -551,6 +592,127 @@ export const getEndpoints = async (protocol?: string) => {
 	const { EndpointModel: EndpointModel } = await import('../db/models/endpoint.model.js');
 	const endpoints = await EndpointModel.getAll(protocol);
 	return endpoints;
+};
+
+/**
+ * Add a new endpoint via target state (persists across cloud sync cycles)
+ * Used by: POST /v1/endpoints
+ */
+export const addEndpoint = async (body: {
+	name: string;
+	protocol: string;
+	connection: Record<string, any>;
+	poll_interval?: number;
+	enabled?: boolean;
+	data_points?: any[];
+	metadata?: Record<string, any>;
+}) => {
+	if (!configManager && !stateManager) throw new Error('Config manager not initialized');
+	if (!body.name) throw new Error('name is required');
+	if (!body.protocol) throw new Error('protocol is required');
+	if (!body.connection) throw new Error('connection is required');
+
+	const uuid = randomUUID();
+
+	// For MQTT: derive auth.mqtt from connection credentials so
+	// MqttFileAuthReconciler writes a passwd/ACL entry on reconcile.
+	// Also promote the first data_point topic to connection.topic (the
+	// reconciler uses it as the base ACL topic pattern).
+	// If no topics were supplied, auto-generate the canonical topic:
+	//   i/<encodedTenant>/a/<encodedAgent>/d/<encodedEndpoint>
+	let mqttAuth: Record<string, any> | undefined;
+	let resolvedConnection = { ...body.connection };
+	let resolvedDataPoints = body.data_points ? [...body.data_points] : [];
+	if (body.protocol === 'mqtt') {
+		const username = body.connection?.username as string | undefined;
+		const password = body.connection?.password as string | undefined;
+		if (username && password) {
+			mqttAuth = { username, passwordPlaintext: password, access: 2 };
+		}
+		// connection.topic drives the ACL pattern; fall back to first data_point,
+		// then to canonical i/<tenant>/a/<agent>/d/<endpoint> when provisioned,
+		// then to '#' (all topics) so the passwd entry is always written.
+		if (!resolvedConnection.topic) {
+			const firstTopic = body.data_points?.[0]?.topic as string | undefined;
+			if (firstTopic) {
+				resolvedConnection.topic = firstTopic;
+			} else {
+				const agentInfo = deviceManager.getAgentInfo();
+				const tenantId = agentInfo?.tenantId as string | undefined;
+				const agentUuid = agentInfo?.uuid as string | undefined;
+				if (tenantId && agentUuid) {
+					const generatedTopic = `i/${encodeIfUuid(tenantId)}/a/${encodeIfUuid(agentUuid)}/d/${encodeIfUuid(uuid)}`;
+					resolvedConnection.topic = generatedTopic;
+					resolvedDataPoints = [{ topic: generatedTopic }];
+				} else {
+					resolvedConnection.topic = '#';
+				}
+			}
+		}
+	}
+
+	const newEndpoint = {
+		id: uuid,
+		uuid,
+		name: body.name,
+		protocol: body.protocol,
+		connection: resolvedConnection,
+		poll_interval: body.poll_interval ?? 5000,
+		pollInterval: body.poll_interval ?? 5000,
+		enabled: body.enabled !== false,
+		...(mqttAuth ? { auth: { mqtt: mqttAuth } } : {}),
+		...(body.metadata ? { metadata: body.metadata } : {}),
+		dataPoints: resolvedDataPoints,
+	};
+
+	await applyConfigUpdate((config) => {
+		if (!Array.isArray(config.endpoints)) config.endpoints = [];
+		config.endpoints.push(newEndpoint as any);
+	});
+
+	return {
+		uuid,
+		name: body.name,
+		protocol: body.protocol,
+		enabled: newEndpoint.enabled,
+		topic: newEndpoint.connection?.topic,
+	};
+};
+
+/**
+ * Remove an endpoint by UUID via target state
+ * Used by: DELETE /v1/endpoints/:uuid
+ */
+export const removeEndpoint = async (uuid: string) => {
+	if (!configManager && !stateManager) throw new Error('Config manager not initialized');
+
+	let found = false;
+	await applyConfigUpdate((config) => {
+		const endpoints = Array.isArray(config.endpoints) ? config.endpoints : [];
+		const filtered = endpoints.filter((e: any) => e.uuid !== uuid && e.id !== uuid);
+		found = filtered.length !== endpoints.length;
+		config.endpoints = filtered;
+	});
+
+	if (!found) {
+		throw Object.assign(new Error(`Endpoint not found: ${uuid}`), { statusCode: 404 });
+	}
+};
+
+/**
+ * Remove all endpoints from target state
+ * Used by: DELETE /v1/endpoints
+ */
+export const removeAllEndpoints = async () => {
+	if (!configManager && !stateManager) throw new Error('Config manager not initialized');
+
+	let removed = 0;
+	await applyConfigUpdate((config) => {
+		removed = Array.isArray(config.endpoints) ? config.endpoints.length : 0;
+		config.endpoints = [];
+	});
+
+	return { removed };
 };
 
 /**

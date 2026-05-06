@@ -15,6 +15,7 @@
 
 import type { CloudMqttClient } from './manager';
 import { createJsonPayload, serializePayload } from './codec';
+import type { PublishMode } from '../features/publish/types.js';
 import { MessageBufferModel } from '../db/models';
 import type { BufferAdmissionDecision } from '../db/models';
 import type { AgentLogger } from '../logging/agent-logger';
@@ -36,10 +37,27 @@ export interface BufferSyncConfig {
 
 export type MessageBufferSyncOptions = BufferSyncConfig;
 
+/**
+ * Minimal interface required by MessageBufferSync.
+ * Both CloudMqttClient and any PublishTarget plugin satisfy this.
+ */
+export interface IPublishClient {
+  on(event: 'connect', listener: () => void): this;
+  off(event: 'connect', listener: () => void): this;
+  isConnected(): boolean;
+  getPublishMode?(): PublishMode;
+  getMessageIdGenerator?(): any;
+  publish(
+    topic: string,
+    payload: string | Buffer,
+    options?: { qos?: 0 | 1 | 2 }
+  ): Promise<void>;
+}
+
 export class MessageBufferSync {
   private static readonly SQLITE_BUSY_PATTERN = /SQLITE_BUSY|database is locked/i;
   private config: BufferSyncConfig;
-  private mqttManager: CloudMqttClient;
+  private mqttManager: IPublishClient;
   private logger?: AgentLogger;
   
   private flushIntervalHandle?: NodeJS.Timeout;
@@ -52,7 +70,7 @@ export class MessageBufferSync {
   };
 
   constructor(
-    mqttManager: CloudMqttClient,
+    mqttManager: IPublishClient,
     logger?: AgentLogger,
     config?: Partial<BufferSyncConfig>
   ) {
@@ -168,7 +186,7 @@ export class MessageBufferSync {
       return false;
     }
 
-    const publishMode = this.mqttManager.getPublishMode();
+    const publishMode = this.mqttManager.getPublishMode?.() ?? 'direct';
     const shouldBuffer =
       !this.mqttManager.isConnected() ||
       this.config.bufferEvenWhenOnline ||
@@ -269,7 +287,7 @@ export class MessageBufferSync {
     // Skip if already flushing or no flush requested
     if (this.isFlushing) return;
 
-    const publishMode = this.mqttManager.getPublishMode();
+    const publishMode = this.mqttManager.getPublishMode?.() ?? 'direct';
     const canFlushNow = this.mqttManager.isConnected() && publishMode === 'direct';
     
     // Only flush if requested OR MQTT is connected
@@ -298,10 +316,10 @@ export class MessageBufferSync {
       return;
     }
 
-    if (this.mqttManager.getPublishMode() !== 'direct') {
+    if ((this.mqttManager.getPublishMode?.() ?? 'direct') !== 'direct') {
       this.logger?.debugSync('MQTT publish mode is buffering, skipping flush', {
         component: LogComponents.agent,
-        publishMode: this.mqttManager.getPublishMode(),
+        publishMode: this.mqttManager.getPublishMode?.() ?? 'direct',
       });
       return;
     }
@@ -352,7 +370,7 @@ export class MessageBufferSync {
             let payload: Buffer | string = record.payload;
             try {
               const json = JSON.parse(record.payload);
-              const msgIdGen = this.mqttManager.getMessageIdGenerator();
+              const msgIdGen = this.mqttManager.getMessageIdGenerator?.();
               let mqttPayload;
               if (record.msg_id) {
                 mqttPayload = createJsonPayload({ ...json, msgId: record.msg_id });

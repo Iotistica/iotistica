@@ -273,7 +273,7 @@ export class AgentManager {
 				uuid: record.uuid,
 				name: record.name || undefined,
 				type: record.type || undefined,
-				apiKey: record.apiKey || record.agentApiKey || undefined,
+				apiKey: record.apiKey || record.deviceApiKey || undefined,
 				provisioningApiKey: record.provisioningApiKey || undefined,
 				apiEndpoint: record.apiEndpoint || undefined,
 				registeredAt: record.registeredAt || undefined,
@@ -303,7 +303,7 @@ export class AgentManager {
 			uuid: this.agentInfo.uuid,
 			name: this.agentInfo.name || null,
 			type: this.agentInfo.type || null,
-			agentApiKey: this.agentInfo.apiKey || null,
+			deviceApiKey: this.agentInfo.apiKey || null,
 			provisioningApiKey: this.agentInfo.provisioningApiKey || null,
 			apiKey: this.agentInfo.apiKey || null,
 			apiEndpoint: this.agentInfo.apiEndpoint || null,
@@ -514,7 +514,7 @@ export class AgentManager {
 				const uuid = this.agentInfo.uuid;
 				const agentName = this.agentInfo.name!; // Guaranteed by line 401
 				const agentType = this.agentInfo.type!; // Guaranteed by line 402
-				const agentApiKey = this.agentInfo.apiKey!; // Guaranteed by line 387-396
+				const deviceApiKey = this.agentInfo.apiKey!; // Guaranteed by line 387-396
 				const applicationId = this.agentInfo.applicationId;
 				const macAddress = this.agentInfo.macAddress;
 				const osVersion = this.agentInfo.osVersion;
@@ -544,10 +544,10 @@ export class AgentManager {
 						apiEndpoint,
 						{
 							uuid,
-							name: agentName,
-							type: agentType,
-							agentApiKey: agentApiKey,
-							agentPublicKey: agentPublicKey,
+							deviceName: agentName,
+							deviceType: agentType,
+							deviceApiKey: deviceApiKey,
+							devicePublicKey: agentPublicKey,
 							applicationId,
 							macAddress,
 							osVersion,
@@ -625,7 +625,7 @@ export class AgentManager {
         // Capture values for closure (TypeScript can't track through await/closures)
         const apiEndpoint = this.agentInfo.apiEndpoint || 'http://localhost:3002';
         const uuid = this.agentInfo.uuid;
-        const agentApiKey = this.agentInfo.apiKey!; // Guaranteed by line 387-396
+        const deviceApiKey = this.agentInfo.apiKey!; // Guaranteed by line 387-396
         const challenge = response?.challenge; // Server-provided nonce for PoP
         
         // Wrap with retry logic for unreliable edge networks
@@ -633,7 +633,7 @@ export class AgentManager {
           () => this.exchangeKeys(
             apiEndpoint,
             uuid,
-            agentApiKey,
+            deviceApiKey,
             challenge  // Pass challenge for proof-of-possession
           ),
           'Key Exchange'
@@ -784,8 +784,8 @@ export class AgentManager {
 			operation: 'registerWithAPI',
 			url,
 			uuid: provisionRequest.uuid,
-			agentName: provisionRequest.name,
-			agentType: provisionRequest.type,
+			agentName: provisionRequest.deviceName,
+			agentType: provisionRequest.deviceType,
 			idempotencyKey,
 		});
 
@@ -841,7 +841,7 @@ export class AgentManager {
 	async exchangeKeys(
 		apiEndpoint: string,
 		uuid: string,
-		agentApiKey: string,
+		deviceApiKey: string,
 		challenge?: string  // Server-provided nonce from registration response
 	): Promise<void> {
 		const url = buildApiEndpoint(apiEndpoint, `/device/${uuid}/key-exchange`);
@@ -877,7 +877,7 @@ export class AgentManager {
 				signature,
 			};
 			
-			const headers = this.createAgentKeyHeaders(agentApiKey);
+			const headers = this.createAgentKeyHeaders(deviceApiKey);
 			headers['X-Idempotency-Key'] = idempotencyKey;
 			
 			this.logger?.infoSync('Using Ed25519 PoP signature', {
@@ -1011,7 +1011,7 @@ export class AgentManager {
 		this.logger?.infoSync('Agent reset (unprovisioned)', {
 			component: LogComponents.agentManager,
 			operation: 'reset',
-			note: 'UUID and agentApiKey preserved for re-registration. MQTT credentials cleared.',
+			note: 'UUID and deviceApiKey preserved for re-registration. MQTT credentials cleared.',
 		});
 	}
 	

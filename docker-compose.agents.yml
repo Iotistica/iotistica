@@ -1,5 +1,5 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-05-03 16:42:19
+# Generated: 2026-05-05 21:27:18
 # Agents: 36 to 36
 # Ports: 48516 to 48516
 
@@ -33,7 +33,7 @@ services:
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=e2ae3fb2075b43ff3bd7b4ecc850a987c29d769bcc76f986eb674f6e08569330
+      - PROVISIONING_KEY=5908670de107cb75c1e65c8b45ea4fb8d50f82739eb6dd6bc1fae36da5a442fd
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=false
       # Testing & Development (not dashboard-controlled)
@@ -48,6 +48,8 @@ services:
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
+      - PUBLISH_TARGET=iothub
+      - AZURE_IOTHUB_CONNECTION_STRING=HostName=iotistica.azure-devices.net;DeviceId=device-1;SharedAccessKey=HSVByMHieDCmA2UYyEiB4ubwNvTvEB/6wvFznkNqieo=
 volumes:
   agent-36-data:
     driver: local

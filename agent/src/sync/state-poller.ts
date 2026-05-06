@@ -275,6 +275,30 @@ export class StatePoller extends EventEmitter {
 			config: deviceState.config || {},
 		};
 
+		// Preserve existing local endpoints when cloud returns none.
+		// This prevents local CLI-managed endpoints from being reconciled out
+		// on restart or transient cloud states with empty endpoint config.
+		const existingTargetState = this.stateManager.getTargetState?.() ?? { apps: {}, config: {} };
+		const cloudEndpoints = Array.isArray(newTargetState.config?.endpoints)
+			? newTargetState.config.endpoints
+			: [];
+		const existingEndpoints = Array.isArray(existingTargetState.config?.endpoints)
+			? existingTargetState.config.endpoints
+			: [];
+
+		if (cloudEndpoints.length === 0 && existingEndpoints.length > 0) {
+			newTargetState.config = {
+				...(newTargetState.config || {}),
+				endpoints: existingEndpoints,
+			};
+
+			this.logger?.infoSync('Preserving existing endpoints on empty cloud target', {
+				component: LogComponents.cloudSync,
+				operation: 'poll',
+				preservedEndpoints: existingEndpoints.length,
+			});
+		}
+
 		const currentStateHash = calculateHash(this.stateManager.getTargetState?.() ?? {});
 		const newStateHash = calculateHash(newTargetState);
 

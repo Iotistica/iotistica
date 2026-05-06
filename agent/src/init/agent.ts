@@ -81,26 +81,26 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 	);
 	await ctx.deviceManager.initialize();
 
-	let deviceInfo = ctx.deviceManager.getAgentInfo();
+	let agentInfo = ctx.deviceManager.getAgentInfo();
 	const provisioningApiKey = normalizeOptionalEnvValue(process.env.PROVISIONING_KEY);
 	const cloudEndpoint = process.env.IOTISTICA_API || ctx.configManager!.getCloudApiEndpoint();
 
-	if (!deviceInfo.provisioned && provisioningApiKey && cloudEndpoint) {
+	if (!agentInfo.provisioned && provisioningApiKey && cloudEndpoint) {
 		try {
 			const macAddress = process.env.MAC_ADDRESS || (await getMacAddress());
 			const osVersion = process.env.OS_VERSION || (await getOsVersion());
 
 			await ctx.deviceManager.provision({
 				provisioningApiKey,
-				deviceName: process.env.DEVICE_NAME || `agent-${deviceInfo.uuid.slice(0, 8)}`,
-				deviceType: process.env.DEVICE_TYPE || 'standalone',
+				agentName: process.env.DEVICE_NAME || `agent-${agentInfo.uuid.slice(0, 8)}`,
+				agentType: process.env.DEVICE_TYPE || 'standalone',
 				apiEndpoint: cloudEndpoint,
 				macAddress,
 				osVersion,
 				agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
 			});
-			deviceInfo = ctx.deviceManager.getAgentInfo();
-			ctx.agentInfo = deviceInfo;
+			agentInfo = ctx.deviceManager.getAgentInfo();
+			ctx.agentInfo = agentInfo;
 		} catch (error: any) {
 			ctx.agentLogger?.errorSync(
 				'Auto-provisioning failed',
@@ -110,29 +110,29 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 					note: 'Device will remain unprovisioned. Check PROVISIONING_KEY or boot config file.',
 				}
 			);
-			deviceInfo = ctx.deviceManager.getAgentInfo();
+			agentInfo = ctx.deviceManager.getAgentInfo();
 		}
-	} else if (!deviceInfo.provisioned && cloudEndpoint && !provisioningApiKey) {
+	} else if (!agentInfo.provisioned && cloudEndpoint && !provisioningApiKey) {
 		ctx.agentLogger?.warnSync('Device not provisioned', {
 			component: LogComponents.agent,
 			note: 'Set PROVISIONING_KEY environment variable or provide /data/iotistic/boot-config.json',
 		});
-	} else if (!deviceInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
+	} else if (!agentInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
 		ctx.agentLogger?.infoSync('Running in local mode (no cloud connection)', {
 			component: LogComponents.agent,
 		});
 		await ctx.deviceManager.markAsLocalMode();
-		deviceInfo = ctx.deviceManager.getAgentInfo();
-	} else if (deviceInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
+		agentInfo = ctx.deviceManager.getAgentInfo();
+	} else if (agentInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
 		ctx.agentLogger?.infoSync('Switching to local mode (no cloud connection)', {
 			component: LogComponents.agent,
 			note: 'Device was previously provisioned but IOTISTICA_API is not set',
 		});
 		await ctx.deviceManager.markAsLocalMode();
-		deviceInfo = ctx.deviceManager.getAgentInfo();
+		agentInfo = ctx.deviceManager.getAgentInfo();
 	}
 
-	ctx.agentInfo = deviceInfo;
+	ctx.agentInfo = agentInfo;
 
 	if (ctx.agentInfo.provisioned) {
 		const tenantId = ctx.agentInfo.tenantId?.trim();

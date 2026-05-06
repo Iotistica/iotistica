@@ -677,6 +677,48 @@ router.get('/v1/endpoints', async (req: Request, res: Response, next: NextFuncti
 });
 
 /**
+ * POST /v1/endpoints
+ * Add a new endpoint to the agent configuration
+ * Body: { name, protocol, connection, poll_interval?, enabled?, data_points?, metadata? }
+ */
+router.post('/v1/endpoints', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const endpoint = await actions.addEndpoint(req.body);
+		return res.status(201).json({ endpoint });
+	} catch (error: any) {
+		if (error?.statusCode === 404) return res.status(404).json({ error: error.message });
+		next(error);
+	}
+});
+
+/**
+ * DELETE /v1/endpoints/:uuid
+ * Remove an endpoint from the agent configuration by UUID
+ */
+router.delete('/v1/endpoints/:uuid', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		await actions.removeEndpoint(req.params.uuid);
+		return res.status(200).json({ message: 'Endpoint removed' });
+	} catch (error: any) {
+		if (error?.statusCode === 404) return res.status(404).json({ error: error.message });
+		next(error);
+	}
+});
+
+/**
+ * DELETE /v1/endpoints
+ * Remove all endpoints from the agent configuration
+ */
+router.delete('/v1/endpoints', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const result = await actions.removeAllEndpoints();
+		return res.status(200).json({ message: `Removed ${result.removed} endpoint(s)`, removed: result.removed });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
  * GET /v1/devices
  * Get all physical/logical protocol devices
  * Supports filtering by protocol via query parameter: ?protocol=modbus

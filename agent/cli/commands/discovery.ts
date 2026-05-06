@@ -12,7 +12,7 @@ function formatConnection(protocol: string, connection: Record<string, any>): st
     case 'opcua':
       return connection.endpointUrl || 'opc.tcp://...';
     case 'mqtt':
-      return process.env.MQTT_BROKER_URL || 'mqtt://localhost:1883';
+      return connection.brokerUrl || connection.url || 'mqtt://localhost:1883';
     case 'snmp':
       return `${connection.host}:${connection.port || 161}`;
     case 'bacnet':
@@ -173,12 +173,31 @@ export async function endpointsList(protocolFilter?: string): Promise<void> {
       for (const endpoint of protoEndpoints as any[]) {
         const enabledIcon = endpoint.enabled ? '✓' : '✗';
         const connectionStr = formatConnection(endpoint.protocol, endpoint.connection);
+        const dataPoints: any[] = endpoint.data_points || [];
 
-        logger.info(`${enabledIcon} ${endpoint.name}`, {
+        const extra: Record<string, any> = {
+          uuid: endpoint.uuid || '(none)',
           connection: connectionStr,
-          pollInterval: `${endpoint.poll_interval}ms`,
-          dataPoints: endpoint.data_points?.length || 0,
-        });
+          interval: `${endpoint.poll_interval}ms`,
+        };
+
+        if (endpoint.protocol === 'mqtt') {
+          const topics = dataPoints.map((dp: any) => dp.topic || dp.name).filter(Boolean);
+          extra.topics = topics.length > 0 ? topics.join(', ') : '(none)';
+          if (endpoint.connection?.username) extra.auth = endpoint.connection.username;
+        } else if (endpoint.protocol === 'modbus') {
+          extra.dataPoints = dataPoints.length;
+          if (dataPoints.length > 0) {
+            extra.registers = dataPoints.slice(0, 5).map((dp: any) => dp.name || dp.label || dp.address).join(', ')
+              + (dataPoints.length > 5 ? ` (+${dataPoints.length - 5} more)` : '');
+          }
+        } else if (endpoint.protocol === 'opcua') {
+          extra.nodes = dataPoints.length;
+        } else {
+          extra.dataPoints = dataPoints.length;
+        }
+
+        logger.info(`${enabledIcon} ${endpoint.name}`, extra);
       }
     }
 
@@ -280,6 +299,170 @@ export async function endpointsShow(endpointName?: string): Promise<void> {
   } catch (error) {
     if (error instanceof CLIError) throw error;
     throw new CLIError('Failed to show device details', 1, {
+      error: (error as Error).message,
+    });
+  }
+}
+
+/**
+ * iotctl endpoints add --name <name> --protocol mqtt --broker <url>
+ *   [--username <user>] [--password <pass>] [--topics <t1,t2>]
+ *   [--interval <ms>] [--disabled]
+ * Also supports: --protocol modbus --host <ip> --port <port> --slave <id>
+ */
+export async function endpointsAdd(): Promise<void> {
+  const args = process.argv;
+
+  function flag(name: string): string | undefined {
+    const idx = args.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
+    if (idx === -1) return undefined;
+    if (args[idx].includes('=')) return args[idx].split('=').slice(1).join('=');
+    return args[idx + 1];
+  }
+
+  const name = flag('name');
+  const protocol = (flag('protocol') ?? 'mqtt').toLowerCase();
+  const enabled = !args.includes('--disabled');
+  const pollInterval = parseInt(flag('interval') ?? '5000', 10);
+
+  if (!name) {
+    throw new CLIError('--name is required', 1, {
+      usage: 'iotctl endpoints add --name <name> --protocol mqtt --broker <url> [--topics <t1,t2>] [--interval <ms>] [--username <user>] [--password <pass>] [--disabled]',
+    });
+  }
+
+  let connection: Record<string, any> = {};
+  let dataPoints: any[] = [];
+
+  if (protocol === 'mqtt') {
+    const broker = flag('broker');
+    if (!broker) {
+      throw new CLIError('--broker is required for mqtt protocol', 1, {
+        usage: 'iotctl endpoints add --name <name> --protocol mqtt --broker mqtt://localhost:1883',
+      });
+    }
+    const username = flag('username');
+    const password = flag('password');
+    const topicsRaw = flag('topics');
+    const topics = topicsRaw ? topicsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [];
+
+    connection = {
+      brokerUrl: broker,
+      ...(username ? { username } : {}),
+      ...(password ? { password } : {}),
+    };
+    dataPoints = topics.map((topic) => ({ name: topic, topic }));
+  } else if (protocol === 'modbus') {
+    const host = flag('host');
+    const port = parseInt(flag('port') ?? '502', 10);
+    const slaveId = parseInt(flag('slave') ?? '1', 10);
+    if (!host) {
+      throw new CLIError('--host is required for modbus protocol', 1, {
+        usage: 'iotctl endpoints add --name <name> --protocol modbus --host <ip> --port <port> --slave <id>',
+      });
+    }
+    connection = { type: 'tcp', host, port, slaveId };
+  } else {
+    // Generic: accept --connection as JSON string
+    const connRaw = flag('connection');
+    if (!connRaw) {
+      throw new CLIError(`--connection (JSON) is required for protocol: ${protocol}`, 1);
+    }
+    try {
+      connection = JSON.parse(connRaw);
+    } catch {
+      throw new CLIError('--connection must be valid JSON', 1);
+    }
+  }
+
+  try {
+    const result = await apiRequest(`${DEVICE_API_V1}/endpoints`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        protocol,
+        connection,
+        poll_interval: isNaN(pollInterval) ? 5000 : pollInterval,
+        enabled,
+        data_points: dataPoints,
+      }),
+    });
+
+    const ep = result.endpoint;
+    logger.info(`Endpoint added: ${ep.name}`, {
+      uuid: ep.uuid,
+      protocol: ep.protocol,
+      enabled: ep.enabled,
+    });
+  } catch (error) {
+    if (error instanceof CLIError) throw error;
+    throw new CLIError('Failed to add endpoint', 1, {
+      error: (error as Error).message,
+    });
+  }
+}
+
+/**
+ * iotctl endpoints remove <uuid>
+ */
+export async function endpointsRemove(uuid?: string): Promise<void> {
+  if (!uuid) {
+    throw new CLIError('UUID is required', 1, {
+      usage: 'iotctl endpoints remove <uuid>',
+    });
+  }
+
+  try {
+    await apiRequest(`${DEVICE_API_V1}/endpoints/${encodeURIComponent(uuid)}`, {
+      method: 'DELETE',
+    });
+    logger.info(`Endpoint removed: ${uuid}`);
+  } catch (error) {
+    if (error instanceof CLIError) throw error;
+    throw new CLIError('Failed to remove endpoint', 1, {
+      error: (error as Error).message,
+    });
+  }
+}
+
+/**
+ * iotctl endpoints clean [--force]
+ * Remove ALL endpoints from the agent configuration
+ */
+export async function endpointsClean(): Promise<void> {
+  const force = process.argv.includes('--force') || process.argv.includes('-f');
+
+  if (!force) {
+    // First list what will be removed
+    try {
+      const result = await apiRequest(`${DEVICE_API_V1}/endpoints`);
+      const endpoints = result.endpoints || [];
+
+      if (endpoints.length === 0) {
+        logger.info('No endpoints to remove');
+        return;
+      }
+
+      logger.info(`This will remove ${endpoints.length} endpoint(s):`);
+      console.log('');
+      for (const ep of endpoints) {
+        console.log(`  - ${ep.name} (${ep.protocol}) [${ep.uuid}]`);
+      }
+      console.log('');
+      logger.info('Re-run with --force to confirm removal');
+    } catch (error) {
+      if (error instanceof CLIError) throw error;
+      throw new CLIError('Failed to list endpoints', 1, { error: (error as Error).message });
+    }
+    return;
+  }
+
+  try {
+    const result = await apiRequest(`${DEVICE_API_V1}/endpoints`, { method: 'DELETE' });
+    logger.info(result.message || 'All endpoints removed');
+  } catch (error) {
+    if (error instanceof CLIError) throw error;
+    throw new CLIError('Failed to clean endpoints', 1, {
       error: (error as Error).message,
     });
   }

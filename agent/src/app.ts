@@ -111,7 +111,7 @@ function registerRuntimeHealthSubsystems(): void {
 		description: 'SQLite query check',
 	});
 
-	health.registerSubsystem('device-api', async () => {
+	health.registerSubsystem('agent-api', async () => {
 		try {
 			const port = process.env.DEVICE_API_PORT || '48484';
 			const response = await fetch(`http://127.0.0.1:${port}/ping`, {
@@ -126,7 +126,7 @@ function registerRuntimeHealthSubsystems(): void {
 		// the agent must keep running local orchestration and buffering. For unprovisioned devices,
 		// keep this critical so setup/provisioning remains restartable.
 		critical: !isProvisioned,
-		description: 'Local Device API ping check',
+		description: 'Local Agent API ping check',
 	});
 
 	health.registerSubsystem('mqtt', async () => {

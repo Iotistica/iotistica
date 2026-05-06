@@ -24,7 +24,7 @@ interface ShellCommand {
 /**
  * Verify HMAC signature of shell command (prevents unauthorized access)
  */
-function verifyCommandSignature(command: ShellCommand, secret: string, deviceUuid: string): boolean {
+function verifyCommandSignature(command: ShellCommand, secret: string, agentUuid: string): boolean {
   if (!command.signature || !command.issued_at) {
     return false;
   }
@@ -33,7 +33,7 @@ function verifyCommandSignature(command: ShellCommand, secret: string, deviceUui
   // Use JSON.stringify to avoid delimiter collision (e.g., data containing '|')
   // Include deviceUuid to prevent cross-device replay attacks
   const canonicalPayload = {
-    deviceUuid,
+    deviceUuid: agentUuid,
     action: command.action,
     sessionId: command.sessionId || '',
     data: command.data || '',
