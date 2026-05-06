@@ -76,6 +76,7 @@ jobs:
           df -h
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/hostedtoolcache || true
           sudo rm -rf /opt/ghc || true
           sudo apt-get clean || true
           echo "=== Disk Space After Cleanup ==="
@@ -93,7 +94,7 @@ jobs:
             yocto-${{ runner.os }}-${{ env.YOCTO_VERSION }}-
 
       - name: Check disk space
-        run: bash .github/workflows/scripts/check-disk-space.sh
+        run: bash .github/workflows/scripts/check-disk-space.sh 30 50
 
       - name: Determine agent version
         id: version
