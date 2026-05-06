@@ -1,9 +1,10 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 BUILD_DIR="$1"
 YOCTO_VERSION="$2"
 SSTATE_DIR="$3"
+CLEAN_BUILD="${4:-false}"
 
 cd "$BUILD_DIR/poky"
 
@@ -15,32 +16,35 @@ fi
 # Source build environment
 source oe-init-build-env build
 
-# ULTRA-NUCLEAR: Clean build
-echo "=== ULTRA-NUCLEAR: Force completely clean build with IPK ==="
-echo "Problem: sstate-cache contains cached RPM native tools"
-echo "Solution: Remove ALL native sysroots from sstate-cache"
-echo ""
-
-if [ -d tmp ]; then
-  echo "Step 1: Removing entire tmp/ directory..."
-  rm -rf tmp
-  echo "✓ tmp/ removed"
-fi
-
-if [ -d "$SSTATE_DIR" ]; then
+if [ "$CLEAN_BUILD" = "true" ]; then
+  echo "=== CLEAN BUILD MODE ENABLED ==="
+  echo "Cleaning tmp and selected native sstate entries (slow path)..."
   echo ""
-  echo "Step 2: Removing native sstate-cache..."
-  echo "Before: $(du -sh "$SSTATE_DIR" 2>/dev/null || echo '0')"
-  
-  find "$SSTATE_DIR" -type d -name "*x86_64-linux*" -exec rm -rf {} + 2>/dev/null || true
-  find "$SSTATE_DIR" -type d -name "*allarch*" -exec rm -rf {} + 2>/dev/null || true
-  
-  echo "After: $(du -sh "$SSTATE_DIR" 2>/dev/null || echo '0')"
-  echo "✓ Native sstate-cache cleared"
-fi
 
-echo ""
-echo "✓ Complete clean - BitBake will build native tools from scratch with IPK"
+  if [ -d tmp ]; then
+    echo "Step 1: Removing entire tmp/ directory..."
+    rm -rf tmp
+    echo "✓ tmp/ removed"
+  fi
+
+  if [ -d "$SSTATE_DIR" ]; then
+    echo ""
+    echo "Step 2: Removing native sstate-cache..."
+    echo "Before: $(du -sh "$SSTATE_DIR" 2>/dev/null || echo '0')"
+
+    find "$SSTATE_DIR" -type d -name "*x86_64-linux*" -exec rm -rf {} + 2>/dev/null || true
+    find "$SSTATE_DIR" -type d -name "*allarch*" -exec rm -rf {} + 2>/dev/null || true
+
+    echo "After: $(du -sh "$SSTATE_DIR" 2>/dev/null || echo '0')"
+    echo "✓ Native sstate-cache cleared"
+  fi
+
+  echo ""
+  echo "✓ Clean build requested - cache reuse minimized"
+else
+  echo "=== INCREMENTAL BUILD MODE ==="
+  echo "Skipping destructive clean to maximize sstate/tmp reuse"
+fi
 
 # Verify configuration
 echo ""

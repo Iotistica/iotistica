@@ -1,11 +1,16 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 BUILD_DIR="$1"
 WORKSPACE="$2"
 MACHINE="$3"
 YOCTO_VERSION="$4"
 AGENT_VERSION="$5"
+
+if [ -z "${BUILD_DIR}" ] || [ -z "${WORKSPACE}" ] || [ -z "${MACHINE}" ] || [ -z "${YOCTO_VERSION}" ] || [ -z "${AGENT_VERSION}" ]; then
+	echo "Usage: $0 <build-dir> <workspace> <machine> <yocto-version> <agent-version>"
+	exit 1
+fi
 
 cd "$BUILD_DIR/poky/build"
 

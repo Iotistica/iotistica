@@ -1,11 +1,16 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 BUILD_DIR="$1"
 YOCTO_VERSION="$2"
 MACHINE="$3"
 DL_DIR="$4"
 SSTATE_DIR="$5"
+
+if [ -z "${BUILD_DIR}" ] || [ -z "${YOCTO_VERSION}" ] || [ -z "${MACHINE}" ] || [ -z "${DL_DIR}" ] || [ -z "${SSTATE_DIR}" ]; then
+  echo "Usage: $0 <build-dir> <yocto-version> <machine> <dl-dir> <sstate-dir>"
+  exit 1
+fi
 
 cd "$BUILD_DIR/poky"
 
@@ -113,10 +118,6 @@ PARALLEL_MAKE = "-j 4"
 # Read-only root filesystem
 IMAGE_FEATURES:append = " read-only-rootfs"
 
-# Boot partition configuration
-RPI_USE_U_BOOT = "1"
-ENABLE_UART = "1"
-
 # Package management for OTA updates
 PACKAGE_CLASSES = "package_ipk"
 EXTRA_IMAGE_FEATURES:append = " package-management"
@@ -131,6 +132,15 @@ INHERIT += "rm_work"
 # License compliance
 LICENSE_FLAGS_ACCEPTED:append = " commercial"
 EOF
+
+  if [[ "$MACHINE" == *"raspberrypi"* ]]; then
+    cat >> conf/local.conf << EOF
+
+# Boot partition configuration (Raspberry Pi)
+RPI_USE_U_BOOT = "1"
+ENABLE_UART = "1"
+EOF
+  fi
 else
   echo "IotisticOS configuration already in local.conf"
 fi
@@ -158,6 +168,16 @@ sed -i '/^PACKAGE_CLASSES/d' conf/local.conf
 echo "" >> conf/local.conf
 echo "# FORCE IPK package manager with :forcevariable (highest priority)" >> conf/local.conf
 echo "PACKAGE_CLASSES:forcevariable = \"package_ipk\"" >> conf/local.conf
+
+if [[ "$MACHINE" == *"raspberrypi"* ]]; then
+  if ! grep -q '^RPI_USE_U_BOOT' conf/local.conf; then
+    echo 'RPI_USE_U_BOOT = "1"' >> conf/local.conf
+  fi
+  if ! grep -q '^ENABLE_UART' conf/local.conf; then
+    echo 'ENABLE_UART = "1"' >> conf/local.conf
+  fi
+fi
+
 echo "✓ IPK forced with :forcevariable in local.conf"
 
 # Show final setting

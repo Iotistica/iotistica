@@ -1,0 +1,19 @@
+[Unit]
+Description=Iotistica Device Agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=iotistica
+Group=iotistica
+WorkingDirectory=/opt/iotistica/agent
+EnvironmentFile=/etc/iotistica/agent.env
+ExecStart=/usr/bin/node /opt/iotistica/agent/dist/index.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

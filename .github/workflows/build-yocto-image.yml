@@ -3,6 +3,14 @@ name: Build Yocto Linux Image
 on:
   workflow_dispatch:
     inputs:
+      runner:
+        description: 'GitHub-hosted runner label'
+        required: true
+        type: choice
+        options:
+          - ubuntu-24.04
+          - ubuntu-22.04
+        default: ubuntu-24.04
       yocto_version:
         description: 'Yocto release (e.g., kirkstone, scarthgap)'
         required: true
@@ -25,6 +33,11 @@ on:
         required: true
         type: boolean
         default: true
+      clean_build:
+        description: 'Force clean build (slow, use only for troubleshooting)'
+        required: true
+        type: boolean
+        default: false
   schedule:
     # Build weekly on Sunday at 3 AM UTC
     - cron: '0 3 * * 0'
@@ -38,69 +51,102 @@ env:
 jobs:
   build-yocto-image:
     name: Build Yocto Image
-    
-    runs-on: [iotistica-lab-sc-multi-cores]    
+
+    runs-on: ${{ github.event.inputs.runner || 'ubuntu-24.04' }}
     timeout-minutes: 720  # 12 hours for full Yocto build (increased for self-hosted runner)
+
+    concurrency:
+      group: yocto-${{ github.workflow }}-${{ github.ref }}-${{ github.event.inputs.machine || 'raspberrypi4-64' }}-${{ github.event.inputs.yocto_version || 'scarthgap' }}
+      cancel-in-progress: false
+
+    env:
+      RUNNER_LABEL: ${{ github.event.inputs.runner || 'ubuntu-24.04' }}
+      YOCTO_VERSION: ${{ github.event.inputs.yocto_version || 'scarthgap' }}
+      MACHINE: ${{ github.event.inputs.machine || 'raspberrypi4-64' }}
+      INCLUDE_AGENT: ${{ github.event.inputs.include_agent || 'true' }}
+      CLEAN_BUILD: ${{ github.event.inputs.clean_build || 'false' }}
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Free disk space on GitHub-hosted runner
+        run: |
+          echo "=== Disk Space Before Cleanup ==="
+          df -h
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo apt-get clean || true
+          echo "=== Disk Space After Cleanup ==="
+          df -h
+
+      - name: Restore Yocto cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.DL_DIR }}
+            ${{ env.SSTATE_DIR }}
+          key: yocto-${{ runner.os }}-${{ env.YOCTO_VERSION }}-${{ env.MACHINE }}-${{ hashFiles('.github/workflows/scripts/*.sh', '.github/workflows/build-yocto-image.yml') }}
+          restore-keys: |
+            yocto-${{ runner.os }}-${{ env.YOCTO_VERSION }}-${{ env.MACHINE }}-
+            yocto-${{ runner.os }}-${{ env.YOCTO_VERSION }}-
 
       - name: Check disk space
         run: bash .github/workflows/scripts/check-disk-space.sh
 
       - name: Determine agent version
         id: version
-        run: bash .github/workflows/scripts/determine-agent-version.sh "${{ inputs.agent_version }}"
+        run: bash .github/workflows/scripts/determine-agent-version.sh "${{ github.event.inputs.agent_version }}"
 
       - name: Fix Python alternatives if broken
         run: bash .github/workflows/scripts/fix-python-alternatives.sh
 
       - name: Install Yocto dependencies
-        run: bash .github/workflows/scripts/install-yocto-dependencies.sh
+        run: bash .github/workflows/scripts/install-yocto-dependencies.sh "$YOCTO_VERSION"
 
       - name: Setup Yocto build directories
         run: bash .github/workflows/scripts/setup-build-directories.sh "$BUILD_DIR" "$DL_DIR" "$SSTATE_DIR"
 
       - name: Clone Poky (Yocto reference distribution)
-        run: bash .github/workflows/scripts/clone-poky.sh "$BUILD_DIR" "${{ inputs.yocto_version }}"
+        run: bash .github/workflows/scripts/clone-poky.sh "$BUILD_DIR" "$YOCTO_VERSION"
 
       - name: Clone meta-openembedded layer
-        run: bash .github/workflows/scripts/clone-meta-openembedded.sh "$BUILD_DIR" "${{ inputs.yocto_version }}"
+        run: bash .github/workflows/scripts/clone-meta-openembedded.sh "$BUILD_DIR" "$YOCTO_VERSION"
 
       - name: Clone meta-raspberrypi layer
-        if: contains(inputs.machine, 'raspberrypi')
-        run: bash .github/workflows/scripts/clone-meta-raspberrypi.sh "$BUILD_DIR" "${{ inputs.yocto_version }}"
+        if: contains(env.MACHINE, 'raspberrypi')
+        run: bash .github/workflows/scripts/clone-meta-raspberrypi.sh "$BUILD_DIR" "$YOCTO_VERSION"
 
       - name: Clone meta-virtualization layer
-        run: bash .github/workflows/scripts/clone-meta-virtualization.sh "$BUILD_DIR" "${{ inputs.yocto_version }}"
+        run: bash .github/workflows/scripts/clone-meta-virtualization.sh "$BUILD_DIR" "$YOCTO_VERSION"
 
       - name: Create meta-iotistica layer
         run: bash .github/workflows/scripts/create-meta-iotistica.sh "$BUILD_DIR"
 
       - name: Create agent recipe
-        if: inputs.include_agent == true
+        if: env.INCLUDE_AGENT == 'true'
         run: bash .github/workflows/scripts/create-agent-recipe.sh "$BUILD_DIR" "${{ steps.version.outputs.agent_version }}"
 
       - name: Initialize build environment
-        run: bash .github/workflows/scripts/init-build-env.sh "$BUILD_DIR" "${{ inputs.yocto_version }}"
+        run: bash .github/workflows/scripts/init-build-env.sh "$BUILD_DIR" "$YOCTO_VERSION"
 
       - name: Configure build
-        run: bash .github/workflows/scripts/configure-build.sh "$BUILD_DIR" "${{ inputs.yocto_version }}" "$DL_DIR" "$SSTATE_DIR" "${{ inputs.include_agent }}" "${{ steps.version.outputs.agent_version }}"
+        run: bash .github/workflows/scripts/configure-build.sh "$BUILD_DIR" "$YOCTO_VERSION" "$MACHINE" "$DL_DIR" "$SSTATE_DIR"
 
       - name: Build image
-        run: bash .github/workflows/scripts/build-image.sh "$BUILD_DIR" "${{ inputs.yocto_version }}" "$SSTATE_DIR"
+        run: bash .github/workflows/scripts/build-image.sh "$BUILD_DIR" "$YOCTO_VERSION" "$SSTATE_DIR" "$CLEAN_BUILD"
 
       - name: Show build artifacts
-        run: bash .github/workflows/scripts/show-artifacts.sh "$BUILD_DIR" "${{ inputs.machine }}"
+        run: bash .github/workflows/scripts/show-artifacts.sh "$BUILD_DIR" "$MACHINE"
 
       - name: Package artifacts
-        run: bash .github/workflows/scripts/package-artifacts.sh "$BUILD_DIR" "${{ inputs.machine }}" "${{ inputs.yocto_version }}" "${{ steps.version.outputs.agent_version }}" "${{ github.workspace }}"
+        run: bash .github/workflows/scripts/package-artifacts.sh "$BUILD_DIR" "${{ github.workspace }}" "$MACHINE" "$YOCTO_VERSION" "${{ steps.version.outputs.agent_version }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: yocto-image-${{ inputs.machine }}-${{ steps.version.outputs.agent_version }}
+          name: yocto-image-${{ env.MACHINE }}-${{ steps.version.outputs.agent_version }}
           path: yocto-artifacts/
           retention-days: 30
           compression-level: 0  # Already compressed
@@ -127,8 +173,8 @@ jobs:
             echo ""
             echo "### Configuration"
             echo "- **Distribution**: Iotistica OS v1.0.0"
-            echo "- **Yocto Version**: ${{ inputs.yocto_version }}"
-            echo "- **Machine**: ${{ inputs.machine }}"
+            echo "- **Yocto Version**: $YOCTO_VERSION"
+            echo "- **Machine**: $MACHINE"
             echo "- **Agent Version**: ${{ steps.version.outputs.agent_version }}"
             echo ""
             echo "### Architecture Features"
@@ -147,19 +193,19 @@ jobs:
             echo "\`\`\`"
             echo ""
             echo "### Build Status"
-            if [ -f "$BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/iotistica-image-${{ inputs.machine }}.wic.bz2" ]; then
+            if [ -f "$BUILD_DIR/poky/build/tmp/deploy/images/$MACHINE/iotistica-image-$MACHINE.wic.bz2" ]; then
               echo "✅ Build successful"
               echo ""
               echo "### Artifacts"
               echo "\`\`\`"
-              ls -lh $BUILD_DIR/poky/build/tmp/deploy/images/${{ inputs.machine }}/ | grep -E "iotistica-image.*\.(wic|tar)" || echo "No images found"
+              ls -lh $BUILD_DIR/poky/build/tmp/deploy/images/$MACHINE/ | grep -E "iotistica-image.*\.(wic|tar)" || echo "No images found"
               echo "\`\`\`"
               echo ""
               echo "### Flash Instructions"
               echo "\`\`\`bash"
               echo "# Extract and flash to SD card (Linux/macOS)"
-              echo "bunzip2 iotistica-image-${{ inputs.machine }}.wic.bz2"
-              echo "sudo dd if=iotistica-image-${{ inputs.machine }}.wic of=/dev/sdX bs=4M status=progress"
+              echo "bunzip2 iotistica-image-$MACHINE.wic.bz2"
+              echo "sudo dd if=iotistica-image-$MACHINE.wic of=/dev/sdX bs=4M status=progress"
               echo "sync"
               echo ""
               echo "# Or use Etcher for GUI flashing (all platforms)"

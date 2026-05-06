@@ -1,8 +1,14 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 BUILD_DIR="$1"
 YOCTO_VERSION="$2"
+POKY_REMOTE="https://git.yoctoproject.org/poky.git"
+
+if [ -z "${BUILD_DIR}" ] || [ -z "${YOCTO_VERSION}" ]; then
+  echo "Usage: $0 <build-dir> <yocto-version>"
+  exit 1
+fi
 
 if [ -d "$BUILD_DIR/poky" ]; then
   echo "Poky exists, checking version..."
@@ -14,16 +20,17 @@ if [ -d "$BUILD_DIR/poky" ]; then
     echo "Removing old poky and cloning fresh..."
     cd "$BUILD_DIR"
     rm -rf poky
-    git clone -b "$YOCTO_VERSION" git://git.yoctoproject.org/poky.git
+    git clone -b "$YOCTO_VERSION" "$POKY_REMOTE"
   else
     echo "Poky already on correct branch, updating..."
-    git fetch origin
-    git reset --hard "origin/$YOCTO_VERSION"
+    git fetch --tags origin
+    git checkout "$YOCTO_VERSION"
+    git pull --ff-only origin "$YOCTO_VERSION"
   fi
 else
   echo "Cloning Poky ($YOCTO_VERSION)..."
   cd "$BUILD_DIR"
-  git clone -b "$YOCTO_VERSION" git://git.yoctoproject.org/poky.git
+  git clone -b "$YOCTO_VERSION" "$POKY_REMOTE"
 fi
 
 echo "✓ Poky ready (branch: $YOCTO_VERSION)"
