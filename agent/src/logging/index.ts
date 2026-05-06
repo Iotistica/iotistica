@@ -7,7 +7,7 @@
 
 export * from './types';
 export { LocalLogBackend } from './local-backend';
-export { ContainerLogMonitor } from './docker-monitor';
+export { ContainerLogMonitor } from './container-monitor';
 export { AgentLogger } from './agent-logger';
 
 import { AgentLogger } from './agent-logger';

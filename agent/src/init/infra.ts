@@ -166,7 +166,7 @@ export async function initContainerManager(ctx: AgentInitContext): Promise<void>
 
 	const docker = ctx.containerManager.getDocker();
 	if (docker) {
-		ctx.logMonitor = new (await import('../logging/docker-monitor.js')).ContainerLogMonitor(docker, ctx.agentLogger);
+		ctx.logMonitor = new (await import('../logging/container-monitor.js')).ContainerLogMonitor(docker, ctx.agentLogger);
 		ctx.containerManager.setLogMonitor(ctx.logMonitor);
 		await ctx.containerManager.attachLogsToAllContainers();
 	}

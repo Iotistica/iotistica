@@ -10,6 +10,8 @@ import {
   MqttConnection,
 } from './types.js';
 import { PublishManager } from './manager.js';
+import { MessageBufferSync } from '../../mqtt/buffer.js';
+import type { IPublishClient } from '../../mqtt/buffer.js';
 
 /**
  * SensorPublishFeature - Manages multiple sensors and publishes data to MQTT
@@ -29,6 +31,11 @@ export class DevicePublishFeature extends BaseFeature {
   private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
   /** External cloud connection; overrides CloudMqttClient for sensor telemetry routing. */
   private sensorConnection?: MqttConnection;
+  /**
+   * Shared durable replay worker used for external targets (IoT Hub/AWS/GCP).
+   * For default Iotistica flow, CloudMqttClient already owns this service.
+   */
+  private externalBufferSync?: MessageBufferSync;
 
   constructor(
     config: DevicePublishConfig & { enabled: boolean },
@@ -150,6 +157,8 @@ export class DevicePublishFeature extends BaseFeature {
     if (deviceConfig.endpoints.length === 0) {
       return;
     }
+
+    await this.startExternalBufferSyncIfNeeded();
     
     // Create and start all sensors
     for (let i = 0; i < deviceConfig.endpoints.length; i++) {
@@ -170,12 +179,33 @@ export class DevicePublishFeature extends BaseFeature {
    * Stop the Device publish feature
    */
   protected async onStop(): Promise<void> {
+    this.externalBufferSync?.stop();
+    this.externalBufferSync = undefined;
+
     // Stop all sensors
     await Promise.all(this.sensors.map(device => device.stop()));
     
     this.sensors = [];
     
     this.emit('stopped');
+  }
+
+  private async startExternalBufferSyncIfNeeded(): Promise<void> {
+    // Default Iotistica path already starts MessageBufferSync in CloudMqttClient.
+    // Only external targets need feature-level wiring to reuse the same replay logic.
+    if (!this.sensorConnection || this.externalBufferSync) {
+      return;
+    }
+
+    const publishClient = this.sensorConnection as Partial<IPublishClient>;
+    if (typeof publishClient.on !== 'function' || typeof publishClient.off !== 'function') {
+      this.logger.warn('External sensor connection does not support EventEmitter connect hooks; durable replay worker not started');
+      return;
+    }
+
+    this.externalBufferSync = new MessageBufferSync(publishClient as IPublishClient, this.agentLogger);
+    await this.externalBufferSync.start();
+    this.logger.debug('Shared durable replay worker started for external publish target');
   }
 
   /**

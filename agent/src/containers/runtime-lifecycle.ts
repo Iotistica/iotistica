@@ -1,5 +1,5 @@
 import type { AgentLogger } from '../logging/agent-logger';
-import type { ContainerLogMonitor } from '../logging/docker-monitor';
+import type { ContainerLogMonitor } from '../logging/container-monitor';
 import { LogComponents } from '../logging/types';
 import type { ContainerService, DeviceState } from './container-manager';
 

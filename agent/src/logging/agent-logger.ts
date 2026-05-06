@@ -12,7 +12,6 @@
  */
 
 import type { LogBackend, LogLevel } from './types';
-import { LocalLogBackend, LocalLogBackendOptions } from './local-backend';
 
 export interface LogContext {
 	component?: string;

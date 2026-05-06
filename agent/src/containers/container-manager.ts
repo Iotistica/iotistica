@@ -29,7 +29,7 @@ import { HealthCheckManager } from './health-check-manager';
 import { ContainerHealthProbe as HealthProbe } from './types';
 import { cloneDeep, uniq } from '../lib/collection-utils';
 import { StateSnapshotModel } from '../db/models';
-import type { ContainerLogMonitor } from '../logging/docker-monitor';
+import type { ContainerLogMonitor } from '../logging/container-monitor';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import {
