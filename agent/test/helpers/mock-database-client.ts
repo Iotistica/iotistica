@@ -14,11 +14,11 @@ export class MockDatabaseClient implements DatabaseClient {
 	public loadDeviceStub = stub<[], Promise<DeviceRecord | null>>();
 	public saveDeviceStub = stub<[Omit<DeviceRecord, 'createdAt'>], Promise<void>>();
 
-	async loadDevice(): Promise<DeviceRecord | null> {
+	async loadAgent(): Promise<DeviceRecord | null> {
 		return this.loadDeviceStub();
 	}
 
-	async saveDevice(data: Omit<DeviceRecord, 'createdAt'>): Promise<void> {
+	async saveAgent(data: Omit<DeviceRecord, 'createdAt'>): Promise<void> {
 		return this.saveDeviceStub(data);
 	}
 

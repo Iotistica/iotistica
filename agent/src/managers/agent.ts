@@ -1,11 +1,11 @@
 /**
- * Device provisioning manager for standalone container-manager
+ * Agent provisioning manager for standalone container-manager
  * Implements two-phase authentication inspired by Balena Supervisor
  * 
  * Flow:
- * 1. Generate UUID and deviceApiKey locally
- * 2. Use provisioningApiKey (fleet-level) to register device
- * 3. Exchange provisioningApiKey for deviceApiKey authentication
+ * 1. Generate UUID and apiKey locally
+ * 2. Use provisioningApiKey (fleet-level) to register agent
+ * 3. Exchange provisioningApiKey for apiKey authentication
  * 4. Remove provisioningApiKey (one-time use)
  * 5. Setup VPN tunnel if provided in provisioning response
  * 
@@ -179,7 +179,7 @@ export class AgentManager {
 	}
 
 	/**
-	 * Initialize device manager and load device info from database
+	 * Initialize agent manager and load agent info from database
 	 */
 	async initialize(): Promise<void> {
 		// Initialize encryption for secure credential storage in persisted location
@@ -196,7 +196,7 @@ export class AgentManager {
 		await this.loadAgentInfo();
 
 		if (!this.agentInfo) {
-			// Create new device with generated UUID and deviceApiKey
+			// Create new agent with generated UUID and apiKey
 			const newApiKey = generateAPIKey('v2'); // Generate v2 versioned key
 			const keyMetadata = parseAPIKey(newApiKey);
 			
@@ -208,7 +208,7 @@ export class AgentManager {
 				agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
 			};
 			await this.saveAgentInfo();
-			this.logger?.infoSync('New device created with versioned API key', {
+			this.logger?.infoSync('New agent created with versioned API key', {
 				component: LogComponents.agentManager,
 				operation: 'initialize',
 				uuid: this.agentInfo.uuid,
@@ -231,18 +231,18 @@ export class AgentManager {
 				});
 			}
 			
-			// Log device info with key metadata (safe fingerprint, no secrets)
+			// Log agent info with key metadata (safe fingerprint, no secrets)
 			const keyMetadata = this.agentInfo.apiKey 
 				? parseAPIKey(this.agentInfo.apiKey) 
 				: null;
 			
-			this.logger?.infoSync('Device loaded', {
+			this.logger?.infoSync('agent loaded', {
 				component: LogComponents.agentManager,
 				operation: 'initialize',
 				uuid: this.agentInfo.uuid,
 				provisioned: this.agentInfo.provisioned,
 				provisioningState: this.agentInfo.provisioningState || 'unknown',
-				hasDeviceApiKey: !!this.agentInfo.apiKey,
+				hasAgentApiKey: !!this.agentInfo.apiKey,
 				keyVersion: keyMetadata?.version,
 				keyFingerprint: this.agentInfo.apiKey 
 					? getAPIKeyFingerprint(this.agentInfo.apiKey) 
@@ -254,15 +254,15 @@ export class AgentManager {
 	}
 
 	/**
-	 * Load device info from database
+	 * Load agent info from database
 	 */
 	private async loadAgentInfo(): Promise<void> {
-		const record = await this.dbClient.loadDevice();
+		const record = await this.dbClient.loadAgent();
 		if (record) {
 			// Debug: log record before parsing
 			this.logger?.debugSync('Record loaded from database', {
 				component: LogComponents.agentManager,
-				operation: 'loadDeviceInfo',
+				operation: 'loadAgentInfo',
 				hasRecord: !!record,
 				hasApiTlsConfig: !!record.apiTlsConfig,
 				apiTlsConfigType: typeof record.apiTlsConfig,
@@ -273,7 +273,7 @@ export class AgentManager {
 				uuid: record.uuid,
 				name: record.name || undefined,
 				type: record.type || undefined,
-				apiKey: record.apiKey || record.deviceApiKey || undefined,
+				apiKey: record.apiKey || record.agentApiKey || undefined,
 				provisioningApiKey: record.provisioningApiKey || undefined,
 				apiEndpoint: record.apiEndpoint || undefined,
 				registeredAt: record.registeredAt || undefined,
@@ -292,18 +292,18 @@ export class AgentManager {
 	}
 }
 	/**
-	 * Save device info to database
+	 * Save agent info to database
 	 */
 	private async saveAgentInfo(): Promise<void> {
 		if (!this.agentInfo) {
-			throw new Error('No device info to save');
+			throw new Error('No agent info to save');
 		}
 
 		const data = {
 			uuid: this.agentInfo.uuid,
 			name: this.agentInfo.name || null,
 			type: this.agentInfo.type || null,
-			deviceApiKey: this.agentInfo.apiKey || null,
+			agentApiKey: this.agentInfo.apiKey || null,
 			provisioningApiKey: this.agentInfo.provisioningApiKey || null,
 			apiKey: this.agentInfo.apiKey || null,
 			apiEndpoint: this.agentInfo.apiEndpoint || null,
@@ -320,15 +320,15 @@ export class AgentManager {
 			updatedAt: new Date().toISOString(),
 		};
 		
-		await this.dbClient.saveDevice(data);
+		await this.dbClient.saveAgent(data);
 	}
 
 	/**
-	 * Persist tenantId for already provisioned devices (migration/repair path)
+	 * Persist tenantId for already provisioned agents (migration/repair path)
 	 */
 	async setTenantId(tenantId: string): Promise<void> {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 
 		this.agentInfo.tenantId = tenantId;
@@ -336,18 +336,18 @@ export class AgentManager {
 	}
 
 	/**
-	 * Get current device info
+	 * Get current agent info
 	 */
 	getAgentInfo(): AgentInfo {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 		
 		return { ...this.agentInfo };
 	}
 
 	/**
-	 * Check if device is provisioned
+	 * Check if agent is provisioned
 	 */
 	isProvisioned(): boolean {
 		return this.agentInfo?.provisioned === true;
@@ -363,8 +363,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * Create headers for Phase 1 device registration (provisioning key).
-	 * Uses x-provisioning-key to distinguish from JWT and device-key traffic.
+	 * Create headers for Phase 1 agent registration (provisioning key).
+	 * Uses x-provisioning-key to distinguish from JWT and agent-key traffic.
 	 */
 	private createProvisioningHeaders(provisioningKey: string): Record<string, string> {
 		return {
@@ -373,21 +373,21 @@ export class AgentManager {
 	}
 
 	/**
-	 * Create headers for Phase 2 key exchange (device API key).
+	 * Create headers for Phase 2 key exchange (agent API key).
 	 * Uses x-device-key to distinguish from JWT and provisioning-key traffic.
 	 */
-	private createDeviceKeyHeaders(deviceKey: string): Record<string, string> {
+	private createAgentKeyHeaders(agentKey: string): Record<string, string> {
 		return {
-			'x-device-key': deviceKey,
+			'x-device-key': agentKey,
 		};
 	}
 
 	/**
-	 * Mark device as running in local mode (no cloud provisioning needed)
+	 * Mark agent as running in local mode (no cloud provisioning needed)
 	 */
 	async markAsLocalMode(): Promise<void> {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 
 		this.agentInfo.provisioned = false; // Explicitly mark as NOT cloud-provisioned
@@ -398,30 +398,30 @@ export class AgentManager {
 		
 		await this.saveAgentInfo();
 
-		this.logger?.infoSync('Device configured for local mode', {
+		this.logger?.infoSync('Agent configured for local mode', {
 			component: LogComponents.agentManager,
 			operation: 'markAsLocalMode',
 			uuid: this.agentInfo.uuid,
-			deviceName: this.agentInfo.name,
+			agentName: this.agentInfo.name,
 			agentVersion: this.agentInfo.agentVersion,
 		});
 	}
 
 	/**
-	 * Provision device using two-phase authentication
-	 * Phase 1: Register device using provisioningApiKey
+	 * Provision agent using two-phase authentication
+	 * Phase 1: Register agent using provisioningApiKey
 	 * Phase 2: Exchange keys and remove provisioning key
 	 */
 	async provision(config: ProvisioningConfig): Promise<AgentInfo> {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 
 		if (!config.provisioningApiKey) {
-			throw new Error('provisioningApiKey is required for device provisioning');
+			throw new Error('provisioningApiKey is required for agent provisioning');
 		}
 
-		// Ensure device API key exists (generate v2 if missing)
+		// Ensure API key exists (generate v2 if missing)
 		if (!this.agentInfo.apiKey) {
 			this.agentInfo.apiKey = generateAPIKey('v2');
 			const keyMetadata = parseAPIKey(this.agentInfo.apiKey);
@@ -434,7 +434,7 @@ export class AgentManager {
 			});
 		}
 
-			// Update device metadata
+			// Update agent metadata
 		this.agentInfo.name = config.name || this.agentInfo.name || `agent-${this.agentInfo.uuid.slice(0, 8)}`;
 		this.agentInfo.type = config.type || this.agentInfo.type || 'generic';
 		this.agentInfo.apiEndpoint = config.apiEndpoint || this.agentInfo.apiEndpoint;
@@ -444,14 +444,14 @@ export class AgentManager {
 		this.agentInfo.osVersion = config.osVersion;
 		this.agentInfo.agentVersion = config.agentVersion;
 
-		// UUID is immutable after cloud registration (prevents device identity hijacking)
-		// Only allow UUID override for new/unprovisioned devices
+		// UUID is immutable after cloud registration (prevents agent identity hijacking)
+		// Only allow UUID override for new/unprovisioned agents
 		if (config.uuid && config.uuid !== this.agentInfo.uuid) {
 			const currentState = this.agentInfo.provisioningState || 'new';
 			const isRegistered = currentState !== 'new' && currentState !== 'registering';
 			
 			if (isRegistered) {
-				// Device already registered with cloud - UUID cannot be changed
+				// Agent already registered with cloud - UUID cannot be changed
 				this.logger?.errorSync(
 					'Attempt to change UUID after cloud registration (rejected)',
 					new Error('UUID is immutable after provisioning'),
@@ -470,8 +470,8 @@ export class AgentManager {
 					`Use factory reset to re-provision with a new UUID.`
 				);
 			} else {
-				// Device not yet registered - UUID change allowed
-				this.logger?.warnSync('Changing device UUID before registration', {
+				// Agent not yet registered - UUID change allowed
+				this.logger?.warnSync('Changing agent UUID before registration', {
 					component: LogComponents.agentManager,
 					operation: 'provision',
 					oldUuid: this.agentInfo.uuid,
@@ -495,11 +495,11 @@ export class AgentManager {
 				});
 			}
 			
-			// Phase 1: Register device with cloud API (idempotent)
+			// Phase 1: Register agent with cloud API (idempotent)
 			let response: ProvisionResponse | undefined;
 			
 			if (currentState === 'new' || currentState === 'registering') {
-				this.logger?.infoSync('Phase 1: Registering device with provisioning key', {
+				this.logger?.infoSync('Phase 1: Registering agent with provisioning key', {
 					component: LogComponents.agentManager,
 					operation: 'provision',
 					state: 'registering',
@@ -512,9 +512,9 @@ export class AgentManager {
 				// Capture values for closure (TypeScript can't track through await/closures)
 				const apiEndpoint = this.agentInfo.apiEndpoint || 'http://localhost:3002';
 				const uuid = this.agentInfo.uuid;
-				const deviceName = this.agentInfo.name!; // Guaranteed by line 401
-				const deviceType = this.agentInfo.type!; // Guaranteed by line 402
-				const deviceApiKey = this.agentInfo.apiKey!; // Guaranteed by line 387-396
+				const agentName = this.agentInfo.name!; // Guaranteed by line 401
+				const agentType = this.agentInfo.type!; // Guaranteed by line 402
+				const agentApiKey = this.agentInfo.apiKey!; // Guaranteed by line 387-396
 				const applicationId = this.agentInfo.applicationId;
 				const macAddress = this.agentInfo.macAddress;
 				const osVersion = this.agentInfo.osVersion;
@@ -522,9 +522,9 @@ export class AgentManager {
 				const provisioningApiKey = this.agentInfo.provisioningApiKey!; // Guaranteed by line 381
 				
 				// Get public key for PoP if crypto initialized
-				const devicePublicKey = this.popCrypto?.getPublicKey();
+				const agentPublicKey = this.popCrypto?.getPublicKey();
 				
-				if (devicePublicKey) {
+				if (agentPublicKey) {
 					this.logger?.infoSync('Registering with PoP public key', {
 						component: LogComponents.agentManager,
 						operation: 'provision',
@@ -544,10 +544,10 @@ export class AgentManager {
 						apiEndpoint,
 						{
 							uuid,
-							name: deviceName,
-							type: deviceType,
-							deviceApiKey,
-							devicePublicKey,
+							name: agentName,
+							type: agentType,
+							agentApiKey: agentApiKey,
+							agentPublicKey: agentPublicKey,
 							applicationId,
 							macAddress,
 							osVersion,
@@ -555,7 +555,7 @@ export class AgentManager {
 						},
 						provisioningApiKey
 					),
-					'Device Registration'
+					'Agent Registration'
 				);
 
 				// Save server-assigned tenant ID and credentials
@@ -569,7 +569,7 @@ export class AgentManager {
 					setTenantId(response.tenantId);
 				}
 				
-				// Update device name/type from server response (critical for virtual agents)
+				// Update agent name/type from server response (critical for virtual agents)
 				// Virtual agents have pre-assigned names in the database that must be preserved
 				if (response.name) {
 					this.agentInfo.name = response.name;
@@ -594,14 +594,14 @@ export class AgentManager {
 					port: response.mqtt?.brokerConfig?.port
 				});
 				
-				this.logger?.infoSync('Phase 1 complete: Device registered', {
+				this.logger?.infoSync('Phase 1 complete: Agent registered', {
 					component: LogComponents.agentManager,
 					operation: 'provision',
 					state: 'registered',
 					uuid: this.agentInfo.uuid,
 				});
 			} else {
-				// Resume from registered state - device already exists in cloud
+				// Resume from registered state - agent already exists in cloud
 				this.logger?.infoSync('Phase 1: Skipping registration (already registered)', {
 					component: LogComponents.agentManager,
 					operation: 'provision',
@@ -610,7 +610,7 @@ export class AgentManager {
 				});
 			}
 
-			// Phase 2: Exchange keys - verify device can authenticate with deviceApiKey
+			// Phase 2: Exchange keys - verify agent can authenticate with apiKey
 			if (currentState !== 'provisioned') {
 				this.logger?.infoSync('Phase 2: Exchanging keys', {
 					component: LogComponents.agentManager,
@@ -664,7 +664,7 @@ export class AgentManager {
 			// Save to database
 			await this.saveAgentInfo();
 
-			this.logger?.infoSync('Device provisioned successfully', {
+			this.logger?.infoSync('Agent provisioned successfully', {
 				component: LogComponents.agentManager,
 				operation: 'provision',
 				state: 'provisioned',
@@ -722,8 +722,8 @@ export class AgentManager {
 					tailnetName: vpnConfig.tailscale.tailnetName,
 				});
 			} catch (vpnError) {
-				// VPN setup failure is non-critical - device can still operate
-				this.logger?.warnSync('Tailscale VPN setup failed (device will continue without VPN)', {
+				// VPN setup failure is non-critical - agent can still operate
+				this.logger?.warnSync('Tailscale VPN setup failed (agent will continue without VPN)', {
 					component: LogComponents.agentManager,
 					operation: 'provision',
 					error: vpnError instanceof Error ? vpnError.message : String(vpnError),
@@ -761,7 +761,7 @@ export class AgentManager {
 	}
 
 	/**
-	 * Register device with cloud API using provisioning key
+	 * Register agent with cloud API using provisioning key
 	 * POST /api/v1/device/register
 	 */
 	private async registerWithAPI(
@@ -770,22 +770,22 @@ export class AgentManager {
 		provisioningApiKey: string
 	): Promise<ProvisionResponse> {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 
 		const url = buildApiEndpoint(apiEndpoint, '/device/register');
 		
-		// Generate idempotency key based on device UUID
+		// Generate idempotency key based on agent UUID
 		// Same UUID = same idempotency key = safe retries
 		const idempotencyKey = `register-${this.agentInfo.uuid}`;
 		
-		this.logger?.infoSync('Registering device with API', {
+		this.logger?.infoSync('Registering agent with API', {
 			component: LogComponents.agentManager,
 			operation: 'registerWithAPI',
 			url,
 			uuid: provisionRequest.uuid,
-			deviceName: provisionRequest.name,
-			deviceType: provisionRequest.type,
+			agentName: provisionRequest.name,
+			agentType: provisionRequest.type,
 			idempotencyKey,
 		});
 
@@ -814,39 +814,39 @@ export class AgentManager {
 					operation: 'registerWithAPI',
 				}
 			);
-			throw new Error(`Failed to register device: ${error.message}`);
+			throw new Error(`Failed to register agent: ${error.message}`);
 		}
 	}
 
 	/**
-	 * Exchange keys - verify device can authenticate with deviceApiKey
+	 * Exchange keys - verify agent can authenticate with apiKey
 	 * POST /api/${API_VERSION}/device/:uuid/key-exchange
 	 * 
 	 * Security: Uses asymmetric proof-of-possession (Ed25519 challenge-response).
-	 * - Device signs challenge with Ed25519 private key (never transmitted)
+	 * - Agent signs challenge with Ed25519 private key (never transmitted)
 	 * - Server verifies signature with public key (registered during provisioning)
-	 * - UUID bound into signature payload to prevent cross-device replay
+	 * - UUID bound into signature payload to prevent cross-agent replay
 	 * 
 	 * This prevents:
 	 * - Replay attacks (challenge is single-use, UUID-bound)
-	 * - Key interception (private key never leaves device)
+	 * - Key interception (private key never leaves agent)
 	 * - Cross-device replay (UUID bound into signed payload)
 	 * - Circular authentication (proof != credential)
 	 * 
 	 * Requirements:
 	 * - Server must provide challenge
-	 * - Device must have PoP crypto initialized (Ed25519 key pair)
+	 * - Agent must have PoP crypto initialized (Ed25519 key pair)
 	 * - No fallback to symmetric crypto (bcrypt deprecated)
 	 */
 	async exchangeKeys(
 		apiEndpoint: string,
 		uuid: string,
-		deviceApiKey: string,
+		agentApiKey: string,
 		challenge?: string  // Server-provided nonce from registration response
 	): Promise<void> {
 		const url = buildApiEndpoint(apiEndpoint, `/device/${uuid}/key-exchange`);
 		
-		// Generate idempotency key based on device UUID and operation
+		// Generate idempotency key based on agent UUID and operation
 		const idempotencyKey = `key-exchange-${uuid}`;
 		
 		// PoP is mandatory - fail if requirements not met
@@ -858,7 +858,7 @@ export class AgentManager {
 			throw new Error('PoP crypto not initialized - cannot authenticate');
 		}
 		
-		this.logger?.infoSync('Exchanging keys for device', {
+		this.logger?.infoSync('Exchanging keys for agent', {
 			component: LogComponents.agentManager,
 			operation: 'exchangeKeys',
 			uuid,
@@ -869,7 +869,7 @@ export class AgentManager {
 
 		try {
 			// SECURE: Proof-of-possession with Ed25519 signature (mandatory)
-			// Binds device UUID to challenge to prevent cross-device replay
+			// Binds agent UUID to challenge to prevent cross-agent replay
 			const signature = this.popCrypto.signChallenge(challenge, uuid);
 			
 			const requestBody: KeyExchangeRequest = {
@@ -877,7 +877,7 @@ export class AgentManager {
 				signature,
 			};
 			
-			const headers = this.createDeviceKeyHeaders(deviceApiKey);
+			const headers = this.createAgentKeyHeaders(agentApiKey);
 			headers['X-Idempotency-Key'] = idempotencyKey;
 			
 			this.logger?.infoSync('Using Ed25519 PoP signature', {
@@ -914,10 +914,10 @@ export class AgentManager {
 	}
 
 	/**
-	 * Check if device already exists and try key exchange
+	 * Check if agent already exists and try key exchange
 	 * GET /api/${API_VERSION}/device/:uuid
 	 */
-	async fetchDevice(apiEndpoint: string, uuid: string, apiKey: string): Promise<any> {
+	async fetchAgent(apiEndpoint: string, uuid: string, apiKey: string): Promise<any> {
 		const url = buildApiEndpoint(apiEndpoint, `/devices/${uuid}`);
 		
 		try {
@@ -927,7 +927,7 @@ export class AgentManager {
 
 			if (!response.ok) {
 				if (response.status === 404) {
-					return null; // Device not found
+					return null; // Agent not found
 				}
 				const errorText = await response.json().catch(() => ({ message: response.statusText }));
 				throw new Error(`API returned ${response.status}: ${JSON.stringify(errorText)}`);
@@ -936,11 +936,11 @@ export class AgentManager {
 			return await response.json();
 		} catch (error: any) {
 			this.logger?.errorSync(
-				'Failed to fetch device',
+				'Failed to fetch agent 	info from API',
 				error instanceof Error ? error : new Error(String(error)),
 				{
 					component: LogComponents.agentManager,
-					operation: 'fetchDevice',
+					operation: 'fetchAgent',
 				}
 			);
 			return null;
@@ -948,11 +948,11 @@ export class AgentManager {
 	}
 
 	/**
-	 * Update device name
+	 * Update agent name
 	 */
 	async updateAgentName(name: string): Promise<void> {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 
 		this.agentInfo.name = name;
@@ -964,7 +964,7 @@ export class AgentManager {
 	 */
 	async updateAPIEndpoint(endpoint: string): Promise<void> {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 
 		this.agentInfo.apiEndpoint = endpoint;
@@ -976,7 +976,7 @@ export class AgentManager {
 	 */
 	async updateAgentVersion(version: string): Promise<void> {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 
 		this.agentInfo.agentVersion = version;
@@ -984,13 +984,13 @@ export class AgentManager {
 	}
 
 	/**
-	 * Reset device (unprovision)
+	 * Reset agent (unprovision)
 	 * Useful for testing or re-provisioning
-	 * Keeps UUID and deviceApiKey, clears server registration and MQTT credentials
+	 * Keeps UUID and apiKey, clears server registration and MQTT credentials
 	 */
 	async reset(): Promise<void> {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 
 		// Clear server-assigned values
@@ -1008,21 +1008,21 @@ export class AgentManager {
 
 		await this.saveAgentInfo();
 
-		this.logger?.infoSync('Device reset (unprovisioned)', {
+		this.logger?.infoSync('Agent reset (unprovisioned)', {
 			component: LogComponents.agentManager,
 			operation: 'reset',
-			note: 'UUID and deviceApiKey preserved for re-registration. MQTT credentials cleared.',
+			note: 'UUID and agentApiKey preserved for re-registration. MQTT credentials cleared.',
 		});
 	}
 	
 	/**
-	 * Factory reset - complete cleanup of all device data
+	 * Factory reset - complete cleanup of all agent data
 	 * WARNING: This will delete all apps, services, state snapshots, and sensor data
 	 * Only UUID will be preserved for hardware identification
 	 */
 	async factoryReset(): Promise<void> {
 		if (!this.agentInfo) {
-			throw new Error('Device manager not initialized');
+			throw new Error('Agent manager not initialized');
 		}
 
 		this.logger?.warnSync('Performing factory reset - all data will be deleted', {
@@ -1030,8 +1030,8 @@ export class AgentManager {
 			operation: 'factoryReset',
 		});
 
-		// First, deprovision from cloud if device is provisioned
-		// This notifies the cloud API so the device can be re-provisioned later
+		// First, deprovision from cloud if agent is provisioned
+		// This notifies the cloud API so the agent can be re-provisioned later
 		if (this.agentInfo.provisioned && this.agentInfo.apiEndpoint) {
 			try {
 				this.logger?.infoSync('Deprovisioning from cloud before factory reset', {
@@ -1050,7 +1050,7 @@ export class AgentManager {
 						component: LogComponents.agentManager,
 						operation: 'factoryReset',
 						status: response.status,
-						note: 'Device will be reset locally. Cloud may still think device is provisioned.',
+						note: 'Agent will be reset locally. Cloud may still think agent is provisioned.',
 					});
 				} else {
 					this.logger?.infoSync('Cloud deprovision successful', {
@@ -1063,7 +1063,7 @@ export class AgentManager {
 					component: LogComponents.agentManager,
 					operation: 'factoryReset',
 					error: error.message,
-					note: 'Device will be reset locally. Cloud may still think device is provisioned.',
+					note: 'Agent will be reset locally. Cloud may still think agent is provisioned.',
 				});
 			}
 		}
@@ -1076,12 +1076,12 @@ export class AgentManager {
 		const { factoryReset: dbFactoryReset } = await import('../db/connection.js');
 		await dbFactoryReset(this.logger);
 		
-		// Reset device info but preserve UUID for hardware identification
+		// Reset agent info but preserve UUID for hardware identification
 		const preservedUuid = this.agentInfo.uuid;
 		
 		this.agentInfo.name = undefined;
 		this.agentInfo.type = undefined;
-		this.agentInfo.apiKey = undefined; // Also clear device key for full reset
+		this.agentInfo.apiKey = undefined; // Also clear API key for full reset
 		this.agentInfo.provisioningApiKey = undefined;
 		this.agentInfo.apiKey = undefined;
 		this.agentInfo.apiEndpoint = undefined;
@@ -1097,11 +1097,11 @@ export class AgentManager {
 
 		await this.saveAgentInfo();
 
-		this.logger?.warnSync('Factory reset complete - device returned to initial state', {
+		this.logger?.warnSync('Factory reset complete - agent returned to initial state', {
 			component: LogComponents.agentManager,
 			operation: 'factoryReset',
 			uuid: preservedUuid,
-			note: 'Only UUID preserved. All apps, services, and data deleted. Device can be re-provisioned.',
+			note: 'Only UUID preserved. All apps, services, and data deleted. Agent can be re-provisioned.',
 		});
 	}
 }

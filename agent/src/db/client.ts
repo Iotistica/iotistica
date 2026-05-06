@@ -14,23 +14,23 @@ export interface DatabaseClient {
   /**
    * Load device record from database
    */
-  loadDevice(): Promise<DeviceRecord | null>;
+  loadAgent(): Promise<DeviceRecord | null>;
   
   /**
    * Save device record to database (insert or update)
    */
-  saveDevice(data: Omit<DeviceRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<void>;
+  saveAgent(data: Omit<DeviceRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<void>;
 }
 
 /**
  * Default implementation using DeviceModel
  */
 export class SqliteDatabaseClient implements DatabaseClient {
-  async loadDevice(): Promise<DeviceRecord | null> {
+  async loadAgent(): Promise<DeviceRecord | null> {
     return await DeviceModel.get();
   }
   
-  async saveDevice(data: Omit<DeviceRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<void> {
+  async saveAgent(data: Omit<DeviceRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<void> {
     await DeviceModel.save(data);
   }
 }

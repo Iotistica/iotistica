@@ -24,7 +24,7 @@ export class CloudTransport {
 		private readonly logger: AgentLogger | undefined,
 		private readonly getApiTimeout: () => number,
 	) {
-		this.reportQueue = new OfflineQueue<AgentStateReport>('state-reports', 1000);
+		this.reportQueue = new OfflineQueue<AgentStateReport>('state-reports', 1000, 2 * 60 * 60 * 1000);
 	}
 
 	async initQueue(): Promise<void> {
@@ -117,6 +117,21 @@ export class CloudTransport {
 	 */
 	async flushOfflineQueue(): Promise<void> {
 		if (this.isFlushing) return;
+		if (this.reportQueue.isEmpty()) return;
+
+		// Prune stale reports before attempting to send.
+		// Mirrors EdgeHub CleanupProcessor: expired items are discarded rather than
+		// replayed. Reports older than the TTL (2h) are stale — the agent's current
+		// state will be captured in the first fresh report after reconnect.
+		const pruned = this.reportQueue.pruneExpired();
+		if (pruned > 0) {
+			this.logger?.warnSync('Discarded expired reports before flush', {
+				component: LogComponents.cloudSync,
+				operation: 'flush-queue-prune',
+				pruned,
+			});
+		}
+
 		if (this.reportQueue.isEmpty()) return;
 
 		this.isFlushing = true;

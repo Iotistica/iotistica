@@ -612,7 +612,7 @@ export class ConfigManager extends EventEmitter {
   /**
    * Get device API port
    */
-  public getDeviceApiPort(): number {
+  public getAgentApiPort(): number {
     const env = process.env.DEVICE_API_PORT;
     const port = env ? parseInt(env, 10) : 48484;
     return isNaN(port) ? 48484 : port;
@@ -953,8 +953,8 @@ export class ConfigManager extends EventEmitter {
           this.logger?.infoSync("Found existing device in DB", {
             component: LogComponents.configManager,
             operation: "syncEndpointsToDatabase",
-            deviceUuid: existing.uuid,
-            deviceName: existing.name,
+            agentUuid: existing.uuid,
+            agentName: existing.name,
             existingDataPointsCount: existing.data_points?.length || 0,
           });
 
@@ -978,8 +978,8 @@ export class ConfigManager extends EventEmitter {
           );
           this.logger?.infoSync("Updated endpoint in database", {
             component: LogComponents.configManager,
-            deviceUuid: normalizedDevice.uuid,
-            deviceName: normalizedDevice.name,
+            agentUuid: normalizedDevice.uuid,
+            agentName: normalizedDevice.name,
             protocol: normalizedDevice.protocol,
             dataPointsCount: normalizedDevice.data_points?.length || 0,
           });
@@ -987,8 +987,8 @@ export class ConfigManager extends EventEmitter {
           this.logger?.infoSync("Device NOT found in DB (will CREATE)", {
             component: LogComponents.configManager,
             operation: "syncEndpointsToDatabase",
-            deviceUuid: normalizedDevice.uuid,
-            deviceName: normalizedDevice.name,
+            agentUuid: normalizedDevice.uuid,
+            agentName: normalizedDevice.name,
             targetDataPointsCount: normalizedDevice.data_points?.length || 0,
           });
 
@@ -1017,8 +1017,8 @@ export class ConfigManager extends EventEmitter {
                 "✅ USING cached discovered data_points (CREATE path)",
                 {
                   component: LogComponents.configManager,
-                  deviceUuid: normalizedDevice.uuid,
-                  deviceName: normalizedDevice.name,
+                  agentUuid: normalizedDevice.uuid,
+                  agentName: normalizedDevice.name,
                   endpointUrl,
                   cachedDataPointsCount: discoveredDevice.dataPoints.length,
                   reason: "Found in discovery cache - using cached nodes",
@@ -1030,8 +1030,8 @@ export class ConfigManager extends EventEmitter {
             } else {
               this.logger?.debugSync("⚠️ Discovery cache MISS for new device", {
                 component: LogComponents.configManager,
-                deviceUuid: normalizedDevice.uuid,
-                deviceName: normalizedDevice.name,
+                agentUuid: normalizedDevice.uuid,
+                agentName: normalizedDevice.name,
                 endpointUrl,
                 cacheHit: !!discoveredDevice,
                 hasDataPoints: discoveredDevice?.dataPoints?.length || 0,
@@ -1049,8 +1049,8 @@ export class ConfigManager extends EventEmitter {
 
             logFn?.("⚠️ Cannot check discovery cache", {
               component: LogComponents.configManager,
-              deviceUuid: normalizedDevice.uuid,
-              deviceName: normalizedDevice.name,
+              agentUuid: normalizedDevice.uuid,
+              agentName: normalizedDevice.name,
               protocol,
               hasEndpointUrl: !!endpointUrl,
               hasDiscoveryService: !!this.discoveryService,
@@ -1069,8 +1069,8 @@ export class ConfigManager extends EventEmitter {
           } catch (verifyError) {
             this.logger?.warnSync("Failed to verify inserted endpoint", {
               component: LogComponents.configManager,
-              deviceName: normalizedDevice.name,
-              deviceUuid: normalizedDevice.uuid,
+              agentName: normalizedDevice.name,
+              agentUuid: normalizedDevice.uuid,
               error:
                 verifyError instanceof Error
                   ? verifyError.message
@@ -1080,8 +1080,8 @@ export class ConfigManager extends EventEmitter {
 
           this.logger?.infoSync("Added endpoint to database", {
             component: LogComponents.configManager,
-            deviceUuid: normalizedDevice.uuid,
-            deviceName: normalizedDevice.name,
+            agentUuid: normalizedDevice.uuid,
+            agentName: normalizedDevice.name,
             protocol: normalizedDevice.protocol,
             dataPointsCount: normalizedDevice.data_points?.length || 0,
             dbDataPointsCount: verifyInsert?.data_points?.length || 0,
@@ -1177,25 +1177,25 @@ export class ConfigManager extends EventEmitter {
 
     // CRITICAL: Filter out discovery targets (devices with slaveRange)
     // Discovery targets should never be in reconciliation steps - they're config-only
-    const filteredTargetDevices = allTargetDevices.filter((device: any) => {
+    const filteredTargetDevices = allTargetDevices.filter((agent: any) => {
       // Parse connection (same logic as syncEndpointsToDatabase and getDiscoveryTargets)
-      let connection: any = device.connection;
-      if (!connection && device.connectionString) {
+      let connection: any = agent.connection;
+      if (!connection && agent.connectionString) {
         try {
-          connection = JSON.parse(device.connectionString);
+          connection = JSON.parse(agent.connectionString);
         } catch {
           connection = null;
         }
       }
 
       // Skip Modbus discovery targets (have slaveRange)
-      if (device.protocol === "modbus" && connection?.slaveRange) {
+      if (agent.protocol === "modbus" && connection?.slaveRange) {
         this.logger?.infoSync(
           "Filtered out discovery target from reconciliation steps",
           {
             component: LogComponents.configManager,
             operation: "calculateSteps",
-            deviceName: device.name,
+            agentName: agent.name,
             slaveRange: connection.slaveRange,
             reason: "Discovery targets are config-only, not reconciled",
           },
@@ -1208,24 +1208,24 @@ export class ConfigManager extends EventEmitter {
 
     // Canonicalize target IDs: cloud may send uuid without id.
     const targetDevices = filteredTargetDevices
-      .map((device: any) => {
-        const canonicalId = device.uuid;
+      .map((agent: any) => {
+        const canonicalId = agent.uuid;
         if (!canonicalId) {
           this.logger?.warnSync("Skipping target endpoint without uuid", {
             component: LogComponents.configManager,
             operation: "calculateSteps",
-            deviceName: device.name,
-            protocol: device.protocol,
+            deviceName: agent.name,
+            protocol: agent.protocol,
           });
           return null;
         }
 
         return {
-          ...device,
+          ...agent,
           id: canonicalId,
         };
       })
-      .filter((device: any) => device !== null);
+      .filter((agent: any) => agent !== null);
 
     this.logger?.debugSync("Calculating reconciliation steps", {
       component: LogComponents.configManager,

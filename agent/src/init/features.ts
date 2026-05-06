@@ -632,7 +632,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
     configFeatures: ctx.configManager!.getFeatures(),
 		configProtocols: targetState?.config?.protocols || {},
     cloudApiEndpoint: ctx.configManager!.getCloudApiEndpoint(),
-    deviceApiPort: ctx.configManager!.getDeviceApiPort(),
+    deviceApiPort: ctx.configManager!.getAgentApiPort(),
     anomalyService: ctx.anomalyService,
     dictionaryManager: ctx.dictionaryManager,
     pipelineService: ctx.pipelineService,

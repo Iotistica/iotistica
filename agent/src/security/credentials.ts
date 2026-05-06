@@ -497,7 +497,7 @@ export class CredentialManager extends EventEmitter {
 	 */
 	private async persistToDatabase(newKey: string, reason?: RotationReason): Promise<void> {
 		// Load current device record
-		const device = await this.dbClient.loadDevice();
+		const device = await this.dbClient.loadAgent();
 
 		if (!device) {
 			throw new Error('Device record not found in database');
@@ -506,9 +506,9 @@ export class CredentialManager extends EventEmitter {
 		// Update deviceApiKey field (and legacy apiKey for backward compatibility)
 		// Also persist rotation metadata for audit trail
 		const now = Date.now();
-		await this.dbClient.saveDevice({
+		await this.dbClient.saveAgent({
 			...device,
-			deviceApiKey: newKey,
+			agentApiKey: newKey,
 			apiKey: newKey, // Sync to legacy field for backward compatibility
 			// Note: lastRotatedAt and rotationReason require database migration
 			// For now, we track them in-memory. Future: add columns to device table.

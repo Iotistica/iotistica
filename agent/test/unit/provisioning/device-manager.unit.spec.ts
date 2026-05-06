@@ -57,7 +57,7 @@ describe('DeviceManager - Refactored Testability', () => {
 				uuid: 'test-uuid-123',
 				name: 'Test Device',
 				type: 'sensor',
-				deviceApiKey: 'existing-api-key',
+				agentApiKey: 'existing-api-key',
 				provisioningApiKey: null,
 				apiKey: null,
 				apiEndpoint: 'http://api:3002',
@@ -303,7 +303,7 @@ describe('DeviceManager - Refactored Testability', () => {
 		it('should reset device (unprovision)', async () => {
 			const provisionedDevice: DeviceRecord = {
 				uuid: 'test-uuid',
-				deviceApiKey: 'api-key-123',
+				agentApiKey: 'api-key-123',
 				provisioned: true,
 				name: 'Test Device',
 				type: 'sensor',

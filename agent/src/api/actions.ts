@@ -1,6 +1,6 @@
 /**
- * Device API Actions
- * Core actions for device management
+ * Agent API Actions
+ * Core actions for agent management
  */
 
 import ContainerManager from '../docker/container-manager';
@@ -401,7 +401,7 @@ export const getApp = async (appId: number) => {
 };
 
 /**
- * Get device state information
+ * Get agent state information
  * Used by: GET /v1/device
  */
 export const getDeviceState = async () => {
@@ -468,7 +468,7 @@ export const getConnectionHealth = async () => {
 };
 
 /**
- * Provision device with provisioning key
+ * Provision agent with provisioning key
  * Used by: POST /v1/provision
  */
 export const provisionDevice = async (config: {
@@ -478,7 +478,7 @@ export const provisionDevice = async (config: {
 	apiEndpoint?: string;
 	applicationId?: number;
 }) => {
-	logger?.infoSync('Provisioning device', {
+	logger?.infoSync('Provisioning agent', {
 		component: LogComponents.agentManager,
 		operation: 'provision',
 		deviceName: config.deviceName,
@@ -526,18 +526,18 @@ export const getProvisionStatus = async () => {
 };
 
 /**
- * Deprovision device
+ * Deprovision agent
  * Used by: POST /v1/deprovision
  */
 export const deprovisionDevice = async () => {
-	logger?.infoSync('Deprovisioning device', {
+	logger?.infoSync('Deprovisioning agent', {
 		component: LogComponents.agentManager,
 		operation: 'deprovision'
 	});
 
 	await deviceManager.reset();
 	
-	logger?.infoSync('Device deprovisioned successfully', {
+	logger?.infoSync('Agent deprovisioned successfully', {
 		component: LogComponents.agentManager,
 		operation: 'deprovision'
 	});
@@ -563,7 +563,7 @@ export const getDevices = async (protocol?: string) => {
 };
 
 /**
- * Factory reset device - complete data wipe
+ * Factory reset agent - complete data wipe
  * Used by: POST /v1/factory-reset
  */
 export const factoryResetDevice = async () => {

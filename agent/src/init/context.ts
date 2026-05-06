@@ -19,7 +19,7 @@ export interface AgentInitContext {
 	agentInfo?: any;
 	containerManager?: any;
 	logMonitor?: any;
-	deviceAPI?: any;
+	agentAPI?: any;
 	cloudSync?: any;
 	firewall?: AgentFirewall;
 	updater?: AgentUpdater;

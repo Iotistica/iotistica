@@ -1,5 +1,5 @@
 /**
- * Types for device provisioning in standalone container-manager
+ * Types for agent provisioning in standalone container-manager
  * Implements two-phase authentication similar to Balena Supervisor
  */
 
@@ -14,7 +14,7 @@ export interface AgentInfo {
 	type?: string;
 	
 	// Two-phase authentication keys
-	apiKey?: string;              // Device-specific API key (permanent)
+	apiKey?: string;              // Agent API key (permanent)
 	provisioningApiKey?: string;  // Fleet/provisioning key (temporary)
 	
 	apiEndpoint?: string;
@@ -26,7 +26,7 @@ export interface AgentInfo {
 	provisioningState?: ProvisioningState;
 	
 	// VPN configuration
-	vpnEnabled?: boolean;         // True if device was provisioned with VPN credentials
+	vpnEnabled?: boolean;         // True if agent was provisioned with VPN credentials
 	
 	// Additional metadata
 	tenantId?: string;            // Tenant ID for MQTT topic construction
@@ -74,7 +74,7 @@ export interface ProvisioningConfig {
 	// Fleet configuration
 	applicationId?: number;
 	
-	// Device metadata
+	// Agent metadata
 	macAddress?: string;
 	osVersion?: string;
 	agentVersion?: string;
@@ -84,8 +84,8 @@ export interface ProvisionRequest {
 	uuid: string;
 	name: string;
 	type: string;
-	deviceApiKey: string;          // Pre-generated device key
-	devicePublicKey?: string;      // Ed25519 public key for PoP (PEM format)
+	agentApiKey: string;          // Pre-generated agent key
+	agentPublicKey?: string;      // Ed25519 public key for PoP (PEM format)
 	applicationId?: number;
 	macAddress?: string;
 	osVersion?: string;
@@ -93,7 +93,7 @@ export interface ProvisionRequest {
 }
 
 export interface ProvisionResponse {
-	id: number;                    // Server-assigned device ID
+	id: number;                    // Server-assigned agent ID
 	uuid: string;
 	name: string;
 	type: string;

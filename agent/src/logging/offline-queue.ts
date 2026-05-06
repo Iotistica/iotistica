@@ -33,13 +33,22 @@ export interface QueueStats {
 export class OfflineQueue<T> {
 	private queueName: string;
 	private maxSize: number;
+	private readonly ttlMs?: number;
 	private inMemoryQueue: T[] = [];
 	private isInitialized = false;
 	private logger?: AgentLogger;
 	
-	constructor(queueName: string, maxSize: number = 1000, logger?: AgentLogger) {
+	/**
+	 * @param queueName  - Unique name for this queue (used as SQLite partition key)
+	 * @param maxSize    - Maximum items before oldest is evicted (count-based cap)
+	 * @param ttlMs      - Optional TTL in ms. Items older than this are pruned on enqueue
+	 *                     and at flush time. Mirrors EdgeHub CleanupProcessor TTL behaviour.
+	 * @param logger     - Optional structured logger
+	 */
+	constructor(queueName: string, maxSize: number = 1000, ttlMs?: number, logger?: AgentLogger) {
 		this.queueName = queueName;
 		this.maxSize = maxSize;
+		this.ttlMs = ttlMs;
 		this.logger = logger;
 	}
 
@@ -91,10 +100,16 @@ export class OfflineQueue<T> {
 		}
 		
 		try {
+			// Prune expired items first (TTL-based), same as EdgeHub CleanupProcessor.
+			// This means TTL eviction is preferred over count-based LRU eviction.
+			if (this.ttlMs !== undefined) {
+				this.pruneExpired();
+			}
+
 			// Add to in-memory queue
 			this.inMemoryQueue.push(item);
 			
-			// Enforce size limit (drop oldest)
+			// Enforce size limit (drop oldest) as last resort
 			if (this.inMemoryQueue.length > this.maxSize) {
 				const dropped = this.inMemoryQueue.shift();
 				this.logger?.warnSync('Queue full, dropped oldest item', {
@@ -243,6 +258,39 @@ export class OfflineQueue<T> {
 		return successCount;
 	}
 	
+	/**
+	 * Prune items older than ttlMs from both in-memory queue and SQLite.
+	 * Mirrors EdgeHub's CleanupProcessor TTL eviction:
+	 *   - Called automatically on enqueue (when ttlMs is set)
+	 *   - Can also be called explicitly before a flush
+	 * Returns the number of items pruned.
+	 */
+	public pruneExpired(ttlMs?: number): number {
+		const effectiveTtl = ttlMs ?? this.ttlMs;
+		if (effectiveTtl === undefined) return 0;
+
+		const cutoff = Date.now() - effectiveTtl;
+		const deleted = OfflineQueueModel.deleteOlderThan(this.queueName, cutoff);
+
+		if (deleted > 0) {
+			// Reload in-memory queue to stay in sync with SQLite
+			try {
+				const rows = OfflineQueueModel.getPayloads(this.queueName);
+				this.inMemoryQueue = rows.map(r => JSON.parse(r.payload) as T);
+			} catch {
+				this.inMemoryQueue = [];
+			}
+			this.logger?.warnSync('Pruned expired items from offline queue', {
+				component: LogComponents.offlineQueue,
+				queueName: this.queueName,
+				deleted,
+				cutoffAgeMs: effectiveTtl,
+			});
+		}
+
+		return deleted;
+	}
+
 	/**
 	 * Get queue size
 	 */

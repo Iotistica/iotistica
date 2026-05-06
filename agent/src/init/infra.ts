@@ -113,7 +113,7 @@ export async function initContainerManager(ctx: AgentInitContext): Promise<void>
 }
 
 export async function initDeviceAPI(ctx: AgentInitContext): Promise<void> {
-	if (ctx.deviceAPI) {
+	if (ctx.agentAPI) {
 		return;
 	}
 
@@ -136,15 +136,15 @@ export async function initDeviceAPI(ctx: AgentInitContext): Promise<void> {
 		},
 	];
 
-	ctx.deviceAPI = new DeviceAPI({
+	ctx.agentAPI = new DeviceAPI({
 		routers: [v1Router],
 		healthchecks,
 		logger: ctx.agentLogger,
 	});
 
-	await ctx.deviceAPI.listen(ctx.configManager!.getDeviceApiPort());
+	await ctx.agentAPI.listen(ctx.configManager!.getAgentApiPort());
 	ctx.agentLogger?.infoSync('Device API initialized', {
 		component: LogComponents.agent,
-		port: ctx.configManager!.getDeviceApiPort(),
+		port: ctx.configManager!.getAgentApiPort(),
 	});
 }

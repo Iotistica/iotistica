@@ -125,4 +125,16 @@ export class OfflineQueueModel {
 	static updateAttempts(id: number, attempts: number): void {
 		this.getDb().prepare(`UPDATE ${this.table} SET attempts = ? WHERE id = ?`).run(attempts, id);
 	}
+
+	/**
+	 * Delete all items older than the given cutoff timestamp (ms).
+	 * Returns the number of rows deleted.
+	 * Mirrors EdgeHub CleanupProcessor TTL eviction logic.
+	 */
+	static deleteOlderThan(queueName: string, cutoffMs: number): number {
+		const result = this.getDb()
+			.prepare(`DELETE FROM ${this.table} WHERE queueName = ? AND createdAt < ?`)
+			.run(queueName, cutoffMs);
+		return result.changes as number;
+	}
 }

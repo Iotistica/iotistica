@@ -226,6 +226,9 @@ export class MessageBufferModel {
     const lockCutoffIso = new Date(now.getTime() - lockTimeoutMs).toISOString();
 
     const dequeueTransaction = db.transaction(() => {
+      // Also exclude already-expired records (mirrors EdgeHub MessageIterator which
+      // skips messages where DateTime.UtcNow - timeStamp >= timeToLive mid-iteration,
+      // so expired data is never sent even before CleanupProcessor runs).
       const candidateRows = db
         .prepare(`
           SELECT id
@@ -236,10 +239,11 @@ export class MessageBufferModel {
           )
           AND (next_retry_at IS NULL OR next_retry_at <= ?)
           AND (? IS NULL OR retry_count < ?)
+          AND expires_at > ?
           ORDER BY created_at ASC
           LIMIT ?
         `)
-        .all(lockCutoffIso, nowIso, maxRetries ?? null, maxRetries ?? null, limit) as Array<{ id: number }>;
+        .all(lockCutoffIso, nowIso, maxRetries ?? null, maxRetries ?? null, nowIso, limit) as Array<{ id: number }>;
 
       if (candidateRows.length === 0) {
         return [];

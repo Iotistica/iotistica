@@ -1,11 +1,11 @@
 /**
- * Device Agent
+ * Agent
  *
- * Orchestrates all device-side operations:
+ * Orchestrates all agent-side operations:
  * - Container management
- * - Device provisioning
+ * - Agent provisioning
  * - System monitoring
- * - Device API server
+ * - Agent API server
  * - Logging
  */
 
@@ -53,8 +53,8 @@ export default class Agent {
   private stateReconciler!: StateManager; // Main state manager
   private containerManager!: ContainerManager; // Keep for backward compatibility with DeviceAPI
   private deviceManager!: DeviceManager;
-  private agentInfo!: AgentInfo; // Cache device info after initialization
-  private deviceAPI!: DeviceAPI;
+  private agentInfo!: AgentInfo; // Cache agent info after initialization
+  private agentAPI!: DeviceAPI;
   private cloudSync?: CloudSync;
   public agentLogger!: AgentLogger; // Structured logging for agent-level events (public for external access)
   private firewall?: AgentFirewall; // Network firewall protection
@@ -124,7 +124,7 @@ export default class Agent {
         agentInfo: this.agentInfo,
         containerManager: this.containerManager,
         logMonitor: (this as any).logMonitor,
-        deviceAPI: this.deviceAPI,
+        agentAPI: this.agentAPI,
         cloudSync: this.cloudSync,
         firewall: this.firewall,
         updater: this.updater,
@@ -194,7 +194,7 @@ export default class Agent {
     this.agentInfo = ctx.agentInfo;
     this.containerManager = ctx.containerManager;
     (this as any).logMonitor = ctx.logMonitor;
-    this.deviceAPI = ctx.deviceAPI;
+    this.agentAPI = ctx.agentAPI;
     this.cloudSync = ctx.cloudSync;
     this.firewall = ctx.firewall;
     this.updater = ctx.updater;
@@ -279,10 +279,10 @@ export default class Agent {
     const mode = this.agentInfo.provisioned ? "Cloud-connected" : "Standalone";
     const intervals = this.configManager.getIntervalConfig();
 
-    this.agentLogger.infoSync("Device Agent initialized", {
+    this.agentLogger.infoSync("Agent initialized", {
       component: LogComponents.agent,
       mode,
-      deviceApiPort: this.configManager.getDeviceApiPort(),
+      deviceApiPort: this.configManager.getAgentApiPort(),
       reconciliationInterval: intervals.reconciliationIntervalMs,
       cloudApiEndpoint: this.configManager.getCloudApiEndpoint(),
       cloudFeaturesEnabled: this.agentInfo.provisioned && !!this.cloudSync,
@@ -384,7 +384,7 @@ export default class Agent {
     }
 
     await this.lifecycle.transition(AgentState.STOPPING, async () => {
-      this.agentLogger?.infoSync("Stopping Device Agent", { component: LogComponents.agent });
+      this.agentLogger?.infoSync("Stopping Agent", { component: LogComponents.agent });
       const cleanupFailures: string[] = [];
 
       await this.safeStopSubsystem('Features', !!this.featureInitializer, async () => {
@@ -450,11 +450,11 @@ export default class Agent {
         await mqttManager.disconnect();
       }, cleanupFailures);
 
-      await this.safeStopSubsystem('Device API', !!this.deviceAPI, async () => {
+      await this.safeStopSubsystem('Agent API', !!this.agentAPI, async () => {
         try {
-          await this.deviceAPI?.stop();
+          await this.agentAPI?.stop();
         } finally {
-          this.deviceAPI = undefined as unknown as DeviceAPI;
+          this.agentAPI = undefined as unknown as DeviceAPI;
         }
       }, cleanupFailures);
 
@@ -485,19 +485,19 @@ export default class Agent {
       }, cleanupFailures);
 
       if (cleanupFailures.length > 0) {
-        this.agentLogger?.warnSync('Device Agent stopped with cleanup warnings', {
+        this.agentLogger?.warnSync('Agent stopped with cleanup warnings', {
           component: LogComponents.agent,
           cleanupFailures,
         });
         return;
       }
 
-      this.agentLogger?.infoSync('Device Agent stopped successfully', {
+      this.agentLogger?.infoSync('Agent stopped successfully', {
         component: LogComponents.agent,
       });
     }).catch((error) => {
       this.agentLogger?.errorSync(
-        "Error stopping Device Agent",
+        "Error stopping Agent",
         error instanceof Error ? error : new Error(String(error)),
         {
           component: LogComponents.agent,
@@ -589,7 +589,7 @@ export default class Agent {
         component: LogComponents.agent,
       });
 
-      // NOTE: Skip deviceAPI - keep it running!
+      // NOTE: Skip agentAPI - keep it running!
 
       // Runtime-only services are stopped by lifecycle RUNNING exit hooks
 
@@ -650,7 +650,7 @@ export default class Agent {
   }
 
   public getDeviceAPI(): DeviceAPI {
-    return this.deviceAPI;
+    return this.agentAPI;
   }
 
   public getCloudSync(): CloudSync | undefined {
@@ -680,19 +680,19 @@ export default class Agent {
     const checks = {
       database: !!this.stateReconciler,
       logging: !!this.agentLogger,
-      deviceInfo: !!this.agentInfo,
-      // For already-provisioned devices (state loaded from SQLite), the agent must continue
-      // running even if the local API is unavailable. For unprovisioned devices, keep the API
+      agentInfo: !!this.agentInfo,
+      // For already-provisioned agents (state loaded from SQLite), the agent must continue
+      // running even if the local API is unavailable. For unprovisioned agents, keep the API
       // startup-critical so provisioning/setup flows still require it.
-      deviceAPI: !!this.agentInfo?.provisioned || !!this.deviceAPI,
+      agentAPI: !!this.agentInfo?.provisioned || !!this.agentAPI,
       containerManager: !!this.containerManager,
-      // MQTT connectivity is not startup-critical. A provisioned device must continue running
+      // MQTT connectivity is not startup-critical. A provisioned agent must continue running
       // and buffering local state/data when broker auth or the API backing auth is unavailable.
       mqtt: true,
-      // CloudSync is critical only if device is provisioned (skip in CI mode).
+      // CloudSync is critical only if agent is provisioned (skip in CI mode).
       // Only require the instance to exist (provisioning config was valid + service was wired).
       // Whether it is currently connected is a runtime/health concern - a cloud outage must not
-      // prevent the agent from sending READY=1 or operating as a standalone device.
+      // prevent the agent from sending READY=1 or operating as a standalone agent.
       cloudSync: isCiMode || !this.agentInfo?.provisioned || !!this.cloudSync
     };
 

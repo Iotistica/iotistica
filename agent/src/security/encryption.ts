@@ -186,7 +186,7 @@ export function migrateToEncrypted(plaintext: string | null): string | null {
  * Fields that should be encrypted in Device model
  */
 export const ENCRYPTED_DEVICE_FIELDS = [
-	'deviceApiKey',
+	'agentApiKey',
 	'provisioningApiKey',
 	'apiKey',
 	'mqttUsername',
