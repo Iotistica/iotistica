@@ -10,7 +10,7 @@ BB_FETCH_TIMEOUT ?= "60"
 
 IMAGE_INSTALL:append = " iotistica-agent"
 VIRTUAL-RUNTIME_init_manager = "systemd"
-DISTRO_FEATURES:append = " systemd virtualization"
+DISTRO_FEATURES:append = " systemd usrmerge virtualization"
 DISTRO_FEATURES_BACKFILL_CONSIDERED = "sysvinit"
 
 EXTRA_IMAGE_FEATURES:append = " package-management ssh-server-openssh"

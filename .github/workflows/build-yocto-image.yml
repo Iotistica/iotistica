@@ -147,6 +147,13 @@ jobs:
       - name: Configure build
         run: bash .github/workflows/scripts/configure-build.sh "$BUILD_DIR" "$YOCTO_VERSION" "$MACHINE" "$DL_DIR" "$SSTATE_DIR"
 
+      - name: Validate Yocto metadata
+        run: bash .github/workflows/scripts/validate-yocto-metadata.sh "$BUILD_DIR" "$YOCTO_VERSION"
+
+      - name: Prebuild agent recipe
+        if: env.INCLUDE_AGENT == 'true'
+        run: bash .github/workflows/scripts/prebuild-yocto-target.sh "$BUILD_DIR" "$YOCTO_VERSION" "iotistic-agent"
+
       - name: Build image
         run: bash .github/workflows/scripts/build-image.sh "$BUILD_DIR" "$YOCTO_VERSION" "$SSTATE_DIR" "$CLEAN_BUILD"
 

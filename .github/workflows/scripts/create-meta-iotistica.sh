@@ -42,7 +42,7 @@ DISTRO_VERSION = "1.0.0"
 DISTRO_CODENAME = "iotistic-core"
 
 # Systemd as init system
-DISTRO_FEATURES:append = " systemd"
+DISTRO_FEATURES:append = " systemd usrmerge"
 DISTRO_FEATURES_BACKFILL_CONSIDERED = "sysvinit"
 VIRTUAL-RUNTIME_init_manager = "systemd"
 VIRTUAL-RUNTIME_initscripts = ""
