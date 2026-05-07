@@ -30,7 +30,7 @@ LAYERDEPENDS_meta-iotistic = "core"
 LAYERSERIES_COMPAT_meta-iotistic = "kirkstone scarthgap"
 EOF
 
-# IotisticOS distro configuration
+# IotisticaOS distro configuration
 cat > "$LAYER_DIR/conf/distro/iotistic.conf" << 'EOF'
 # IotisticOS - IoT distribution with container orchestration
 
