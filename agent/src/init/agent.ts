@@ -72,16 +72,16 @@ export async function initializeCloudLogging(ctx: AgentInitContext): Promise<voi
 
 export async function initializeDeviceManager(ctx: AgentInitContext): Promise<void> {
 	const cloudApiEndpoint = ctx.configManager!.getCloudApiEndpoint();
-	ctx.deviceManager = new (await import('../managers/index.js')).DeviceManager(
+	ctx.agentManager = new (await import('../managers/index.js')).AgentManager(
 		ctx.agentLogger!,
 		ctx.sharedHttpClient,
 		undefined,
 		undefined,
 		cloudApiEndpoint
 	);
-	await ctx.deviceManager.initialize();
+	await ctx.agentManager.initialize();
 
-	let agentInfo = ctx.deviceManager.getAgentInfo();
+	let agentInfo = ctx.agentManager.getAgentInfo();
 	const provisioningApiKey = normalizeOptionalEnvValue(process.env.PROVISIONING_KEY);
 	const cloudEndpoint = process.env.IOTISTICA_API || ctx.configManager!.getCloudApiEndpoint();
 
@@ -90,7 +90,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 			const macAddress = process.env.MAC_ADDRESS || (await getMacAddress());
 			const osVersion = process.env.OS_VERSION || (await getOsVersion());
 
-			await ctx.deviceManager.provision({
+			await ctx.agentManager.provision({
 				provisioningApiKey,
 				agentName: process.env.DEVICE_NAME || `agent-${agentInfo.uuid.slice(0, 8)}`,
 				agentType: process.env.DEVICE_TYPE || 'standalone',
@@ -99,7 +99,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 				osVersion,
 				agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
 			});
-			agentInfo = ctx.deviceManager.getAgentInfo();
+			agentInfo = ctx.agentManager.getAgentInfo();
 			ctx.agentInfo = agentInfo;
 		} catch (error: any) {
 			ctx.agentLogger?.errorSync(
@@ -110,7 +110,7 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 					note: 'Device will remain unprovisioned. Check PROVISIONING_KEY or boot config file.',
 				}
 			);
-			agentInfo = ctx.deviceManager.getAgentInfo();
+			agentInfo = ctx.agentManager.getAgentInfo();
 		}
 	} else if (!agentInfo.provisioned && cloudEndpoint && !provisioningApiKey) {
 		ctx.agentLogger?.warnSync('Device not provisioned', {
@@ -121,15 +121,15 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 		ctx.agentLogger?.infoSync('Running in local mode (no cloud connection)', {
 			component: LogComponents.agent,
 		});
-		await ctx.deviceManager.markAsLocalMode();
-		agentInfo = ctx.deviceManager.getAgentInfo();
+		await ctx.agentManager.markAsLocalMode();
+		agentInfo = ctx.agentManager.getAgentInfo();
 	} else if (agentInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
 		ctx.agentLogger?.infoSync('Switching to local mode (no cloud connection)', {
 			component: LogComponents.agent,
 			note: 'Device was previously provisioned but IOTISTICA_API is not set',
 		});
-		await ctx.deviceManager.markAsLocalMode();
-		agentInfo = ctx.deviceManager.getAgentInfo();
+		await ctx.agentManager.markAsLocalMode();
+		agentInfo = ctx.agentManager.getAgentInfo();
 	}
 
 	ctx.agentInfo = agentInfo;
@@ -146,8 +146,8 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 
 	const currentVersion = process.env.AGENT_VERSION || getPackageVersion();
 	if (ctx.agentInfo.agentVersion !== currentVersion) {
-		await ctx.deviceManager.updateAgentVersion(currentVersion);
-		ctx.agentInfo = ctx.deviceManager.getAgentInfo();
+		await ctx.agentManager.updateAgentVersion(currentVersion);
+		ctx.agentInfo = ctx.agentManager.getAgentInfo();
 	}
 
 	ctx.agentLogger?.setDeviceId(ctx.agentInfo.uuid);

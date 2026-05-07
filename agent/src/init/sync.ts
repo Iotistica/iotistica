@@ -14,7 +14,7 @@ export async function initSync(ctx: AgentInitContext): Promise<void> {
 
 	deviceActions.initialize(
 		ctx.containerManager,
-		ctx.deviceManager,
+		ctx.agentManager,
 		ctx.cloudSync,
 		ctx.agentLogger,
 		ctx.anomalyService,
@@ -63,7 +63,7 @@ export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
 
 	ctx.cloudSync = new CloudSync(
 		ctx.stateReconciler,
-		ctx.deviceManager,
+		ctx.agentManager,
 		{
 			cloudApiEndpoint,
 			pollInterval: intervals.targetStatePollIntervalMs!,

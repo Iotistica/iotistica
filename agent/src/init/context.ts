@@ -16,7 +16,7 @@ export interface AgentInitContext {
 	configManager?: ConfigManager;
 	agentLogger?: AgentLogger;
 	sharedHttpClient?: ReturnType<typeof import('../lib/http-client.js').createHttpClient>;
-	deviceManager?: any;
+	agentManager?: any;
 	agentInfo?: any;
 	containerManager?: any;
 	logMonitor?: any;

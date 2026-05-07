@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'crypto';
 import ContainerManager from '../containers/container-manager';
-import type { DeviceManager } from '../managers';
+import type { AgentManager } from '../managers';
 import type { CloudSync } from '../sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../anomaly';
@@ -21,7 +21,7 @@ import { encodeIfUuid } from '../mqtt/codec';
 import type { AgentUpdater } from '../updater';
 
 let containerManager: ContainerManager;
-let deviceManager: DeviceManager;
+let agentManager: AgentManager;
 let cloudSync: CloudSync | undefined;
 let logger: AgentLogger | undefined;
 let anomalyService: AnomalyDetectionService | undefined;
@@ -143,7 +143,7 @@ export async function getBufferStatusPayload(): Promise<{
 	agentLogLastFlushSuccess?: string;
 	agentLogLastFlushError?: string;
 }> {
-	const info = deviceManager.getAgentInfo();
+	const info = agentManager.getAgentInfo();
 	const mqttConnected = CloudMqttClient.getInstance().isConnected();
 	const cloudOnline = cloudSync?.isOnline() === true;
 	const mqttStats = MessageBufferModel.getStats();
@@ -199,14 +199,14 @@ export async function getBufferStatusPayload(): Promise<{
 
 export function initialize(
 	cm: ContainerManager, 
-	dm: DeviceManager, 
+	dm: AgentManager, 
 	ab?: CloudSync, 
 	agentLogger?: AgentLogger,
 	anomaly?: AnomalyDetectionService,
 	simulation?: SimulationOrchestrator
 ) {
 	containerManager = cm;
-	deviceManager = dm;
+	agentManager = dm;
 	cloudSync = ab;
 	logger = agentLogger;
 	anomalyService = anomaly;
@@ -446,7 +446,7 @@ export const getApp = async (appId: number) => {
  * Used by: GET /v1/device
  */
 export const getDeviceState = async () => {
-	const agentInfo = deviceManager.getAgentInfo();
+	const agentInfo = agentManager.getAgentInfo();
 	const currentState = await containerManager.getCurrentState();
 	const isOnline = cloudSync?.isOnline?.() ?? false;
 	
@@ -526,7 +526,7 @@ export const provisionDevice = async (config: {
 		apiEndpoint: config.apiEndpoint
 	});
 
-	const result = await deviceManager.provision(config);
+	const result = await agentManager.provision(config);
 	
 	logger?.infoSync('Agent provisioned successfully', {
 		component: LogComponents.agentManager,
@@ -551,7 +551,7 @@ export const provisionDevice = async (config: {
  * Used by: GET /v1/provision/status
  */
 export const getProvisionStatus = async () => {
-	const agentInfo = deviceManager.getAgentInfo();
+	const agentInfo = agentManager.getAgentInfo();
 	
 	return {
 		provisioned: agentInfo.provisioned,
@@ -576,7 +576,7 @@ export const deprovisionDevice = async () => {
 		operation: 'deprovision'
 	});
 
-	await deviceManager.reset();
+	await agentManager.reset();
 	
 	logger?.infoSync('Agent deprovisioned successfully', {
 		component: LogComponents.agentManager,
@@ -637,7 +637,7 @@ export const addEndpoint = async (body: {
 			if (firstTopic) {
 				resolvedConnection.topic = firstTopic;
 			} else {
-				const agentInfo = deviceManager.getAgentInfo();
+				const agentInfo = agentManager.getAgentInfo();
 				const tenantId = agentInfo?.tenantId as string | undefined;
 				const agentUuid = agentInfo?.uuid as string | undefined;
 				if (tenantId && agentUuid) {
@@ -735,7 +735,7 @@ export const factoryResetDevice = async () => {
 		warning: 'This will delete all apps, services, and data'
 	});
 
-	await deviceManager.factoryReset();
+	await agentManager.factoryReset();
 	
 	logger?.warnSync('Factory reset completed', {
 		component: LogComponents.agentManager,

@@ -11,7 +11,7 @@
 
 import { StateManager } from "./managers/state.js";
 import ContainerManager from "./containers/container-manager.js";
-import { DeviceManager } from "./managers/index.js";
+import { AgentManager } from "./managers/index.js";
 import type { AgentInfo } from "./managers/types.js";
 import { DeviceAPI } from "./api/index.js";
 import { CloudSync } from "./sync/index.js";
@@ -53,7 +53,7 @@ export default class Agent {
   private readonly lifecycle = new AgentLifecycle();
   private stateReconciler!: StateManager; // Main state manager
   private containerManager!: ContainerManager; // Keep for backward compatibility with DeviceAPI
-  private deviceManager!: DeviceManager;
+  private agentManager!: AgentManager;
   private agentInfo!: AgentInfo; // Cache agent info after initialization
   private agentAPI!: DeviceAPI;
   private cloudSync?: CloudSync;
@@ -121,7 +121,7 @@ export default class Agent {
         configManager: this.configManager,
         agentLogger: this.agentLogger,
         sharedHttpClient: this.sharedHttpClient,
-        deviceManager: this.deviceManager,
+        agentManager: this.agentManager,
         agentInfo: this.agentInfo,
         containerManager: this.containerManager,
         logMonitor: (this as any).logMonitor,
@@ -191,7 +191,7 @@ export default class Agent {
     this.agentLogger = ctx.agentLogger!;
     this.lifecycle.setLogger(this.agentLogger);
     this.sharedHttpClient = ctx.sharedHttpClient;
-    this.deviceManager = ctx.deviceManager;
+    this.agentManager = ctx.agentManager;
     this.agentInfo = ctx.agentInfo;
     this.containerManager = ctx.containerManager;
     (this as any).logMonitor = ctx.logMonitor;
@@ -646,8 +646,8 @@ export default class Agent {
     return this.containerManager;
   }
 
-  public getDeviceManager(): DeviceManager {
-    return this.deviceManager;
+  public getAgentManager(): AgentManager {
+    return this.agentManager;
   }
 
   public getDeviceAPI(): DeviceAPI {

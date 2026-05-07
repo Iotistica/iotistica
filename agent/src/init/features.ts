@@ -628,7 +628,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 	const featureContext: FeatureContext = {
 		logger: agentLogger,
     deviceInfo: ctx.agentInfo,
-    deviceManager: ctx.deviceManager,
+    deviceManager: ctx.agentManager,
     stateReconciler: ctx.stateReconciler,
     mqttManager: (await import('../mqtt/manager.js')).CloudMqttClient.getInstance(),
     httpClient: ctx.sharedHttpClient,

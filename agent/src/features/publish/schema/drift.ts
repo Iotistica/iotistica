@@ -38,6 +38,12 @@ type DriftDetectorOptions = {
   minTypeDominanceRatio: number;
   /** Maximum array length used in log fields to prevent oversized log payloads. */
   logSampleSize: number;
+  /**
+   * Run the full schema check only every Nth batch after the baseline is established.
+   * 1 = every batch (default). Higher values reduce CPU at high-frequency endpoints.
+   * The warmup phase always processes every batch regardless of this setting.
+   */
+  checkIntervalBatches: number;
 };
 
 type ExtractedSchema = {
@@ -67,6 +73,7 @@ const DEFAULT_OPTIONS: DriftDetectorOptions = {
   maxRenameFieldLength: 64,
   minTypeDominanceRatio: 0.15,
   logSampleSize: 10,
+  checkIntervalBatches: 1,
 };
 
 const RESERVED_GENERIC_KEYS = new Set<string>([
@@ -254,6 +261,11 @@ export class SchemaDriftDetector {
 
     if (!this.baseline) {
       this.learnBaseline(extracted);
+      return;
+    }
+
+    const interval = Math.max(1, this.options.checkIntervalBatches);
+    if (interval > 1 && this.totalBatches % interval !== 0) {
       return;
     }
 
