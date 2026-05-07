@@ -137,7 +137,7 @@ $body = @{
     provisioningKeySecret = "<secret-from-above>"
 } | ConvertTo-Json
 
-curl -X POST http://localhost:3002/api/v1/device/register `
+curl -X POST http://localhost:3002/api/v1/agent/register `
   -H "Content-Type: application/json" `
   -d $body
 

@@ -57,7 +57,7 @@ $deviceBody = @{
 } | ConvertTo-Json
 
 try {
-    $deviceResponse = Invoke-RestMethod -Uri "$ApiUrl/api/v1/device/register" `
+    $deviceResponse = Invoke-RestMethod -Uri "$ApiUrl/api/v1/agent/register" `
         -Method POST `
         -ContentType "application/json" `
         -Body $deviceBody `

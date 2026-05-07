@@ -436,7 +436,7 @@ router.post('/jobs', async (req, res) => {
 **Device Limit Enforcement**:
 ```typescript
 // In routes/provisioning.ts
-router.post('/device/register', async (req, res) => {
+router.post('/agent/register', async (req, res) => {
   const deviceCount = await query('SELECT COUNT(*) FROM devices WHERE is_active = true');
   const canProvision = await validator.checkDeviceLimit(deviceCount.rows[0].count);
   

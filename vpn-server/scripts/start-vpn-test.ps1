@@ -57,7 +57,7 @@ Write-Host "   API:         172.25.0.13:3002" -ForegroundColor Cyan
 # Step 8: Next steps
 Write-Host "`n📝 Next Steps:" -ForegroundColor Yellow
 Write-Host "   1. Provision a test device:" -ForegroundColor White
-Write-Host "      curl -X POST http://localhost:3002/api/v1/device/register ..." -ForegroundColor Gray
+Write-Host "      curl -X POST http://localhost:3002/api/v1/agent/register ..." -ForegroundColor Gray
 Write-Host ""
 Write-Host "   2. Save VPN config from response to:" -ForegroundColor White
 Write-Host "      C:\Users\$env:USERNAME\openvpn-config\iotistic-test.ovpn" -ForegroundColor Gray

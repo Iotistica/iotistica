@@ -78,7 +78,7 @@ echo "Device Name: $DEVICE_NAME"
 echo ""
 
 echo "Calling provisioning API..."
-PROVISION_RESPONSE=$(curl -s -X POST "${API_ENDPOINT}/api/v1/device/register" \
+PROVISION_RESPONSE=$(curl -s -X POST "${API_ENDPOINT}/api/v1/agent/register" \
     -H "Content-Type: application/json" \
     -H "X-Provisioning-Key: ${PROVISIONING_KEY}" \
     -d "{

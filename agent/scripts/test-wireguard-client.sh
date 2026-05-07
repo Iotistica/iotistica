@@ -51,7 +51,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo "  4. Set permissions: chmod 600 $CONFIG_FILE"
     echo ""
     echo "Example API call (replace YOUR_KEY and YOUR_DEVICE_UUID):"
-    echo '  curl -X POST http://YOUR_WINDOWS_IP:4002/api/v1/device/register \'
+    echo '  curl -X POST http://YOUR_WINDOWS_IP:4002/api/v1/agent/register \'
     echo '    -H "Content-Type: application/json" \'
     echo '    -H "X-Provisioning-Key: YOUR_KEY" \'
     echo '    -d '"'"'{"deviceUuid": "YOUR_DEVICE_UUID", "deviceName": "rpi-test"}'"'"' \'

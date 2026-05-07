@@ -143,7 +143,7 @@ export interface RegisterOptions {
  * Throws on any non-200 response.
  */
 export async function registerDevice(opts: RegisterOptions): Promise<void> {
-  const url = `${opts.apiUrl.replace(/\/$/, '')}/api/v1/device/register`;
+  const url = `${opts.apiUrl.replace(/\/$/, '')}/api/v1/agent/register`;
   const body = Buffer.from(JSON.stringify({
     uuid: opts.uuid,
     deviceName: opts.deviceName,

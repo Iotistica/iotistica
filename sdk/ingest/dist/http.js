@@ -136,7 +136,7 @@ exports.HttpTransport = HttpTransport;
  * Throws on any non-200 response.
  */
 async function registerDevice(opts) {
-    const url = `${opts.apiUrl.replace(/\/$/, '')}/api/v1/device/register`;
+    const url = `${opts.apiUrl.replace(/\/$/, '')}/api/v1/agent/register`;
     const body = Buffer.from(JSON.stringify({
         uuid: opts.uuid,
         deviceName: opts.deviceName,

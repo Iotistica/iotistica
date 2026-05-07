@@ -116,7 +116,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
     try {
       const { uuid } = req.params;
       const { signature } = req.body;
-      const authKey = (req.headers['x-device-key'] as string) ?? undefined;
+      const authKey = (req.headers['x-agent-key'] as string) ?? undefined;
 
       if (!authKey) {
         await logAuditEvent({
@@ -125,9 +125,9 @@ const plugin: FastifyPluginAsync = async (fastify) => {
           ipAddress,
           userAgent,
           severity: AuditSeverity.WARNING,
-          details: { reason: 'Missing x-device-key header' },
+          details: { reason: 'Missing x-agent-key header' },
         });
-        return reply.status(400).send({ error: 'Missing credentials', message: 'x-device-key header required' });
+        return reply.status(400).send({ error: 'Missing credentials', message: 'x-agent-key header required' });
       }
 
       if (!signature) {

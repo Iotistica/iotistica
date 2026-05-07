@@ -1,7 +1,7 @@
 /**
  * Agent Registration Route — Phase 1 of two-phase authentication
  *
- * - POST /api/v1/device/register
+ * - POST /api/v1/agent/register
  *
  * Validates provisioning key, enforces license limits, and delegates to
  * the provisioning service to create/update the agent record.
@@ -18,7 +18,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
 
   /**
    * Register a new agent with a provisioning key
-   * POST /api/v1/device/register
+   * POST /api/v1/agent/register
    *
    * Phase 1 of two-phase authentication:
    * 1. Validates provisioning key
@@ -26,7 +26,7 @@ const plugin: FastifyPluginAsync = async (fastify) => {
    * 3. Validates optional public key format (for PoP)
    * 4. Delegates to provisioningService for business logic
    */
-  fastify.post<{ Body: RegisterDeviceBody }>('/device/register', async (req, reply) => {
+  fastify.post<{ Body: RegisterDeviceBody }>('/agent/register', async (req, reply) => {
     const ipAddress = req.ip;
     const userAgent = req.headers['user-agent'];
 

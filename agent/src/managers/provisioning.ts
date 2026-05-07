@@ -395,7 +395,7 @@ export class AgentProvisioningService {
 		provisionRequest: ProvisionRequest,
 		provisioningApiKey: string
 	): Promise<ProvisionResponse> {
-		const url = buildApiEndpoint(apiEndpoint, '/device/register');
+		const url = buildApiEndpoint(apiEndpoint, '/agent/register');
 		const idempotencyKey = `register-${agentInfo.uuid}`;
 
 		this.logger?.infoSync('Registering agent with API', {
@@ -449,7 +449,7 @@ export class AgentProvisioningService {
 
 	private createAgentKeyHeaders(agentKey: string): Record<string, string> {
 		return {
-			'x-device-key': agentKey,
+			'x-agent-key': agentKey,
 		};
 	}
 }
