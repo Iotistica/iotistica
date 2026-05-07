@@ -65,6 +65,11 @@ jobs:
       MACHINE: ${{ github.event.inputs.machine || 'raspberrypi4-64' }}
       INCLUDE_AGENT: ${{ github.event.inputs.include_agent || 'true' }}
       CLEAN_BUILD: ${{ github.event.inputs.clean_build || 'false' }}
+      # SAS URL for the Azure Blob container used as sstate mirror.
+      # Required secret: YOCTO_SSTATE_AZURE_SAS_URL
+      # Format: https://<account>.blob.core.windows.net/<container>?<sas-token>
+      # SAS permissions needed: Read, Write, List, Delete (rwdl) on the container.
+      AZURE_SSTATE_URL: ${{ secrets.YOCTO_SSTATE_AZURE_SAS_URL }}
     
     steps:
       - name: Checkout repository
@@ -94,16 +99,51 @@ jobs:
             echo "kernel.apparmor_restrict_unprivileged_userns not present on this runner"
           fi
 
-      - name: Restore Yocto cache
+      # DL_DIR: downloaded source tarballs (~2-5 GB, fits in GitHub cache).
+      # Uses run_id as key so each run saves a new incremental entry.
+      # restore-keys fall back to the most recent matching entry.
+      - name: Restore downloads cache (DL_DIR)
+        id: dl-cache
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ env.DL_DIR }}
-            ${{ env.SSTATE_DIR }}
-          key: yocto-${{ runner.os }}-${{ env.YOCTO_VERSION }}-${{ env.MACHINE }}-${{ hashFiles('.github/workflows/scripts/*.sh', '.github/workflows/build-yocto-image.yml') }}
+          path: ${{ env.DL_DIR }}
+          key: yocto-dl-${{ runner.os }}-${{ env.YOCTO_VERSION }}-${{ env.MACHINE }}-${{ github.run_id }}
           restore-keys: |
-            yocto-${{ runner.os }}-${{ env.YOCTO_VERSION }}-${{ env.MACHINE }}-
-            yocto-${{ runner.os }}-${{ env.YOCTO_VERSION }}-
+            yocto-dl-${{ runner.os }}-${{ env.YOCTO_VERSION }}-${{ env.MACHINE }}-
+            yocto-dl-${{ runner.os }}-${{ env.YOCTO_VERSION }}-
+
+      # SSTATE_DIR: compiled package cache (~15-50 GB for raspberrypi4-64).
+      # Too large for GitHub Actions cache (10 GB limit) — stored in Azure Blob Storage.
+      # azcopy is pre-installed on GitHub-hosted Ubuntu runners.
+      - name: Restore sstate cache from Azure Blob Storage
+        run: |
+          if [ -z "${AZURE_SSTATE_URL:-}" ]; then
+            echo "YOCTO_SSTATE_AZURE_SAS_URL secret not set — skipping sstate restore"
+            echo "First run: sstate will be built from scratch and uploaded at the end."
+          else
+            echo "=== Syncing sstate from Azure Blob Storage ==="
+            sudo mkdir -p "$SSTATE_DIR"
+            azcopy sync "$AZURE_SSTATE_URL" "$SSTATE_DIR/" \
+              --recursive=true \
+              --log-level=WARNING \
+              --cap-mbps=500
+            echo ""
+            echo "=== Sstate size after restore ==="
+            du -sh "$SSTATE_DIR"
+            echo "=== File count ==="
+            find "$SSTATE_DIR" -type f | wc -l
+          fi
+
+      - name: Report cache restore status
+        run: |
+          echo "=== Cache Restore Status ==="
+          echo "DL cache hit: ${{ steps.dl-cache.outputs.cache-hit }}"
+          echo ""
+          echo "=== DL_DIR size after restore ==="
+          du -sh "$DL_DIR" 2>/dev/null || echo "Empty"
+          echo ""
+          echo "=== SSTATE_DIR size after restore ==="
+          du -sh "$SSTATE_DIR" 2>/dev/null || echo "Empty"
 
       - name: Check disk space
         run: bash .github/workflows/scripts/check-disk-space.sh 30 50
@@ -156,6 +196,27 @@ jobs:
 
       - name: Build image
         run: bash .github/workflows/scripts/build-image.sh "$BUILD_DIR" "$YOCTO_VERSION" "$SSTATE_DIR" "$CLEAN_BUILD"
+
+      # Save sstate back to Azure after every build (success or failure).
+      # --delete-destination=false ensures previously cached packages are never removed.
+      # This means interrupted builds still contribute their partial sstate on the next run.
+      - name: Save sstate cache to Azure Blob Storage
+        if: always()
+        run: |
+          if [ -z "${AZURE_SSTATE_URL:-}" ]; then
+            echo "YOCTO_SSTATE_AZURE_SAS_URL secret not set — skipping sstate save"
+          elif [ ! -d "$SSTATE_DIR" ] || [ -z "$(ls -A $SSTATE_DIR 2>/dev/null)" ]; then
+            echo "SSTATE_DIR is empty — nothing to upload"
+          else
+            echo "=== Syncing sstate to Azure Blob Storage ==="
+            echo "Local sstate size: $(du -sh $SSTATE_DIR)"
+            azcopy sync "$SSTATE_DIR/" "$AZURE_SSTATE_URL" \
+              --recursive=true \
+              --delete-destination=false \
+              --log-level=WARNING \
+              --cap-mbps=500
+            echo "=== Upload complete ==="
+          fi
 
       - name: Show build artifacts
         run: bash .github/workflows/scripts/show-artifacts.sh "$BUILD_DIR" "$MACHINE"

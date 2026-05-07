@@ -48,6 +48,10 @@ jobs:
         working-directory: ./agent
         run: npm ci --prefer-offline --no-audit
 
+      - name: Run ESLint
+        working-directory: ./agent
+        run: npm run lint
+
       - name: Run unit tests
         working-directory: ./agent
         run: npm run test:unit
