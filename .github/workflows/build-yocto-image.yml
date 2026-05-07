@@ -65,6 +65,7 @@ jobs:
       MACHINE: ${{ github.event.inputs.machine || 'raspberrypi4-64' }}
       INCLUDE_AGENT: ${{ github.event.inputs.include_agent || 'true' }}
       CLEAN_BUILD: ${{ github.event.inputs.clean_build || 'false' }}
+      SSTATE_SYNC_INTERVAL_MINUTES: '10'
       # SAS URL for the Azure Blob container used as sstate mirror.
       # Required secret: YOCTO_SSTATE_AZURE_SAS_URL
       # Format: https://<account>.blob.core.windows.net/<container>?<sas-token>
@@ -192,10 +193,10 @@ jobs:
 
       - name: Prebuild agent recipe
         if: env.INCLUDE_AGENT == 'true'
-        run: bash .github/workflows/scripts/prebuild-yocto-target.sh "$BUILD_DIR" "$YOCTO_VERSION" "iotistic-agent"
+        run: bash .github/workflows/scripts/run-with-periodic-sstate-sync.sh "$SSTATE_DIR" "$AZURE_SSTATE_URL" "$SSTATE_SYNC_INTERVAL_MINUTES" bash .github/workflows/scripts/prebuild-yocto-target.sh "$BUILD_DIR" "$YOCTO_VERSION" "iotistic-agent"
 
       - name: Build image
-        run: bash .github/workflows/scripts/build-image.sh "$BUILD_DIR" "$YOCTO_VERSION" "$SSTATE_DIR" "$CLEAN_BUILD"
+        run: bash .github/workflows/scripts/run-with-periodic-sstate-sync.sh "$SSTATE_DIR" "$AZURE_SSTATE_URL" "$SSTATE_SYNC_INTERVAL_MINUTES" bash .github/workflows/scripts/build-image.sh "$BUILD_DIR" "$YOCTO_VERSION" "$SSTATE_DIR" "$CLEAN_BUILD"
 
       # Save sstate back to Azure after every build (success or failure).
       # --delete-destination=false ensures previously cached packages are never removed.
