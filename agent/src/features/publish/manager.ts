@@ -13,6 +13,7 @@ import { MessageBatcher } from './batch.js';
 import { DeviceConnection } from './connection.js';
 import { PublishStats } from './stats.js';
 import { HeartbeatManager } from './heartbeat.js';
+import { SchemaDriftDetector } from './schema/drift.js';
 
 // Adaptive batch safety limits (calculated once at module load)
 const MAX_BATCH_MESSAGES = 10000;
@@ -34,6 +35,7 @@ export class PublishManager extends EventEmitter {
   private readonly stats: PublishStats;
   private readonly feed: AnomalyFeed;
   private readonly enricher: AnomalyEnricher;
+  private readonly schemaDriftDetector: SchemaDriftDetector;
   private heartbeat?: HeartbeatManager;
   private bufferTimer: NodeJS.Timeout | null = null;
   private needStop = false;
@@ -99,6 +101,7 @@ export class PublishManager extends EventEmitter {
     this.stats = new PublishStats();
     this.feed = new AnomalyFeed(() => this.anomalyService, deviceUuid, protocol, logger);
     this.enricher = new AnomalyEnricher(() => this.anomalyService, deviceUuid, protocol);
+    this.schemaDriftDetector = new SchemaDriftDetector(config.name || 'unknown', logger);
 
     this.batcher.on('flush', () => { this.publishBatch(); });
     this.batcher.on('message-added', () => { this.stats.data.messagesReceived++; });
@@ -226,6 +229,12 @@ export class PublishManager extends EventEmitter {
           } catch (err) {
             this.logger?.warn(`Live data interceptor failed for endpoint '${name}', continuing with original payload`, err);
           }
+        }
+
+        try {
+          this.schemaDriftDetector.observe(messages);
+        } catch (err) {
+          this.logger?.warn(`Schema drift detector failed for endpoint '${name}', continuing with original payload`, err);
         }
 
         const enriched = this.processAnomaly(messages, name);
