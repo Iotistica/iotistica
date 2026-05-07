@@ -44,8 +44,8 @@ let baselineExternal: number = 0;
 // - V8-internal metric, not strict allocation counter
 // - Can jump due to allocator behavior
 // - Use for context/investigation, not leak detection triggers
-let initialMalloced: number = 0;
-let baselineMalloced: number = 0;
+let _initialMalloced: number = 0;
+let _baselineMalloced: number = 0;
 
 // Survivor tracking (long-lived objects that survive GC cycles)
 // NOTE: survivorBaseline is for DIAGNOSTICS/LOGGING only
@@ -58,7 +58,7 @@ const SURVIVOR_UPDATE_INTERVAL_MS = 2 * 60 * 1000; // Update survivor baseline e
 // Legacy RSS tracking (for comparison only)
 export let initialMemory: number = 0;
 let baselineRSS: number = 0; // Sliding baseline (same logic as heap)
-let lastMemoryCheck: number = 0;
+let _lastMemoryCheck: number = 0;
 let logger: AgentLogger | undefined;
 let monitoringInterval: NodeJS.Timeout | undefined;
 let memoryThresholdBreached: boolean = false;
@@ -70,7 +70,7 @@ let leakedObjects: any[] = [];
 // Restart policy (prevents restart loops)
 const RESTART_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour minimum between restarts
 const MAX_RESTART_ATTEMPTS = 3; // Max restarts in 24 hours
-const RESTART_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hour window
+const _RESTART_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hour window
 let lastRestartAttempt: number = 0;
 let restartAttemptsSinceStartup: number = 0;
 
@@ -737,7 +737,7 @@ function isHeapStable(): boolean {
 function detectLeakPattern(
     currentHeap: number,
     currentRSS: number,
-    currentExternal: number
+    _currentExternal: number
 ): {
     pattern:
         | 'survivor-leak'
@@ -988,7 +988,7 @@ function updateBaselineIfStable(currentHeap: number, currentRSS: number): void {
  * Uses sliding baseline to avoid false positives on long-running processes.
  */
 export async function healthcheck(
-	thresholdBytes: number = 15 * 1024 * 1024, // Legacy RSS threshold (kept for compatibility)
+	_thresholdBytes: number = 15 * 1024 * 1024, // Legacy RSS threshold (kept for compatibility)
 ): Promise<boolean> {
 	const mem = memoryUsage();
 	const currentRSS = mem.rss;
@@ -1006,12 +1006,12 @@ export async function healthcheck(
 		baselineHeap = currentHeap;
 		initialExternal = mem.external;
 		baselineExternal = mem.external;
-		initialMalloced = heapStats.malloced_memory;
-		baselineMalloced = heapStats.malloced_memory;
+		_initialMalloced = heapStats.malloced_memory;
+		_baselineMalloced = heapStats.malloced_memory;
 		initialMemory = currentRSS; // Legacy
 		baselineRSS = currentRSS; // Sliding RSS baseline
 		lastBaselineUpdate = Date.now();
-		lastMemoryCheck = currentRSS; // Legacy
+		_lastMemoryCheck = currentRSS; // Legacy
 		
 		heapSamples.push({ 
 			timestamp: Date.now(), 
@@ -1347,7 +1347,7 @@ export function startMemoryLeakSimulation(): void {
 				});
 				break;
 
-			case 'sudden':
+			case 'sudden': {
 				// Leak large amount immediately
 				const suddenAmount = config.maxMB;
 				leakMemory(suddenAmount, config.allocation);
@@ -1359,6 +1359,7 @@ export function startMemoryLeakSimulation(): void {
 				});
 				stopMemoryLeakSimulation();
 				break;
+			}
 
 			case 'cyclic':
 				// Leak then release in cycles
@@ -1446,7 +1447,7 @@ function leakMemory(megabytes: number, allocation: 'buffer' | 'heap' = 'buffer')
  * Release memory by removing leaked objects
  * (allocation type doesn't matter for release, both stored in same array)
  */
-function releaseMemory(megabytes: number, allocation: 'buffer' | 'heap' = 'buffer'): void {
+function releaseMemory(megabytes: number, _allocation: 'buffer' | 'heap' = 'buffer'): void {
 	const bytesToRelease = megabytes * 1024 * 1024;
 	const objectSize = 1024;
 	const objectCount = Math.floor(bytesToRelease / objectSize);

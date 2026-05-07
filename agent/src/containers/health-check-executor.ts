@@ -95,7 +95,7 @@ export class HealthCheckExecutor {
     
     const url = `${scheme}://${ipAddress}:${check.port}${check.path}`;
     
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve, _reject) => {
       const client = scheme === 'https' ? https : http;
       
       const req = client.get(url, {
@@ -227,10 +227,10 @@ export class HealthCheckExecutor {
           return;
         }
 
-        let output = '';
+        let _output = '';
         
         stream?.on('data', (chunk: Buffer) => {
-          output += chunk.toString();
+          _output += chunk.toString();
         });
 
         stream?.on('end', async () => {

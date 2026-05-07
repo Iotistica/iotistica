@@ -78,7 +78,7 @@ export function isDnsError(error: unknown): boolean {
 	// Check error message
 	const msg = error.message.toLowerCase();
 	return msg.includes('getaddrinfo') && 
-	       (msg.includes('enotfound') || msg.includes('eai_again'));
+	(msg.includes('enotfound') || msg.includes('eai_again'));
 }
 
 /**
@@ -141,9 +141,9 @@ export function isNetworkUnreachable(error: unknown): boolean {
  */
 export function isRetryableNetworkError(error: unknown): boolean {
 	return isDnsError(error) || 
-	       isConnectionRefused(error) || 
-	       isTimeout(error) ||
-	       isNetworkUnreachable(error);
+	isConnectionRefused(error) || 
+	isTimeout(error) ||
+	isNetworkUnreachable(error);
 }
 
 /**
@@ -180,4 +180,5 @@ export function autoDetectLocalSubnets(): string[] {
 
   return ranges;
 }
+
 

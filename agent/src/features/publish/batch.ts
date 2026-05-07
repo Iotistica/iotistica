@@ -28,7 +28,7 @@ export class MessageBatcher extends EventEmitter {
     private readonly logger?: Logger,
   ) {
     super();
-    if (!/^[\x00-\x7F]+$/.test(config.eomDelimiter)) {
+    if (!this.isAsciiSafe(config.eomDelimiter)) {
       throw new Error(`Invalid eom_delimiter: ${config.eomDelimiter}. Delimiter must be ASCII-safe.`);
     }
     if (config.eomDelimiter.length === 0) {
@@ -101,6 +101,15 @@ export class MessageBatcher extends EventEmitter {
   private isPlainDelimiter(pattern: string): boolean {
     // Fast-path only literal delimiters with no regex metacharacters.
     return !/[\\^$.*+?()[\]{}|]/.test(pattern);
+  }
+
+  private isAsciiSafe(value: string): boolean {
+    for (let i = 0; i < value.length; i += 1) {
+      if (value.charCodeAt(i) > 0x7f) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private parseFrames(): void {

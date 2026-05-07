@@ -286,11 +286,16 @@ export class AnomalyStorageService {
 						alert_id: alert.id,
 						note: 'Run migration 003_add_alert_suppression_metadata.sql to enable suppression tracking',
 					});
-					const { cooldown_sec, first_seen, consecutive_count, ...legacyRecord } = record;
+					const {
+						cooldown_sec: _cooldown_sec,
+						first_seen: _first_seen,
+						consecutive_count: _consecutive_count,
+						...legacyRecord
+					} = record;
 					return legacyRecord;
 				})();
 
-			const { sql, values } = this.buildInsertStatement('anomaly_alerts', insertRecord);
+			const { sql, values } = this.buildInsertStatement('anomaly_alerts', insertRecord as unknown as Record<string, unknown>);
 			this.db.prepare(sql).run(...values);
 
 			this.logger?.debugSync('Stored anomaly alert', {
@@ -596,36 +601,32 @@ export class AnomalyStorageService {
 		}
 		
 		// Get overall baseline (time_slot = -1) or legacy baseline (no time_slot)
-		try {
-			if (schema.hasTimeSlot) {
-				for (const candidateDeviceId of deviceCandidates) {
-					let baseline = this.queryBaseline(metric, {
+		if (schema.hasTimeSlot) {
+			for (const candidateDeviceId of deviceCandidates) {
+				let baseline = this.queryBaseline(metric, {
+					timeSlot: -1,
+					profile,
+					deviceState: schema.hasDeviceState ? deviceState : undefined,
+					deviceId: schema.hasDeviceId ? candidateDeviceId : undefined,
+				});
+
+				if (!baseline && schema.hasDeviceState && deviceState !== 'unknown') {
+					baseline = this.queryBaseline(metric, {
 						timeSlot: -1,
 						profile,
-						deviceState: schema.hasDeviceState ? deviceState : undefined,
+						deviceState: 'unknown',
 						deviceId: schema.hasDeviceId ? candidateDeviceId : undefined,
 					});
-
-					if (!baseline && schema.hasDeviceState && deviceState !== 'unknown') {
-						baseline = this.queryBaseline(metric, {
-							timeSlot: -1,
-							profile,
-							deviceState: 'unknown',
-							deviceId: schema.hasDeviceId ? candidateDeviceId : undefined,
-						});
-					}
-
-					if (baseline) {
-						return baseline;
-					}
 				}
-				return null;
-			}
 
-			return this.queryBaseline(metric, { minimumSamples: undefined });
-		} catch (overallError: any) {
-			throw overallError;
+				if (baseline) {
+					return baseline;
+				}
+			}
+			return null;
 		}
+
+		return this.queryBaseline(metric, { minimumSamples: undefined });
 	}
 
 

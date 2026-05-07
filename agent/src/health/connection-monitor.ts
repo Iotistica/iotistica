@@ -66,8 +66,8 @@ export class ConnectionMonitor extends EventEmitter {
 	}
 	
 	/**
-	 * Mark a successful operation (poll or report)
-	 */
+	* Mark a successful operation (poll or report)
+	*/
 	public markSuccess(operation: 'poll' | 'report'): void {
 		const now = Date.now();
 		const wasOffline = !this.state.isOnline;
@@ -120,9 +120,9 @@ export class ConnectionMonitor extends EventEmitter {
 	}
 	
 	/**
-	 * Mark a failed operation (poll or report)
-	 */
-	public markFailure(operation: 'poll' | 'report', error?: Error): void {
+	* Mark a failed operation (poll or report)
+	*/
+	public markFailure(operation: 'poll' | 'report', _error?: Error): void {
 		const wasOnline = this.state.isOnline;
 		
 		// Update counters for the specific operation
@@ -155,8 +155,8 @@ export class ConnectionMonitor extends EventEmitter {
 		
 		// Check if we should mark as degraded (2+ failures on any operation)
 		if (maxFailures >= this.DEGRADED_THRESHOLD && 
-		    maxFailures < this.FAILURE_THRESHOLD && 
-		    wasOnline) {
+		maxFailures < this.FAILURE_THRESHOLD && 
+		wasOnline) {
 			this.logger?.warnSync('Connection degraded', {
 				component: LogComponents.connectionMonitor,
 				consecutiveFailures: maxFailures,
@@ -184,15 +184,15 @@ export class ConnectionMonitor extends EventEmitter {
 	}
 	
 	/**
-	 * Check if currently online
-	 */
+	* Check if currently online
+	*/
 	public isOnline(): boolean {
 		return this.state.isOnline;
 	}
 	
 	/**
-	 * Get offline duration in milliseconds
-	 */
+	* Get offline duration in milliseconds
+	*/
 	public getOfflineDuration(): number {
 		return this.state.offlineSince 
 			? Date.now() - this.state.offlineSince 
@@ -200,15 +200,15 @@ export class ConnectionMonitor extends EventEmitter {
 	}
 	
 	/**
-	 * Get current connection state
-	 */
+	* Get current connection state
+	*/
 	public getState(): ConnectionState {
 		return { ...this.state };
 	}
 	
 	/**
-	 * Get connection health summary
-	 */
+	* Get connection health summary
+	*/
 	public getHealth(): ConnectionHealth {
 		const pollSuccessRate = this.state.totalPollAttempts > 0
 			? (this.state.successfulPolls / this.state.totalPollAttempts) * 100
@@ -248,8 +248,8 @@ export class ConnectionMonitor extends EventEmitter {
 	}
 	
 	/**
-	 * Format timestamp for logging
-	 */
+	* Format timestamp for logging
+	*/
 	private formatTimestamp(timestamp: number): string {
 		const now = Date.now();
 		const diff = now - timestamp;
@@ -279,3 +279,4 @@ export class ConnectionMonitor extends EventEmitter {
 		return super.emit(event, ...args);
 	}
 }
+

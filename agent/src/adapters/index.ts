@@ -25,7 +25,6 @@ import { EndpointModel } from '../db/models/endpoint.model.js';
 import { encodeIfUuid } from '../mqtt/codec.js';
 
 // Type imports only (no runtime loading)
-import type { OPCUAAdapter } from './opcua/adapter.js';
 import type { OPCUAAdapterConfig } from './opcua/types.js';
 
 // SNMP imports

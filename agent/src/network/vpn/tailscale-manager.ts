@@ -26,9 +26,7 @@
 
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
-import { writeFile, mkdir, access, readFile } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
+import { access, readFile } from 'fs/promises';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 

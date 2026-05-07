@@ -14,7 +14,7 @@
 import { Readable } from 'stream';
 import { BaseOrchestratorDriver } from './types';
 import type {
-	TargetState,
+	TargetState as _TargetState,
 	CurrentState,
 	ServiceConfig,
 	ServiceStatus,
@@ -507,7 +507,7 @@ export class K3sDriver extends BaseOrchestratorDriver {
 
 	// Stub implementations for remaining methods
 	
-	async stopService(serviceId: string, timeout?: number): Promise<void> {
+	async stopService(serviceId: string, _timeout?: number): Promise<void> {
 		this.log('info', 'Stopping service', { serviceId });
 		// Scale deployment to 0 replicas
 		try {
@@ -540,7 +540,7 @@ export class K3sDriver extends BaseOrchestratorDriver {
 		}
 	}
 
-	async restartService(serviceId: string, timeout?: number): Promise<void> {
+	async restartService(serviceId: string, _timeout?: number): Promise<void> {
 		this.log('info', 'Restarting service', { serviceId });
 		
 		try {
@@ -666,19 +666,19 @@ export class K3sDriver extends BaseOrchestratorDriver {
 		}
 	}
 
-	async executeHealthCheck(serviceId: string): Promise<{ healthy: boolean; message?: string }> {
+	async executeHealthCheck(_serviceId: string): Promise<{ healthy: boolean; message?: string }> {
 		throw new Error('K3s executeHealthCheck not yet implemented');
 	}
 
-	async startHealthMonitoring(serviceId: string): Promise<void> {
+	async startHealthMonitoring(_serviceId: string): Promise<void> {
 		throw new Error('K3s startHealthMonitoring not yet implemented');
 	}
 
-	async stopHealthMonitoring(serviceId: string): Promise<void> {
+	async stopHealthMonitoring(_serviceId: string): Promise<void> {
 		throw new Error('K3s stopHealthMonitoring not yet implemented');
 	}
 
-	async getServiceMetrics(serviceId: string): Promise<ContainerMetrics> {
+	async getServiceMetrics(_serviceId: string): Promise<ContainerMetrics> {
 		throw new Error('K3s getServiceMetrics not yet implemented');
 	}
 
@@ -686,11 +686,11 @@ export class K3sDriver extends BaseOrchestratorDriver {
 		throw new Error('K3s getAllMetrics not yet implemented');
 	}
 
-	async createNetwork(network: NetworkConfig): Promise<void> {
+	async createNetwork(_network: NetworkConfig): Promise<void> {
 		throw new Error('K3s createNetwork not yet implemented');
 	}
 
-	async removeNetwork(networkName: string): Promise<void> {
+	async removeNetwork(_networkName: string): Promise<void> {
 		throw new Error('K3s removeNetwork not yet implemented');
 	}
 
@@ -698,11 +698,11 @@ export class K3sDriver extends BaseOrchestratorDriver {
 		throw new Error('K3s listNetworks not yet implemented');
 	}
 
-	async createVolume(volume: VolumeConfig): Promise<void> {
+	async createVolume(_volume: VolumeConfig): Promise<void> {
 		throw new Error('K3s createVolume not yet implemented');
 	}
 
-	async removeVolume(volumeName: string): Promise<void> {
+	async removeVolume(_volumeName: string): Promise<void> {
 		throw new Error('K3s removeVolume not yet implemented');
 	}
 

@@ -38,7 +38,7 @@ export class DeviceConnection extends EventEmitter {
   connect(): void {
     this.stopped = false;
     this._state = DeviceState.CONNECTING;
-    const name = this.config.name || 'unknown';
+    const _name = this.config.name || 'unknown';
 
     try {
       this.socket = net.createConnection(this.config.addr);

@@ -25,7 +25,7 @@ import { LogComponents } from '../../logging/types.js';
 import { CloudMqttClient } from '../../mqtt/manager.js';
 import { agentTopic } from '../../mqtt/topics.js';
 import { JobEngine } from './engine.js';
-import { JobDocument, JobStatus, JobExecutionData } from './types.js';
+import { JobDocument, JobExecutionData } from './types.js';
 import { normalizeApiEndpoint, getApiVersion } from '../../utils/api-utils.js';
 
 export interface JobsConfig extends FeatureConfig {

@@ -363,7 +363,7 @@ export class AnomalyDetectionService {
 						sampleCount: dbBaseline.sample_count,
 					});
 				}
-			} catch (error) {
+			} catch (_error) {
 				this.logger?.debugSync('Failed to load baseline from database, using buffer stats', {
 					component: LogComponents.anomaly,
 					metric: dataPoint.metric,

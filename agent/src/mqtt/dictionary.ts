@@ -669,7 +669,7 @@ export class DictionaryManager {
     if (stats.count % 10 === 0) {
       try {
         await DictionaryModel.saveEnumStats('qualityCode', undefined, value, stats.count, stats.firstSeen);
-      } catch (error) {
+      } catch (_error) {
         // Silently fail - stats are in memory
       }
     }
@@ -744,7 +744,7 @@ export class DictionaryManager {
     if (stats.count % 10 === 0) {
       try {
         await DictionaryModel.saveEnumStats('metric', protocol, metric, stats.count, stats.firstSeen);
-      } catch (error) {
+      } catch (_error) {
         // Silently fail - stats are in memory
       }
     }
@@ -844,7 +844,7 @@ export class DictionaryManager {
     if (stats.count % 10 === 0) {
       try {
         await DictionaryModel.saveEnumStats('device', protocol, deviceName, stats.count, stats.firstSeen);
-      } catch (error) {
+      } catch (_error) {
         // Silently fail - stats are in memory
       }
     }

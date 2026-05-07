@@ -39,17 +39,19 @@ export async function createOrchestratorDriver(
 	let driver: IOrchestratorDriver;
 
 	switch (orchestrator) {
-		case 'docker':
+		case 'docker': {
 			// Lazy load to avoid import overhead
 			const { DockerDriver } = await import('./docker.js');
 			driver = new DockerDriver(logger);
 			break;
+		}
 
-		case 'k3s':
+		case 'k3s': {
 			// Lazy load K3s driver
 			const { K3sDriver } = await import('./k3s.js');
 			driver = new K3sDriver(logger);
 			break;
+		}
 
 		default:
 			throw new Error(`Unsupported orchestrator type: ${orchestrator}`);

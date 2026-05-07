@@ -1,4 +1,3 @@
-import path from 'path';
 import type { VolumeInspectInfo } from 'dockerode';
 
 import { difference, uniq } from '../lib/collection-utils';
@@ -6,7 +5,6 @@ import { isNotFoundError, InternalInconsistencyError } from '../lib/errors';
 import { docker } from '../lib/docker-utils';
 import * as logger from '../logging';
 import { ResourceRecreationAttemptError } from './errors';
-import type { DockerVolumeConfig as VolumeConfig } from './types';
 import { Volume } from './volume';
 
 /**
@@ -254,7 +252,7 @@ export async function remove(volume: Volume) {
  * @param fromVersion - Current volume version
  * @param toVersion - Target volume version
  */
-async function migrateVolume(
+async function _migrateVolume(
 	volume: Volume,
 	fromVersion: number,
 	toVersion: number,

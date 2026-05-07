@@ -341,7 +341,7 @@ export class MessageBufferModel {
     const deleted = this.deleteIdsInChunks(ids);
 
     if (deleted > 0) {
-	  this.incrementMetric('total_flushed', deleted);
+	this.incrementMetric('total_flushed', deleted);
     }
 
     return deleted;
@@ -419,7 +419,7 @@ export class MessageBufferModel {
       .run(...idsToDelete).changes;
 
     if (deleted > 0) {
-	  this.incrementMetric('total_dropped', deleted);
+	this.incrementMetric('total_dropped', deleted);
     }
 
     return deleted;
@@ -436,7 +436,7 @@ export class MessageBufferModel {
     const deleted = this.deleteIdsInChunks(ids);
 
     if (deleted > 0) {
-	  this.incrementMetric('total_dropped', deleted);
+	this.incrementMetric('total_dropped', deleted);
     }
 
     return deleted;
@@ -775,3 +775,4 @@ export class MessageBufferModel {
     return topic.startsWith('alerts/') || topic.startsWith('events/');
   }
 }
+

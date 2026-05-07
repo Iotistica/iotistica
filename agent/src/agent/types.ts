@@ -127,7 +127,7 @@ export interface ProvisionResponse {
 					protocol: string;
 				};
 				config?: string;  // Complete WireGuard config file content
-		  }
+		}
 		| {
 				enabled: boolean;
 				type: 'tailscale';
@@ -139,7 +139,7 @@ export interface ProvisionResponse {
 					acceptRoutes?: boolean;   // Accept subnet routes (routers/gateways only)
 					acceptDNS?: boolean;      // Use Tailscale MagicDNS
 				};
-		  }
+		}
 	createdAt: string;
 }
 
@@ -160,3 +160,4 @@ export interface KeyExchangeResponse {
 		deviceName: string;
 	};
 }
+

@@ -6,7 +6,7 @@
  */
 
 import type { AgentLogger } from '../logging/agent-logger';
-import type { AgentInfo } from '../managers/types.js';
+import type { AgentInfo } from '../agent/types.js';
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/monitor.js';
@@ -21,8 +21,7 @@ import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
-import { StateManager } from '../managers/state.js';
-import { getPackageVersion } from '../utils/api-utils.js';
+import { StateManager } from '../agent/state.js';
 
 export interface FeatureContext {
   logger: AgentLogger;

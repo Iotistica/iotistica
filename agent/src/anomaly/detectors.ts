@@ -6,7 +6,7 @@
  */
 
 import type { AnomalyDetector, DetectionResult, MetricConfig, StatisticalBuffer } from './types';
-import { getMAD, getIQR, getPercentile, getRateOfChange } from './buffer';
+import { getMAD, getIQR, getPercentile } from './buffer';
 import { sigmoid, binaryConfidence, exponentialConfidence } from './confidence';
 
 /**
@@ -232,7 +232,7 @@ export class IQRDetector implements AnomalyDetector {
 export class ExpectedRangeDetector implements AnomalyDetector {
 	readonly method = 'expected_range' as const;
 	
-	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
+	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, _dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
 		// Must have expectedRange configured
 		if (!config.expectedRange || config.expectedRange.length !== 2) {
 			return {
@@ -294,7 +294,7 @@ export class ExpectedRangeDetector implements AnomalyDetector {
 export class RateChangeDetector implements AnomalyDetector {
 	readonly method = 'rate_change' as const;
 	
-	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
+	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, _dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
 		if (buffer.size < 2) {
 			return {
 				method: this.method,
@@ -356,7 +356,7 @@ export class EWMADetector implements AnomalyDetector {
 	private readonly MAX_CACHE_SIZE = 1000; // Prevent unbounded growth
 	private readonly EVICTION_THRESHOLD = 0.9; // Evict when 90% full
 	
-	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
+	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, _dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
 		if (buffer.size < 5) {
 			return {
 				method: this.method,
@@ -379,7 +379,7 @@ export class EWMADetector implements AnomalyDetector {
 			this.ewmaValues.delete(metricKey);
 		}
 		
-		let ewmaState = this.ewmaValues.get(metricKey);
+		const ewmaState = this.ewmaValues.get(metricKey);
 		let ewma: number;
 		
 		// Initialize EWMA with buffer mean

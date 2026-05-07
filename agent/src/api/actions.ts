@@ -5,14 +5,14 @@
 
 import { randomUUID } from 'crypto';
 import ContainerManager from '../containers/container-manager';
-import type { AgentManager } from '../managers';
+import type { AgentManager } from '../agent/index.js';
 import type { CloudSync } from '../sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../anomaly';
 import type { SimulationOrchestrator } from '../anomaly/simulator';
 import type { AdapterManager } from '../adapters';
-import type { ConfigManager } from '../managers/config';
-import type { StateManager } from '../managers/state';
+import type { ConfigManager } from '../agent/config';
+import type { StateManager } from '../agent/state';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/health-arbiter';
 import { MessageBufferModel } from '../db/models/buffer.model';
@@ -329,7 +329,7 @@ export const runHealthchecks = async (
  * Restarts an application by recreating containers
  * Used by: POST /v1/apps/:appId/restart
  */
-export const restartApp = async (appId: number, force: boolean = false) => {
+export const restartApp = async (appId: number, _force: boolean = false) => {
 	const currentState = await containerManager.getCurrentState();
 	const app = currentState.apps[appId];
 	
@@ -351,7 +351,7 @@ export const restartApp = async (appId: number, force: boolean = false) => {
  * Stops a service
  * Used by: POST /v1/apps/:appId/stop
  */
-export const stopService = async (appId: number, serviceName?: string, force: boolean = false) => {
+export const stopService = async (appId: number, serviceName?: string, _force: boolean = false) => {
 	const currentState = await containerManager.getCurrentState();
 	const app = currentState.apps[appId];
 	
@@ -384,7 +384,7 @@ export const stopService = async (appId: number, serviceName?: string, force: bo
  * Starts a service
  * Used by: POST /v1/apps/:appId/start
  */
-export const startService = async (appId: number, serviceName?: string, force: boolean = false) => {
+export const startService = async (appId: number, serviceName?: string, _force: boolean = false) => {
 	const currentState = await containerManager.getCurrentState();
 	const app = currentState.apps[appId];
 	
@@ -462,7 +462,7 @@ export const getDeviceState = async () => {
  * Purge volumes for an application
  * Used by: POST /v1/apps/:appId/purge
  */
-export const purgeApp = async (appId: number, force: boolean = false) => {
+export const purgeApp = async (appId: number, _force: boolean = false) => {
 	const currentState = await containerManager.getCurrentState();
 	const app = currentState.apps[appId];
 	
@@ -621,7 +621,7 @@ export const addEndpoint = async (body: {
 	// If no topics were supplied, auto-generate the canonical topic:
 	//   i/<encodedTenant>/a/<encodedAgent>/d/<encodedEndpoint>
 	let mqttAuth: Record<string, any> | undefined;
-	let resolvedConnection = { ...body.connection };
+	const resolvedConnection = { ...body.connection };
 	let resolvedDataPoints = body.data_points ? [...body.data_points] : [];
 	if (body.protocol === 'mqtt') {
 		const username = body.connection?.username as string | undefined;

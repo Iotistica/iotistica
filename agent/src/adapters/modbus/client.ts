@@ -388,7 +388,7 @@ export class ModbusClient {
     const generation = this.generation;
 
     // Use precomputed batches (computed once in constructor)
-    for (const [functionCode, batches] of this.precomputedBatches) {
+    for (const [_functionCode, batches] of this.precomputedBatches) {
       
       for (const batch of batches) {
         if (batch.length === 1) {
@@ -755,7 +755,7 @@ export class ModbusClient {
         quality: 'GOOD',
         protocol: 'modbus'
       }));
-    } catch (error) {
+    } catch (_error) {
       // Batch failed - split in half and recurse
       const mid = Math.floor(batch.length / 2);
       const leftHalf = batch.slice(0, mid);
@@ -1149,7 +1149,7 @@ export class ModbusClient {
       case ModbusDataType.FLOAT32:
         value = buffer.readFloatBE(0);
         break;
-      case ModbusDataType.STRING:
+      case ModbusDataType.STRING: {
         // Use configurable encoding (default: ascii)
         const encoding = (register.encoding || 'ascii') as BufferEncoding;
         let str = buffer.toString(encoding);
@@ -1159,6 +1159,7 @@ export class ModbusClient {
         str = str.replace(/\0/g, '').trim();
         
         return str;
+      }
       default:
         throw new Error(`Unsupported data type: ${register.dataType}`);
     }

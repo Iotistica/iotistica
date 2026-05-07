@@ -168,7 +168,7 @@ export class HealthCheckManager extends EventEmitter {
     const state = this.probes.get(probeKey);
     if (!state) return;
 
-    const { probe, containerId, probeType, serviceName } = state;
+    const { probe, containerId, probeType, serviceName: _serviceName } = state;
     const timeoutMs = (probe.timeoutSeconds || 1) * 1000;
 
     try {
@@ -212,7 +212,12 @@ export class HealthCheckManager extends EventEmitter {
     const state = this.probes.get(probeKey);
     if (!state) return;
 
-    const { probe, probeType, containerId, serviceName } = state;
+    const {
+      probe,
+      probeType: _probeType,
+      containerId: _containerId,
+      serviceName: _serviceName,
+    } = state;
     const successThreshold = probe.successThreshold || 1;
     const failureThreshold = probe.failureThreshold || 3;
 
@@ -283,7 +288,7 @@ export class HealthCheckManager extends EventEmitter {
         }
         break;
 
-      case 'readiness':
+      case 'readiness': {
         const wasReady = health.isReady;
         health.isReady = newStatus === 'healthy';
         
@@ -296,6 +301,7 @@ export class HealthCheckManager extends EventEmitter {
           console.log(`[HealthCheck] ${serviceName} readiness: ${health.isReady ? 'ready' : 'not ready'}`);
         }
         break;
+      }
     }
   }
 

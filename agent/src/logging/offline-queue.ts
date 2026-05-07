@@ -16,7 +16,7 @@ import { OfflineQueueModel, type OfflineQueueRecord } from '../db/models';
 import type { AgentLogger } from './agent-logger';
 import { LogComponents } from './types';
 
-export interface QueueItem<T> {
+export interface QueueItem<_T> {
 	id?: number;
 	queueName: string;
 	payload: string; // JSON stringified T
@@ -111,7 +111,7 @@ export class OfflineQueue<T> {
 			
 			// Enforce size limit (drop oldest) as last resort
 			if (this.inMemoryQueue.length > this.maxSize) {
-				const dropped = this.inMemoryQueue.shift();
+				const _dropped = this.inMemoryQueue.shift();
 				this.logger?.warnSync('Queue full, dropped oldest item', {
 					component: LogComponents.offlineQueue,
 					queueName: this.queueName,

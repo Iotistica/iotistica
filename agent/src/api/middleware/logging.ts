@@ -17,7 +17,7 @@ function isHealthCheckPath(path: string): boolean {
 		|| path === '/v1/health/report';
 }
 
-function isSilentDebugPath(path: string): boolean {
+function isSilentDebugPath(_path: string): boolean {
 	return false;
 }
 

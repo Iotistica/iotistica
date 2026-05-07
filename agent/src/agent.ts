@@ -9,10 +9,10 @@
  * - Logging
  */
 
-import { StateManager } from "./managers/state.js";
+import { StateManager } from "./agent/state.js";
 import ContainerManager from "./containers/container-manager.js";
-import { AgentManager } from "./managers/index.js";
-import type { AgentInfo } from "./managers/types.js";
+import { AgentManager } from "./agent/index.js";
+import type { AgentInfo } from "./agent/types.js";
 import { DeviceAPI } from "./api/index.js";
 import { CloudSync } from "./sync/index.js";
 
@@ -32,7 +32,7 @@ import { AnomalyDetectionService } from "./anomaly/index.js";
 import { SimulationOrchestrator } from "./anomaly/simulator.js";
 import { DiscoveryService } from "./adapters/discovery/service.js";
 import { FeatureInitializer } from "./init/features.js";
-import type { ConfigManager } from "./managers/config.js";
+import type { ConfigManager } from "./agent/config.js";
 import {
   initCore as runInitCore,
 } from './init/core.js';

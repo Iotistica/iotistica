@@ -289,7 +289,7 @@ export class MqttFileAuthReconciler {
           operation: 'signalMosquittoReload',
           helper: SYSTEMD_RELOAD_HELPER,
         });
-      } catch (err) {
+      } catch (_err) {
         // Expected when NoNewPrivileges=true — the path unit handles the reload.
         this.logger?.debugSync(`sudo reload helper unavailable (expected with NoNewPrivileges=true) — systemd path unit will handle reload`, {
           component: LogComponents.configManager,

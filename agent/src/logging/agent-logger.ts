@@ -84,7 +84,7 @@ export class AgentLogger {
 	 * @param level - 'debug', 'info', 'warn', or 'error'
 	 */
 	public setLogLevel(level: LogLevel): void {
-		const oldLevel = this.minLogLevel;
+		const _oldLevel = this.minLogLevel;
 		this.minLogLevel = level;
 		
 		// Log the change at info level (always show this)

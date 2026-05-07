@@ -75,8 +75,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Set logger (called after logger is initialized)
-	 */
+	* Set logger (called after logger is initialized)
+	*/
 	public setLogger(logger: AgentLogger): void {
 		this.logger = logger;
 	}
@@ -86,21 +86,21 @@ export class DockerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Start monitoring Docker events for declarative reconciliation
-	 * 
-	 * Event-driven approach for edge devices:
-	 * - Detects crashes immediately (no polling)
-	 * - Auto-restarts critical services
-	 * - Updates internal state in real-time
-	 * - Works with label-based filtering
-	 * 
-	 * Emits events:
-	 * - 'container:start' - Container started
-	 * - 'container:stop' - Container stopped
-	 * - 'container:die' - Container crashed
-	 * - 'container:health' - Health status changed
-	 * - 'container:oom' - Out of memory killed
-	 */
+	* Start monitoring Docker events for declarative reconciliation
+	* 
+	* Event-driven approach for edge devices:
+	* - Detects crashes immediately (no polling)
+	* - Auto-restarts critical services
+	* - Updates internal state in real-time
+	* - Works with label-based filtering
+	* 
+	* Emits events:
+	* - 'container:start' - Container started
+	* - 'container:stop' - Container stopped
+	* - 'container:die' - Container crashed
+	* - 'container:health' - Health status changed
+	* - 'container:oom' - Out of memory killed
+	*/
 	async startEventMonitoring(): Promise<void> {
 		if (this.isMonitoringEvents) {
 			this.logger?.debugSync('Event monitoring already active', {
@@ -172,8 +172,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Stop monitoring Docker events
-	 */
+	* Stop monitoring Docker events
+	*/
 	stopEventMonitoring(): void {
 		if (this.eventStream) {
 			this.logger?.infoSync('Stopping Docker event monitoring', {
@@ -191,8 +191,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Handle Docker event and emit appropriate signals
-	 */
+	* Handle Docker event and emit appropriate signals
+	*/
 	private handleDockerEvent(event: any): void {
 		const action = event.Action as string;
 		const containerId = event.Actor?.ID as string;
@@ -234,7 +234,7 @@ export class DockerManager extends EventEmitter {
 				this.emit('container:stop', { containerId, containerName, appId, serviceName });
 				break;
 
-			case 'die':
+			case 'die': {
 				const exitCode = event.Actor?.Attributes?.exitCode;
 				this.logger?.warnSync('Container died', {
 					component: LogComponents.dockerManager,
@@ -250,6 +250,7 @@ export class DockerManager extends EventEmitter {
 					this.emit('container:crash', { containerId, containerName, appId, serviceName, exitCode });
 				}
 				break;
+			}
 
 			case 'kill':
 				this.logger?.warnSync('Container killed', {
@@ -281,7 +282,7 @@ export class DockerManager extends EventEmitter {
 				this.emit('container:unpause', { containerId, containerName, appId, serviceName });
 				break;
 
-			case 'health_status':
+			case 'health_status': {
 				const healthStatus = event.Actor?.Attributes?.['health_status'];
 				this.logger?.infoSync('Container health status changed', {
 					component: LogComponents.dockerManager,
@@ -292,6 +293,7 @@ export class DockerManager extends EventEmitter {
 				});
 				this.emit('container:health', { containerId, containerName, appId, serviceName, healthStatus });
 				break;
+			}
 
 			case 'oom':
 				this.logger?.errorSync('Container out of memory', new Error('OOM'), {
@@ -319,20 +321,20 @@ export class DockerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Validate container security configuration for edge devices
-	 * 
-	 * CRITICAL: Edge devices have Docker socket access (root equivalent)
-	 * Must prevent container escape and privilege escalation
-	 * 
-	 * Blocked configurations:
-	 * - privileged: true (full root access to host)
-	 * - cap_add (capability additions)
-	 * - pid=host (access to all host processes)
-	 * - ipc=host (access to host IPC namespace)
-	 * - userns=host (bypass user namespace isolation)
-	 * 
-	 * @throws Error if configuration violates security policy
-	 */
+	* Validate container security configuration for edge devices
+	* 
+	* CRITICAL: Edge devices have Docker socket access (root equivalent)
+	* Must prevent container escape and privilege escalation
+	* 
+	* Blocked configurations:
+	* - privileged: true (full root access to host)
+	* - cap_add (capability additions)
+	* - pid=host (access to all host processes)
+	* - ipc=host (access to host IPC namespace)
+	* - userns=host (bypass user namespace isolation)
+	* 
+	* @throws Error if configuration violates security policy
+	*/
 	private validateSecurityConfig(service: ContainerService): void {
 		const violations: string[] = [];
 
@@ -384,10 +386,10 @@ export class DockerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Pull an image from registry
-	 * @param imageName - Image name (e.g., "nginx:latest")
-	 * @param authConfig - Optional authentication for private registries
-	 */
+	* Pull an image from registry
+	* @param imageName - Image name (e.g., "nginx:latest")
+	* @param authConfig - Optional authentication for private registries
+	*/
 	async pullImage(imageName: string, authConfig?: DockerAuthConfig): Promise<void> {
 		this.logger?.infoSync('Pulling Docker image', {
 			component: LogComponents.dockerManager,
@@ -411,7 +413,7 @@ export class DockerManager extends EventEmitter {
 				// Follow progress
 				this.docker.modem.followProgress(
 					stream,
-					(err: any, output: any) => {
+					(err: any, _output: any) => {
 						if (err) {
 							this.logger?.errorSync('Image pull failed during progress', err, {
 								component: LogComponents.dockerManager,
@@ -439,12 +441,12 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Pull an image with retry logic and exponential backoff
-	 * Critical for edge devices with flaky network connections
-	 * @param imageName - Image name to pull
-	 * @param authConfig - Optional authentication for private registries
-	 * @param retries - Number of retry attempts (default: 3)
-	 */
+	* Pull an image with retry logic and exponential backoff
+	* Critical for edge devices with flaky network connections
+	* @param imageName - Image name to pull
+	* @param authConfig - Optional authentication for private registries
+	* @param retries - Number of retry attempts (default: 3)
+	*/
 	async pullImageWithRetry(
 		imageName: string,
 		authConfig?: DockerAuthConfig,
@@ -493,8 +495,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Check if image exists locally (with caching)
-	 */
+	* Check if image exists locally (with caching)
+	*/
 	async hasImage(imageName: string): Promise<boolean> {
 		// Check cache first
 		if (this.imageCache.has(imageName)) {
@@ -506,22 +508,22 @@ export class DockerManager extends EventEmitter {
 			await image.inspect();
 			this.imageCache.set(imageName, true);
 			return true;
-		} catch (error) {
+		} catch (_error) {
 			this.imageCache.set(imageName, false);
 			return false;
 		}
 	}
 
 	/**
-	 * Clear image cache (call after pulling images)
-	 */
+	* Clear image cache (call after pulling images)
+	*/
 	clearImageCache(): void {
 		this.imageCache.clear();
 	}
 
 	/**
-	 * List all local images
-	 */
+	* List all local images
+	*/
 	async listImages(): Promise<Docker.ImageInfo[]> {
 		return this.docker.listImages();
 	}
@@ -531,8 +533,8 @@ export class DockerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Find a container by name
-	 */
+	* Find a container by name
+	*/
 	async findContainerByName(name: string): Promise<Docker.Container | null> {
 		const containers = await this.docker.listContainers({ all: true });
 		const found = containers.find(c =>
@@ -542,9 +544,9 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Create and start a container from a service definition
-	 * Idempotent: Reuses existing containers if found (crash-safe/restart-safe)
-	 */
+	* Create and start a container from a service definition
+	* Idempotent: Reuses existing containers if found (crash-safe/restart-safe)
+	*/
 	async startContainer(service: ContainerService): Promise<string> {
 		this.logger?.infoSync('Starting container', {
 			component: LogComponents.dockerManager,
@@ -600,7 +602,7 @@ export class DockerManager extends EventEmitter {
 
 			// 2. Parse port bindings
 			const portBindings: Docker.PortMap = {};
-			const exposedPorts: { [port: string]: {} } = {};
+			const exposedPorts: Record<string, object> = {};
 
 			if (service.config.ports) {
 				for (const portMapping of service.config.ports) {
@@ -702,7 +704,7 @@ export class DockerManager extends EventEmitter {
 				Env: service.config.environment
 					? Object.entries(service.config.environment).map(
 							([key, value]) => `${key}=${value}`,
-					  )
+					)
 					: [],
 				ExposedPorts: exposedPorts,
 				Healthcheck: healthcheck,
@@ -790,8 +792,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Stop a running container
-	 */
+	* Stop a running container
+	*/
 	async stopContainer(containerId: string, timeout: number = 10): Promise<void> {
 		this.logger?.infoSync('Stopping container', {
 			component: LogComponents.dockerManager,
@@ -828,8 +830,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Pause a container (freeze all processes)
-	 */
+	* Pause a container (freeze all processes)
+	*/
 	async pauseContainer(containerId: string): Promise<void> {
 		this.logger?.infoSync('Pausing container', {
 			component: LogComponents.dockerManager,
@@ -856,8 +858,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Unpause a container (resume all processes)
-	 */
+	* Unpause a container (resume all processes)
+	*/
 	async unpauseContainer(containerId: string): Promise<void> {
 		this.logger?.infoSync('Unpausing container', {
 			component: LogComponents.dockerManager,
@@ -884,8 +886,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Remove a container
-	 */
+	* Remove a container
+	*/
 	async removeContainer(containerId: string, force: boolean = false): Promise<void> {
 		this.logger?.infoSync('Removing container', {
 			component: LogComponents.dockerManager,
@@ -922,8 +924,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Rename a container
-	 */
+	* Rename a container
+	*/
 	async renameContainer(containerId: string, newName: string): Promise<void> {
 		this.logger?.infoSync('Renaming container', {
 			component: LogComponents.dockerManager,
@@ -953,12 +955,12 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Wait for container to become healthy
-	 * @param containerId - Container ID to monitor
-	 * @param timeoutMs - Maximum time to wait (default: 30 seconds)
-	 * @param intervalMs - Poll interval (default: 1 second)
-	 * @returns true if healthy, false if timeout
-	 */
+	* Wait for container to become healthy
+	* @param containerId - Container ID to monitor
+	* @param timeoutMs - Maximum time to wait (default: 30 seconds)
+	* @param intervalMs - Poll interval (default: 1 second)
+	* @returns true if healthy, false if timeout
+	*/
 	async waitForHealthy(
 		containerId: string,
 		timeoutMs: number = 30000,
@@ -1039,20 +1041,20 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Update a container with zero-downtime (blue-green deployment)
-	 * Critical for edge services like MQTT brokers, OPC UA simulators, gateways
-	 * 
-	 * Strategy:
-	 * 1. Create new container with temp name
-	 * 2. Wait for health check to pass
-	 * 3. Stop old container
-	 * 4. Rename new container to final name
-	 * 5. Remove old container
-	 * 
-	 * @param service - Service definition for new container
-	 * @param healthCheckTimeoutMs - Time to wait for health check (default: 30s)
-	 * @returns New container ID
-	 */
+	* Update a container with zero-downtime (blue-green deployment)
+	* Critical for edge services like MQTT brokers, OPC UA simulators, gateways
+	* 
+	* Strategy:
+	* 1. Create new container with temp name
+	* 2. Wait for health check to pass
+	* 3. Stop old container
+	* 4. Rename new container to final name
+	* 5. Remove old container
+	* 
+	* @param service - Service definition for new container
+	* @param healthCheckTimeoutMs - Time to wait for health check (default: 30s)
+	* @returns New container ID
+	*/
 	async updateContainer(
 		service: ContainerService,
 		healthCheckTimeoutMs: number = 30000
@@ -1099,9 +1101,9 @@ export class DockerManager extends EventEmitter {
 			}
 
 			// 3. Create new container with temp name
-			const tempService = { ...service };
+			const _tempService = { ...service };
 			const portBindings: Docker.PortMap = {};
-			const exposedPorts: { [port: string]: {} } = {};
+			const exposedPorts: Record<string, object> = {};
 
 			if (service.config.ports) {
 				for (const portMapping of service.config.ports) {
@@ -1152,7 +1154,7 @@ export class DockerManager extends EventEmitter {
 				Env: service.config.environment
 					? Object.entries(service.config.environment).map(
 							([key, value]) => `${key}=${value}`,
-					  )
+					)
 					: [],
 				ExposedPorts: exposedPorts,
 				HostConfig: {
@@ -1279,23 +1281,23 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Get container information
-	 */
+	* Get container information
+	*/
 	async inspectContainer(containerId: string): Promise<Docker.ContainerInspectInfo> {
 		const container = this.docker.getContainer(containerId);
 		return container.inspect();
 	}
 
 	/**
-	 * List all containers (running and stopped)
-	 */
+	* List all containers (running and stopped)
+	*/
 	async listContainers(all: boolean = true): Promise<Docker.ContainerInfo[]> {
 		return this.docker.listContainers({ all });
 	}
 
 	/**
-	 * List containers managed by our app (filtered by labels)
-	 */
+	* List containers managed by our app (filtered by labels)
+	*/
 	async listManagedContainers(): Promise<DockerContainerInfo[]> {
 		const containers = await this.docker.listContainers({
 			all: true,
@@ -1316,8 +1318,8 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Get container logs
-	 */
+	* Get container logs
+	*/
 	async getContainerLogs(
 		containerId: string,
 		tail: number = 100,
@@ -1337,8 +1339,8 @@ export class DockerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Create a Docker network
-	 */
+	* Create a Docker network
+	*/
 	async createNetwork(name: string): Promise<Docker.Network> {
 		this.logger?.infoSync('Creating Docker network', {
 			component: LogComponents.dockerManager,
@@ -1361,15 +1363,15 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * List all networks
-	 */
+	* List all networks
+	*/
 	async listNetworks(): Promise<Docker.NetworkInspectInfo[]> {
 		return this.docker.listNetworks();
 	}
 
 	/**
-	 * Remove a network
-	 */
+	* Remove a network
+	*/
 	async removeNetwork(networkId: string): Promise<void> {
 		this.logger?.infoSync('Removing Docker network', {
 			component: LogComponents.dockerManager,
@@ -1390,8 +1392,8 @@ export class DockerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Create a Docker volume
-	 */
+	* Create a Docker volume
+	*/
 	async createVolume(name: string): Promise<Docker.VolumeCreateResponse> {
 		this.logger?.infoSync('Creating Docker volume', {
 			component: LogComponents.dockerManager,
@@ -1413,16 +1415,16 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * List all volumes
-	 */
+	* List all volumes
+	*/
 	async listVolumes(): Promise<Docker.VolumeInspectInfo[]> {
 		const result = await this.docker.listVolumes();
 		return result.Volumes;
 	}
 
 	/**
-	 * Remove a volume
-	 */
+	* Remove a volume
+	*/
 	async removeVolume(volumeName: string, force: boolean = false): Promise<void> {
 		this.logger?.infoSync('Removing Docker volume', {
 			component: LogComponents.dockerManager,
@@ -1444,8 +1446,8 @@ export class DockerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Convert K8s-style health probe to Docker native healthcheck
-	 */
+	* Convert K8s-style health probe to Docker native healthcheck
+	*/
 	private convertProbeToDockerHealthcheck(probe: {
 		type: 'http' | 'tcp' | 'exec';
 		path?: string;
@@ -1491,16 +1493,16 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Parse K8s-style resource limits to Docker format
-	 * 
-	 * K8s format:
-	 *   cpu: "0.5" (50% of 1 CPU), "2" (2 CPUs), "500m" (500 millicores = 0.5 CPU)
-	 *   memory: "512M", "1G", "256Mi", "2Gi"
-	 * 
-	 * Docker format:
-	 *   NanoCpus: 1000000000 = 1 CPU, 500000000 = 0.5 CPU
-	 *   Memory: bytes (e.g., 536870912 = 512MB)
-	 */
+	* Parse K8s-style resource limits to Docker format
+	* 
+	* K8s format:
+	*   cpu: "0.5" (50% of 1 CPU), "2" (2 CPUs), "500m" (500 millicores = 0.5 CPU)
+	*   memory: "512M", "1G", "256Mi", "2Gi"
+	* 
+	* Docker format:
+	*   NanoCpus: 1000000000 = 1 CPU, 500000000 = 0.5 CPU
+	*   Memory: bytes (e.g., 536870912 = 512MB)
+	*/
 	private parseResourceLimits(service: ContainerService): Partial<Docker.HostConfig> {
 		const hostConfig: Partial<Docker.HostConfig> = {};
 		
@@ -1589,9 +1591,9 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Parse CPU limit string to Docker NanoCpus format
-	 * Examples: "0.5" -> 500000000, "2" -> 2000000000, "500m" -> 500000000
-	 */
+	* Parse CPU limit string to Docker NanoCpus format
+	* Examples: "0.5" -> 500000000, "2" -> 2000000000, "500m" -> 500000000
+	*/
 	private parseCpuLimit(cpu: string): number {
 		// Handle millicores (e.g., "500m" = 0.5 CPU)
 		if (cpu.endsWith('m')) {
@@ -1605,9 +1607,9 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Parse memory limit string to bytes
-	 * Examples: "512M" -> 536870912, "1G" -> 1073741824, "256Mi" -> 268435456
-	 */
+	* Parse memory limit string to bytes
+	* Examples: "512M" -> 536870912, "1G" -> 1073741824, "256Mi" -> 268435456
+	*/
 	private parseMemoryLimit(memory: string): number {
 		const units: Record<string, number> = {
 			// Decimal units (1000-based)
@@ -1635,37 +1637,38 @@ export class DockerManager extends EventEmitter {
 	}
 
 	/**
-	 * Check if Docker daemon is accessible
-	 */
+	* Check if Docker daemon is accessible
+	*/
 	async ping(): Promise<boolean> {
 		try {
 			await this.docker.ping();
 			return true;
-		} catch (error) {
+		} catch (_error) {
 			return false;
 		}
 	}
 
 	/**
-	 * Get Docker version info
-	 */
+	* Get Docker version info
+	*/
 	async getVersion(): Promise<any> {
 		return this.docker.version();
 	}
 
 	/**
-	 * Get Docker system info
-	 */
+	* Get Docker system info
+	*/
 	async getInfo(): Promise<any> {
 		return this.docker.info();
 	}
 
 	/**
-	 * Get the Docker instance (for advanced operations)
-	 */
+	* Get the Docker instance (for advanced operations)
+	*/
 	public getDockerInstance(): Docker {
 		return this.docker;
 	}
 }
 
 export default DockerManager;
+

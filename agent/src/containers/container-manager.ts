@@ -241,31 +241,31 @@ export type AppStep =
 			appId: number;
 			serviceId: number;
 			containerId: string;
-	  }
+	}
 	| {
 			action: 'pauseContainer';
 			appId: number;
 			serviceId: number;
 			containerId: string;
-	  }
+	}
 	| {
 			action: 'unpauseContainer';
 			appId: number;
 			serviceId: number;
 			containerId: string;
-	  }
+	}
 	| {
 			action: 'startStoppedContainer';
 			appId: number;
 			serviceId: number;
 			containerId: string;
-	  }
+	}
 	| {
 			action: 'removeContainer';
 			appId: number;
 			serviceId: number;
 			containerId: string;
-	  }
+	}
 	| { action: 'startContainer'; appId: number; service: ContainerService }
 	| { action: 'removeNetwork'; appId: number; networkName: string }
 	| { action: 'removeVolume'; appId: number; volumeName: string }
@@ -342,8 +342,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Set logger (called after logger is initialized)
-	 */
+	* Set logger (called after logger is initialized)
+	*/
 	public setLogger(logger: AgentLogger): void {
 		this.logger = logger;
 		// Also update DockerManager's logger
@@ -353,8 +353,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Initialize and load persisted state from database
-	 */
+	* Initialize and load persisted state from database
+	*/
 	public async init(): Promise<void> {
 		this.logger?.infoSync('Initializing ContainerManager', {
 			component: LogComponents.containerManager,
@@ -374,16 +374,16 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Generate SHA-256 hash of state for efficient comparison
-	 */
+	* Generate SHA-256 hash of state for efficient comparison
+	*/
 	private getStateHash(state: DeviceState): string {
 		const stateJson = JSON.stringify(state);
 		return crypto.createHash('sha256').update(stateJson).digest('hex');
 	}
 
 	/**
-	 * Load target state from database
-	 */
+	* Load target state from database
+	*/
 	private async loadTargetStateFromDB(): Promise<void> {
 		try {
 			const snapshot = StateSnapshotModel.getLatest('target');
@@ -422,8 +422,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Save target state to database (only if changed)
-	 */
+	* Save target state to database (only if changed)
+	*/
 	private async saveTargetStateToDB(): Promise<void> {
 		try {
 			const stateHash = this.getStateHash(this.targetState);
@@ -482,8 +482,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Save current state to database (only if changed)
-	 */
+	* Save current state to database (only if changed)
+	*/
 	private async saveCurrentStateToDB(): Promise<void> {
 		try {
 			const stateHash = this.getStateHash(this.currentState);
@@ -526,8 +526,8 @@ export class ContainerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Set what containers SHOULD be running (target state)
-	 */
+	* Set what containers SHOULD be running (target state)
+	*/
 	public async setTarget(target: DeviceState): Promise<void> {
 		this.logger?.infoSync('Setting target state', {
 			component: LogComponents.containerManager,
@@ -567,9 +567,9 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Get what containers ARE running (current state)
-	 * Includes config from target state
-	 */
+	* Get what containers ARE running (current state)
+	* Includes config from target state
+	*/
 	public async getCurrentState(): Promise<DeviceState> {
 		if (this.useRealDocker) {
 			// Query Docker for actual state
@@ -584,8 +584,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Sync current state from real Docker containers
-	 */
+	* Sync current state from real Docker containers
+	*/
 	private async syncCurrentStateFromDocker(): Promise<void> {
 		try {
 			this.currentState = await syncStateFromDocker({
@@ -608,16 +608,16 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Get target state
-	 */
+	* Get target state
+	*/
 	public getTargetState(): DeviceState {
 		return cloneDeep(this.targetState);
 	}
 
 	/**
-	 * Main function: Reconcile current state → target state
-	 * @param options.saveState - Whether to save state to DB after reconciliation (default: true)
-	 */
+	* Main function: Reconcile current state → target state
+	* @param options.saveState - Whether to save state to DB after reconciliation (default: true)
+	*/
 	public async applyTargetState(options: { saveState?: boolean } = {}): Promise<void> {
 		const { saveState = true } = options;
 		
@@ -745,8 +745,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Simulate updating current state (in real app: query Docker)
-	 */
+	* Simulate updating current state (in real app: query Docker)
+	*/
 	public setCurrentState(state: DeviceState): void {
 		this.currentState = cloneDeep(state);
 		this.emit('current-state-changed', state);
@@ -1007,8 +1007,8 @@ export class ContainerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Mark service as having an error (K8s-style)
-	 */
+	* Mark service as having an error (K8s-style)
+	*/
 	private markServiceAsError(
 		appId: number,
 		serviceIdOrImage: number | string,
@@ -1025,8 +1025,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Mark service as running successfully
-	 */
+	* Mark service as running successfully
+	*/
 	private markServiceAsRunning(appId: number, serviceId: number): void {
 		markServiceRunning(this.getStateHelpersContext(), appId, serviceId);
 	}
@@ -1063,9 +1063,9 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Sanitize state to ensure all data is in correct format
-	 * Fixes issues with data loaded from database that may have wrong types
-	 */
+	* Sanitize state to ensure all data is in correct format
+	* Fixes issues with data loaded from database that may have wrong types
+	*/
 	private sanitizeState(state: DeviceState): void {
 		sanitizeContainerState(state);
 	}
@@ -1089,9 +1089,9 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Get reconciliation status for each service
-	 * Returns which services are out of sync and need updates
-	 */
+	* Get reconciliation status for each service
+	* Returns which services are out of sync and need updates
+	*/
 	public getReconciliationStatus(): {
 		[appId: number]: {
 			appName: string;
@@ -1137,9 +1137,9 @@ export class ContainerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Start automatic reconciliation loop
-	 * This monitors containers and automatically restarts them if they stop
-	 */
+	* Start automatic reconciliation loop
+	* This monitors containers and automatically restarts them if they stop
+	*/
 	public startAutoReconciliation(intervalMs: number = 30000): void {
 		const state = {
 			enabled: this.isReconciliationEnabled,
@@ -1161,8 +1161,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Stop automatic reconciliation loop
-	 */
+	* Stop automatic reconciliation loop
+	*/
 	public stopAutoReconciliation(): void {
 		const state = {
 			enabled: this.isReconciliationEnabled,
@@ -1174,15 +1174,15 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Check if auto-reconciliation is enabled
-	 */
+	* Check if auto-reconciliation is enabled
+	*/
 	public isAutoReconciliationEnabled(): boolean {
 		return this.isReconciliationEnabled;
 	}
 
 	/**
-	 * Get the Docker instance (for logging and advanced operations)
-	 */
+	* Get the Docker instance (for logging and advanced operations)
+	*/
 	public getDocker(): Docker | undefined {
 		if (this.useRealDocker && this.dockerManager) {
 			return this.dockerManager.getDockerInstance();
@@ -1191,8 +1191,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Set the log monitor (called by API server after initialization)
-	 */
+	* Set the log monitor (called by API server after initialization)
+	*/
 	public setLogMonitor(monitor: ContainerLogMonitor): void {
 		this.logMonitor = monitor;
 		this.logger?.infoSync('Log monitor attached to ContainerManager', {
@@ -1202,8 +1202,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Attach log monitor to a container
-	 */
+	* Attach log monitor to a container
+	*/
 	private async attachLogsToContainer(
 		containerId: string,
 		service: ContainerService,
@@ -1212,8 +1212,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Attach logs to all running containers
-	 */
+	* Attach logs to all running containers
+	*/
 	public async attachLogsToAllContainers(): Promise<void> {
 		await attachAllRuntimeLogs(
 			this.logMonitor,
@@ -1229,8 +1229,8 @@ export class ContainerManager extends EventEmitter {
 	// ========================================================================
 
 	/**
-	 * Start health check monitoring for a container
-	 */
+	* Start health check monitoring for a container
+	*/
 	private startHealthMonitoring(containerId: string, service: ContainerService): void {
 		startHealthRuntime(
 			{
@@ -1252,15 +1252,15 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Convert service config probe to HealthProbe format
-	 */
+	* Convert service config probe to HealthProbe format
+	*/
 	private convertToHealthProbe(probe: any): HealthProbe {
 		return toHealthProbe(probe);
 	}
 
 	/**
-	 * Restart a container that failed its liveness probe
-	 */
+	* Restart a container that failed its liveness probe
+	*/
 	private async restartUnhealthyContainer(
 		containerId: string,
 		serviceName: string,
@@ -1287,8 +1287,8 @@ export class ContainerManager extends EventEmitter {
 	}
 
 	/**
-	 * Get health status for all containers
-	 */
+	* Get health status for all containers
+	*/
 	public getContainerHealth(): any[] {
 		return this.healthCheckManager.getAllHealth();
 	}
@@ -1299,4 +1299,5 @@ export class ContainerManager extends EventEmitter {
 // ============================================================================
 
 export default ContainerManager;
+
 

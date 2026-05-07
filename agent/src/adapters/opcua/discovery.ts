@@ -10,7 +10,7 @@ import { createHash } from 'crypto';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice } from '../types';
 import { generateOPCUAFingerprint } from '../fingerprint';
-import type { ConfigManager } from '../../managers/config.js';
+import type { ConfigManager } from '../../agent/config.js';
 
 export interface OPCUADiscoveryOptions {
   discoveryUrls?: string[]; // e.g., ['opc.tcp://localhost:4840']
@@ -108,7 +108,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
   /**
    * Phase 1: Fast endpoint enumeration
    */
-  async discover(options?: OPCUADiscoveryOptions): Promise<DiscoveredDevice[]> {
+  async discover(_options?: OPCUADiscoveryOptions): Promise<DiscoveredDevice[]> {
     const discovered: DiscoveredDevice[] = [];
 
     // Get discovery targets from endpoints (those with endpointUrl but no dataPoints)
@@ -376,7 +376,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 						phase: 'discovery'
 					});
 				}
-			} catch (error) {
+			} catch (_error) {
 				this.logger?.debugSync(`No OPC-UA server at ${url}`, {
 					component: LogComponents.discovery + "] [" + this.protocol as any
 				});
@@ -388,7 +388,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
   /**
    * Phase 2: Validate server (read ServerInfo)
    */
-  async validate(device: DiscoveredDevice, timeout = 5000): Promise<any> {
+  async validate(device: DiscoveredDevice, _timeout = 5000): Promise<any> {
     this.logger?.debugSync('Validating OPC-UA server', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       endpoint: device.connection.endpointUrl,

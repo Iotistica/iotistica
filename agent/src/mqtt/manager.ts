@@ -3,7 +3,6 @@ import { EventEmitter } from 'events';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { MessageIdGenerator } from './utils';
-import type { DictionaryManager } from './dictionary';
 import { MessageBufferSync } from './buffer';
 import type { BufferSyncConfig } from './buffer';
 import { serializePayload } from './codec';

@@ -320,7 +320,7 @@ export async function getNetworkInterfaces(): Promise<NetworkInterfaceInfo[]> {
 	// Cache with timestamp for 30-second TTL
 	cachedNetworkInterfaces = { ts: now, data: formatted };
 	return formatted;
-	} catch (error) {
+	} catch (_error) {
 		// Don't cache errors - allow retry on next call
 		return [];
 	}
@@ -343,7 +343,7 @@ export async function getCpuTemp(): Promise<number | null> {
 	try {
 		const tempInfo = await systeminformation.cpuTemperature();
 		return tempInfo.main > 0 ? Math.round(tempInfo.main) : null;
-	} catch (error) {
+	} catch (_error) {
 		return null;
 	}
 }
@@ -360,7 +360,7 @@ export async function getCpuCores(): Promise<number> {
 		const cpuInfo = await systeminformation.cpu();
 		cachedCpuCores = cpuInfo.cores;
 		return cachedCpuCores;
-	} catch (error) {
+	} catch (_error) {
 		cachedCpuCores = 1;
 		return 1;
 	}
@@ -404,7 +404,7 @@ export async function getMemoryInfo(): Promise<{
 		total: totalMb,
 		percent,
 	};
-} catch (error) {
+} catch (_error) {
 	// Silently return zero values - caller will handle
 	return { used: 0, total: 0, percent: 0 };
 }
@@ -504,7 +504,7 @@ export async function getStorageInfo(): Promise<{
 		const fsInfo = await systeminformation.fsSize();
 		
 		// Look for /data partition first
-		let targetPartition = fsInfo.find(fs => 
+		const targetPartition = fsInfo.find(fs => 
 			process.platform === 'win32'
 				? fs.mount.toUpperCase() === 'C:'
 				: fs.mount === '/data'
@@ -521,7 +521,7 @@ export async function getStorageInfo(): Promise<{
 		// use is already 0-100 from systeminformation, round to integer for display
 		percent: Math.round(targetPartition.use),
 	};
-} catch (error) {
+} catch (_error) {
 	// Silently return null values - caller will handle
 	return { used: null, total: null, percent: null };
 }
@@ -540,7 +540,7 @@ export async function getUptime(): Promise<number> {
 		}
 		const timeInfo = await systeminformation.time();
 		return timeInfo.uptime;
-	} catch (error) {
+	} catch (_error) {
 		return 0;
 	}
 }
@@ -557,7 +557,7 @@ export async function getHostname(): Promise<string> {
 		const osInfo = await systeminformation.osInfo();
 		cachedHostname = osInfo.hostname;
 		return cachedHostname;
-	} catch (error) {
+	} catch (_error) {
 		cachedHostname = 'unknown';
 		return 'unknown';
 	}
@@ -572,7 +572,7 @@ export async function getMacAddress(): Promise<string | undefined> {
 		const interfaces = await systeminformation.networkInterfaces();
 		const primaryInterface = interfaces.find(i => i.iface === defaultIface);
 		return primaryInterface?.mac || undefined;
-	} catch (error) {
+	} catch (_error) {
 		// Silently return undefined - caller will handle
 		return undefined;
 	}
@@ -586,7 +586,7 @@ export async function getOsVersion(): Promise<string | undefined> {
 		const osInfo = await systeminformation.osInfo();
 		// Format: "Debian GNU/Linux 12 (bookworm)" or similar
 		return `${osInfo.distro} ${osInfo.release}${osInfo.codename ? ` (${osInfo.codename})` : ''}`;
-	} catch (error) {
+	} catch (_error) {
 		// Silently return undefined - caller will handle
 		return undefined;
 	}
@@ -687,7 +687,7 @@ export async function getTopProcesses(): Promise<ProcessInfo[]> {
 	result.length = resultCount;
 	
 	return result;
-} catch (error) {
+} catch (_error) {
 	// Silently try fallback method - debug logging removed
 	return await getTopProcessesFallback();
 }
@@ -727,7 +727,7 @@ async function getTopProcessesFallback(): Promise<ProcessInfo[]> {
 	
 	// Debug logging removed - processes collected successfully
 	return processes;
-} catch (error) {
+} catch (_error) {
 	// Silently return empty array - caller will handle
 	return [];
 }
@@ -764,7 +764,7 @@ async function getTopProcessesWindows(): Promise<ProcessInfo[]> {
 
 export async function getSystemMetrics(): Promise<SystemMetrics> {
 	// Gather all metrics in parallel for speed - with timing
-	const startTime = Date.now();
+	const _startTime = Date.now();
 	const timings: Record<string, number> = {};
 	
 	const wrapWithTiming = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {

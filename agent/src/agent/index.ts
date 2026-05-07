@@ -265,7 +265,6 @@ export class AgentManager {
 	private async loadAgentInfo(): Promise<void> {
 		const record = await this.dbClient.loadAgent();
 		if (record) {
-			// Debug: log record before parsing
 			this.logger?.debugSync('Record loaded from database', {
 				component: LogComponents.agentManager,
 				operation: 'loadAgentInfo',
@@ -631,8 +630,5 @@ export class AgentManager {
 	}
 }
 
-export default AgentManager;
 
-
-
-
+export type { AgentInfo, ProvisioningConfig, ProvisionRequest, ProvisionResponse } from './types.js';

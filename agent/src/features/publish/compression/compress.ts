@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import * as msgpack from 'msgpack-lite';
 import { createJsonPayload, createMsgpackPayload, serializePayload } from '../../../mqtt/manager.js';
 import { getCpuUsage } from '../../../system/metrics.js';
-import type { MqttConnection, Logger } from '../types.js';
+import type { MqttConnection } from '../types.js';
 import type { Protocol } from '../../../anomaly/types.js';
 
 const deflateAsync = promisify(zlibDeflate);
@@ -189,7 +189,7 @@ export class PayloadCompressor {
 
     if (this.opts.useMsgpack) {
       const cpu1 = process.cpuUsage();
-      let payload = serializePayload(createMsgpackPayload(data as object, msgIdGen));
+      const payload = serializePayload(createMsgpackPayload(data as object, msgIdGen));
       msgpackCpu = process.cpuUsage(cpu1);
 
       const deflated = await this.maybeDeflatePayload(payload, this.opts.useDeflate);
@@ -197,7 +197,7 @@ export class PayloadCompressor {
       deflateCpu = deflated.deflateCpu;
       compressedSize = this.sizeOf(finalPayload);
     } else {
-      let payload = serializePayload(createJsonPayload(data as object, msgIdGen));
+      const payload = serializePayload(createJsonPayload(data as object, msgIdGen));
 
       if (this.opts.useDeflate) {
         const deflated = await this.maybeDeflatePayload(payload, true);

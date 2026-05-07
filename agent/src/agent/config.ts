@@ -384,9 +384,10 @@ export class ConfigManager extends EventEmitter {
             connection?.slaveRange !== undefined ||
             connection?.slaveId !== undefined
           );
-        case "opcua":
+        case "opcua": {
           const hasEndpointUrl = !!connection?.endpointUrl;
           return hasEndpointUrl && hasNoDataPoints;
+        }
         case "snmp":
           return connection?.community && hasNoDataPoints;
         case "bacnet":
@@ -394,12 +395,13 @@ export class ConfigManager extends EventEmitter {
             Array.isArray(connection?.discoveryTargets) &&
             connection.discoveryTargets.length > 0
           );
-        case "mqtt":
+        case "mqtt": {
           // Accept endpoints with topics array (for validation)
           // Discovery validates that topics receive data (not auto-discovery)
           const hasTopics =
             Array.isArray(connection?.topics) && connection.topics.length > 0;
           return hasTopics && hasNoDataPoints;
+        }
         default:
           return false;
       }
@@ -1900,7 +1902,7 @@ export class ConfigManager extends EventEmitter {
   /**
    * Handle memory configuration changes
    */
-  public handleMemoryConfigChanges(change: { old: any; new: any }): void {
+  public handleMemoryConfigChanges(_change: { old: any; new: any }): void {
     const performanceConfig = this.getPerformanceConfig();
     const newInterval = performanceConfig.memoryCheckIntervalMs!;
     const newThreshold = performanceConfig.memoryThresholdMb! * 1024 * 1024;

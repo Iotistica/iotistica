@@ -229,7 +229,7 @@ export class CredentialManager extends EventEmitter {
 			// @ts-ignore - Accessing internal buffer (implementation-specific)
 			if (str.length > 0 && typeof str === 'string') {
 				// Trigger a copy-on-write if possible, then hint to GC
-				const zeros = '0'.repeat(str.length);
+				const _zeros = '0'.repeat(str.length);
 				// Note: Assignment won't modify original string due to immutability,
 				// but helps ensure old value isn't easily recoverable in heap dumps
 			}
@@ -342,7 +342,7 @@ export class CredentialManager extends EventEmitter {
 			}
 
 			// Step 2: Commit changes atomically
-			let oldKey = this.deviceApiKey;
+			const oldKey = this.deviceApiKey;
 
 			// Update in-memory
 			this.deviceApiKey = newKey;
@@ -590,10 +590,3 @@ export class CredentialManager extends EventEmitter {
 	}
 }
 
-/**
- * Event type declarations for TypeScript
- */
-export interface CredentialManager {
-	on(event: 'apiKeyRotated', listener: (payload: ApiKeyRotatedEvent) => void): this;
-	emit(event: 'apiKeyRotated', payload: ApiKeyRotatedEvent): boolean;
-}

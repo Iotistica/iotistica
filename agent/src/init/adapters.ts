@@ -8,7 +8,6 @@
  * Extracted from features.ts to keep feature orchestration focused.
  */
 
-import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 import { AdapterManager, type AdapterConfig } from '../adapters/index.js';
 import type { FeatureContext } from './features.js';

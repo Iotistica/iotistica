@@ -1,7 +1,7 @@
 import type { AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
 import type { MqttDiscoveryOptions } from '../mqtt/discovery.js';
-import type { ConfigManager } from '../../managers/config.js';
+import type { ConfigManager } from '../../agent/config.js';
 
 /**
  * Builds protocol-specific discovery options from environment variables / ConfigManager.

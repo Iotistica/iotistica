@@ -98,7 +98,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
       this.logger.debug(`Starting ${this.getProtocolName()} adapter...`);
 
       // Initialize all enabled devices
-      for (const [name, device] of this.devices) {
+      for (const [_name, device] of this.devices) {
         if (device.enabled) {
           await this.initializeDevice(device);
         }
@@ -381,7 +381,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
    * Initialize device statuses
    */
   protected initializeDeviceStatuses(): void {
-    for (const [name, device] of this.devices) {
+    for (const [name, _device] of this.devices) {
       this.deviceStatuses.set(name, {
         deviceName: name,
         connected: false,

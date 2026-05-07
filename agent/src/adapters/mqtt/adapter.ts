@@ -1245,7 +1245,7 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
       // Default behavior without explicit metric mapping:
       // emit every primitive field from JSON object payloads.
       if (points.length === 0) {
-        let singleMetric = device.metric || topic;
+        const singleMetric = device.metric || topic;
         let singleType = device.dataType;
         let singleSource: unknown = parsed;
 

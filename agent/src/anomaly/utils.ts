@@ -61,18 +61,18 @@ export function loadConfigFromTargetState(targetStateConfig?: any): AnomalyConfi
  * Load configuration from environment variables (fallback)
  */
 export function loadConfigFromEnv(): AnomalyConfig {
-	const enabled = process.env.ANOMALY_DETECTION_ENABLED === 'true';
+	const _enabled = process.env.ANOMALY_DETECTION_ENABLED === 'true';
 	const sensitivity = parseInt(process.env.ANOMALY_SENSITIVITY || '5', 10);
 	
 	// Parse detection methods
 	const methodsStr = process.env.ANOMALY_METHODS || 'zscore,mad,ewma';
-	const methods = methodsStr.split(',').map(m => m.trim()) as DetectionMethod[];
+	const _methods = methodsStr.split(',').map(m => m.trim()) as DetectionMethod[];
 	
 	// Statistical parameters
-	const windowSize = parseInt(process.env.ANOMALY_WINDOW_SIZE || '500', 10);
+	const _windowSize = parseInt(process.env.ANOMALY_WINDOW_SIZE || '500', 10);
 	const zscoreThreshold = parseFloat(process.env.ANOMALY_ZSCORE_THRESHOLD || '3.0');
 	const madThreshold = parseFloat(process.env.ANOMALY_MAD_THRESHOLD || '3.0');
-	const rateThreshold = parseFloat(process.env.ANOMALY_RATE_THRESHOLD || '10.0');
+	const _rateThreshold = parseFloat(process.env.ANOMALY_RATE_THRESHOLD || '10.0');
 	
 	// ML parameters
 	const mlEnabled = process.env.ANOMALY_ML_ENABLED === 'true';

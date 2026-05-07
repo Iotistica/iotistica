@@ -1,6 +1,7 @@
 import { BACnetDevice, BACnetObject, BACnetProperty } from './types';
 import { Logger } from '../types';
 import { pLimit } from '../../lib/p-limit.js';
+import BACnet from 'bacstack';
 
 interface BACnetReadResult {
   objectId: {
@@ -29,7 +30,6 @@ export class BACnetClient {
     this.logger = logger;
 
     // Initialize bacstack client
-    const BACnet = require('bacstack');
     this.client = new BACnet({
       apduTimeout: config.connectionTimeoutMs,
       port: bacnetPort,

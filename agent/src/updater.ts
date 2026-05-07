@@ -6,7 +6,7 @@
  */
 
 import { existsSync, writeFileSync, unlinkSync, readFileSync, statSync, mkdirSync } from 'fs';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { join } from 'path';
@@ -1038,7 +1038,7 @@ export class AgentUpdater {
           component: LogComponents.agentUpdater
         });
       }
-    } catch (error) {
+    } catch (_error) {
       // Power state check not critical
       checks.powerState = true;
       this.logger.debugSync("Power state check skipped", {
@@ -1177,7 +1177,7 @@ export class AgentUpdater {
       // Remove corrupted file
       try {
         unlinkSync(UPDATE_STATUS_FILE);
-      } catch (cleanupError) {
+      } catch (_cleanupError) {
         // Ignore cleanup errors
       }
     }
@@ -1282,7 +1282,7 @@ export class AgentUpdater {
       // Remove corrupted file
       try {
         unlinkSync(PENDING_UPDATE_FILE);
-      } catch (cleanupError) {
+      } catch (_cleanupError) {
         // Ignore cleanup errors
       }
     }
@@ -1441,7 +1441,6 @@ export class AgentUpdater {
       // Don't fail if missing, just warn - some systems may not support it
       // Note: Using sync exec to avoid making verifyScriptIntegrity async
       try {
-        const { execSync } = require('child_process');
         const output = execSync(`lsattr ${scriptPath} 2>/dev/null || true`, { encoding: 'utf8' });
         const hasImmutableBit = output.includes('i');
         
@@ -1458,7 +1457,7 @@ export class AgentUpdater {
             scriptPath
           });
         }
-      } catch (error) {
+      } catch (_error) {
         // lsattr not available or failed - not critical, just note it
         this.logger.debugSync("Could not check immutable bit (lsattr unavailable)", {
           component: LogComponents.agentUpdater,

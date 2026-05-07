@@ -153,7 +153,7 @@ export class RetryManager {
 					message: 'Retry backoff preserved across agent restart',
 				});
 			}
-		} catch (err: any) {
+		} catch (_err: any) {
 			// Table might not exist yet - that's okay, it will be created on first write
 			this.initialized = true;
 		}

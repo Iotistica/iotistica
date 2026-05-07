@@ -44,7 +44,7 @@ export function calculateHash(obj: any): string {
  */
 export function appsChanged(oldApps: any, newApps: any): boolean {
 	const normalizeService = (service: any) => {
-		const { containerId, status, ...configFields } = service;
+		const { _containerId, _status, ...configFields } = service;
 		return configFields;
 	};
 

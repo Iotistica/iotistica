@@ -221,7 +221,7 @@ const {
 	agentNetworkSubnet: subnet,
 } = constants;
 
-export async function supervisorNetworkReady(): Promise<boolean> {
+export async function agentNetworkReady(): Promise<boolean> {
 	try {
 		// The inspect may fail even if the interface exist due to docker corruption
 		const network = await docker.getNetwork(iface).inspect();
@@ -239,7 +239,7 @@ export async function supervisorNetworkReady(): Promise<boolean> {
 	}
 }
 
-export async function ensureSupervisorNetwork(): Promise<void> {
+export async function ensureAgentNetwork(): Promise<void> {
 	// CRITICAL: Acquire lock to prevent concurrent network recreation
 	// Edge scenarios: systemd restart during OTA, two agent instances overlapping
 	const lockId = await acquireNetworkLock('network-supervisor', 30000);

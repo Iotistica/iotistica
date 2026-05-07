@@ -15,7 +15,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from '../types';
 import { generateModbusFingerprint } from '../fingerprint';
-import type { ConfigManager } from '../../managers/config.js';
+import type { ConfigManager } from '../../agent/config.js';
 
 export interface ModbusDiscoveryOptions {
   serialPort?: string; // e.g., '/dev/ttyUSB0' or 'COM3'
@@ -40,11 +40,11 @@ interface DataPoint {
   safe?: boolean; // Default true - false for control registers that trigger actions
 }
 
-interface ProfileMap {
+interface _ProfileMap {
   [profile: string]: { dataPoints: DataPoint[] };
 }
 
-const PROFILE_ENV = process.env.MODBUS_PROFILE || 'Generic';
+const _PROFILE_ENV = process.env.MODBUS_PROFILE || 'Generic';
 
 export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
   private configManager?: ConfigManager;
@@ -58,7 +58,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Phase 1: Fast slave ID scanning
    * Opens connection ONCE, cycles through all slave IDs
    */
-  async discover(options?: ModbusDiscoveryOptions): Promise<DiscoveredDevice[]> {
+  async discover(_options?: ModbusDiscoveryOptions): Promise<DiscoveredDevice[]> {
 
     // Get discovery targets from endpoints (those with slaveRange or slaveId)
     const discoveryTargets = this.configManager?.getDiscoveryTargets?.('modbus') || [];

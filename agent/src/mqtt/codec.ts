@@ -55,10 +55,11 @@ export function serializePayload(payload: MqttPayload): Buffer {
 			return payload.data;
 		case 'text':
 			return Buffer.from(payload.data, 'utf-8');
-		default:
+		default: {
 			// TypeScript exhaustiveness check
 			const _exhaustive: never = payload;
 			throw new Error(`Unknown payload format: ${(_exhaustive as any).format}`);
+		}
 	}
 }
 
@@ -254,7 +255,7 @@ export function logCompressionStats(
 				`json: ${jsonSize}B, msgpack: ${msgpackSize}B, savings: ${savingsBytes}B (${compressionRatio}%)`
 			);
 		}
-	} catch (error) {
+	} catch (_error) {
 		// Ignore logging errors
 	}
 }

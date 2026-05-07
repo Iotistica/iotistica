@@ -1,4 +1,3 @@
-import type Docker from 'dockerode';
 import type { ContainerLogMonitor } from '../logging/container-monitor';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';

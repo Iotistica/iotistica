@@ -72,7 +72,7 @@ export async function initializeCloudLogging(ctx: AgentInitContext): Promise<voi
 
 export async function initializeDeviceManager(ctx: AgentInitContext): Promise<void> {
 	const cloudApiEndpoint = ctx.configManager!.getCloudApiEndpoint();
-	ctx.agentManager = new (await import('../managers/index.js')).AgentManager(
+	ctx.agentManager = new (await import('../agent/index.js')).AgentManager(
 		ctx.agentLogger!,
 		ctx.sharedHttpClient,
 		undefined,

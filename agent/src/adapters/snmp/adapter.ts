@@ -142,7 +142,7 @@ export class SNMPAdapter extends BaseProtocolAdapter {
     }
   }
 
-  private parseSnmpValue(value: any, oid: SNMPDataPoint): number {
+  private parseSnmpValue(value: any, _oid: SNMPDataPoint): number {
     // Handle SNMP data types
     if (typeof value === 'number') return value;
     if (typeof value === 'string') {

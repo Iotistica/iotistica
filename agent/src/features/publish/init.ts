@@ -470,7 +470,7 @@ export class DevicePublishFeature extends BaseFeature {
     // Validate regex
     try {
       new RegExp(config.eomDelimiter);
-    } catch (error) {
+    } catch (_error) {
       throw new Error(`Device '${config.name}': Invalid 'eomDelimiter' regex: ${config.eomDelimiter}`);
     }
 

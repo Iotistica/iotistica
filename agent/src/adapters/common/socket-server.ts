@@ -247,7 +247,7 @@ export class SocketServer {
       this.clients.splice(index, 1);
       try {
         socket.destroy();
-      } catch (error) {
+      } catch (_error) {
         // Ignore errors when destroying socket
       }
     }

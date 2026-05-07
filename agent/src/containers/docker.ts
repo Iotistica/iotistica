@@ -10,7 +10,6 @@ import { Readable } from 'stream';
 import { BaseOrchestratorDriver } from './types';
 import ContainerManager from './container-manager';
 import type {
-	TargetState,
 	CurrentState,
 	ServiceConfig,
 	ServiceStatus,
@@ -158,8 +157,8 @@ export class DockerDriver extends BaseOrchestratorDriver {
 			if (service) {
 				return {
 					state: service.status === 'Running' ? 'running' : 
-					       service.status === 'Exited' ? 'stopped' : 
-					       'unknown',
+					service.status === 'Exited' ? 'stopped' : 
+					'unknown',
 					startedAt: undefined, // Would need to get from Docker
 					message: service.status
 				};
@@ -350,3 +349,4 @@ export class DockerDriver extends BaseOrchestratorDriver {
 		return [];
 	}
 }
+

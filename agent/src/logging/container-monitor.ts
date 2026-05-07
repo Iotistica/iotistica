@@ -348,7 +348,7 @@ export class ContainerLogMonitor {
 				containerId: containerId.substring(0, 12),
 				serviceName: options.serviceName,
 			});
-		} catch (error) {
+		} catch (_error) {
 			// Reconnection failed, scheduleReconnection will be called from attach()
 			// which already logged the error
 		}

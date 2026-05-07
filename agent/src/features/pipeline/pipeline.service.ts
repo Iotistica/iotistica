@@ -115,7 +115,8 @@ export class PipelineService {
     // node-red is intentionally optional. Keep the runtime out of the default
     // agent install and require an explicit plugin-style install when needed.
     try {
-      this.red = require('node-red');
+      const nodeRedModule = await import('node-red');
+      this.red = (nodeRedModule as any).default || nodeRedModule;
     } catch (error: any) {
       if (error?.code === 'MODULE_NOT_FOUND' || String(error?.message || '').includes("Cannot find module 'node-red'")) {
         throw new Error('Embedded Node-RED runtime is not installed. Install node-red separately and set ENABLE_EMBEDDED_NODE_RED=true to enable the optional pipeline runtime.');

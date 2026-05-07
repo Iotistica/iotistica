@@ -16,6 +16,8 @@
  */
 
 import type { AgentLogger } from '../../logging/agent-logger';
+import os from 'os';
+import BACnet from 'bacstack';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from '../types';
 import { generateBACnetFingerprint } from '../fingerprint';
@@ -105,7 +107,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
     if (target.includes('/')) {
       const [baseIP, prefixStr] = target.split('/');
       const prefix = parseInt(prefixStr, 10);
-      const [a, b, c, d] = baseIP.split('.').map(Number);
+      const [a, b, c, _d] = baseIP.split('.').map(Number);
       const ips: string[] = [];
       
       // Simple /24 subnet expansion (192.168.x.1-254)
@@ -141,7 +143,6 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Derive subnet broadcast address from network interfaces
    */
   private deriveBroadcastAddress(): string {
-    const os = require('os');
     const ifaces = os.networkInterfaces();
     
     // Find first non-loopback IPv4 interface that's NOT a /32 (point-to-point)
@@ -212,9 +213,6 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
       deviceId: this.AGENT_DEVICE_ID
     });
 
-    // @ts-ignore - bacstack has no type definitions
-    const BACnet = require('bacstack');
-    
     this.client = new BACnet({ 
       apduTimeout: timeout,
       port: this.AGENT_PORT,  // Use different port to avoid collision with devices
@@ -417,7 +415,6 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 
               // Create temporary client with target IP as broadcast address
               // Use random port (undefined) to avoid conflict with main client
-              const BACnet = require('bacstack');
               const unicastClient = new BACnet({
                 apduTimeout: timeout,
                 // port: undefined,  // Let OS assign random port
@@ -444,7 +441,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
               setTimeout(() => {
                 try {
                   unicastClient.close();
-                } catch (err) {
+                } catch (_err) {
                   // Ignore cleanup errors
                 }
               }, timeout + 1000);

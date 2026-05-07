@@ -13,7 +13,7 @@ import process from 'process';
 import { writeHeapSnapshot } from 'v8';
 import { mkdirSync } from 'fs';
 import { join } from 'path';
-import Agent from './agent';
+import Agent from './agent.js';
 import { startWatchdog, notifySystemd, notifyReady } from './system/watchdog';
 import { HealthArbiter } from './health/health-arbiter';
 import { healthcheck } from './system/memory';

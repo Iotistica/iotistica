@@ -19,8 +19,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from '../types';
 import { generateSNMPFingerprint } from '../fingerprint';
-import type { ConfigManager } from '../../managers/config.js';
-import * as net from 'net';
+import type { ConfigManager } from '../../agent/config.js';
 import * as dns from 'dns';
 import { promisify } from 'util';
 import { pLimit } from '../../lib/p-limit.js';
@@ -348,7 +347,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
         });
       });
 
-    } catch (error) {
+    } catch (_error) {
       return null;
     }
   }
@@ -579,7 +578,7 @@ export class SNMPDiscoveryPlugin extends BaseDiscoveryPlugin {
   /**
    * Generate default data points from device info
    */
-  private generateDefaultDataPoints(info: SNMPDeviceInfo): any[] {
+  private generateDefaultDataPoints(_info: SNMPDeviceInfo): any[] {
     return [
       {
         name: 'sysName',

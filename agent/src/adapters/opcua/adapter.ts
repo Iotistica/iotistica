@@ -54,7 +54,6 @@
  * @module opcua-adapter
  */
 
-import { EventEmitter } from 'events';
 import { createHash } from 'crypto';
 // @ts-ignore - Optional dependency: node-opcua-client may not be installed
 import {
@@ -67,10 +66,10 @@ import {
   UserTokenType,
   ClientSubscription,
   TimestampsToReturn,
-  MonitoringParametersOptions,
+  MonitoringParametersOptions as _MonitoringParametersOptions,
   ReadValueIdOptions,
   ClientMonitoredItem,
-  DataType,
+  DataType as _DataType,
 } from 'node-opcua-client';
 import { BaseProtocolAdapter, GenericDeviceConfig } from '../base.js';
 import { DeviceDataPoint, Logger } from '../types.js';
@@ -837,7 +836,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
    * @returns Array of data values
    */
   private async readWithRetry(session: ClientSession, nodesToRead: ReadValueIdOptions[]): Promise<DataValue[]> {
-    let results = await session.read(nodesToRead);
+    const results = await session.read(nodesToRead);
     
     // PERFORMANCE: Smart retry - only retry failed nodes, not successful ones
     // Before: 1 transient error → re-read all 100 nodes
@@ -1477,7 +1476,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       for (const subscription of sessionWrapper.subscriptions) {
         try {
           await subscription.terminate();
-        } catch (error) {
+        } catch (_error) {
           // Ignore individual subscription errors
         }
       }
@@ -1487,7 +1486,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
       if (sessionWrapper.subscription) {
         try {
           await sessionWrapper.subscription.terminate();
-        } catch (error) {
+        } catch (_error) {
           // Ignore
         }
         sessionWrapper.subscription = null;

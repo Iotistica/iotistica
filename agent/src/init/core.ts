@@ -9,7 +9,7 @@ export async function initCore(ctx: AgentInitContext): Promise<void> {
 }
 
 export async function initializeStateReconciler(ctx: AgentInitContext): Promise<void> {
-	const { StateManager: StateManager } = await import('../managers/state.js');
+	const { StateManager: StateManager } = await import('../agent/state.js');
 	ctx.stateReconciler = new StateManager();
 	await ctx.stateReconciler.init();
 	ctx.configManager = ctx.stateReconciler.getConfigManager();

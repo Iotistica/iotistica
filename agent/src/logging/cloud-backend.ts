@@ -97,7 +97,7 @@ export class CloudLogBackend implements LogBackend {
 	private lastFlushSuccessAt?: number;
 	private lastFlushError?: string;
 	
-	constructor(config: CloudLogBackendConfig, logger?: AgentLogger) {
+	constructor(config: CloudLogBackendConfig, _logger?: AgentLogger) {
 		// this.logger = logger; // REMOVED - causes infinite recursion
 		this.config = {
 			cloudEndpoint: config.cloudEndpoint,
@@ -126,7 +126,7 @@ export class CloudLogBackend implements LogBackend {
 		
 	// For localhost/development, disable TLS verification
 	const isLocalhost = this.config.cloudEndpoint.includes('localhost') || 
-	                     this.config.cloudEndpoint.includes('127.0.0.1');
+	this.config.cloudEndpoint.includes('127.0.0.1');
 	
 	// Use shared HTTP client if provided, otherwise create dedicated instance
 	if (config.httpClient) {
@@ -162,7 +162,7 @@ export class CloudLogBackend implements LogBackend {
 					}
 				},
 				
-				onFailure: (error, attempts) => {
+				onFailure: (error, _attempts) => {
 					// Use logger with component to avoid recursive logging
 					this.consecutiveFailures++;
 					
@@ -212,9 +212,9 @@ export class CloudLogBackend implements LogBackend {
 	}
 
 	/**
-	 * Trigger an immediate flush attempt.
-	 * Used when another subsystem has concrete evidence that connectivity recovered.
-	 */
+	* Trigger an immediate flush attempt.
+	* Used when another subsystem has concrete evidence that connectivity recovered.
+	*/
 	public triggerFlush(reason: string = 'manual'): void {
 		if (this.buffer.length === 0 && this.pendingBatches.size === 0) {
 			return;
@@ -289,7 +289,7 @@ export class CloudLogBackend implements LogBackend {
 		}
 	}
 	
-	async getLogs(filter?: LogFilter): Promise<LogMessage[]> {
+	async getLogs(_filter?: LogFilter): Promise<LogMessage[]> {
 		// CloudLogBackend doesn't store logs locally (they're streamed to cloud)
 		// Return empty array
 		return [];
@@ -299,38 +299,38 @@ export class CloudLogBackend implements LogBackend {
 		return 0;
 	}
 	
-	async cleanup(olderThanMs: number): Promise<number> {
+	async cleanup(_olderThanMs: number): Promise<number> {
 		// CloudLogBackend doesn't store logs locally
 		return 0;
 	}
 	
 	/**
-	 * Get current metrics state (for Prometheus-style /metrics endpoint)
-	 * 
-	 * Metrics expose internal state for machine consumption:
-	 * - cloudlog_buffer_bytes (Gauge): Current buffer size in bytes
-	 * - cloudlog_buffer_logs (Gauge): Current number of logs in buffer
-	 * - cloudlog_pending_batches (Gauge): Number of batches awaiting ACK
-	 * - cloudlog_circuit_open (Gauge): Circuit breaker state (1=open, 0=closed)
-	 * - cloudlog_dropped_total (Counter): Total logs dropped since startup
-	 * - cloudlog_batches_attempted_total (Counter): Total batch send attempts
-	 * - cloudlog_batches_acked_total (Counter): Total successful ACKs
-	 * - cloudlog_batches_failed_total (Counter): Total failed batches
-	 * - cloudlog_adaptive_batch_size (Gauge): Current adaptive batch size limit
-	 * - cloudlog_adaptive_batch_bytes (Gauge): Current adaptive batch byte limit
-	 * - cloudlog_consecutive_failures (Gauge): Current failure streak
-	 * 
-	 * Example Prometheus exposition format:
-	 * ```
-	 * # HELP cloudlog_buffer_bytes Current buffer size in bytes
-	 * # TYPE cloudlog_buffer_bytes gauge
-	 * cloudlog_buffer_bytes{device="abc-123"} 524288
-	 * 
-	 * # HELP cloudlog_circuit_open Circuit breaker state (1=open, 0=closed)
-	 * # TYPE cloudlog_circuit_open gauge
-	 * cloudlog_circuit_open{device="abc-123"} 0
-	 * ```
-	 */
+	* Get current metrics state (for Prometheus-style /metrics endpoint)
+	* 
+	* Metrics expose internal state for machine consumption:
+	* - cloudlog_buffer_bytes (Gauge): Current buffer size in bytes
+	* - cloudlog_buffer_logs (Gauge): Current number of logs in buffer
+	* - cloudlog_pending_batches (Gauge): Number of batches awaiting ACK
+	* - cloudlog_circuit_open (Gauge): Circuit breaker state (1=open, 0=closed)
+	* - cloudlog_dropped_total (Counter): Total logs dropped since startup
+	* - cloudlog_batches_attempted_total (Counter): Total batch send attempts
+	* - cloudlog_batches_acked_total (Counter): Total successful ACKs
+	* - cloudlog_batches_failed_total (Counter): Total failed batches
+	* - cloudlog_adaptive_batch_size (Gauge): Current adaptive batch size limit
+	* - cloudlog_adaptive_batch_bytes (Gauge): Current adaptive batch byte limit
+	* - cloudlog_consecutive_failures (Gauge): Current failure streak
+	* 
+	* Example Prometheus exposition format:
+	* ```
+	* # HELP cloudlog_buffer_bytes Current buffer size in bytes
+	* # TYPE cloudlog_buffer_bytes gauge
+	* cloudlog_buffer_bytes{device="abc-123"} 524288
+	* 
+	* # HELP cloudlog_circuit_open Circuit breaker state (1=open, 0=closed)
+	* # TYPE cloudlog_circuit_open gauge
+	* cloudlog_circuit_open{device="abc-123"} 0
+	* ```
+	*/
 	getMetrics(): {
 		// Gauges (current state)
 		bufferBytes: number;
@@ -481,7 +481,7 @@ export class CloudLogBackend implements LogBackend {
 		this.totalBatchesAttempted++;
 		const maxBatchBytes = Math.floor(this.adaptiveMaxBytes);
 		const logBatches: LogBatch[] = [];
-		const totalLogsToFlush = this.buffer.length; // Store before clearing
+		const _totalLogsToFlush = this.buffer.length; // Store before clearing
 		
 		let currentBatch: LogMessage[] = [];
 		let currentBatchBytes = 0;
@@ -574,8 +574,8 @@ export class CloudLogBackend implements LogBackend {
 				
 				// Grow by 10% every 3 consecutive successes
 				if (this.consecutiveSuccesses >= 3) {
-					const oldSize = this.adaptiveBatchSize;
-					const oldBytes = this.adaptiveMaxBytes;
+					const _oldSize = this.adaptiveBatchSize;
+					const _oldBytes = this.adaptiveMaxBytes;
 					
 					this.adaptiveBatchSize = Math.min(
 						this.adaptiveBatchSize * 1.1,
@@ -738,9 +738,9 @@ export class CloudLogBackend implements LogBackend {
 	
 	
 	/**
-	 * Create summary of dropped logs for later analysis
-	 * Captures key metadata without storing full log content
-	 */
+	* Create summary of dropped logs for later analysis
+	* Captures key metadata without storing full log content
+	*/
 	private createDroppedLogSummary(
 		logs: LogMessage[], 
 		reason: DroppedLogSummary['reason']
@@ -806,9 +806,9 @@ export class CloudLogBackend implements LogBackend {
 	}
 	
 	/**
-	 * Store dropped log summary in circular buffer
-	 * Keeps last N summaries for analysis
-	 */
+	* Store dropped log summary in circular buffer
+	* Keeps last N summaries for analysis
+	*/
 	private storeDroppedLogSummary(summary: DroppedLogSummary): void {
 		this.droppedLogSummaries.push(summary);
 		
@@ -826,11 +826,11 @@ export class CloudLogBackend implements LogBackend {
 	}
 	
 	/**
-	 * Send dropped log summaries to cloud when connection recovers
-	 * This allows analysis of what was lost during outages
-	 * 
-	 * NOTE: Endpoint not implemented in API yet - commenting out to avoid 404 spam
-	 */
+	* Send dropped log summaries to cloud when connection recovers
+	* This allows analysis of what was lost during outages
+	* 
+	* NOTE: Endpoint not implemented in API yet - commenting out to avoid 404 spam
+	*/
 	private async sendDroppedLogSummaries(): Promise<void> {
 		// TODO: Implement /device/{uuid}/logs/dropped-summaries endpoint in API
 		// For now, just clear summaries to avoid memory buildup
@@ -847,9 +847,9 @@ export class CloudLogBackend implements LogBackend {
 	}
 	
 	/**
-	 * Generate unique batch ID (deviceUuid-timestamp-counter)
-	 * Format: {deviceUuid}-{timestamp}-{counter}
-	 */
+	* Generate unique batch ID (deviceUuid-timestamp-counter)
+	* Format: {deviceUuid}-{timestamp}-{counter}
+	*/
 	private generateBatchId(): string {
 		const timestamp = Date.now();
 		const counter = this.nextBatchId++;
@@ -857,3 +857,4 @@ export class CloudLogBackend implements LogBackend {
 	}
 	
 }
+

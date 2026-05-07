@@ -196,7 +196,7 @@ export class PopCryptoManager {
         this.keyPair.publicKey,
         Buffer.from(signature, 'base64')
       );
-    } catch (error) {
+    } catch (_error) {
       return false;
     }
   }

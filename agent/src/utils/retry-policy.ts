@@ -30,10 +30,10 @@ export class RetryPolicy {
 	) {}
 	
 	/**
-	 * Execute function with retry logic
-	 * @returns Result of successful execution
-	 * @throws Last error if all retries exhausted
-	 */
+	* Execute function with retry logic
+	* @returns Result of successful execution
+	* @throws Last error if all retries exhausted
+	*/
 	async execute<T>(fn: () => Promise<T>): Promise<T> {
 		let lastError: unknown;
 		
@@ -79,9 +79,9 @@ export class RetryPolicy {
 	}
 	
 	/**
-	 * Execute with simplified error handling
-	 * Returns undefined if all retries fail instead of throwing
-	 */
+	* Execute with simplified error handling
+	* Returns undefined if all retries fail instead of throwing
+	*/
 	async executeSafe<T>(fn: () => Promise<T>): Promise<T | undefined> {
 		try {
 			return await this.execute(fn);
@@ -91,36 +91,36 @@ export class RetryPolicy {
 	}
 	
 	/**
-	 * Get current consecutive failure count
-	 */
+	* Get current consecutive failure count
+	*/
 	getConsecutiveFailures(): number {
 		return this.consecutiveFailures;
 	}
 	
 	/**
-	 * Get remaining attempts before giving up
-	 */
+	* Get remaining attempts before giving up
+	*/
 	getRemainingAttempts(): number {
 		return Math.max(0, this.config.maxAttempts - this.consecutiveFailures);
 	}
 	
 	/**
-	 * Check if we've hit max failures
-	 */
+	* Check if we've hit max failures
+	*/
 	hasExhaustedRetries(): boolean {
 		return this.consecutiveFailures >= this.config.maxAttempts;
 	}
 	
 	/**
-	 * Manually reset failure counter
-	 */
+	* Manually reset failure counter
+	*/
 	reset(): void {
 		this.consecutiveFailures = 0;
 	}
 	
 	/**
-	 * Calculate exponential backoff delay
-	 */
+	* Calculate exponential backoff delay
+	*/
 	private calculateBackoff(attempt: number): number {
 		const delay = this.config.baseDelayMs * 
 			Math.pow(this.config.backoffMultiplier, attempt - 1);
@@ -128,23 +128,23 @@ export class RetryPolicy {
 	}
 	
 	/**
-	 * Sleep helper
-	 */
+	* Sleep helper
+	*/
 	private sleep(ms: number): Promise<void> {
 		return new Promise(resolve => setTimeout(resolve, ms));
 	}
 	
 	/**
-	 * Calculate exponential backoff delay with optional jitter
-	 * Useful for scheduling retry intervals in polling loops
-	 * 
-	 * @param attempt Current attempt number (1-based)
-	 * @param baseDelayMs Initial delay in milliseconds
-	 * @param multiplier Exponential backoff multiplier (typically 2)
-	 * @param maxDelayMs Maximum delay cap
-	 * @param jitterPercent Optional jitter as percentage (0.3 = ±30%), prevents thundering herd
-	 * @returns Calculated delay in milliseconds
-	 */
+	* Calculate exponential backoff delay with optional jitter
+	* Useful for scheduling retry intervals in polling loops
+	* 
+	* @param attempt Current attempt number (1-based)
+	* @param baseDelayMs Initial delay in milliseconds
+	* @param multiplier Exponential backoff multiplier (typically 2)
+	* @param maxDelayMs Maximum delay cap
+	* @param jitterPercent Optional jitter as percentage (0.3 = ±30%), prevents thundering herd
+	* @returns Calculated delay in milliseconds
+	*/
 	static calculateBackoffWithJitter(
 		attempt: number,
 		baseDelayMs: number,
@@ -200,9 +200,9 @@ export class CircuitBreaker {
 	) {}
 	
 	/**
-	 * Check if circuit breaker is open (in cooldown)
-	 * @returns true if circuit is open and operation should be skipped
-	 */
+	* Check if circuit breaker is open (in cooldown)
+	* @returns true if circuit is open and operation should be skipped
+	*/
 	isOpen(): boolean {
 		if (this.openUntil > 0 && Date.now() < this.openUntil) {
 			return true; // Still in cooldown
@@ -214,17 +214,17 @@ export class CircuitBreaker {
 	}
 	
 	/**
-	 * Record successful operation (resets failure counter)
-	 */
+	* Record successful operation (resets failure counter)
+	*/
 	recordSuccess(): void {
 		this.failureCount = 0;
 		this.openUntil = 0;
 	}
 	
 	/**
-	 * Record failed operation
-	 * @returns true if circuit just opened (max failures reached)
-	 */
+	* Record failed operation
+	* @returns true if circuit just opened (max failures reached)
+	*/
 	recordFailure(): boolean {
 		this.failureCount++;
 		if (this.failureCount >= this.maxFailures) {
@@ -235,24 +235,24 @@ export class CircuitBreaker {
 	}
 	
 	/**
-	 * Get current consecutive failure count
-	 */
+	* Get current consecutive failure count
+	*/
 	getFailureCount(): number {
 		return this.failureCount;
 	}
 	
 	/**
-	 * Get remaining cooldown time in milliseconds
-	 * @returns 0 if circuit is closed
-	 */
+	* Get remaining cooldown time in milliseconds
+	* @returns 0 if circuit is closed
+	*/
 	getCooldownRemaining(): number {
 		if (this.openUntil === 0) return 0;
 		return Math.max(0, this.openUntil - Date.now());
 	}
 	
 	/**
-	 * Manually reset circuit breaker
-	 */
+	* Manually reset circuit breaker
+	*/
 	reset(): void {
 		this.failureCount = 0;
 		this.openUntil = 0;
@@ -291,9 +291,9 @@ export class AsyncLock {
 	private locked: boolean = false;
 	
 	/**
-	 * Try to acquire lock
-	 * @returns true if lock acquired, false if already locked
-	 */
+	* Try to acquire lock
+	* @returns true if lock acquired, false if already locked
+	*/
 	async acquire(): Promise<boolean> {
 		if (!this.locked) {
 			this.locked = true;
@@ -303,23 +303,23 @@ export class AsyncLock {
 	}
 	
 	/**
-	 * Release lock
-	 */
+	* Release lock
+	*/
 	release(): void {
 		this.locked = false;
 	}
 	
 	/**
-	 * Check if currently locked
-	 */
+	* Check if currently locked
+	*/
 	isLocked(): boolean {
 		return this.locked;
 	}
 	
 	/**
-	 * Execute function with lock protection
-	 * @returns Result of function, or undefined if lock could not be acquired
-	 */
+	* Execute function with lock protection
+	* @returns Result of function, or undefined if lock could not be acquired
+	*/
 	async tryExecute<T>(fn: () => Promise<T>): Promise<T | undefined> {
 		const acquired = await this.acquire();
 		if (!acquired) return undefined;
@@ -358,10 +358,10 @@ export function isRetryableHttpError(error: unknown): boolean {
 	if (error && typeof error === 'object') {
 		const err = error as any;
 		if (err.code === 'ECONNREFUSED' || 
-		    err.code === 'ETIMEDOUT' || 
-		    err.code === 'ENOTFOUND' ||
-		    err.code === 'ECONNRESET' ||
-		    err.name === 'AbortError') {
+		err.code === 'ETIMEDOUT' || 
+		err.code === 'ENOTFOUND' ||
+		err.code === 'ECONNRESET' ||
+		err.name === 'AbortError') {
 			return true;
 		}
 	}
@@ -374,3 +374,4 @@ export function isRetryableHttpError(error: unknown): boolean {
 	
 	return false;
 }
+

@@ -8,11 +8,11 @@
  * - Clean, isolated tests with predictable behavior
  */
 
-import { AgentManager } from '../../../src/managers/agent';
+import { AgentManager } from '../../../src/agent/agent';
 import { MockHttpClient } from '../../helpers/mock-http-client';
 import { MockDatabaseClient, MockUuidGenerator } from '../../helpers/mock-database-client';
 import type { DeviceRecord } from '../../../src/db/client';
-import type { ProvisionResponse } from '../../../src/managers/types';
+import type { ProvisionResponse } from '../../../src/agent/types';
 
 describe('DeviceManager - Refactored Testability', () => {
 	let deviceManager: AgentManager;

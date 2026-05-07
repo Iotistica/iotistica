@@ -13,7 +13,6 @@
  * - Statistics tracking
  */
 
-import type { CloudMqttClient } from './manager';
 import { createJsonPayload, serializePayload } from './codec';
 import type { PublishMode } from '../features/publish/types.js';
 import { MessageBufferModel } from '../db/models';
@@ -671,7 +670,7 @@ export class MessageBufferSync {
   ): Promise<T> {
     let attempt = 0;
 
-    while (true) {
+    while (attempt < maxAttempts) {
       attempt += 1;
       try {
         return await work();
@@ -693,5 +692,8 @@ export class MessageBufferSync {
         await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
       }
     }
+
+    throw new Error(`SQLite retry exhausted unexpectedly during ${operation}`);
   }
+
 }

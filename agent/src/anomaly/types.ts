@@ -285,7 +285,7 @@ export interface AnomalyAlert {
 export interface MetricConfig {
 	name: string;                    // Metric name field (e.g., 'level', 'temperature')
 	deviceName?: string;             // Optional: scope this config to a specific device (e.g., 'Zone A-uuid123')
-	                                 // When set, matches incoming metric "deviceName_name" (e.g., 'Zone A-uuid123_level')
+	// When set, matches incoming metric "deviceName_name" (e.g., 'Zone A-uuid123_level')
 	enabled: boolean;
 	methods: DetectionMethod[];      // Which detection methods to use
 	threshold: number;               // Threshold for detection (σ or MAD multiplier)
@@ -441,3 +441,4 @@ export interface AlertManager {
 	clearAlerts(): void;
 	getQueueSize(): number;
 }
+

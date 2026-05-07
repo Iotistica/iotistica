@@ -1,28 +1,3 @@
-/**
- * Protocol Discovery Service
- * 
- * Auto-discovers sensors on Modbus, CAN, OPC-UA networks
- * Saves discovered devices directly to SQLite sensors table
- * 
- * Discovery is RATE-LIMITED to avoid slow operations:
- * - First boot: Full discovery with validation
- * - Manual trigger: Full discovery with validation
- * - Scheduled: Light discovery (ping only, no validation)
- * - Min interval: 1 hour between automatic discoveries
- * 
- * Two-Phase Architecture:
- * Phase 1 (Discovery): Fast scan to detect responding devices
- * Phase 2 (Validation): Optional deep inspection (slow, reads device info)
- * 
- * Usage:
- *   const discovery = new DiscoveryService(logger);
- *   
- *   // Manual full discovery
- *   await discovery.runDiscovery({ trigger: 'manual', validate: true });
- *   
- *   // Scheduled light discovery
- *   await discovery.runDiscovery({ trigger: 'scheduled', validate: false });
- */
 
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
@@ -37,7 +12,7 @@ import { CANDiscoveryPlugin } from '../can/discovery';
 import { SNMPDiscoveryPlugin } from '../snmp/discovery';
 import { LocalBrokerMqttDiscoveryPlugin } from '../mqtt/discovery';
 import { BACnetDiscoveryPlugin } from '../bacnet/discovery';
-import type { ConfigManager } from '../../managers/config.js';
+import type { ConfigManager } from '../../agent/config.js';
 import { DiscoveryOptionsBuilder } from './options.js';
 import { DiscoveryStore } from './db.js';
 
@@ -253,7 +228,12 @@ export class DiscoveryService extends EventEmitter {
    * Main entry point: Run discovery with rate limiting
    */
   async runDiscovery(options: DiscoveryOptions): Promise<DiscoveredDevice[]> {
-    const { trigger, validate = false, forceRun = false, protocols } = options;
+    const {
+      trigger: _trigger,
+      validate: _validate = false,
+      forceRun: _forceRun = false,
+      protocols: _protocols,
+    } = options;
     const traceId = crypto.randomUUID();
 
     this.discoveryRunning = true;

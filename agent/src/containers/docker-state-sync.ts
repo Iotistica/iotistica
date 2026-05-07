@@ -78,10 +78,10 @@ export async function syncStateFromDocker(
 		}
 
 		let networks: string[] = [];
-		let environment: Record<string, string> = {};
+		const environment: Record<string, string> = {};
 		let volumes: string[] = [];
 		let restart = 'no';
-		let labels: Record<string, string> = {};
+		const labels: Record<string, string> = {};
 		let networkMode = 'bridge';
 
 		try {
@@ -158,7 +158,7 @@ export async function syncStateFromDocker(
 										.filter((p) => p.PublicPort && p.PrivatePort)
 										.map((p) => `${p.PublicPort}:${p.PrivatePort}`),
 								),
-						  )
+						)
 						: [],
 				volumes: volumes.length > 0 ? volumes : [],
 				networks: networks.length > 0 ? networks : [],
@@ -174,3 +174,4 @@ export async function syncStateFromDocker(
 
 	return nextState;
 }
+

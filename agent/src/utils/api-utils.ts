@@ -28,7 +28,7 @@ export function getPackageVersion(): string {
 		const content = readFileSync(packageJsonPath, "utf-8");
 		const packageJson = JSON.parse(content);
 		return packageJson.version || "unknown";
-	} catch (error) {
+	} catch (_error) {
 		return "unknown";
 	}
 }

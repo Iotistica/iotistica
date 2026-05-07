@@ -17,7 +17,7 @@ export type VpnConfig =
 			type: 'wireguard';
 			ipAddress: string;
 			wgConfig: string;
-	  }
+	}
 	| {
 			enabled: boolean;
 			type: 'tailscale';
@@ -26,7 +26,7 @@ export type VpnConfig =
 				tailnetName: string;
 				expiresAt: string;
 			};
-	  };
+	};
 
 export interface VpnStatus {
 	interfaceUp: boolean;
@@ -56,8 +56,8 @@ export class WireGuardManager {
 	}
 
 	/**
-	 * Check if WireGuard is available on the system
-	 */
+	* Check if WireGuard is available on the system
+	*/
 	async isAvailable(): Promise<boolean> {
 		try {
 			await execAsync('which wg');
@@ -68,9 +68,9 @@ export class WireGuardManager {
 	}
 
 	/**
-	 * Setup WireGuard VPN tunnel
-	 * @param vpnConfig VPN configuration from provisioning response
-	 */
+	* Setup WireGuard VPN tunnel
+	* @param vpnConfig VPN configuration from provisioning response
+	*/
 	async setup(vpnConfig: Extract<VpnConfig, { type: 'wireguard' }>): Promise<boolean> {
 		if (!vpnConfig.enabled) {
 			this.logger?.infoSync('VPN not enabled for this device', {
@@ -144,8 +144,8 @@ export class WireGuardManager {
 	}
 
 	/**
-	 * Bring up WireGuard interface
-	 */
+	* Bring up WireGuard interface
+	*/
 	async up(): Promise<void> {
 		try {
 			this.logger?.infoSync('Starting WireGuard interface', {
@@ -197,8 +197,8 @@ export class WireGuardManager {
 	}
 
 	/**
-	 * Bring down WireGuard interface
-	 */
+	* Bring down WireGuard interface
+	*/
 	async down(): Promise<void> {
 		try {
 			this.logger?.infoSync('Stopping WireGuard interface', {
@@ -222,8 +222,8 @@ export class WireGuardManager {
 	}
 
 	/**
-	 * Get VPN tunnel status
-	 */
+	* Get VPN tunnel status
+	*/
 	async getStatus(): Promise<VpnStatus> {
 		try {
 			// Check if interface exists
@@ -266,8 +266,8 @@ export class WireGuardManager {
 	}
 
 	/**
-	 * Test VPN connectivity by pinging gateway
-	 */
+	* Test VPN connectivity by pinging gateway
+	*/
 	private async testConnectivity(): Promise<boolean> {
 		try {
 			this.logger?.infoSync('Testing VPN connectivity', {
@@ -284,7 +284,7 @@ export class WireGuardManager {
 			});
 
 			return true;
-		} catch (error) {
+		} catch (_error) {
 			this.logger?.warnSync('VPN connectivity test failed (may take time to establish)', {
 				component: LogComponents.wireGuardManager,
 				operation: 'testConnectivity',
@@ -294,8 +294,8 @@ export class WireGuardManager {
 	}
 
 	/**
-	 * Enable WireGuard auto-start on boot
-	 */
+	* Enable WireGuard auto-start on boot
+	*/
 	private async enableAutoStart(): Promise<void> {
 		try {
 			// Check if systemd is available
@@ -316,7 +316,7 @@ export class WireGuardManager {
 				component: LogComponents.wireGuardManager,
 				operation: 'enableAutoStart',
 			});
-		} catch (error) {
+		} catch (_error) {
 			this.logger?.warnSync('Failed to enable auto-start (non-critical)', {
 				component: LogComponents.wireGuardManager,
 				operation: 'enableAutoStart',
@@ -325,8 +325,8 @@ export class WireGuardManager {
 	}
 
 	/**
-	 * Parse byte string to number (e.g., "1.23 KiB" -> 1259)
-	 */
+	* Parse byte string to number (e.g., "1.23 KiB" -> 1259)
+	*/
 	private parseBytes(str: string): number {
 		const match = str.match(/([\d.]+)\s+(\w+)/);
 		if (!match) return 0;
@@ -344,3 +344,4 @@ export class WireGuardManager {
 		return value * (multipliers[unit] || 1);
 	}
 }
+

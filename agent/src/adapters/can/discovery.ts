@@ -119,7 +119,7 @@ export class CANDiscoveryPlugin extends BaseDiscoveryPlugin {
   /**
    * Phase 2: Validate messages (pattern analysis)
    */
-  async validate(device: DiscoveredDevice, timeout = 10000): Promise<any> {
+  async validate(device: DiscoveredDevice, _timeout = 10000): Promise<any> {
     this.logger?.debugSync('Validating CAN messages', {
       component: LogComponents.discovery + "] [" + this.protocol as any,
       canId: device.metadata?.canId,
