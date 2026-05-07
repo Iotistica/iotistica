@@ -27,7 +27,6 @@ export interface AdapterFeatures {
  */
 export class AdapterInitializer {
 	private features: AdapterFeatures = {};
-	private cloudSync?: any;
 
 	constructor(
     private context: FeatureContext,
