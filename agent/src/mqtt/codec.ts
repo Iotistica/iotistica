@@ -1,7 +1,7 @@
 import msgpack from 'msgpack-lite';
 import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
-import { MessageIdGenerator } from './utils';
+import { type MessageIdGenerator } from './utils';
 
 /**
  * Explicit payload contract - callers must specify format

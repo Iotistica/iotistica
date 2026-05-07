@@ -12,7 +12,7 @@
  * - Audit trail
  */
 
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 
 export type DictionaryDomain = 'key' | 'metric' | 'unit' | 'quality' | 'device';
@@ -105,7 +105,7 @@ export class DictionaryModel {
 
 		// Populate maps by domain
 		for (const entry of entries) {
-			const domain = (entry.domain || 'key') as DictionaryDomain;
+			const domain = (entry.domain || 'key');
 			domains[domain].set(entry.field_name, entry.field_index);
 		}
     

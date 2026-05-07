@@ -1,4 +1,4 @@
-import mqtt, { MqttClient, IClientOptions, IClientPublishOptions } from "mqtt";
+import mqtt, { type MqttClient, type IClientOptions, type IClientPublishOptions } from "mqtt";
 import { EventEmitter } from "events";
 import type { AgentLogger } from "../logging/agent-logger";
 import { LogComponents } from "../logging/types";

@@ -75,7 +75,7 @@ function readMetadata(backupPath: string): DbBackupMetadata | undefined {
 
 	try {
 		const parsed = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as DbBackupMetadata;
-		if (parsed && parsed.version === 1) {
+		if (parsed?.version === 1) {
 			return parsed;
 		}
 		return undefined;

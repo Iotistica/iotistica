@@ -32,7 +32,7 @@ export class ZScoreDetector implements AnomalyDetector {
 		
 		// If expectedRange configured, use it as absolute bounds (hard detector)
 		// This prevents false positives from statistical detectors on stable metrics (e.g., grid frequency)
-		if (config.expectedRange && config.expectedRange.length === 2) {
+		if (config.expectedRange?.length === 2) {
 			const [min, max] = config.expectedRange;
 			if (value >= min && value <= max) {
 				return {
@@ -108,7 +108,7 @@ export class MADDetector implements AnomalyDetector {
 		
 		// If expectedRange configured, use it as absolute bounds (hard detector)
 		// This prevents false positives from statistical detectors on stable metrics (e.g., grid frequency)
-		if (config.expectedRange && config.expectedRange.length === 2) {
+		if (config.expectedRange?.length === 2) {
 			const [min, max] = config.expectedRange;
 			if (value >= min && value <= max) {
 				// LOG: expectedRange override - skip statistical checks (MAD detector)
@@ -234,7 +234,7 @@ export class ExpectedRangeDetector implements AnomalyDetector {
 	
 	detect(value: number, buffer: StatisticalBuffer, config: MetricConfig, _dbBaseline?: { median?: number; mad?: number; sample_count: number }): DetectionResult {
 		// Must have expectedRange configured
-		if (!config.expectedRange || config.expectedRange.length !== 2) {
+		if (config.expectedRange?.length !== 2) {
 			return {
 				method: this.method,
 				isAnomaly: false,

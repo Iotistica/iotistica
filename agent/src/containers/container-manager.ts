@@ -26,7 +26,7 @@ import type Docker from 'dockerode';
 import { DockerManager } from './docker-manager';
 import { RetryManager } from './retry-manager';
 import { HealthCheckManager } from './health-check-manager';
-import { ContainerHealthProbe as HealthProbe } from './types';
+import { type ContainerHealthProbe as HealthProbe } from './types';
 import { cloneDeep, uniq } from '../lib/collection-utils';
 import { StateSnapshotModel } from '../db/models';
 import type { ContainerLogMonitor } from '../logging/container-monitor';

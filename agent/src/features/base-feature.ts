@@ -11,7 +11,7 @@
 
 import { EventEmitter } from "events";
 import { CloudMqttClient } from "../mqtt/manager.js";
-import { AgentLogger } from "../logging/agent-logger.js";
+import { type AgentLogger } from "../logging/agent-logger.js";
 
 export interface FeatureConfig {
 	enabled: boolean;

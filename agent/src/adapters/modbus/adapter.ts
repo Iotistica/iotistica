@@ -1,9 +1,9 @@
 import { EventEmitter } from 'events';
-import { ModbusAdapterConfig } from './types';
-import { ModbusDevice } from './types';
+import { type ModbusAdapterConfig } from './types';
+import { type ModbusDevice } from './types';
 import { ModbusClient } from './client';
-import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
-import { DeviceMetrics, MetricsSummary } from '../metrics.js';
+import { type DeviceDataPoint, type DeviceStatus, type Logger } from '../types.js';
+import { DeviceMetrics, type MetricsSummary } from '../metrics.js';
 import { EndpointModel } from '../../db/models/endpoint.model.js';
 import { DeviceModel } from '../../db/models/device.model.js';
 import { pLimit } from '../../lib/p-limit.js';
@@ -289,7 +289,7 @@ export class ModbusAdapter extends EventEmitter {
 			await client.connect();
 
 			// Store config displayName if provided (Modbus has no server-side name discovery)
-			if (deviceConfig.displayName && deviceConfig.displayName.trim()) {
+			if (deviceConfig.displayName?.trim()) {
 				this.resolvedDeviceNames.set(deviceConfig.name, deviceConfig.displayName.trim());
 			}
 

@@ -7,13 +7,13 @@
 import http from 'http';
 import https from 'https';
 import net from 'net';
-import Docker from 'dockerode';
+import type Docker from 'dockerode';
 import {
-	HealthCheck,
-	HealthCheckResult,
-	HttpHealthCheck,
-	TcpHealthCheck,
-	ExecHealthCheck,
+	type HealthCheck,
+	type HealthCheckResult,
+	type HttpHealthCheck,
+	type TcpHealthCheck,
+	type ExecHealthCheck,
 } from './types';
 
 export class HealthCheckExecutor {

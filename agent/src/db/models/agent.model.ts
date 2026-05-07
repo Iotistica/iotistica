@@ -3,7 +3,7 @@
  * Manages device provisioning and registration data in SQLite
  */
 
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 import { 
 	encryptData, 

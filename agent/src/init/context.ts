@@ -15,6 +15,7 @@ export interface AgentInitContext {
 	stateReconciler?: any;
 	configManager?: ConfigManager;
 	agentLogger?: AgentLogger;
+	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 	sharedHttpClient?: ReturnType<typeof import('../lib/http-client.js').createHttpClient>;
 	agentManager?: any;
 	agentInfo?: any;

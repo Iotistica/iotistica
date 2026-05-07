@@ -7,7 +7,7 @@
 
 import type Docker from 'dockerode';
 import type { LogMessage, LogStreamOptions, ContainerLogAttachment, LogBackend } from './types';
-import { AgentLogger } from './agent-logger';
+import { type AgentLogger } from './agent-logger';
 import { LogComponents } from './types';
 import { RetryManager, DOCKER_POLICY } from '../containers/retry-manager';
 
@@ -114,7 +114,7 @@ export class ContainerLogMonitor {
 				stderr: options.stderr ?? true,
 				timestamps: options.timestamps ?? false,
 				tail: options.tail ?? 100, // Get last 100 lines initially
-			})) as NodeJS.ReadableStream;
+			}));
 
 			// Docker multiplexes stdout/stderr in a special format
 			// We need to demultiplex it

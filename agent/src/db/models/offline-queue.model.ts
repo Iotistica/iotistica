@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 
 export interface OfflineQueueRecord {
@@ -135,6 +135,6 @@ export class OfflineQueueModel {
 		const result = this.getDb()
 			.prepare(`DELETE FROM ${this.table} WHERE queueName = ? AND createdAt < ?`)
 			.run(queueName, cutoffMs);
-		return result.changes as number;
+		return result.changes;
 	}
 }

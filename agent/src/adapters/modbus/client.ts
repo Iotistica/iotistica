@@ -1,13 +1,13 @@
 import ModbusRTU from 'modbus-serial';
 import {
-	ModbusDevice,
+	type ModbusDevice,
 	ModbusConnectionType,
 	ModbusFunctionCode,
 	ModbusDataType,
 	ByteOrder,
 	Endianness
 } from './types';
-import { DeviceDataPoint, Logger } from '../types.js';
+import { type DeviceDataPoint, type Logger } from '../types.js';
 
 /**
  * Modbus Client wrapper that handles different connection types and data reading
@@ -563,7 +563,7 @@ export class ModbusClient {
 			// 1. Register allows batching (noBatch flag for vendor-specific restrictions)
 			// 2. Gap is within tolerance (contiguous or small gap)
 			// 3. Total batch size doesn't exceed Modbus limit
-			const registerAllowsBatch = !(reg as any).noBatch && !(currentBatch[0] as any).noBatch;
+			const registerAllowsBatch = !(reg).noBatch && !(currentBatch[0]).noBatch;
 			const withinGapTolerance = gap <= this.GAP_TOLERANCE;
 			const withinSizeLimit = potentialBatchSize <= this.MAX_BATCH_SIZE;
 			const canBatch = registerAllowsBatch && withinGapTolerance && withinSizeLimit;

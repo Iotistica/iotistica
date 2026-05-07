@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 import { EndpointOutputModel } from './endpoint-outputs.model';
 

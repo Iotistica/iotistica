@@ -27,7 +27,9 @@ const MAX_BATCH_BYTES = (() => {
 // ============================================================================
 
 export class PublishManager extends EventEmitter {
+	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 	private messageBufferModel?: typeof import('../../db/models/buffer.model.js').MessageBufferModel;
+	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 	private messageBufferModelPromise?: Promise<typeof import('../../db/models/buffer.model.js').MessageBufferModel>;
 	private readonly batcher: MessageBatcher;
 	private readonly connection: DeviceConnection;
@@ -443,6 +445,7 @@ export class PublishManager extends EventEmitter {
 		}
 	}
 
+	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 	private async getMessageBufferModel(): Promise<typeof import('../../db/models/buffer.model.js').MessageBufferModel> {
 		if (this.messageBufferModel) {
 			return this.messageBufferModel;

@@ -408,7 +408,7 @@ export class StateManager extends EventEmitter {
 		
 		const agentConfig = (targetState.config as any)?.agent;
 		
-		if (!agentConfig || !agentConfig.version) {
+		if (!agentConfig?.version) {
 			// No agent update requested
 			this.logger?.debugSync('No agent version specified in target state', {
 				component: LogComponents.stateReconciler,

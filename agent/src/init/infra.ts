@@ -1,5 +1,6 @@
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types.js';
+import type { MqttConnection } from '../features/publish/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 
 
@@ -83,7 +84,7 @@ async function _connectIotisticaMqtt(ctx: AgentInitContext): Promise<void> {
  * Connect an external cloud publish target when configured via env / agentInfo.
  * Returns the connected MqttConnection, or null when using Iotistica.
  */
-async function _connectExternalTarget(ctx: AgentInitContext): Promise<import('../features/publish/types.js').MqttConnection | null> {
+async function _connectExternalTarget(ctx: AgentInitContext): Promise<MqttConnection | null> {
 	const targetType = (
 		process.env.PUBLISH_TARGET ||
 		ctx.agentInfo?.publishing?.target ||

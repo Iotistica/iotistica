@@ -9,6 +9,8 @@ module.exports = {
   parserOptions: {
     ecmaVersion: 'latest',
     sourceType: 'module',
+    project: './tsconfig.json',
+    tsconfigRootDir: __dirname,
   },
   plugins: ['@typescript-eslint'],
   extends: ['eslint:recommended', 'plugin:@typescript-eslint/recommended'],
@@ -28,5 +30,19 @@ module.exports = {
         caughtErrorsIgnorePattern: '^_',
       },
     ],
+    // --- Phase 1: TypeScript best practices (no type-aware linting required) ---
+    // Enforce `import type` for type-only imports to eliminate phantom runtime deps.
+    '@typescript-eslint/consistent-type-imports': [
+      'error',
+      { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+    ],
+    // Prefer `a?.b` over `a && a.b` — reduces null-check boilerplate.
+    '@typescript-eslint/prefer-optional-chain': 'error',
+    // Catch type assertions that are no longer necessary.
+    '@typescript-eslint/no-unnecessary-type-assertion': 'warn',
+    // Require all switch statements on union types to handle every member.
+    // allowDefaultCaseForExhaustiveSwitch: when there is a `default:` case, treat it as
+    // exhaustive — this covers switches on `string | undefined` where runtime fallback is fine.
+    '@typescript-eslint/switch-exhaustiveness-check': ['error', { allowDefaultCaseForExhaustiveSwitch: true }],
   },
 };

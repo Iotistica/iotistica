@@ -391,7 +391,7 @@ export class ShellHandler {
 		try {
 			// SECURITY: explicit shell/cwd resolution (no implicit fallback behavior)
 			const shell = this.resolveShell();
-			const willDropPrivileges = !!(process.getuid && process.getuid() === 0 && os.platform() !== 'win32');
+			const willDropPrivileges = !!(process.getuid?.() === 0 && os.platform() !== 'win32');
 			const cwd = this.resolveWorkingDirectory();
 
 			if (!this.shellExists(shell)) {

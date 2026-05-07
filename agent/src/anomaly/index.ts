@@ -21,6 +21,8 @@ import type {
 	AnomalySeverity,
 	Protocol,
 	CanonicalDeviceState,
+	BaselineInfo,
+	AnomalyEvent,
 } from './types';
 import { createBuffer, addValue, getRecentValues, getTrend, getMedian } from './buffer';
 import { getDetector } from './detectors';
@@ -69,7 +71,7 @@ export class AnomalyDetectionService {
 	private startupTimestamp: number = Date.now();
 	private warmupPeriodMs: number;
 	
-	constructor(config: AnomalyConfig, db?: Database.Database, logger?: AgentLogger, mqttManager?: CloudMqttClient, deviceUuid?: string, deviceName?: string, deviceType?: import('./types').Protocol) {
+	constructor(config: AnomalyConfig, db?: Database.Database, logger?: AgentLogger, mqttManager?: CloudMqttClient, deviceUuid?: string, deviceName?: string, deviceType?: Protocol) {
 		this.config = config;
 		this.logger = logger;
 		this.mqttManager = mqttManager;
@@ -161,7 +163,7 @@ export class AnomalyDetectionService {
 		}
 
 		const metricConfig = this.getMetricConfig(dataPoint.metric);
-		if (!metricConfig || !metricConfig.enabled) {
+		if (!metricConfig?.enabled) {
 			const missingCount = (this.unconfiguredMetricLogCounts.get(dataPoint.metric) || 0) + 1;
 			this.unconfiguredMetricLogCounts.set(dataPoint.metric, missingCount);
 
@@ -541,7 +543,7 @@ export class AnomalyDetectionService {
 		const windowEndMs = buffer.size > 0 ? Math.max(...windowTimestamps) : dataPoint.timestamp;
 		
 		// Build baseline info for explainability
-		const baseline: import('./types').BaselineInfo = {
+		const baseline: BaselineInfo = {
 			median: getMedian(buffer),
 			mean: buffer.mean,
 			stdDev: buffer.stdDev,
@@ -565,7 +567,7 @@ export class AnomalyDetectionService {
 		const deviceType = this.resolveEventDeviceType(dataPoint);
 		const deviceState = this.resolveDeviceState(dataPoint);
 		
-		const event: import('./types').AnomalyEvent = {
+		const event: AnomalyEvent = {
 			agentUuid: this.deviceUuid || 'unknown', // Infrastructure tracking (edge gateway)
 			deviceName: this.deviceName || 'Agent System', // Monitored device name (what users care about)
 			deviceType, // Protocol/source type (modbus, opcua, bacnet, mqtt, system)
@@ -749,7 +751,7 @@ export class AnomalyDetectionService {
 	*/
 	private calculateConfidence(
 		anomalyScore: number,
-		baseline: import('./types').BaselineInfo
+		baseline: BaselineInfo
 	): number {
 		let confidence = anomalyScore;
 		
@@ -905,7 +907,7 @@ export class AnomalyDetectionService {
 	/** Returns true when the given canonical metric key is configured and enabled. */
 	isMetricConfigured(metricName: string): boolean {
 		const cfg = this.getMetricConfig(metricName);
-		return !!(cfg && cfg.enabled);
+		return !!(cfg?.enabled);
 	}
 
 	/**
@@ -1066,8 +1068,7 @@ export class AnomalyDetectionService {
 			// Add time-to-threshold only when prediction confidence is solid
 			if (
 				prediction.confidence >= MIN_TIME_TO_THRESHOLD_CONFIDENCE &&
-				metricConfig.expectedRange &&
-				metricConfig.expectedRange[1] !== undefined
+				metricConfig.expectedRange?.[1] !== undefined
 			) {
 				const threshold = metricConfig.expectedRange[1]; // Upper bound
 				const samplingIntervalMs = 20000; // Default 20s interval (matches METRICS_INTERVAL_MS)

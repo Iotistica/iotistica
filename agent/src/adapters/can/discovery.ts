@@ -7,7 +7,7 @@
 
 import type { AgentLogger } from "../../logging/agent-logger";
 import { LogComponents } from "../../logging/types";
-import { BaseDiscoveryPlugin, DiscoveredDevice } from "../types";
+import { BaseDiscoveryPlugin, type DiscoveredDevice } from "../types";
 import { generateCANFingerprint } from "../fingerprint";
 
 export interface CANDiscoveryOptions {

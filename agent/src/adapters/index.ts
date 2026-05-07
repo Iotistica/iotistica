@@ -13,13 +13,13 @@
  */
 
 import { EventEmitter } from "events";
-import { AgentLogger } from "../logging/agent-logger.js";
+import { type AgentLogger } from "../logging/agent-logger.js";
 import { ModbusAdapter } from "./modbus/adapter.js";
-import { ModbusAdapterConfig } from "./modbus/types.js";
+import { type ModbusAdapterConfig } from "./modbus/types.js";
 import { LocalBrokerMqttAdapter } from "./mqtt/adapter.js";
-import { MqttAdapterConfig } from "./mqtt/types.js";
+import { type MqttAdapterConfig } from "./mqtt/types.js";
 import { SocketServer } from "./common/socket-server.js";
-import { DeviceDataPoint, SocketOutput } from "./types.js";
+import { type DeviceDataPoint, type SocketOutput } from "./types.js";
 import { EndpointOutputModel } from "../db/models/endpoint-outputs.model.js";
 import { EndpointModel } from "../db/models/endpoint.model.js";
 import { encodeIfUuid } from "../mqtt/codec.js";
@@ -32,7 +32,7 @@ import { SNMPAdapter } from "./snmp/adapter.js";
 
 // BACnet imports
 import { BACnetAdapter } from "./bacnet/adapter.js";
-import { BACnetAdapterConfig } from "./bacnet/types.js";
+import { type BACnetAdapterConfig } from "./bacnet/types.js";
 
 export interface AdapterConfig {
 	modbus?: { enabled: boolean; config?: ModbusAdapterConfig };

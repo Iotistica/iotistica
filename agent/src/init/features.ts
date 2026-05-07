@@ -19,9 +19,10 @@ import type { AnomalyDetectionService } from '../anomaly/index.js';
 import { AdapterInitializer } from './adapters.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
-import { CloudMqttClient } from '../mqtt/manager.js';
+import { type CloudMqttClient } from '../mqtt/manager.js';
+import type { MqttConnection } from '../features/publish/types.js';
 import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
-import { StateManager } from '../agent/state.js';
+import { type StateManager } from '../agent/state.js';
 
 export interface FeatureContext {
   logger: AgentLogger;
@@ -45,7 +46,7 @@ export interface FeatureContext {
    * When set, sensor data is routed through this connection (IoT Hub, AWS, GCP, …)
    * instead of the default Iotistica CloudMqttClient.
    */
-  sensorConnection?: import('../features/publish/types.js').MqttConnection;
+  sensorConnection?: MqttConnection;
 }
 
 export interface InitializedFeatures {
@@ -695,7 +696,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 export async function initDiscoveryService(ctx: AgentInitContext): Promise<void> {
 
 	try {
-		ctx.discoveryService = new DiscoveryService(ctx.agentLogger!, ctx.configManager!);
+		ctx.discoveryService = new DiscoveryService(ctx.agentLogger, ctx.configManager);
 		await ctx.discoveryService.init();
 	} catch (error) {
 		ctx.agentLogger?.errorSync('Failed to initialize Discovery Service', error as Error, {

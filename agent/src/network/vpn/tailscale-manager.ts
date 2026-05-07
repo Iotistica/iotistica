@@ -862,6 +862,7 @@ export class TailscaleManager {
 			});
 		} else if (!vpnHealth.connected) {
 			// Daemon running but not connected - distinguish failure modes
+			// eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
 			switch (vpnHealth.backendState) {
 				case 'NeedsLogin':
 					this.logger?.errorSync('VPN requires re-authentication', undefined, {

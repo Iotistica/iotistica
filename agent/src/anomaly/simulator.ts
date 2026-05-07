@@ -642,6 +642,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 		const spread = this.getBaselineSpread(base, baseline);
 		const metricCount = this.metricInjectionCounts.get(metric) || 0;
 		
+		// eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
 		switch (this.getEffectivePattern(metric)) {
 			case 'alert': {
 				// Stateful sustained anomaly with per-metric escalation and auto-recovery.

@@ -58,29 +58,29 @@ import { createHash } from 'crypto';
 // @ts-ignore - Optional dependency: node-opcua-client may not be installed
 import {
 	OPCUAClient,
-	ClientSession,
-	DataValue,
+	type ClientSession,
+	type DataValue,
 	AttributeIds,
 	MessageSecurityMode,
 	SecurityPolicy,
 	UserTokenType,
-	ClientSubscription,
+	type ClientSubscription,
 	TimestampsToReturn,
 	MonitoringParametersOptions as _MonitoringParametersOptions,
-	ReadValueIdOptions,
-	ClientMonitoredItem,
+	type ReadValueIdOptions,
+	type ClientMonitoredItem,
 	DataType as _DataType,
 } from 'node-opcua-client';
-import { BaseProtocolAdapter, GenericDeviceConfig } from '../base.js';
-import { DeviceDataPoint, Logger } from '../types.js';
+import { BaseProtocolAdapter, type GenericDeviceConfig } from '../base.js';
+import { type DeviceDataPoint, type Logger } from '../types.js';
 import { ConsoleLogger } from '../common/logger.js';
 import {
-	OPCUADeviceConfig,
-	OPCUAConnection,
-	OPCUADataPoint,
-	OPCUACertificateTrustMode,
-	OPCUASecurityMode,
-	OPCUASecurityPolicy,
+	type OPCUADeviceConfig,
+	type OPCUAConnection,
+	type OPCUADataPoint,
+	type OPCUACertificateTrustMode,
+	type OPCUASecurityMode,
+	type OPCUASecurityPolicy,
 } from './types.js';
 
 /**
@@ -463,7 +463,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 	): Promise<void> {
 		// Filter to only metadata nodes
 		const metadataNodes = dataPoints.filter(dp => 
-			(dp as OPCUADataPoint).nodeType === 'metadata'
+			(dp).nodeType === 'metadata'
 		);
 
 		if (metadataNodes.length === 0) {
@@ -534,7 +534,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 		// Filter to only validated metric nodes (exclude metadata)
 		const validDataPoints = dataPoints.filter(dp => 
 			sessionWrapper.validatedNodes.has(dp.nodeId) && 
-      (dp as OPCUADataPoint).nodeType === 'metric'
+      (dp).nodeType === 'metric'
 		);
 
 		if (validDataPoints.length === 0) {
@@ -611,7 +611,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 					// Handle data changes (real-time streaming)
 					monitoredItem.on('changed', (dataValue: DataValue) => {
 						// Hard gate: Never emit metadata nodes
-						if ((dp as OPCUADataPoint).nodeType !== 'metric') {
+						if ((dp).nodeType !== 'metric') {
 							this.logger.warn(`Blocked metadata node emission: ${dp.name}`, { deviceName });
 							return;
 						}
@@ -778,7 +778,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 		}
     
 		// OPC-UA has built-in quality checks
-		if (statusCode.isGood && statusCode.isGood()) {
+		if (statusCode.isGood?.()) {
 			return 'GOOD';
 		}
     
@@ -1131,8 +1131,8 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 			// Only set when explicitly configured via metadata.displayName — do NOT read ns=0;i=2253
 			// (the OPC-UA Server root object) because its DisplayName is always "Server" per the spec
 			// and is unrelated to any sensor or device being polled.
-			const configDisplayName = device.metadata?.displayName as string | undefined;
-			if (configDisplayName && configDisplayName.trim()) {
+			const configDisplayName = device.metadata?.displayName;
+			if (configDisplayName?.trim()) {
 				this.resolvedDeviceNames.set(device.name, configDisplayName.trim());
 			}
       
@@ -1194,7 +1194,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
 			// Log classification summary
 			const metadataCount = device.dataPoints.filter(dp => 
-				(dp as OPCUADataPoint).nodeType === 'metadata'
+				(dp).nodeType === 'metadata'
 			).length;
       
 			this.logger.debug(`Node classification summary for ${device.name}`, {
@@ -1575,7 +1575,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 		// Filter to only validated metric nodes (exclude metadata)
 		const validDataPoints = dataPoints.filter(dp => 
 			sessionWrapper.validatedNodes.has(dp.nodeId) && 
-      (dp as OPCUADataPoint).nodeType === 'metric'
+      (dp).nodeType === 'metric'
 		);
 
 		if (validDataPoints.length === 0) {
@@ -1606,7 +1606,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 			const dataValue = dataValues[i];
 
 			// Hard gate: Never process metadata nodes
-			if ((dp as OPCUADataPoint).nodeType !== 'metric') {
+			if ((dp).nodeType !== 'metric') {
 				this.logger.warn(`Blocked metadata node read: ${dp.name}`, { deviceName });
 				continue;
 			}

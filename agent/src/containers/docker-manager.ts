@@ -7,8 +7,8 @@
  */
 
 import Docker from 'dockerode';
-import { ContainerService } from './container-manager';
-import { AgentLogger } from '../logging/agent-logger';
+import { type ContainerService } from './container-manager';
+import { type AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { EventEmitter } from 'events';
 

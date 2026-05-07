@@ -1,6 +1,6 @@
 // agent/src/features/endpoints/snmp/client.ts
 import * as snmp from 'net-snmp';
-import { SNMPDeviceConfig } from './types.js';
+import { type SNMPDeviceConfig } from './types.js';
 import type { Logger } from '../types.js';
 
 export class SNMPClient {
@@ -123,6 +123,7 @@ export class SNMPClient {
 			case 'noAuthNoPriv': return snmp.SecurityLevel.noAuthNoPriv;
 			case 'authNoPriv': return snmp.SecurityLevel.authNoPriv;
 			case 'authPriv': return snmp.SecurityLevel.authPriv;
+			case undefined: return snmp.SecurityLevel.noAuthNoPriv;
 			default: return snmp.SecurityLevel.noAuthNoPriv;
 		}
 	}
@@ -131,6 +132,7 @@ export class SNMPClient {
 		switch (protocol) {
 			case 'md5': return snmp.AuthProtocols.md5;
 			case 'sha': return snmp.AuthProtocols.sha;
+			case undefined: return snmp.AuthProtocols.md5;
 			default: return snmp.AuthProtocols.md5;
 		}
 	}
@@ -139,6 +141,7 @@ export class SNMPClient {
 		switch (protocol) {
 			case 'des': return snmp.PrivProtocols.des;
 			case 'aes': return snmp.PrivProtocols.aes;
+			case undefined: return snmp.PrivProtocols.des;
 			default: return snmp.PrivProtocols.des;
 		}
 	}

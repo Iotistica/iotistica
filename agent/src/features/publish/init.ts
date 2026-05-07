@@ -1,13 +1,13 @@
 import { BaseFeature } from '../index.js';
-import { AgentLogger } from '../../logging/agent-logger.js';
+import { type AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
 import type { Protocol } from '../../anomaly/types.js';
 import type { AnomalyDetectionService } from '../../anomaly/index.js';
 import type { PipelineService } from '../pipeline/index.js';
 import {
-	DevicePublishConfig,
-	DeviceConfig,
-	MqttConnection,
+	type DevicePublishConfig,
+	type DeviceConfig,
+	type MqttConnection,
 } from './types.js';
 import { PublishManager } from './manager.js';
 import { MessageBufferSync } from '../../mqtt/buffer.js';

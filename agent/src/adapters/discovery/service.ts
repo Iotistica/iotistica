@@ -158,7 +158,7 @@ export class DiscoveryService extends EventEmitter {
           { component: LogComponents.discovery }
 				);
 			});
-		}, intervals.discoveryLightIntervalMs!);
+		}, intervals.discoveryLightIntervalMs);
     
 		// Full discovery: Deep validation with device info reads
 		this.fullTimer = setInterval(() => {
@@ -176,7 +176,7 @@ export class DiscoveryService extends EventEmitter {
           { component: LogComponents.discovery }
 				);
 			});
-		}, intervals.discoveryFullIntervalMs!);
+		}, intervals.discoveryFullIntervalMs);
 	}
 
 	/**

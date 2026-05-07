@@ -1,15 +1,15 @@
-import { spawn, SpawnOptions } from 'child_process';
+import { spawn, type SpawnOptions } from 'child_process';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { 
-	JobDocument, 
-	JobAction, 
-	ActionResult, 
-	JobResult, 
+	type JobDocument, 
+	type JobAction, 
+	type ActionResult, 
+	type JobResult, 
 	ActionType,
-	ActionHandlerInput,
-	ActionCommandInput
+	type ActionHandlerInput,
+	type ActionCommandInput
 } from './types';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';

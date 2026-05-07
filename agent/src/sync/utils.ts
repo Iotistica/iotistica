@@ -49,7 +49,7 @@ export function appsChanged(oldApps: any, newApps: any): boolean {
 	};
 
 	const normalizeApp = (app: any) => {
-		if (!app || !app.services) return app;
+		if (!app?.services) return app;
 		return { ...app, services: app.services.map(normalizeService) };
 	};
 

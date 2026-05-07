@@ -3,7 +3,7 @@
  * Manages output configurations for protocol adapters (Modbus, CAN, OPC-UA)
  */
 
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 
 export interface DeviceEndpointOutput {

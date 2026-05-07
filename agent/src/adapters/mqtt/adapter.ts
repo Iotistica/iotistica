@@ -1,8 +1,8 @@
 import { EventEmitter } from "events";
 import * as mqtt from "mqtt";
 import * as mqttPattern from "mqtt-pattern";
-import { DeviceDataPoint, DeviceStatus, Logger } from "../types.js";
-import { MqttAdapterConfig, MqttDevice, MqttMetricConfig } from "./types.js";
+import { type DeviceDataPoint, type DeviceStatus, type Logger } from "../types.js";
+import { type MqttAdapterConfig, type MqttDevice, type MqttMetricConfig } from "./types.js";
 import { parsePayload, coerceType } from "./payload.js";
 import { agentTopic } from "../../mqtt/topics.js";
 import { EndpointModel } from "../../db/models/endpoint.model.js";
@@ -67,7 +67,7 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 			}
 
 			// Cache displayName by topic for fast lookup in enqueueData
-			if (device.displayName && device.displayName.trim()) {
+			if (device.displayName?.trim()) {
 				this.displayNamesByTopic.set(device.topic, device.displayName.trim());
 			}
 
@@ -523,7 +523,7 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 		this.currentReconnectPeriod = periodMs;
 
 		if (this.client) {
-			(this.client.options as mqtt.IClientOptions).reconnectPeriod = periodMs;
+			(this.client.options).reconnectPeriod = periodMs;
 		}
 	}
 

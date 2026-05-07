@@ -1,7 +1,7 @@
 import * as net from "net";
 import * as fs from "fs";
 import * as path from "path";
-import { DeviceDataPoint, SocketOutput, Logger } from "../types.js";
+import { type DeviceDataPoint, type SocketOutput, type Logger } from "../types.js";
 
 /**
  * IPC Socket Server that receives sensor data and serves it to connected clients

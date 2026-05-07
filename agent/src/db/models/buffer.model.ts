@@ -12,7 +12,7 @@
  * - Statistics tracking
  */
 
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 
 export interface MessageBufferRecord {

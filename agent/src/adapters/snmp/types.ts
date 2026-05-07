@@ -1,5 +1,5 @@
 // agent/src/features/endpoints/snmp/types.ts
-import { GenericDeviceConfig } from '../base.js';
+import { type GenericDeviceConfig } from '../base.js';
 
 export interface SNMPConnection {
   host: string;

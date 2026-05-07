@@ -13,8 +13,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { DeviceDataPoint, DeviceStatus, Logger } from './types.js';
-import { Endpoint } from '../db/models/endpoint.model.js';
+import { type DeviceDataPoint, type DeviceStatus, type Logger } from './types.js';
+import { type Endpoint } from '../db/models/endpoint.model.js';
 import { DeviceModel } from '../db/models/device.model.js';
 
 /**
@@ -260,7 +260,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 			try {
 			// Check if device is connected
 				const connection = this.connections.get(device.name);
-				if (!connection || !connection.connected) {
+				if (!connection?.connected) {
 				// Send BAD quality data points
 					const badDataPoints = this.createBadQualityDataPoints(
 						device,

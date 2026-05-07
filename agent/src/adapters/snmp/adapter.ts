@@ -1,9 +1,9 @@
 // agent/src/features/endpoints/snmp/adapter.ts
-import { BaseProtocolAdapter, GenericDeviceConfig } from '../base.js';
+import { BaseProtocolAdapter, type GenericDeviceConfig } from '../base.js';
 import { SNMPClient } from './client.js';
-import { DeviceDataPoint, Logger } from '../types.js';
+import { type DeviceDataPoint, type Logger } from '../types.js';
 import { ConsoleLogger } from '../common/logger.js';
-import { SNMPDeviceConfig, SNMPDataPoint } from './types.js';
+import { type SNMPDeviceConfig, type SNMPDataPoint } from './types.js';
 
 export class SNMPAdapter extends BaseProtocolAdapter {
 	private clients: Map<string, SNMPClient> = new Map();
@@ -33,7 +33,7 @@ export class SNMPAdapter extends BaseProtocolAdapter {
 		// Resolve human-readable display name.
 		// Priority: metadata.displayName (config) > SNMP sysName (1.3.6.1.2.1.1.5.0) > (unset)
 		const configDisplayName = device.metadata?.displayName as string | undefined;
-		if (configDisplayName && configDisplayName.trim()) {
+		if (configDisplayName?.trim()) {
 			this.resolvedDeviceNames.set(device.name, configDisplayName.trim());
 		} else {
 			try {
@@ -136,7 +136,7 @@ export class SNMPAdapter extends BaseProtocolAdapter {
     
 		// Validate OID format (basic check)
 		for (const oid of config.dataPoints) {
-			if (!oid.oid || !oid.oid.match(/^[\d.]+$/)) {
+			if (!oid.oid?.match(/^[\d.]+$/)) {
 				throw new Error(`Invalid OID format for ${oid.name}: ${oid.oid}`);
 			}
 		}

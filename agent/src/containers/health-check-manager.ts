@@ -9,15 +9,15 @@
  */
 
 import { EventEmitter } from 'events';
-import Docker from 'dockerode';
+import type Docker from 'dockerode';
 import { HealthCheckExecutor } from './health-check-executor';
 import {
-	ContainerHealthProbe as HealthProbe,
-	ProbeState,
-	ProbeType,
-	ContainerHealth,
-	HealthStatus,
-	HealthCheckResult,
+	type ContainerHealthProbe as HealthProbe,
+	type ProbeState,
+	type ProbeType,
+	type ContainerHealth,
+	type HealthStatus,
+	type HealthCheckResult,
 } from './types';
 
 export interface HealthCheckConfig {

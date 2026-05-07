@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
-import { BACnetAdapterConfig, BACnetDevice } from './types';
+import { type BACnetAdapterConfig, type BACnetDevice } from './types';
 import { BACnetClient } from './client';
-import { DeviceDataPoint, DeviceStatus, Logger } from '../types.js';
+import { type DeviceDataPoint, type DeviceStatus, type Logger } from '../types.js';
 import { DeviceModel } from '../../db/models/device.model.js';
 import { pLimit } from '../../lib/p-limit.js';
 
@@ -224,7 +224,7 @@ export class BACnetAdapter extends EventEmitter {
 
 			// Resolve human-readable display name.
 			// Priority: device.displayName (config) > BACnet objectName property > (unset)
-			if (deviceConfig.displayName && deviceConfig.displayName.trim()) {
+			if (deviceConfig.displayName?.trim()) {
 				this.resolvedDeviceNames.set(deviceConfig.name, deviceConfig.displayName.trim());
 			} else {
 				const objectName = await client.readDeviceName();

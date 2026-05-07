@@ -18,14 +18,14 @@
  * - Unified execution: Single JobEngine handles jobs from both delivery methods
  */
 
-import { HttpClient, FetchHttpClient } from '../../lib/http-client.js';
-import { BaseFeature, FeatureConfig } from '../base-feature.js';
-import { AgentLogger } from '../../logging/agent-logger.js';
+import { type HttpClient, FetchHttpClient } from '../../lib/http-client.js';
+import { BaseFeature, type FeatureConfig } from '../base-feature.js';
+import { type AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
 import { CloudMqttClient } from '../../mqtt/manager.js';
 import { agentTopic } from '../../mqtt/topics.js';
 import { JobEngine } from './engine.js';
-import { JobDocument, JobExecutionData } from './types.js';
+import { type JobDocument, type JobExecutionData } from './types.js';
 import { normalizeApiEndpoint, getApiVersion } from '../../utils/api-utils.js';
 
 export interface JobsConfig extends FeatureConfig {

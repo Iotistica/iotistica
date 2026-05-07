@@ -5,6 +5,7 @@ import { LogComponents } from '../logging/types.js';
 import { buildApiEndpoint } from '../utils/api-utils.js';
 import { agentTopic } from '../mqtt/topics.js';
 import type { AgentStateReport, CloudSyncMqttManager } from './types.js';
+import type { PublishMode } from '../mqtt/manager.js';
 import { CloudTransportBufferedError, NonRetryableTransportError } from './types.js';
 import { stableStringify } from './utils.js';
 
@@ -20,7 +21,7 @@ export class CloudTransport {
 		private httpClient: HttpClient,
 		private readonly cloudApiEndpoint: string,
 		private readonly getAgentInfo: () => { uuid: string; apiKey?: string; provisioned: boolean },
-		private readonly getPublishMode: () => import('../mqtt/manager.js').PublishMode,
+		private readonly getPublishMode: () => PublishMode,
 		private readonly logger: AgentLogger | undefined,
 		private readonly getApiTimeout: () => number,
 	) {

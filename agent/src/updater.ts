@@ -10,7 +10,7 @@ import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { join } from 'path';
-import { AgentLogger } from './logging/agent-logger.js';
+import { type AgentLogger } from './logging/agent-logger.js';
 import { LogComponents } from './logging/types.js';
 import { CloudMqttClient, createJsonPayload } from './mqtt/manager.js';
 import { notifySystemd } from './system/watchdog.js';

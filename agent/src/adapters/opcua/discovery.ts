@@ -8,7 +8,7 @@
 import type { AgentLogger } from '../../logging/agent-logger';
 import { createHash } from 'crypto';
 import { LogComponents } from '../../logging/types';
-import { BaseDiscoveryPlugin, DiscoveredDevice } from '../types';
+import { BaseDiscoveryPlugin, type DiscoveredDevice } from '../types';
 import { generateOPCUAFingerprint } from '../fingerprint';
 import type { ConfigManager } from '../../agent/config.js';
 
@@ -46,6 +46,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 				return 3;
 			case 'http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15':
 				return 2;
+			case undefined:
 			default:
 				return 1;
 		}
@@ -77,6 +78,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 				return 'Aes128_Sha256_RsaOaep';
 			case 'http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss':
 				return 'Aes256_Sha256_RsaPss';
+			case undefined:
 			default:
 				return 'None';
 		}

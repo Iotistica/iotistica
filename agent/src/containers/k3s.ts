@@ -11,7 +11,7 @@
  * 3. Valid kubeconfig access
  */
 
-import { Readable } from 'stream';
+import { type Readable } from 'stream';
 import { BaseOrchestratorDriver } from './types';
 import type {
 	TargetState as _TargetState,
@@ -641,7 +641,7 @@ export class K3sDriver extends BaseOrchestratorDriver {
 			// Get logs from first pod
 			const pod = podsResponse.items[0];
 			const logStream = await this.coreV1Api.readNamespacedPodLog(
-				pod.metadata!.name!,
+				pod.metadata!.name,
 				this.namespace,
 				undefined, // container (use default)
 				options?.follow || false,
@@ -656,7 +656,7 @@ export class K3sDriver extends BaseOrchestratorDriver {
 			// Convert response to Readable stream
 			const { Readable } = await import('stream');
 			const stream = new Readable();
-			stream.push(logStream as any);
+			stream.push(logStream);
 			stream.push(null);
 			
 			return stream;

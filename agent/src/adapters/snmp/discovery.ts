@@ -19,8 +19,8 @@ import type { AgentLogger } from "../../logging/agent-logger";
 import { LogComponents } from "../../logging/types";
 import {
 	BaseDiscoveryPlugin,
-	DiscoveredDevice,
-	ValidationResult,
+	type DiscoveredDevice,
+	type ValidationResult,
 } from "../types";
 import { generateSNMPFingerprint } from "../fingerprint";
 import type { ConfigManager } from "../../agent/config.js";

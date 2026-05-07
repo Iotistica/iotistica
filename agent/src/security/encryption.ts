@@ -134,7 +134,7 @@ export function encryptData(plaintext: string): string {
  * @returns Decrypted plaintext
  */
 export function decryptData(encrypted: string): string {
-	if (!encrypted || !encrypted.includes(':')) {
+	if (!encrypted?.includes(':')) {
 		return encrypted; // Not encrypted or empty
 	}
 

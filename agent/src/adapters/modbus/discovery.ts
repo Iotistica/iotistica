@@ -13,7 +13,7 @@
 
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
-import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from '../types';
+import { BaseDiscoveryPlugin, type DiscoveredDevice, type ValidationResult } from '../types';
 import { generateModbusFingerprint } from '../fingerprint';
 import type { ConfigManager } from '../../agent/config.js';
 
@@ -280,13 +280,13 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 							connection: isSerial
 								? {
 									type: 'serial',
-									port: options!.serialPort,
+									port: options.serialPort,
 									baudRate: options?.baudRate || 9600,
 									slaveId
 								}
 								: {
 									type: 'tcp',
-									host: options!.tcpHost,
+									host: options.tcpHost,
 									port: options?.tcpPort || 502,
 									slaveId
 								},
@@ -664,7 +664,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 
 			if (isSerial) {
 				// Serial (RTU) connection
-				await client.connectRTUBuffered(options!.serialPort!, {
+				await client.connectRTUBuffered(options.serialPort!, {
 					baudRate: options?.baudRate || 9600,
 					dataBits: 8,
 					stopBits: 1,
@@ -674,7 +674,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 				this.logger?.debugSync('Opened Modbus RTU connection', {
 					component: LogComponents.discovery + "] [" + this.protocol as any,
 					phase: 'discovery',
-					port: options!.serialPort,
+					port: options.serialPort,
 					baudRate: options?.baudRate || 9600
 				});
 
@@ -776,7 +776,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 			return null;
 		});
 
-		if (meiResult && meiResult.Basic?.VendorName) {
+		if (meiResult?.Basic?.VendorName) {
 			const vendor = meiResult.Basic.VendorName.toString();
 
 			return {

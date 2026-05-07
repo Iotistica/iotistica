@@ -567,7 +567,7 @@ export class ConfigManager extends EventEmitter {
 	public getPerformanceConfig(): PerformanceConfig {
 		const cloudRuntime = this.targetConfig.runtime;
 		const cloudSettings = this.targetConfig.settings;
-		const cloudMemory = (cloudRuntime as any)?.memory;
+		const cloudMemory = (cloudRuntime)?.memory;
 
 		return {
 			memoryCheckIntervalMs:
@@ -636,33 +636,33 @@ export class ConfigManager extends EventEmitter {
 	 */
 	public getIntervalConfig(): IntervalConfig {
 		const cloud = this.targetConfig.intervals;
-		const cloudDevice = (cloud as any)?.device;
-		const cloudDiscovery = (cloud as any)?.discovery;
+		const cloudDevice = (cloud)?.device;
+		const cloudDiscovery = (cloud)?.discovery;
 
 		return {
 			discoveryFullIntervalMs:
 				cloudDiscovery?.fullIntervalMs ??
-				(cloud as any)?.discoveryFullIntervalMs ??
+				(cloud)?.discoveryFullIntervalMs ??
 				86400000,
 			discoveryLightIntervalMs:
 				cloudDiscovery?.lightIntervalMs ??
-				(cloud as any)?.discoveryLightIntervalMs ??
+				(cloud)?.discoveryLightIntervalMs ??
 				14400000,
 			targetStatePollIntervalMs:
 				cloudDevice?.targetStatePollIntervalMs ??
-				(cloud as any)?.targetStatePollIntervalMs ??
+				(cloud)?.targetStatePollIntervalMs ??
 				60000,
 			deviceReportIntervalMs:
 				cloudDevice?.reportIntervalMs ??
-				(cloud as any)?.deviceReportIntervalMs ??
+				(cloud)?.deviceReportIntervalMs ??
 				60000,
 			metricsIntervalMs:
 				cloudDevice?.metricsIntervalMs ??
-				(cloud as any)?.metricsIntervalMs ??
+				(cloud)?.metricsIntervalMs ??
 				300000,
 			reconciliationIntervalMs:
 				cloudDevice?.reconciliationIntervalMs ??
-				(cloud as any)?.reconciliationIntervalMs ??
+				(cloud)?.reconciliationIntervalMs ??
 				30000,
 		};
 	}
@@ -965,7 +965,7 @@ export class ConfigManager extends EventEmitter {
 
 				// Normalize property names from cloud API (camelCase) to SQLite (snake_case)
 				const normalizedDevice = this.normalizeDevice(
-					device as ProtocolAdapterDevice,
+					device,
 				);
 
 				// UUID-only lookup
@@ -1062,8 +1062,7 @@ export class ConfigManager extends EventEmitter {
 						const discoveredDevice =
 							this.discoveryService.getDiscoveredDevice?.(endpointUrl);
 						if (
-							discoveredDevice &&
-							discoveredDevice.dataPoints &&
+							discoveredDevice?.dataPoints &&
 							discoveredDevice.dataPoints.length > 0
 						) {
 							this.logger?.debugSync(
@@ -1283,7 +1282,7 @@ export class ConfigManager extends EventEmitter {
 
 		// Build maps for easier comparison
 		const targetMap = new Map(
-			targetDevices.map((d) => [d.id || (d as any).uuid, d]),
+			targetDevices.map((d) => [d.id || (d).uuid, d]),
 		);
 		const currentMap = new Map(
 			currentDevices
@@ -1341,7 +1340,7 @@ export class ConfigManager extends EventEmitter {
 
 		// Devices to update (config changed)
 		for (const targetDevice of targetDevices) {
-			const targetDeviceId = targetDevice.id || (targetDevice as any).uuid;
+			const targetDeviceId = targetDevice.id || (targetDevice).uuid;
 			const currentDevice = currentMap.get(targetDeviceId);
 			if (currentDevice && !deepEqual(targetDevice, currentDevice)) {
 				this.logger?.debugSync("Device needs to be updated", {
@@ -1495,8 +1494,7 @@ export class ConfigManager extends EventEmitter {
 			// CRITICAL: Preserve discovered data_points if target state has empty array
 			// Same logic as syncEndpointsToDatabase() - don't overwrite discovery results
 			if (
-				existing &&
-				existing.data_points &&
+				existing?.data_points &&
 				existing.data_points.length > 0 &&
 				(!dataPoints || dataPoints.length === 0)
 			) {
@@ -1875,7 +1873,7 @@ export class ConfigManager extends EventEmitter {
 		if (this.containerManager) {
 			this.containerManager.stopAutoReconciliation();
 			this.containerManager.startAutoReconciliation(
-				intervals.reconciliationIntervalMs!,
+				intervals.reconciliationIntervalMs,
 			);
 
 			this.logger?.infoSync(
@@ -1955,7 +1953,7 @@ export class ConfigManager extends EventEmitter {
 			});
 		}
 
-		if (!restartConfig || !restartConfig.enabled) {
+		if (!restartConfig?.enabled) {
 			this.logger?.debugSync("Scheduled restart disabled or not configured", {
 				component: LogComponents.configManager,
 				config: restartConfig || "not set",

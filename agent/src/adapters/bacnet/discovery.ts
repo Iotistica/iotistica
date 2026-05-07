@@ -19,7 +19,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import os from 'os';
 import BACnet from 'bacstack';
 import { LogComponents } from '../../logging/types';
-import { BaseDiscoveryPlugin, DiscoveredDevice, ValidationResult } from '../types';
+import { BaseDiscoveryPlugin, type DiscoveredDevice, type ValidationResult } from '../types';
 import { generateBACnetFingerprint } from '../fingerprint';
 
 export interface BACnetDiscoveryOptions {

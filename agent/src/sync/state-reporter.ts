@@ -2,11 +2,12 @@ import type { StateManager } from '../agent/state.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 import { RetryPolicy, CircuitBreaker, AsyncLock } from '../utils/retry-policy.js';
-import { ConnectionMonitor } from '../health/connection-monitor.js';
+import { type ConnectionMonitor } from '../health/connection-monitor.js';
 import type { AgentDeviceReport, AgentStateReport } from './types.js';
 import { CloudTransportBufferedError } from './types.js';
 import { calculateHash, calculateStateDiff, stableStringify } from './utils.js';
 import type { CloudTransport } from './transport.js';
+import type { PublishMode } from '../mqtt/manager.js';
 
 const CIRCUIT_FAILURE_THRESHOLD = 10;
 const CIRCUIT_COOLDOWN_MS = 5 * 60 * 1000;   // 5 min
@@ -28,8 +29,8 @@ export interface StateReporterDeps {
 		vpnEnabled?: boolean;
 	};
 	getConfig: () => { reportInterval: number; metricsInterval: number };
-	getPublishMode: () => import('../mqtt/manager.js').PublishMode;
-	setPublishMode: (mode: import('../mqtt/manager.js').PublishMode, reason?: string) => void;
+	getPublishMode: () => PublishMode;
+	setPublishMode: (mode: PublishMode, reason?: string) => void;
 	requestMqttFlush?: (reason?: string) => void;
 	getEndpoints?: () => { getAllDeviceStatuses?(): Record<string, any> };
 	devicePublish?: { getStats(): any };

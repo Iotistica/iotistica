@@ -1,5 +1,5 @@
-import { BACnetDevice, BACnetObject, BACnetProperty } from './types';
-import { Logger } from '../types';
+import { type BACnetDevice, type BACnetObject, BACnetProperty } from './types';
+import { type Logger } from '../types';
 import { pLimit } from '../../lib/p-limit.js';
 import BACnet from 'bacstack';
 

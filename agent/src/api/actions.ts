@@ -4,7 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import ContainerManager from '../containers/container-manager';
+import type ContainerManager from '../containers/container-manager';
 import type { AgentManager } from '../agent/index.js';
 import type { CloudSync } from '../sync';
 import type { AgentLogger } from '../logging/agent-logger';
@@ -19,6 +19,7 @@ import { MessageBufferModel } from '../db/models/buffer.model';
 import { CloudMqttClient } from '../mqtt/manager';
 import { encodeIfUuid } from '../mqtt/codec';
 import type { AgentUpdater } from '../updater';
+import type { DiscoveryService } from '../adapters/discovery/service';
 
 let containerManager: ContainerManager;
 let agentManager: AgentManager;
@@ -29,7 +30,7 @@ let simulationOrchestrator: SimulationOrchestrator | undefined;
 let adapterManager: AdapterManager | undefined;
 let configManager: ConfigManager | undefined;
 let stateManager: StateManager | undefined;
-let discoveryService: import('../adapters/discovery/service').DiscoveryService | undefined;
+let discoveryService: DiscoveryService | undefined;
 let agentInstance: any | undefined;
 let healthReporter: (() => HealthReport) | undefined;
 let agentUpdater: AgentUpdater | undefined;
@@ -279,14 +280,14 @@ export function getSimulationOrchestrator(): SimulationOrchestrator | undefined 
 /**
  * Set discovery service (called by agent after initialization)
  */
-export function setDiscoveryService(service: import('../adapters/discovery/service').DiscoveryService | undefined) {
+export function setDiscoveryService(service: DiscoveryService | undefined) {
 	discoveryService = service;
 }
 
 /**
  * Get discovery service (for accessing discovery functionality)
  */
-export function getDiscoveryService(): import('../adapters/discovery/service').DiscoveryService | undefined {
+export function getDiscoveryService(): DiscoveryService | undefined {
 	return discoveryService;
 }
 
@@ -638,7 +639,7 @@ export const addEndpoint = async (body: {
 				resolvedConnection.topic = firstTopic;
 			} else {
 				const agentInfo = agentManager.getAgentInfo();
-				const tenantId = agentInfo?.tenantId as string | undefined;
+				const tenantId = agentInfo?.tenantId;
 				const agentUuid = agentInfo?.uuid as string | undefined;
 				if (tenantId && agentUuid) {
 					const generatedTopic = `i/${encodeIfUuid(tenantId)}/a/${encodeIfUuid(agentUuid)}/d/${encodeIfUuid(uuid)}`;

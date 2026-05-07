@@ -5,7 +5,7 @@
  * for all protocol adapters (Modbus, SNMP, OPC-UA, MQTT, BACnet)
  */
 
-import { DeviceStatus } from './types.js';
+import { type DeviceStatus } from './types.js';
 
 /**
  * Metrics configuration

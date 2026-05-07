@@ -9,18 +9,18 @@
  * - Logging
  */
 
-import { StateManager } from "./agent/state.js";
-import ContainerManager from "./containers/container-manager.js";
-import { AgentManager } from "./agent/index.js";
+import { type StateManager } from "./agent/state.js";
+import type ContainerManager from "./containers/container-manager.js";
+import { type AgentManager } from "./agent/index.js";
 import type { AgentInfo } from "./agent/types.js";
-import { DeviceAPI } from "./api/index.js";
-import { CloudSync } from "./sync/index.js";
+import { type DeviceAPI } from "./api/index.js";
+import { type CloudSync } from "./sync/index.js";
 
-import { AgentLogger } from "./logging/agent-logger.js";
+import { type AgentLogger } from "./logging/agent-logger.js";
 import { LogComponents } from "./logging/types.js";
 import { CloudMqttClient } from "./mqtt";
-import { AgentFirewall } from "./network/firewall.js";
-import { AgentUpdater } from "./updater.js";
+import { type AgentFirewall } from "./network/firewall.js";
+import { type AgentUpdater } from "./updater.js";
 import { 
 	setMemoryLogger,
 	startMemoryMonitoring,
@@ -28,12 +28,12 @@ import {
 	startMemoryLeakSimulation,
 	stopMemoryLeakSimulation
 } from "./system/memory.js";
-import { AnomalyDetectionService } from "./anomaly/index.js";
-import { SimulationOrchestrator } from "./anomaly/simulator.js";
-import { DiscoveryService } from "./adapters/discovery/service.js";
-import { FeatureInitializer } from "./init/features.js";
-import type { ConfigManager } from "./agent/config.js";
-import {
+import { type AnomalyDetectionService } from "./anomaly/index.js";
+import { type SimulationOrchestrator } from "./anomaly/simulator.js";
+import { type DiscoveryService } from "./adapters/discovery/service.js";
+import { type FeatureInitializer } from "./init/features.js";
+import type { ConfigManager } from "./agent/config.js";import type { DictionaryManager } from './mqtt/dictionary.js';
+import type { HttpClient } from './lib/http-client.js';import {
 	initCore as runInitCore,
 } from './init/core.js';
 import type { AgentInitContext } from './init/context.js';
@@ -65,8 +65,8 @@ export default class Agent {
 	private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
 	private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
 	private configManager!: ConfigManager; // Configuration manager (centralized config access)
-	private dictionaryManager?: import('./mqtt/dictionary.js').DictionaryManager; // MQTT message key compaction (top-level service)
-	private sharedHttpClient?: import('./lib/http-client').HttpClient; // Shared HTTP client for connection pooling
+	private dictionaryManager?: DictionaryManager; // MQTT message key compaction (top-level service)
+	private sharedHttpClient?: HttpClient; // Shared HTTP client for connection pooling
 
 	// System settings (config-driven with env var defaults)
 	// Note: All settings now accessed via configManager getters (intervals, endpoints, ports, etc.)
@@ -293,7 +293,7 @@ export default class Agent {
 	private startAutoReconciliation(): void {
 		const intervals = this.configManager.getIntervalConfig();
 		this.containerManager.startAutoReconciliation(
-      intervals.reconciliationIntervalMs!
+			intervals.reconciliationIntervalMs
 		);
 		this.agentLogger?.infoSync("Auto-reconciliation started", {
 			component: LogComponents.agent,

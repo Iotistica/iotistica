@@ -10,7 +10,7 @@ export { LocalLogBackend } from './local-backend';
 export { ContainerLogMonitor } from './container-monitor';
 export { AgentLogger } from './agent-logger';
 
-import { AgentLogger } from './agent-logger';
+import { type AgentLogger } from './agent-logger';
 import { LogComponents } from './types';
 
 /**
