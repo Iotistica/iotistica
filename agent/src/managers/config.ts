@@ -16,10 +16,13 @@ import { cloneDeep, deepEqual } from "../lib/collection-utils.js";
 import {
   MqttFileAuthReconciler,
   resolveMosquittoAuthDir,
-  type ContainerManager,
+  type ContainerManager as MqttAuthContainerManager,
 } from "../mqtt/auth.js";
 import type { AgentLogger } from "../logging/agent-logger.js";
 import { LogComponents, type LogLevel } from "../logging/types.js";
+import type { ContainerManager } from "../containers/container-manager.js";
+import type { CloudSync } from "../sync/index.js";
+import type { DiscoveryService } from "../adapters/discovery/service.js";
 import type {
   DeviceConfig,
   ConfigStep,
@@ -151,12 +154,12 @@ export class ConfigManager extends EventEmitter {
   private logger?: AgentLogger;
 
   // Reactive handler dependencies (initialized via setReactiveHandlers())
-  private containerManager?: any;
-  private cloudSync?: any;
+  private containerManager?: ContainerManager;
+  private cloudSync?: CloudSync;
   private discoveryLightTimer?: NodeJS.Timeout;
   private discoveryFullTimer?: NodeJS.Timeout;
   private scheduledRestartTimer?: NodeJS.Timeout;
-  private discoveryService?: any;
+  private discoveryService?: DiscoveryService;
 
   constructor(logger?: AgentLogger) {
     super();
@@ -193,9 +196,9 @@ export class ConfigManager extends EventEmitter {
    * Must be called after init() to enable automatic config change responses
    */
   public setReactiveHandlers(dependencies: {
-    containerManager?: any;
-    cloudSync?: any;
-    discoveryService?: any;
+    containerManager?: ContainerManager;
+    cloudSync?: CloudSync;
+    discoveryService?: DiscoveryService;
     discoveryLightTimer?: NodeJS.Timeout;
     discoveryFullTimer?: NodeJS.Timeout;
   }): void {
@@ -293,6 +296,71 @@ export class ConfigManager extends EventEmitter {
     return key in this.currentConfig;
   }
 
+  private hasNoDataPoints(endpoint: any): boolean {
+    return !endpoint.dataPoints || endpoint.dataPoints.length === 0;
+  }
+
+  private parseConnectionValue(
+    source: any,
+    operation: string,
+    warnOnError = false,
+  ): any {
+    let connection: any = source?.connection;
+    if (!connection && source?.connectionString) {
+      try {
+        connection = JSON.parse(source.connectionString);
+      } catch (err) {
+        if (warnOnError) {
+          this.logger?.warnSync("Failed to parse connectionString", {
+            component: LogComponents.configManager,
+            operation,
+            deviceName: source?.name,
+            connectionString: source?.connectionString,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+        connection = null;
+      }
+    }
+
+    return connection;
+  }
+
+  private isModbusDiscoveryTarget(device: any, connection: any): boolean {
+    return device?.protocol === "modbus" && connection?.slaveRange !== undefined;
+  }
+
+  private resolveAdapterConnection(device: ProtocolAdapterDevice): Record<string, any> {
+    if (device.connectionString) {
+      try {
+        const url = new URL(device.connectionString);
+        return {
+          host: url.hostname,
+          port: parseInt(url.port) || 502,
+        };
+      } catch {
+        return { connectionString: device.connectionString };
+      }
+    }
+
+    return ((device as any).connection || {}) as Record<string, any>;
+  }
+
+  private buildEndpointMetadata(
+    device: ProtocolAdapterDevice,
+    connection: Record<string, any>,
+    overwriteModbusSlaveId: boolean,
+  ): Record<string, any> {
+    const metadata: Record<string, any> = { ...(((device as any).metadata || {}) as Record<string, any>) };
+    if (device.protocol === "modbus" && connection.unitId !== undefined) {
+      if (overwriteModbusSlaveId || !metadata.slaveId) {
+        metadata.slaveId = connection.unitId;
+      }
+    }
+
+    return metadata;
+  }
+
   // ==================== PROTOCOL CONFIG GETTERS ====================
 
   /**
@@ -303,16 +371,11 @@ export class ConfigManager extends EventEmitter {
 
     const filtered = endpoints.filter((endpoint: any) => {
       if (endpoint.protocol !== protocol) return false;
-
-      // Parse connection from either object or string format
-      let connection: any = endpoint.connection;
-      if (!connection && endpoint.connectionString) {
-        try {
-          connection = JSON.parse(endpoint.connectionString);
-        } catch {
-          connection = null;
-        }
-      }
+      const connection = this.parseConnectionValue(
+        endpoint,
+        "getDiscoveryTargets",
+      );
+      const hasNoDataPoints = this.hasNoDataPoints(endpoint);
 
       switch (protocol) {
         case "modbus":
@@ -323,14 +386,9 @@ export class ConfigManager extends EventEmitter {
           );
         case "opcua":
           const hasEndpointUrl = !!connection?.endpointUrl;
-          const hasNoDataPoints =
-            !endpoint.dataPoints || endpoint.dataPoints.length === 0;
           return hasEndpointUrl && hasNoDataPoints;
         case "snmp":
-          return (
-            connection?.community &&
-            (!endpoint.dataPoints || endpoint.dataPoints.length === 0)
-          );
+          return connection?.community && hasNoDataPoints;
         case "bacnet":
           return (
             Array.isArray(connection?.discoveryTargets) &&
@@ -341,9 +399,7 @@ export class ConfigManager extends EventEmitter {
           // Discovery validates that topics receive data (not auto-discovery)
           const hasTopics =
             Array.isArray(connection?.topics) && connection.topics.length > 0;
-          const hasNoMqttDataPoints =
-            !endpoint.dataPoints || endpoint.dataPoints.length === 0;
-          return hasTopics && hasNoMqttDataPoints;
+          return hasTopics && hasNoDataPoints;
         default:
           return false;
       }
@@ -874,26 +930,13 @@ export class ConfigManager extends EventEmitter {
 
       // For each device in target state
       for (const device of devices) {
-        const deviceAny = device as any;
-        let connection: any = deviceAny.connection;
-        if (!connection && deviceAny.connectionString) {
-          try {
-            connection = JSON.parse(deviceAny.connectionString);
-          } catch (err) {
-            this.logger?.warnSync("Failed to parse connectionString", {
-              component: LogComponents.configManager,
-              deviceName: device.name,
-              connectionString: deviceAny.connectionString,
-              error: err instanceof Error ? err.message : String(err),
-            });
-            connection = null;
-          }
-        }
+        const connection = this.parseConnectionValue(
+          device,
+          "syncEndpointsToDatabase",
+          true,
+        );
 
-        // Check if this is a Modbus discovery target (has slaveRange)
-        const hasSlaveRange = connection?.slaveRange !== undefined;
-
-        if (device.protocol === "modbus" && hasSlaveRange) {
+        if (this.isModbusDiscoveryTarget(device, connection)) {
           this.logger?.debugSync(
             "Skipping discovery target device (has slaveRange)",
             {
@@ -1128,7 +1171,7 @@ export class ConfigManager extends EventEmitter {
     try {
       const reconciler = new MqttFileAuthReconciler(this.logger);
       const rawDocker = (this.containerManager as any)?.getDocker?.();
-      const dockerManager: ContainerManager | undefined = rawDocker
+      const dockerManager: MqttAuthContainerManager | undefined = rawDocker
         ? {
             findContainerByName: async (name: string) => {
               const all = await rawDocker.listContainers({ all: true });
@@ -1178,18 +1221,10 @@ export class ConfigManager extends EventEmitter {
     // CRITICAL: Filter out discovery targets (devices with slaveRange)
     // Discovery targets should never be in reconciliation steps - they're config-only
     const filteredTargetDevices = allTargetDevices.filter((agent: any) => {
-      // Parse connection (same logic as syncEndpointsToDatabase and getDiscoveryTargets)
-      let connection: any = agent.connection;
-      if (!connection && agent.connectionString) {
-        try {
-          connection = JSON.parse(agent.connectionString);
-        } catch {
-          connection = null;
-        }
-      }
+      const connection = this.parseConnectionValue(agent, "calculateSteps");
 
       // Skip Modbus discovery targets (have slaveRange)
-      if (agent.protocol === "modbus" && connection?.slaveRange) {
+      if (this.isModbusDiscoveryTarget(agent, connection)) {
         this.logger?.infoSync(
           "Filtered out discovery target from reconciliation steps",
           {
@@ -1359,32 +1394,8 @@ export class ConfigManager extends EventEmitter {
         "../db/models/endpoint.model.js"
       );
 
-      // Handle both connectionString and connection formats
-      let connection: Record<string, any> = {};
-      if (device.connectionString) {
-        // Legacy format: parse connection string
-        try {
-          const url = new URL(device.connectionString);
-          connection = {
-            host: url.hostname,
-            port: parseInt(url.port) || 502,
-          };
-        } catch {
-          connection = { connectionString: device.connectionString };
-        }
-      } else if ((device as any).connection) {
-        // New format: connection object already provided
-        connection = (device as any).connection;
-      }
-
-      // Extract protocol-specific metadata (preserve existing metadata from device)
-      let metadata: Record<string, any> = (device as any).metadata || {};
-
-      // Add protocol-specific metadata if needed
-      if (device.protocol === "modbus" && connection.unitId !== undefined) {
-        // For Modbus: store unitId as slaveId in metadata
-        metadata.slaveId = connection.unitId;
-      }
+      const connection = this.resolveAdapterConnection(device);
+      const metadata = this.buildEndpointMetadata(device, connection, true);
 
       // Normalize property names (camelCase → snake_case)
       const normalizedEndpoint: Partial<Endpoint> = {
@@ -1461,34 +1472,8 @@ export class ConfigManager extends EventEmitter {
         "../db/models/endpoint.model.js"
       );
 
-      // Handle both connectionString and connection formats
-      let connection: Record<string, any> = {};
-      if (device.connectionString) {
-        // Legacy format: parse connection string
-        try {
-          const url = new URL(device.connectionString);
-          connection = {
-            host: url.hostname,
-            port: parseInt(url.port) || 502,
-          };
-        } catch {
-          connection = { connectionString: device.connectionString };
-        }
-      } else if ((device as any).connection) {
-        // New format: connection object already provided
-        connection = (device as any).connection;
-      }
-
-      // Preserve existing metadata from device (includes connectionName, profile, etc.)
-      let metadata: Record<string, any> = (device as any).metadata || {};
-
-      // Add protocol-specific metadata if needed (preserve existing values)
-      if (device.protocol === "modbus" && connection.unitId !== undefined) {
-        // For Modbus: store unitId as slaveId in metadata (only if not already set)
-        if (!metadata.slaveId) {
-          metadata.slaveId = connection.unitId;
-        }
-      }
+      const connection = this.resolveAdapterConnection(device);
+      const metadata = this.buildEndpointMetadata(device, connection, false);
 
       // Get existing device first to check for data_points preservation
       const existing = await DeviceSensorModel.getByUuid(device.id);
@@ -2114,7 +2099,6 @@ export class ConfigManager extends EventEmitter {
           forceRun: true, // Bypass rate limiting (config-driven change)
           protocols: discoveryProtocols, // Only scan changed protocols
           skipDbWrites: !shouldAllowDiscoveryWrites, // Allow discovery to persist new slaves for modbus slaveRange targets
-          traceId: `config-change-${Date.now()}`, // Set traceId to enable batch mode
         })
         .catch((err: Error) => {
           this.logger?.errorSync(

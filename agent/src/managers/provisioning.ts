@@ -232,7 +232,6 @@ export class AgentProvisioningService {
 				operation: 'provision',
 			});
 			agentInfo.provisioningApiKey = undefined;
-
 			agentInfo.provisioned = true;
 			agentInfo.provisioningState = 'provisioned';
 			agentInfo.registeredAt = Date.now();
