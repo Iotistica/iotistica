@@ -30,11 +30,11 @@ export class LogSampler {
 	}
 
 	/**
-	 * Returns true if this log message should be forwarded to the cloud.
-	 *
-	 * Critical logs are never dropped. When the circuit breaker is open,
-	 * info logs are sampled at 10% and debug logs are dropped entirely.
-	 */
+	* Returns true if this log message should be forwarded to the cloud.
+	*
+	* Critical logs are never dropped. When the circuit breaker is open,
+	* info logs are sampled at 10% and debug logs are dropped entirely.
+	*/
 	shouldSample(logMessage: LogMessage, circuitBreakerOpen: boolean): boolean {
 		if (this.isCriticalLog(logMessage)) {
 			return true;
@@ -56,9 +56,9 @@ export class LogSampler {
 	}
 
 	/**
-	 * Extract log level from a structured or unstructured log message.
-	 * Prefers the structured `level` field; falls back to regex pattern matching.
-	 */
+	* Extract log level from a structured or unstructured log message.
+	* Prefers the structured `level` field; falls back to regex pattern matching.
+	*/
 	detectLogLevel(logMessage: LogMessage): LogLevel {
 		if (logMessage.level) {
 			return logMessage.level;
@@ -79,12 +79,12 @@ export class LogSampler {
 	}
 
 	/**
-	 * Returns true if the log is critical and must never be dropped by
-	 * circuit-breaker shedding.
-	 *
-	 * Covers: error/warn levels, agent service logs, isSystem flag,
-	 * system/manager log sources.
-	 */
+	* Returns true if the log is critical and must never be dropped by
+	* circuit-breaker shedding.
+	*
+	* Covers: error/warn levels, agent service logs, isSystem flag,
+	* system/manager log sources.
+	*/
 	isCriticalLog(logMessage: LogMessage): boolean {
 		const level = logMessage.level ?? this.detectLogLevel(logMessage);
 		if (level === 'error' || level === 'warn') {
@@ -104,9 +104,9 @@ export class LogSampler {
 	}
 
 	/**
-	 * Fast approximate serialized size for buffer byte-budget accounting.
-	 * Avoids JSON.stringify on the hot path; conservative to prevent underestimating.
-	 */
+	* Fast approximate serialized size for buffer byte-budget accounting.
+	* Avoids JSON.stringify on the hot path; conservative to prevent underestimating.
+	*/
 	estimateLogSize(logMessage: LogMessage): number {
 		const messageLen = logMessage.message ? logMessage.message.length : 0;
 		const serviceLen = logMessage.serviceName ? logMessage.serviceName.length : 0;
@@ -116,11 +116,11 @@ export class LogSampler {
 	}
 
 	/**
-	 * Deterministic sampling based on a hash of device + service + minute bucket.
-	 *
-	 * The minute-bucket keeps the same service consistently sampled/dropped within
-	 * a one-minute window (better dashboard UX than purely random sampling).
-	 */
+	* Deterministic sampling based on a hash of device + service + minute bucket.
+	*
+	* The minute-bucket keeps the same service consistently sampled/dropped within
+	* a one-minute window (better dashboard UX than purely random sampling).
+	*/
 	private deterministicSample(logMessage: LogMessage, rate: number): boolean {
 		if (rate >= 1.0) return true;
 		if (rate <= 0.0) return false;

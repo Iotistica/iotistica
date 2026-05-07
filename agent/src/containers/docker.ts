@@ -157,8 +157,8 @@ export class DockerDriver extends BaseOrchestratorDriver {
 			if (service) {
 				return {
 					state: service.status === 'Running' ? 'running' : 
-					service.status === 'Exited' ? 'stopped' : 
-					'unknown',
+						service.status === 'Exited' ? 'stopped' : 
+							'unknown',
 					startedAt: undefined, // Would need to get from Docker
 					message: service.status
 				};

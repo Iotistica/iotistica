@@ -388,21 +388,21 @@ export class ContainerManager extends EventEmitter {
 		try {
 			const snapshot = StateSnapshotModel.getLatest('target');
 
-		if (snapshot) {
-			this.targetState = JSON.parse(snapshot.state);
+			if (snapshot) {
+				this.targetState = JSON.parse(snapshot.state);
 			
-			// Ensure config field exists (for backward compatibility with old snapshots)
-			if (!this.targetState.config) {
-				this.targetState.config = {};
-			}
+				// Ensure config field exists (for backward compatibility with old snapshots)
+				if (!this.targetState.config) {
+					this.targetState.config = {};
+				}
 			
-			// Load the hash for future comparisons
-			if (snapshot.stateHash) {
-				this.lastSavedTargetStateHash = snapshot.stateHash;
-			}
+				// Load the hash for future comparisons
+				if (snapshot.stateHash) {
+					this.lastSavedTargetStateHash = snapshot.stateHash;
+				}
 			
-			// Sanitize loaded state to ensure ports are strings
-			this.sanitizeState(this.targetState);				this.logger?.infoSync('Loaded target state from database', {
+				// Sanitize loaded state to ensure ports are strings
+				this.sanitizeState(this.targetState);				this.logger?.infoSync('Loaded target state from database', {
 					component: LogComponents.containerManager,
 					operation: 'loadTargetState',
 					appsCount: Object.keys(this.targetState.apps).length
@@ -448,26 +448,26 @@ export class ContainerManager extends EventEmitter {
 				return;
 			}
 			
-		this.logger?.debugSync('Saving target state to database', {
-			component: LogComponents.containerManager,
-			operation: 'saveTargetState'
-		});
-		this.lastSavedTargetStateHash = stateHash;
+			this.logger?.debugSync('Saving target state to database', {
+				component: LogComponents.containerManager,
+				operation: 'saveTargetState'
+			});
+			this.lastSavedTargetStateHash = stateHash;
 		
-		const stateJson = JSON.stringify(this.targetState);
+			const stateJson = JSON.stringify(this.targetState);
 		
-		// Log JSON details for debugging
-		this.logger?.debugSync('Target state JSON details', {
-			component: LogComponents.containerManager,
-			operation: 'saveTargetState',
-			jsonPreview: stateJson.substring(0, 500),
-			jsonLength: stateJson.length,
-			hasConfigField: stateJson.includes('"config"'),
-			hasSensorsField: stateJson.includes('"sensors"')
-		});
+			// Log JSON details for debugging
+			this.logger?.debugSync('Target state JSON details', {
+				component: LogComponents.containerManager,
+				operation: 'saveTargetState',
+				jsonPreview: stateJson.substring(0, 500),
+				jsonLength: stateJson.length,
+				hasConfigField: stateJson.includes('"config"'),
+				hasSensorsField: stateJson.includes('"sensors"')
+			});
 		
-		// Delete old target snapshots and insert new (with hash)
-		StateSnapshotModel.replace('target', stateJson, stateHash);
+			// Delete old target snapshots and insert new (with hash)
+			StateSnapshotModel.replace('target', stateJson, stateHash);
 			
 		} catch (error) {
 			this.logger?.errorSync(
@@ -1080,7 +1080,7 @@ export class ContainerManager extends EventEmitter {
 		targetApps: number;
 		currentServices: number;
 		targetServices: number;
-	} {
+		} {
 		return getManagerStatus(
 			this.currentState,
 			this.targetState,
@@ -1103,7 +1103,7 @@ export class ContainerManager extends EventEmitter {
 				};
 			};
 		};
-	} {
+		} {
 		return getStateReconciliationStatus(this.currentState, this.targetState);
 	}
 

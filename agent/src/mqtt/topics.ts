@@ -9,8 +9,8 @@
 import { encodeIfUuid } from './codec.js';
 
 export const MQTT_TOPIC_PATTERNS = {
-  tenantScopedRoot: 'i/{tenantId}/a/{agentId}/...',
-  tenantScopedEndpoints: 'i/{tenantId}/a/{agentId}/d/{endpointId}/+',
+	tenantScopedRoot: 'i/{tenantId}/a/{agentId}/...',
+	tenantScopedEndpoints: 'i/{tenantId}/a/{agentId}/d/{endpointId}/+',
 } as const;
 
 let cachedTenantId: string | null = null;
@@ -21,37 +21,37 @@ let cachedTenantId: string | null = null;
  * and loaded into cache during agent initialization.
  */
 export function getTenantId(): string {
-  if (cachedTenantId) {
-    return cachedTenantId;
-  }
+	if (cachedTenantId) {
+		return cachedTenantId;
+	}
 
-  throw new Error(
-    'Tenant ID is not initialized. Agent must be provisioned with tenantId before using MQTT topics.'
-  );
+	throw new Error(
+		'Tenant ID is not initialized. Agent must be provisioned with tenantId before using MQTT topics.'
+	);
 }
 
 /**
  * Update cached tenant ID (called automatically after provisioning)
  */
 export function setTenantId(tenantId: string): void {
-  const normalized = tenantId?.trim();
-  if (!normalized) {
-    throw new Error('Cannot set empty tenant ID');
-  }
-  cachedTenantId = normalized;
+	const normalized = tenantId?.trim();
+	if (!normalized) {
+		throw new Error('Cannot set empty tenant ID');
+	}
+	cachedTenantId = normalized;
 }
 
 /**
  * Reset cached tenant ID (for testing only)
  */
 export function resetTenantIdCache(): void {
-  cachedTenantId = null;
+	cachedTenantId = null;
 }
 
 /**
  * Build an agent-scoped MQTT topic: i/{encodedTenant}/a/{encodedAgent}/...segments
  */
 export function agentTopic(agentUuid: string, ...segments: string[]): string {
-  const tenantId = getTenantId();
-  return ['i', encodeIfUuid(tenantId), 'a', encodeIfUuid(agentUuid), ...segments].join('/');
+	const tenantId = getTenantId();
+	return ['i', encodeIfUuid(tenantId), 'a', encodeIfUuid(agentUuid), ...segments].join('/');
 }

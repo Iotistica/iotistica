@@ -630,13 +630,13 @@ export interface ConfigReconciliationResult {
  */
 export interface IOrchestratorDriver extends EventEmitter {
 	/**
-	 * Driver name (e.g., 'docker', 'k3s')
-	 */
+	* Driver name (e.g., 'docker', 'k3s')
+	*/
 	readonly name: string;
 
 	/**
-	 * Driver version
-	 */
+	* Driver version
+	*/
 	readonly version: string;
 
 	// ============================================================================
@@ -644,31 +644,31 @@ export interface IOrchestratorDriver extends EventEmitter {
 	// ============================================================================
 
 	/**
-	 * Initialize the orchestrator driver
-	 * - Connect to orchestrator API
-	 * - Verify connectivity
-	 * - Set up event listeners
-	 * 
-	 * @throws Error if initialization fails
-	 */
+	* Initialize the orchestrator driver
+	* - Connect to orchestrator API
+	* - Verify connectivity
+	* - Set up event listeners
+	* 
+	* @throws Error if initialization fails
+	*/
 	init(): Promise<void>;
 
 	/**
-	 * Shutdown the orchestrator driver
-	 * - Clean up resources
-	 * - Close connections
-	 * - Stop event listeners
-	 */
+	* Shutdown the orchestrator driver
+	* - Clean up resources
+	* - Close connections
+	* - Stop event listeners
+	*/
 	shutdown(): Promise<void>;
 
 	/**
-	 * Check if driver is ready to accept operations
-	 */
+	* Check if driver is ready to accept operations
+	*/
 	isReady(): boolean;
 
 	/**
-	 * Get driver health status
-	 */
+	* Get driver health status
+	*/
 	getHealth(): Promise<{
 		healthy: boolean;
 		message?: string;
@@ -680,33 +680,33 @@ export interface IOrchestratorDriver extends EventEmitter {
 	// ============================================================================
 
 	/**
-	 * Get current state of all running services
-	 * 
-	 * @returns Current state snapshot
-	 */
+	* Get current state of all running services
+	* 
+	* @returns Current state snapshot
+	*/
 	getCurrentState(): Promise<CurrentState>;
 
 	/**
-	 * Set target state (desired state)
-	 * This does NOT apply the state - use reconcile() to apply changes
-	 * 
-	 * @param targetState - Desired state configuration
-	 */
+	* Set target state (desired state)
+	* This does NOT apply the state - use reconcile() to apply changes
+	* 
+	* @param targetState - Desired state configuration
+	*/
 	setTargetState(targetState: TargetState): Promise<void>;
 
 	/**
-	 * Get current target state
-	 */
+	* Get current target state
+	*/
 	getTargetState(): TargetState | null;
 
 	/**
-	 * Reconcile current state with target state
-	 * - Compare current vs target
-	 * - Create/update/remove services as needed
-	 * - Handle errors gracefully
-	 * 
-	 * @returns Reconciliation result with statistics
-	 */
+	* Reconcile current state with target state
+	* - Compare current vs target
+	* - Create/update/remove services as needed
+	* - Handle errors gracefully
+	* 
+	* @returns Reconciliation result with statistics
+	*/
 	reconcile(): Promise<ReconciliationResult>;
 
 	// ============================================================================
@@ -714,47 +714,47 @@ export interface IOrchestratorDriver extends EventEmitter {
 	// ============================================================================
 
 	/**
-	 * Create and start a service
-	 * 
-	 * @param service - Service configuration
-	 * @returns Container/pod ID
-	 */
+	* Create and start a service
+	* 
+	* @param service - Service configuration
+	* @returns Container/pod ID
+	*/
 	createService(service: ServiceConfig): Promise<string>;
 
 	/**
-	 * Stop a running service
-	 * 
-	 * @param serviceId - Service identifier (name or ID)
-	 * @param timeout - Graceful shutdown timeout in seconds
-	 */
+	* Stop a running service
+	* 
+	* @param serviceId - Service identifier (name or ID)
+	* @param timeout - Graceful shutdown timeout in seconds
+	*/
 	stopService(serviceId: string, timeout?: number): Promise<void>;
 
 	/**
-	 * Remove a service
-	 * 
-	 * @param serviceId - Service identifier
-	 * @param force - Force removal even if running
-	 */
+	* Remove a service
+	* 
+	* @param serviceId - Service identifier
+	* @param force - Force removal even if running
+	*/
 	removeService(serviceId: string, force?: boolean): Promise<void>;
 
 	/**
-	 * Restart a service
-	 * 
-	 * @param serviceId - Service identifier
-	 * @param timeout - Graceful shutdown timeout in seconds
-	 */
+	* Restart a service
+	* 
+	* @param serviceId - Service identifier
+	* @param timeout - Graceful shutdown timeout in seconds
+	*/
 	restartService(serviceId: string, timeout?: number): Promise<void>;
 
 	/**
-	 * Get service status
-	 * 
-	 * @param serviceId - Service identifier
-	 */
+	* Get service status
+	* 
+	* @param serviceId - Service identifier
+	*/
 	getServiceStatus(serviceId: string): Promise<ServiceStatus>;
 
 	/**
-	 * List all services managed by this driver
-	 */
+	* List all services managed by this driver
+	*/
 	listServices(): Promise<ServiceConfig[]>;
 
 	// ============================================================================
@@ -762,12 +762,12 @@ export interface IOrchestratorDriver extends EventEmitter {
 	// ============================================================================
 
 	/**
-	 * Get service logs
-	 * 
-	 * @param serviceId - Service identifier
-	 * @param options - Log streaming options
-	 * @returns Stream of log data
-	 */
+	* Get service logs
+	* 
+	* @param serviceId - Service identifier
+	* @param options - Log streaming options
+	* @returns Stream of log data
+	*/
 	getServiceLogs(serviceId: string, options?: LogStreamOptions): Promise<Stream>;
 
 	// ============================================================================
@@ -775,28 +775,28 @@ export interface IOrchestratorDriver extends EventEmitter {
 	// ============================================================================
 
 	/**
-	 * Execute health check for a service
-	 * 
-	 * @param serviceId - Service identifier
-	 * @returns Health status
-	 */
+	* Execute health check for a service
+	* 
+	* @param serviceId - Service identifier
+	* @returns Health status
+	*/
 	executeHealthCheck(serviceId: string): Promise<{
 		healthy: boolean;
 		message?: string;
 	}>;
 
 	/**
-	 * Start continuous health monitoring for a service
-	 * 
-	 * @param serviceId - Service identifier
-	 */
+	* Start continuous health monitoring for a service
+	* 
+	* @param serviceId - Service identifier
+	*/
 	startHealthMonitoring(serviceId: string): Promise<void>;
 
 	/**
-	 * Stop health monitoring for a service
-	 * 
-	 * @param serviceId - Service identifier
-	 */
+	* Stop health monitoring for a service
+	* 
+	* @param serviceId - Service identifier
+	*/
 	stopHealthMonitoring(serviceId: string): Promise<void>;
 
 	// ============================================================================
@@ -804,15 +804,15 @@ export interface IOrchestratorDriver extends EventEmitter {
 	// ============================================================================
 
 	/**
-	 * Get resource usage metrics for a service
-	 * 
-	 * @param serviceId - Service identifier
-	 */
+	* Get resource usage metrics for a service
+	* 
+	* @param serviceId - Service identifier
+	*/
 	getServiceMetrics(serviceId: string): Promise<ContainerMetrics>;
 
 	/**
-	 * Get metrics for all services
-	 */
+	* Get metrics for all services
+	*/
 	getAllMetrics(): Promise<ContainerMetrics[]>;
 
 	// ============================================================================
@@ -820,22 +820,22 @@ export interface IOrchestratorDriver extends EventEmitter {
 	// ============================================================================
 
 	/**
-	 * Create a network
-	 * 
-	 * @param network - Network configuration
-	 */
+	* Create a network
+	* 
+	* @param network - Network configuration
+	*/
 	createNetwork(network: NetworkConfig): Promise<void>;
 
 	/**
-	 * Remove a network
-	 * 
-	 * @param networkName - Network name
-	 */
+	* Remove a network
+	* 
+	* @param networkName - Network name
+	*/
 	removeNetwork(networkName: string): Promise<void>;
 
 	/**
-	 * List all networks
-	 */
+	* List all networks
+	*/
 	listNetworks(): Promise<NetworkConfig[]>;
 
 	// ============================================================================
@@ -843,22 +843,22 @@ export interface IOrchestratorDriver extends EventEmitter {
 	// ============================================================================
 
 	/**
-	 * Create a volume
-	 * 
-	 * @param volume - Volume configuration
-	 */
+	* Create a volume
+	* 
+	* @param volume - Volume configuration
+	*/
 	createVolume(volume: VolumeConfig): Promise<void>;
 
 	/**
-	 * Remove a volume
-	 * 
-	 * @param volumeName - Volume name
-	 */
+	* Remove a volume
+	* 
+	* @param volumeName - Volume name
+	*/
 	removeVolume(volumeName: string): Promise<void>;
 
 	/**
-	 * List all volumes
-	 */
+	* List all volumes
+	*/
 	listVolumes(): Promise<VolumeConfig[]>;
 }
 

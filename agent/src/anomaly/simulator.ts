@@ -228,8 +228,8 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 	}
 	
 	/**
-	 * Inject one anomaly
-	 */
+	* Inject one anomaly
+	*/
 	private async injectAnomaly(): Promise<void> {
 		if (!this.anomalyService) return;
 		if (this.config.metrics.length === 0) {
@@ -527,21 +527,21 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 	}
 
 	/**
-	 * AR(1) filter: value = α·prev + (1-α)·raw
-	 *
-	 * Applied to patterns that produce independent samples (spike, drift, random,
-	 * realistic, recovery, extreme, variance_spike) to add mild autocorrelation
-	 * matching real sensor behaviour — consecutive readings are never fully
-	 * independent.
-	 *
-	 * Skipped for patterns that already carry temporal memory:
-	 *   noisy       — OU process (dt-aware mean reversion)
-	 *   alert       — state machine drives magnitude; AR(1) would dampen alert signal
-	 *   cyclic      — continuous phase/amplitude state provides structure
-	 *   regime_shift — AR(1) would blur the crisp step change
-	 *
-	 * Alpha = 0.25: mild smoothing (each sample is 75 % new information).
-	 */
+	* AR(1) filter: value = α·prev + (1-α)·raw
+	*
+	* Applied to patterns that produce independent samples (spike, drift, random,
+	* realistic, recovery, extreme, variance_spike) to add mild autocorrelation
+	* matching real sensor behaviour — consecutive readings are never fully
+	* independent.
+	*
+	* Skipped for patterns that already carry temporal memory:
+	*   noisy       — OU process (dt-aware mean reversion)
+	*   alert       — state machine drives magnitude; AR(1) would dampen alert signal
+	*   cyclic      — continuous phase/amplitude state provides structure
+	*   regime_shift — AR(1) would blur the crisp step change
+	*
+	* Alpha = 0.25: mild smoothing (each sample is 75 % new information).
+	*/
 	private applyAr1Filter(metric: string, raw: number): number {
 		const AR1_ALPHA = 0.25;
 
@@ -567,22 +567,22 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 	}
 
 	/**
-	 * Snap a value to the nearest multiple of `resolution`.
-	 * Models the discrete output steps of real sensors (e.g. 0.1°C, 1% CPU).
-	 */
+	* Snap a value to the nearest multiple of `resolution`.
+	* Models the discrete output steps of real sensors (e.g. 0.1°C, 1% CPU).
+	*/
 	private roundToResolution(value: number, resolution: number): number {
 		if (resolution <= 0) return value;
 		return Math.round(value / resolution) * resolution;
 	}
 
 	/**
-	 * Return the measurement resolution for a metric.
-	 *
-	 * Lookup order:
-	 *   1. Well-known field name patterns (explicit table)
-	 *   2. Magnitude of baseline center (order-of-magnitude heuristic)
-	 *   3. Safe default: 0.01
-	 */
+	* Return the measurement resolution for a metric.
+	*
+	* Lookup order:
+	*   1. Well-known field name patterns (explicit table)
+	*   2. Magnitude of baseline center (order-of-magnitude heuristic)
+	*   3. Safe default: 0.01
+	*/
 	private getMetricResolution(metric: string, baseline?: AnomalyBaselineRecord): number {
 		// Strip canonical prefix to get the bare field name
 		const canonicalMatch = metric.match(CANONICAL_METRIC_REGEX);
@@ -628,9 +628,9 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 	}
 
 	/**
-	 * Box-Muller transform: returns a standard normal sample (mean=0, stddev=1).
-	 * Used to add realistic Gaussian jitter to all generated values.
-	 */
+	* Box-Muller transform: returns a standard normal sample (mean=0, stddev=1).
+	* Used to add realistic Gaussian jitter to all generated values.
+	*/
 	private gaussianNoise(): number {
 		const u1 = Math.max(Math.random(), 1e-10); // guard against log(0)
 		const u2 = Math.random();
@@ -709,124 +709,124 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 			}
 
 			case 'spike':
-				// Sudden spike — randomised direction (70% high, 30% low) with Gaussian jitter
-				{
-					const dir: 1 | -1 = Math.random() > 0.3 ? 1 : -1;
-					const peak = this.normalizeDeviation(metric, base, spread, spread * magnitude * 1.8);
-					const jitter = this.gaussianNoise() * spread * 0.3;
-					return base + dir * peak + jitter;
-				}
+			// Sudden spike — randomised direction (70% high, 30% low) with Gaussian jitter
+			{
+				const dir: 1 | -1 = Math.random() > 0.3 ? 1 : -1;
+				const peak = this.normalizeDeviation(metric, base, spread, spread * magnitude * 1.8);
+				const jitter = this.gaussianNoise() * spread * 0.3;
+				return base + dir * peak + jitter;
+			}
 				
 			case 'drift':
-				// Logistic (S-curve) drift: slow latent start → rapid acceleration → saturation.
-				// Real sensor degradation (wear, contamination, thermal creep) follows this shape.
-				//
-				//   drift(n) = maxDrift × (σ(n) − σ(0)) / (1 − σ(0))
-				//   σ(n)     = 1 / (1 + e^(−k·(n − x0)))
-				//
-				// Zero-referenced so drift=0 at n=0, with inflection at x0 injections.
-				{
-					const k = 0.12;    // growth rate per injection (steepness of the S)
-					const x0 = 15;     // inflection point — maximum acceleration here
-					const maxDrift = spread * magnitude * 1.5;
-					const logistic = (x: number) => 1 / (1 + Math.exp(-k * (x - x0)));
-					const l0 = logistic(0);          // value at n=0 (used to zero-reference)
-					const range = 1 - l0;            // usable range [0, 1−l0]
-					const rawDrift = maxDrift * (logistic(metricCount) - l0) / range;
-					const trend = this.normalizeDeviation(metric, base, spread, rawDrift);
-					const noise = this.gaussianNoise() * spread * 0.25;
-					return base + trend + noise;
-				}
+			// Logistic (S-curve) drift: slow latent start → rapid acceleration → saturation.
+			// Real sensor degradation (wear, contamination, thermal creep) follows this shape.
+			//
+			//   drift(n) = maxDrift × (σ(n) − σ(0)) / (1 − σ(0))
+			//   σ(n)     = 1 / (1 + e^(−k·(n − x0)))
+			//
+			// Zero-referenced so drift=0 at n=0, with inflection at x0 injections.
+			{
+				const k = 0.12;    // growth rate per injection (steepness of the S)
+				const x0 = 15;     // inflection point — maximum acceleration here
+				const maxDrift = spread * magnitude * 1.5;
+				const logistic = (x: number) => 1 / (1 + Math.exp(-k * (x - x0)));
+				const l0 = logistic(0);          // value at n=0 (used to zero-reference)
+				const range = 1 - l0;            // usable range [0, 1−l0]
+				const rawDrift = maxDrift * (logistic(metricCount) - l0) / range;
+				const trend = this.normalizeDeviation(metric, base, spread, rawDrift);
+				const noise = this.gaussianNoise() * spread * 0.25;
+				return base + trend + noise;
+			}
 
 			case 'recovery':
 				// Explicit low-variance Gaussian return toward baseline.
 				return base + this.gaussianNoise() * spread * 0.2;
 				
 			case 'cyclic': {
-					// Per-metric state: each metric runs its own independent oscillator so
-					// multiple metrics don't peak and trough in lockstep.
-					let cycleState = this.cyclicStateByMetric.get(metric);
-					if (!cycleState) {
-						// Randomise starting phase — avoids all metrics being synchronised
-						// at simulation start.
-						cycleState = { phase: Math.random() * 2 * Math.PI, amplitude: 1.0 };
-						this.cyclicStateByMetric.set(metric, cycleState);
-					}
-
-					// Phase advances by baseFreq each step, with Gaussian jitter simulating
-					// real-world frequency instability (clock drift, load-dependent periodicity).
-					// baseFreq ≈ 2π/60 → one full cycle every ~60 injections at default interval.
-					const baseFreq  = 0.105; // rad per injection
-					const freqJitter = 0.008; // ±~7.6 % per step
-					cycleState.phase += baseFreq + this.gaussianNoise() * freqJitter;
-
-					// Amplitude drifts multiplicatively — small Gaussian nudge each step,
-					// clamped to [0.5, 2.0] so it can't collapse to zero or diverge.
-					cycleState.amplitude = Math.min(
-						Math.max(cycleState.amplitude * (1 + this.gaussianNoise() * 0.02), 0.5),
-						2.0,
-					);
-
-					const cycle = Math.sin(cycleState.phase) * cycleState.amplitude;
-					const noise  = this.gaussianNoise() * spread * 0.1;
-					return base + this.normalizeSignedDeviation(metric, base, spread, spread * cycle * magnitude * 1.2) + noise;
+				// Per-metric state: each metric runs its own independent oscillator so
+				// multiple metrics don't peak and trough in lockstep.
+				let cycleState = this.cyclicStateByMetric.get(metric);
+				if (!cycleState) {
+					// Randomise starting phase — avoids all metrics being synchronised
+					// at simulation start.
+					cycleState = { phase: Math.random() * 2 * Math.PI, amplitude: 1.0 };
+					this.cyclicStateByMetric.set(metric, cycleState);
 				}
+
+				// Phase advances by baseFreq each step, with Gaussian jitter simulating
+				// real-world frequency instability (clock drift, load-dependent periodicity).
+				// baseFreq ≈ 2π/60 → one full cycle every ~60 injections at default interval.
+				const baseFreq  = 0.105; // rad per injection
+				const freqJitter = 0.008; // ±~7.6 % per step
+				cycleState.phase += baseFreq + this.gaussianNoise() * freqJitter;
+
+				// Amplitude drifts multiplicatively — small Gaussian nudge each step,
+				// clamped to [0.5, 2.0] so it can't collapse to zero or diverge.
+				cycleState.amplitude = Math.min(
+					Math.max(cycleState.amplitude * (1 + this.gaussianNoise() * 0.02), 0.5),
+					2.0,
+				);
+
+				const cycle = Math.sin(cycleState.phase) * cycleState.amplitude;
+				const noise  = this.gaussianNoise() * spread * 0.1;
+				return base + this.normalizeSignedDeviation(metric, base, spread, spread * cycle * magnitude * 1.2) + noise;
+			}
 				
 			case 'noisy':
-				// True OU discretization — time-aware so behaviour is stable regardless
-				// of interval, burst size, or ingestion jitter.
-				//
-				//   x(t+dt) = x(t)·e^(-θdt)
-				//           + μ·(1 - e^(-θdt))
-				//           + σ_stat·√(1 - e^(-2θdt))·N(0,1)
-				//
-				// σ_stat is the desired long-run std of the process (independent of dt).
-				// As dt→0 the noise term vanishes — no micro-jumps from tight bursts.
-				{
-					const now = Date.now();
-					const thetaPerSec = 0.1; // mean-reversion speed in 1/s (time constant ≈ 10 s)
-					const sigmaStationary = spread * magnitude * 0.7; // desired long-run std
-					const fallbackDtSec = (this.config.intervalMs || 5000) / 1000;
-					const state = this.noisyWalkByMetric.get(metric);
-					const prev = state?.value ?? base;
-					const dt = state ? Math.max((now - state.ts) / 1000, 1e-6) : fallbackDtSec;
-					const decay = Math.exp(-thetaPerSec * dt);
-					const noiseMag = sigmaStationary * Math.sqrt(Math.max(1 - decay * decay, 0));
-					const next = prev * decay + base * (1 - decay) + noiseMag * this.gaussianNoise();
-					this.noisyWalkByMetric.set(metric, { value: next, ts: now });
-					return next;
-				}
+			// True OU discretization — time-aware so behaviour is stable regardless
+			// of interval, burst size, or ingestion jitter.
+			//
+			//   x(t+dt) = x(t)·e^(-θdt)
+			//           + μ·(1 - e^(-θdt))
+			//           + σ_stat·√(1 - e^(-2θdt))·N(0,1)
+			//
+			// σ_stat is the desired long-run std of the process (independent of dt).
+			// As dt→0 the noise term vanishes — no micro-jumps from tight bursts.
+			{
+				const now = Date.now();
+				const thetaPerSec = 0.1; // mean-reversion speed in 1/s (time constant ≈ 10 s)
+				const sigmaStationary = spread * magnitude * 0.7; // desired long-run std
+				const fallbackDtSec = (this.config.intervalMs || 5000) / 1000;
+				const state = this.noisyWalkByMetric.get(metric);
+				const prev = state?.value ?? base;
+				const dt = state ? Math.max((now - state.ts) / 1000, 1e-6) : fallbackDtSec;
+				const decay = Math.exp(-thetaPerSec * dt);
+				const noiseMag = sigmaStationary * Math.sqrt(Math.max(1 - decay * decay, 0));
+				const next = prev * decay + base * (1 - decay) + noiseMag * this.gaussianNoise();
+				this.noisyWalkByMetric.set(metric, { value: next, ts: now });
+				return next;
+			}
 				
 			case 'regime_shift': {
-					// Permanent step-change in the operating level — the most common real-world
-					// anomaly class: pump switched, valve repositioned, load shed, sensor recalibrated.
-					//
-					// On first injection the shift is computed and locked into shiftedBaseByMetric.
-					// All subsequent points oscillate around that new level with the same low
-					// noise as normal operation — the system is stable, just at a different setpoint.
-					//
-					// With a very small probability (~0.5 % per injection) a secondary step fires,
-					// modelling compound events (second valve closes, cascade failure).
-					let shiftedBase = this.shiftedBaseByMetric.get(metric);
-					if (shiftedBase === undefined) {
-						const direction: 1 | -1 = Math.random() > 0.5 ? 1 : -1;
-						const shiftAmount = this.normalizeDeviation(metric, base, spread, spread * magnitude * 1.5);
-						shiftedBase = base + direction * shiftAmount;
-						this.shiftedBaseByMetric.set(metric, shiftedBase);
-					}
-
-					// Compound step: rare secondary shift to model cascading events
-					if (Math.random() < 0.005) {
-						const direction: 1 | -1 = Math.random() > 0.5 ? 1 : -1;
-						shiftedBase = shiftedBase + direction * spread * magnitude * 0.5;
-						this.shiftedBaseByMetric.set(metric, shiftedBase);
-					}
-
-					// Stable operation at the new level — low noise, same variance as normal
-					return shiftedBase + this.gaussianNoise() * spread * 0.2;
+				// Permanent step-change in the operating level — the most common real-world
+				// anomaly class: pump switched, valve repositioned, load shed, sensor recalibrated.
+				//
+				// On first injection the shift is computed and locked into shiftedBaseByMetric.
+				// All subsequent points oscillate around that new level with the same low
+				// noise as normal operation — the system is stable, just at a different setpoint.
+				//
+				// With a very small probability (~0.5 % per injection) a secondary step fires,
+				// modelling compound events (second valve closes, cascade failure).
+				let shiftedBase = this.shiftedBaseByMetric.get(metric);
+				if (shiftedBase === undefined) {
+					const direction: 1 | -1 = Math.random() > 0.5 ? 1 : -1;
+					const shiftAmount = this.normalizeDeviation(metric, base, spread, spread * magnitude * 1.5);
+					shiftedBase = base + direction * shiftAmount;
+					this.shiftedBaseByMetric.set(metric, shiftedBase);
 				}
 
-				case 'variance_spike': {
+				// Compound step: rare secondary shift to model cascading events
+				if (Math.random() < 0.005) {
+					const direction: 1 | -1 = Math.random() > 0.5 ? 1 : -1;
+					shiftedBase = shiftedBase + direction * spread * magnitude * 0.5;
+					this.shiftedBaseByMetric.set(metric, shiftedBase);
+				}
+
+				// Stable operation at the new level — low noise, same variance as normal
+				return shiftedBase + this.gaussianNoise() * spread * 0.2;
+			}
+
+			case 'variance_spike': {
 				// Amplify variance without shifting the mean — the signal stays centred on base
 				// but the noise envelope is blown out by magnitude.  Models an unstable or
 				// degraded sensor: high-frequency noise bursts, EMI pickup, mechanical looseness.
@@ -863,23 +863,23 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 				
 			case 'realistic':
 			default:
-				// Slightly elevated but still realistic — Gaussian jitter makes it
-				// indistinguishable from a genuine sensor excursion.
-				{
-					const signal = this.normalizeDeviation(metric, base, spread, spread * magnitude * 0.9);
-					const noise = this.gaussianNoise() * spread * 0.2;
-					return base + signal + noise;
-				}
+			// Slightly elevated but still realistic — Gaussian jitter makes it
+			// indistinguishable from a genuine sensor excursion.
+			{
+				const signal = this.normalizeDeviation(metric, base, spread, spread * magnitude * 0.9);
+				const noise = this.gaussianNoise() * spread * 0.2;
+				return base + signal + noise;
+			}
 		}
 	}
 
 	/**
-	 * Returns the effective pattern for a metric.
-	 *
-	 * When config.pattern === 'drift', individual metrics may have been promoted
-	 * into an alert or recovery phase by the evolution state machine.  All other
-	 * configured patterns are returned as-is (passthrough).
-	 */
+	* Returns the effective pattern for a metric.
+	*
+	* When config.pattern === 'drift', individual metrics may have been promoted
+	* into an alert or recovery phase by the evolution state machine.  All other
+	* configured patterns are returned as-is (passthrough).
+	*/
 	private getEffectivePattern(metric: string): SimulationPattern {
 		if (this.config.pattern !== 'drift') {
 			return this.config.pattern;
@@ -890,11 +890,11 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 	}
 
 	/**
-	 * Computes whether the logistic drift for this metric has exceeded the
-	 * trigger threshold (1× spread×magnitude), using the same formula as the
-	 * 'drift' case in generateByPattern so the threshold fires at a consistent
-	 * point on the S-curve (~23 injections with default k=0.12, x0=15).
-	 */
+	* Computes whether the logistic drift for this metric has exceeded the
+	* trigger threshold (1× spread×magnitude), using the same formula as the
+	* 'drift' case in generateByPattern so the threshold fires at a consistent
+	* point on the S-curve (~23 injections with default k=0.12, x0=15).
+	*/
 	private isDriftAboveThreshold(metric: string, spread: number): boolean {
 		const magnitude = this.config.magnitude || 3;
 		const k = 0.12, x0 = 15;
@@ -907,14 +907,14 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 	}
 
 	/**
-	 * Advances the per-metric pattern evolution state machine.
-	 * Only active when config.pattern === 'drift'.
-	 *
-	 * Transition graph:
-	 *   drift → alert     (when logistic drift exceeds 1×spread×magnitude)
-	 *   alert → recovery  (after alertActivePoints + alertRecoveryPoints ticks)
-	 *   recovery → drift  (after evolutionRecoveryTicks; resets injection count)
-	 */
+	* Advances the per-metric pattern evolution state machine.
+	* Only active when config.pattern === 'drift'.
+	*
+	* Transition graph:
+	*   drift → alert     (when logistic drift exceeds 1×spread×magnitude)
+	*   alert → recovery  (after alertActivePoints + alertRecoveryPoints ticks)
+	*   recovery → drift  (after evolutionRecoveryTicks; resets injection count)
+	*/
 	private advancePatternEvolution(
 		metric: string,
 		base: number,
@@ -1124,8 +1124,8 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 	}
 	
 	/**
-	 * Get unit for metric
-	 */
+	* Get unit for metric
+	*/
 	private getUnitForMetric(metric: string): string {
 		const units: Record<string, string> = {
 			cpu_usage: '%',
@@ -1282,7 +1282,7 @@ export class SimulationOrchestrator {
 		enabled: boolean;
 		scenarios: SimulationScenarioStatus[];
 		activeCount: number;
-	} {
+		} {
 		const scenarios = Array.from(this.scenarios.values()).map((s) => s.getStatus());
 		const activeCount = scenarios.filter((s) => s.running).length;
 

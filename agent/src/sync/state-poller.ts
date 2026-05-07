@@ -47,8 +47,8 @@ export class StatePoller extends EventEmitter {
 	}
 
 	/**
-	 * Load persisted ETag from database and start the poll loop.
-	 */
+	* Load persisted ETag from database and start the poll loop.
+	*/
 	async start(): Promise<void> {
 		if (this.isRunning) {
 			this.logger?.warnSync('StatePoller already running', { component: LogComponents.cloudSync });

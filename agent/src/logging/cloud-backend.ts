@@ -103,18 +103,18 @@ export class CloudLogBackend implements LogBackend {
 			cloudEndpoint: config.cloudEndpoint,
 			deviceUuid: config.deviceUuid,
 			deviceApiKey: config.deviceApiKey ?? '',
-		compression: config.compression ?? true,
-		batchSize: config.batchSize ?? 100, // 100 logs per batch (reduced from 500 to prevent payload too large)
-		maxRetries: config.maxRetries ?? 3,		bufferSize: config.bufferSize ?? 2 * 1024 * 1024, // 2MB - absorbs container startup bursts (~2000-5000 logs)
-		flushInterval: config.flushInterval ?? 30000, // 30 seconds (changed from 100ms)
-		reconnectInterval: config.reconnectInterval ?? 5000, // 5s
-		maxReconnectInterval: config.maxReconnectInterval ?? 300000, // 5min
-		spoolPath: config.spoolPath ?? '', // Empty string if not provided
-		maxSpoolSizeMb: config.maxSpoolSizeMb ?? 50,
-		maxTotalSpoolSizeMb: config.maxTotalSpoolSizeMb ?? 200,
-		maxLogStorageMb: config.maxLogStorageMb ?? 256,
-		samplingRates: config.samplingRates ?? { debug: 0.05, info: 1, warn: 1, error: 1 }, // All info/warn/error, sample 5% debug
-	};		
+			compression: config.compression ?? true,
+			batchSize: config.batchSize ?? 100, // 100 logs per batch (reduced from 500 to prevent payload too large)
+			maxRetries: config.maxRetries ?? 3,		bufferSize: config.bufferSize ?? 2 * 1024 * 1024, // 2MB - absorbs container startup bursts (~2000-5000 logs)
+			flushInterval: config.flushInterval ?? 30000, // 30 seconds (changed from 100ms)
+			reconnectInterval: config.reconnectInterval ?? 5000, // 5s
+			maxReconnectInterval: config.maxReconnectInterval ?? 300000, // 5min
+			spoolPath: config.spoolPath ?? '', // Empty string if not provided
+			maxSpoolSizeMb: config.maxSpoolSizeMb ?? 50,
+			maxTotalSpoolSizeMb: config.maxTotalSpoolSizeMb ?? 200,
+			maxLogStorageMb: config.maxLogStorageMb ?? 256,
+			samplingRates: config.samplingRates ?? { debug: 0.05, info: 1, warn: 1, error: 1 }, // All info/warn/error, sample 5% debug
+		};		
 		// Create LogSpool if a spool path is configured (directory created in initialize())
 		if (this.config.spoolPath) {
 			this.spool = new LogSpool({
@@ -124,25 +124,25 @@ export class CloudLogBackend implements LogBackend {
 			});
 		}
 		
-	// For localhost/development, disable TLS verification
-	const isLocalhost = this.config.cloudEndpoint.includes('localhost') || 
+		// For localhost/development, disable TLS verification
+		const isLocalhost = this.config.cloudEndpoint.includes('localhost') || 
 	this.config.cloudEndpoint.includes('127.0.0.1');
 	
-	// Use shared HTTP client if provided, otherwise create dedicated instance
-	if (config.httpClient) {
-		this.httpClient = config.httpClient;
-	} else {
-		this.httpClient = new FetchHttpClient({
-			defaultHeaders: {
-				'X-Device-API-Key': this.config.deviceApiKey
-			},
-			defaultTimeout: 30000, // 30 second timeout
-			rejectUnauthorized: !isLocalhost // Allow self-signed certs for localhost
-		});
-	}
+		// Use shared HTTP client if provided, otherwise create dedicated instance
+		if (config.httpClient) {
+			this.httpClient = config.httpClient;
+		} else {
+			this.httpClient = new FetchHttpClient({
+				defaultHeaders: {
+					'X-Device-API-Key': this.config.deviceApiKey
+				},
+				defaultTimeout: 30000, // 30 second timeout
+				rejectUnauthorized: !isLocalhost // Allow self-signed certs for localhost
+			});
+		}
 	
-	// Initialize sampler (stateless — circuitBreakerOpen is passed per-call in log())
-	this.sampler = new LogSampler(config.deviceUuid, config.samplingRates);
+		// Initialize sampler (stateless — circuitBreakerOpen is passed per-call in log())
+		this.sampler = new LogSampler(config.deviceUuid, config.samplingRates);
 
 		// Initialize retry policy
 		this.retryPolicy = new RetryPolicy(
@@ -350,7 +350,7 @@ export class CloudLogBackend implements LogBackend {
 		lastFlushError?: string;
 		// Metadata
 		deviceUuid: string;
-	} {
+		} {
 		return {
 			// Gauges
 			bufferBytes: this.bufferBytes,
@@ -432,70 +432,87 @@ export class CloudLogBackend implements LogBackend {
 				return;
 			}
 		
-		// Check circuit breaker
-		if (this.circuitBreakerOpen) {
-			const now = Date.now();
-			const timeSinceOpen = now - this.circuitBreakerOpenedAt;
+			// Check circuit breaker
+			if (this.circuitBreakerOpen) {
+				const now = Date.now();
+				const timeSinceOpen = now - this.circuitBreakerOpenedAt;
 			
-			if (timeSinceOpen < this.CIRCUIT_BREAKER_RESET_MS) {
+				if (timeSinceOpen < this.CIRCUIT_BREAKER_RESET_MS) {
 				// Circuit still open - shed non-critical buffered logs only.
-				if (this.buffer.length > 0) {
-					const kept: LogMessage[] = [];
-					const dropped: LogMessage[] = [];
+					if (this.buffer.length > 0) {
+						const kept: LogMessage[] = [];
+						const dropped: LogMessage[] = [];
 
-					for (const log of this.buffer) {
-						if (this.sampler.isCriticalLog(log)) {
-							kept.push(log);
-						} else {
-							dropped.push(log);
+						for (const log of this.buffer) {
+							if (this.sampler.isCriticalLog(log)) {
+								kept.push(log);
+							} else {
+								dropped.push(log);
+							}
+						}
+
+						if (dropped.length > 0) {
+							const summary = this.createDroppedLogSummary(dropped, 'network_failure');
+							this.storeDroppedLogSummary(summary);
+							this.totalLogsDropped += dropped.length;
+						}
+
+						this.buffer = kept;
+						this.bufferBytes = 0;
+						for (const log of kept) {
+							this.bufferBytes += this.sampler.estimateLogSize(log);
 						}
 					}
-
-					if (dropped.length > 0) {
-						const summary = this.createDroppedLogSummary(dropped, 'network_failure');
-						this.storeDroppedLogSummary(summary);
-						this.totalLogsDropped += dropped.length;
-					}
-
-					this.buffer = kept;
-					this.bufferBytes = 0;
-					for (const log of kept) {
-						this.bufferBytes += this.sampler.estimateLogSize(log);
-					}
-				}
-				return;
-			} else {
+					return;
+				} else {
 				// Try to close circuit breaker
 				// CRITICAL: Use console.log to prevent recursive logging
-				console.log('[CloudLog] Circuit breaker attempting reset...');
-				this.circuitBreakerOpen = false;
-				this.consecutiveFailures = 0;
+					console.log('[CloudLog] Circuit breaker attempting reset...');
+					this.circuitBreakerOpen = false;
+					this.consecutiveFailures = 0;
+				}
 			}
-		}
 		
-		// Split new buffer into smaller batches if too large
-		// Use ADAPTIVE sizing that learns from failures (TCP congestion control style)
-		// - On error: Cut batch size by 50% (multiplicative decrease)
-		// - On success: Grow batch size by 10% (additive increase)
-		const maxBatchSize = Math.floor(this.adaptiveBatchSize);
-		this.totalBatchesAttempted++;
-		const maxBatchBytes = Math.floor(this.adaptiveMaxBytes);
-		const logBatches: LogBatch[] = [];
-		const _totalLogsToFlush = this.buffer.length; // Store before clearing
+			// Split new buffer into smaller batches if too large
+			// Use ADAPTIVE sizing that learns from failures (TCP congestion control style)
+			// - On error: Cut batch size by 50% (multiplicative decrease)
+			// - On success: Grow batch size by 10% (additive increase)
+			const maxBatchSize = Math.floor(this.adaptiveBatchSize);
+			this.totalBatchesAttempted++;
+			const maxBatchBytes = Math.floor(this.adaptiveMaxBytes);
+			const logBatches: LogBatch[] = [];
+			const _totalLogsToFlush = this.buffer.length; // Store before clearing
 		
-		let currentBatch: LogMessage[] = [];
-		let currentBatchBytes = 0;
+			let currentBatch: LogMessage[] = [];
+			let currentBatchBytes = 0;
 		
-		for (const log of this.buffer) {
+			for (const log of this.buffer) {
 			// Estimate log size (JSON serialization + newline)
-			const logSize = JSON.stringify(log).length + 1;
+				const logSize = JSON.stringify(log).length + 1;
 			
-			// Check if adding this log would exceed adaptive limits
-			const wouldExceedSize = currentBatchBytes + logSize > maxBatchBytes;
-			const wouldExceedCount = currentBatch.length >= maxBatchSize;
+				// Check if adding this log would exceed adaptive limits
+				const wouldExceedSize = currentBatchBytes + logSize > maxBatchBytes;
+				const wouldExceedCount = currentBatch.length >= maxBatchSize;
 			
-			if ((wouldExceedSize || wouldExceedCount) && currentBatch.length > 0) {
+				if ((wouldExceedSize || wouldExceedCount) && currentBatch.length > 0) {
 				// Create batch with unique ID
+					const batchId = this.generateBatchId();
+					logBatches.push({
+						batchId,
+						logs: currentBatch,
+						createdAt: Date.now(),
+						attempts: 0
+					});
+					currentBatch = [];
+					currentBatchBytes = 0;
+				}
+			
+				currentBatch.push(log);
+				currentBatchBytes += logSize;
+			}
+		
+			// Add final batch
+			if (currentBatch.length > 0) {
 				const batchId = this.generateBatchId();
 				logBatches.push({
 					batchId,
@@ -503,160 +520,143 @@ export class CloudLogBackend implements LogBackend {
 					createdAt: Date.now(),
 					attempts: 0
 				});
-				currentBatch = [];
-				currentBatchBytes = 0;
 			}
-			
-			currentBatch.push(log);
-			currentBatchBytes += logSize;
-		}
 		
-		// Add final batch
-		if (currentBatch.length > 0) {
-			const batchId = this.generateBatchId();
-			logBatches.push({
-				batchId,
-				logs: currentBatch,
-				createdAt: Date.now(),
-				attempts: 0
-			});
-		}
-		
-		if (logBatches.length > 0) {
+			if (logBatches.length > 0) {
 			// CRITICAL: Don't clear buffer until ACK received
 			// Move logs to pending batches for tracking
-			for (const logBatch of logBatches) {
-				this.pendingBatches.set(logBatch.batchId, logBatch);
-			}
-
-			// Clear in-memory buffer (now tracked in pendingBatches)
-			this.buffer = [];
-			this.bufferBytes = 0;
-
-			// Write to disk spool before sending (survives crashes/power loss)
-			if (this.spool) {
-				await this.spool.write(logBatches);
-			}
-		}
-
-		const batchesToSend = logBatches.length > 0
-			? logBatches
-			: Array.from(this.pendingBatches.values());
-
-		// Send batches sequentially with ACK tracking
-		const batchesWithRetry: string[] = []; // Track batches that need retry
-		
-		for (const logBatch of batchesToSend) {
-			logBatch.attempts++;
-			
-			try {
-				// Use retry policy for network resilience
-				const ack = await this.retryPolicy.execute(() => this.sendLogBatch(logBatch));
-				
-				// Verify ACK matches batch ID (idempotency check)
-				if (ack.batchId !== logBatch.batchId) {
-					process.stderr.write(`[CloudLog] ACK mismatch: sent ${logBatch.batchId}, received ${ack.batchId}\n`);
-					batchesWithRetry.push(logBatch.batchId);
-					continue;
+				for (const logBatch of logBatches) {
+					this.pendingBatches.set(logBatch.batchId, logBatch);
 				}
-				
-				// SUCCESS: Remove from pending batches
-				this.totalBatchesAcked++;
-				this.pendingBatches.delete(logBatch.batchId);
-				
-				// Update ACK cursor (for spool pruning)
+
+				// Clear in-memory buffer (now tracked in pendingBatches)
+				this.buffer = [];
+				this.bufferBytes = 0;
+
+				// Write to disk spool before sending (survives crashes/power loss)
 				if (this.spool) {
-					await this.spool.updateAckCursor(logBatch.batchId);
+					await this.spool.write(logBatches);
 				}
+			}
+
+			const batchesToSend = logBatches.length > 0
+				? logBatches
+				: Array.from(this.pendingBatches.values());
+
+			// Send batches sequentially with ACK tracking
+			const batchesWithRetry: string[] = []; // Track batches that need retry
+		
+			for (const logBatch of batchesToSend) {
+				logBatch.attempts++;
+			
+				try {
+				// Use retry policy for network resilience
+					const ack = await this.retryPolicy.execute(() => this.sendLogBatch(logBatch));
 				
-				// Increase batch size gradually (additive increase)
-				this.consecutiveSuccesses++;
+					// Verify ACK matches batch ID (idempotency check)
+					if (ack.batchId !== logBatch.batchId) {
+						process.stderr.write(`[CloudLog] ACK mismatch: sent ${logBatch.batchId}, received ${ack.batchId}\n`);
+						batchesWithRetry.push(logBatch.batchId);
+						continue;
+					}
 				
-				// Grow by 10% every 3 consecutive successes
-				if (this.consecutiveSuccesses >= 3) {
-					const _oldSize = this.adaptiveBatchSize;
-					const _oldBytes = this.adaptiveMaxBytes;
+					// SUCCESS: Remove from pending batches
+					this.totalBatchesAcked++;
+					this.pendingBatches.delete(logBatch.batchId);
+				
+					// Update ACK cursor (for spool pruning)
+					if (this.spool) {
+						await this.spool.updateAckCursor(logBatch.batchId);
+					}
+				
+					// Increase batch size gradually (additive increase)
+					this.consecutiveSuccesses++;
+				
+					// Grow by 10% every 3 consecutive successes
+					if (this.consecutiveSuccesses >= 3) {
+						const _oldSize = this.adaptiveBatchSize;
+						const _oldBytes = this.adaptiveMaxBytes;
 					
-					this.adaptiveBatchSize = Math.min(
-						this.adaptiveBatchSize * 1.1,
-						this.MAX_BATCH_SIZE
-					);
-					this.adaptiveMaxBytes = Math.min(
-						this.adaptiveMaxBytes * 1.1,
-						this.MAX_BATCH_BYTES
-					);
+						this.adaptiveBatchSize = Math.min(
+							this.adaptiveBatchSize * 1.1,
+							this.MAX_BATCH_SIZE
+						);
+						this.adaptiveMaxBytes = Math.min(
+							this.adaptiveMaxBytes * 1.1,
+							this.MAX_BATCH_BYTES
+						);
 					
-					this.consecutiveSuccesses = 0;
+						this.consecutiveSuccesses = 0;
 					
 					// console.log(`[CloudLog] Adaptive growth: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB`);
-				}
+					}
 				
-				// Reset retry counters on success
-				this.retryCount = 0;
-				this.lastFlushError = undefined;
-				this.lastFlushSuccessAt = Date.now();
-				const wasCircuitOpen = this.circuitBreakerOpen;
-				this.consecutiveFailures = 0;
-				this.circuitBreakerOpen = false;
-				this.retryPolicy.reset();
+					// Reset retry counters on success
+					this.retryCount = 0;
+					this.lastFlushError = undefined;
+					this.lastFlushSuccessAt = Date.now();
+					const wasCircuitOpen = this.circuitBreakerOpen;
+					this.consecutiveFailures = 0;
+					this.circuitBreakerOpen = false;
+					this.retryPolicy.reset();
 				
-				// Log only circuit breaker state transitions (not every batch in steady state)
-				if (wasCircuitOpen) {
-					console.log(`[CloudLog] Circuit breaker CLOSED - connection restored (ACKed batch ${logBatch.batchId})`);
-				}
-			} catch (error) {
+					// Log only circuit breaker state transitions (not every batch in steady state)
+					if (wasCircuitOpen) {
+						console.log(`[CloudLog] Circuit breaker CLOSED - connection restored (ACKed batch ${logBatch.batchId})`);
+					}
+				} catch (error) {
 				// FAILURE: Cut batch size in half (multiplicative decrease)
-				const oldSize = this.adaptiveBatchSize;
-				const oldBytes = this.adaptiveMaxBytes;
+					const oldSize = this.adaptiveBatchSize;
+					const oldBytes = this.adaptiveMaxBytes;
 				
-				this.adaptiveBatchSize = Math.max(
-					this.adaptiveBatchSize * 0.5,
-					this.MIN_BATCH_SIZE
-				);
-				this.adaptiveMaxBytes = Math.max(
-					this.adaptiveMaxBytes * 0.5,
-					this.MIN_BATCH_BYTES
-				);
+					this.adaptiveBatchSize = Math.max(
+						this.adaptiveBatchSize * 0.5,
+						this.MIN_BATCH_SIZE
+					);
+					this.adaptiveMaxBytes = Math.max(
+						this.adaptiveMaxBytes * 0.5,
+						this.MIN_BATCH_BYTES
+					);
 				
-				this.consecutiveSuccesses = 0; // Reset growth counter
+					this.consecutiveSuccesses = 0; // Reset growth counter
 				
-				process.stderr.write(`[CloudLog] Adaptive decrease due to error: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB\n`);
+					process.stderr.write(`[CloudLog] Adaptive decrease due to error: ${Math.floor(oldSize)}→${Math.floor(this.adaptiveBatchSize)} logs, ${(oldBytes/1024/1024).toFixed(1)}→${(this.adaptiveMaxBytes/1024/1024).toFixed(1)}MB\n`);
 				
-				// Drop batch if retries exhausted or too many attempts
-				if (this.retryPolicy.hasExhaustedRetries() || logBatch.attempts >= 10) {
-					const summary = this.createDroppedLogSummary(logBatch.logs, 'retry_exhausted');
-					this.totalBatchesFailed++;
-					this.totalLogsDropped += logBatch.logs.length;
-					this.storeDroppedLogSummary(summary);
+					// Drop batch if retries exhausted or too many attempts
+					if (this.retryPolicy.hasExhaustedRetries() || logBatch.attempts >= 10) {
+						const summary = this.createDroppedLogSummary(logBatch.logs, 'retry_exhausted');
+						this.totalBatchesFailed++;
+						this.totalLogsDropped += logBatch.logs.length;
+						this.storeDroppedLogSummary(summary);
 					
-					// Remove from pending (give up)
-					this.pendingBatches.delete(logBatch.batchId);
+						// Remove from pending (give up)
+						this.pendingBatches.delete(logBatch.batchId);
 					
-					process.stderr.write(`[CloudLog] Dropping batch ${logBatch.batchId} (${logBatch.logs.length} logs) after ${logBatch.attempts} attempts (retry exhaustion)\n`);
-					continue;
+						process.stderr.write(`[CloudLog] Dropping batch ${logBatch.batchId} (${logBatch.logs.length} logs) after ${logBatch.attempts} attempts (retry exhaustion)\n`);
+						continue;
+					}
+				
+					// Keep batch for retry (still in pendingBatches)
+					batchesWithRetry.push(logBatch.batchId);
+					this.retryCount++;
+					this.lastFlushError = error instanceof Error ? error.message : String(error);
 				}
-				
-				// Keep batch for retry (still in pendingBatches)
-				batchesWithRetry.push(logBatch.batchId);
-				this.retryCount++;
-				this.lastFlushError = error instanceof Error ? error.message : String(error);
 			}
-		}
 		
-		// Prune spool based on ACK cursor (remove successfully sent batches)
-		if (this.spool && this.pendingBatches.size === 0) {
+			// Prune spool based on ACK cursor (remove successfully sent batches)
+			if (this.spool && this.pendingBatches.size === 0) {
 			// All batches ACKed - safe to clear spool
-			await this.spool.clear();
-		} else if (this.spool) {
+				await this.spool.clear();
+			} else if (this.spool) {
 			// Partial success - prune ACKed batches from spool
-			await this.spool.pruneByAcks();
-		}
+				await this.spool.pruneByAcks();
+			}
 		
-		// Schedule retry for failed batches
-		if (batchesWithRetry.length > 0) {
-			console.log(`[CloudLog] Scheduling retry for ${batchesWithRetry.length} batches`);
-			this.scheduleReconnect();
-		}
+			// Schedule retry for failed batches
+			if (batchesWithRetry.length > 0) {
+				console.log(`[CloudLog] Scheduling retry for ${batchesWithRetry.length} batches`);
+				this.scheduleReconnect();
+			}
 		} catch (error) {
 			this.lastFlushError = error instanceof Error ? error.message : String(error);
 			process.stderr.write(`[CloudLog] Flush failed: ${this.lastFlushError}\n`);

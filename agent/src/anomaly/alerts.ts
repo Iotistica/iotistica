@@ -37,8 +37,8 @@ export class AlertManager implements IAlertManager {
 	}
 	
 	/**
-	 * Add an alert (with deduplication)
-	 */
+	* Add an alert (with deduplication)
+	*/
 	addAlert(alert: AnomalyAlert): void {
 		const fingerprint = this.calculateFingerprint(alert);
 		alert.fingerprint = fingerprint;
@@ -88,8 +88,8 @@ export class AlertManager implements IAlertManager {
 	}
 	
 	/**
-	 * Get all alerts since a timestamp
-	 */
+	* Get all alerts since a timestamp
+	*/
 	getAlerts(since?: number): AnomalyAlert[] {
 		const alerts = Array.from(this.alerts.values());
 		
@@ -107,8 +107,8 @@ export class AlertManager implements IAlertManager {
 	}
 	
 	/**
-	 * Clear all alerts
-	 */
+	* Clear all alerts
+	*/
 	clearAlerts(): void {
 		this.alerts.clear();
 		this.lastAlertTime.clear();
@@ -116,22 +116,22 @@ export class AlertManager implements IAlertManager {
 	}
 	
 	/**
-	 * Reset consecutive count for a metric (e.g., after resolution)
-	 */
+	* Reset consecutive count for a metric (e.g., after resolution)
+	*/
 	resetConsecutiveCount(fingerprint: string): void {
 		this.consecutiveCounts.delete(fingerprint);
 	}
 	
 	/**
-	 * Get current queue size
-	 */
+	* Get current queue size
+	*/
 	getQueueSize(): number {
 		return this.alerts.size;
 	}
 	
 	/**
-	 * Get alerts by severity
-	 */
+	* Get alerts by severity
+	*/
 	getAlertsBySeverity(severity: AnomalySeverity): AnomalyAlert[] {
 		return Array.from(this.alerts.values())
 			.filter(a => a.severity === severity)
@@ -139,8 +139,8 @@ export class AlertManager implements IAlertManager {
 	}
 	
 	/**
-	 * Get alerts by metric
-	 */
+	* Get alerts by metric
+	*/
 	getAlertsByMetric(metric: string): AnomalyAlert[] {
 		return Array.from(this.alerts.values())
 			.filter(a => a.metric === metric)
@@ -148,17 +148,17 @@ export class AlertManager implements IAlertManager {
 	}
 	
 	/**
-	 * Calculate fingerprint for deduplication
-	 * Hash of: metric + state + method + severity
-	 */
+	* Calculate fingerprint for deduplication
+	* Hash of: metric + state + method + severity
+	*/
 	private calculateFingerprint(alert: AnomalyAlert): string {
 		const data = `${alert.metric}:${alert.deviceState || 'unknown'}:${alert.detectionMethod}:${alert.severity}`;
 		return hash16(data);
 	}
 	
 	/**
-	 * Get oldest alert key for eviction
-	 */
+	* Get oldest alert key for eviction
+	*/
 	private getOldestAlertKey(): string | undefined {
 		let oldestKey: string | undefined;
 		let oldestTime = Infinity;

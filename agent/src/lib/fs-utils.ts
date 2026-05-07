@@ -79,10 +79,10 @@ export const touch = (file: string, time = new Date()) =>
 		// if some other error happens is probably better to not touch it
 		isENOENT(e)
 			? fs
-					.open(file, 'w')
-					.then((fd) => fd.close())
-					// If date is custom we need to change the file atime and mtime
-					.then(() => fs.utimes(file, time, time))
+				.open(file, 'w')
+				.then((fd) => fd.close())
+			// If date is custom we need to change the file atime and mtime
+				.then(() => fs.utimes(file, time, time))
 			: e,
 	);
 

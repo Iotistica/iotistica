@@ -89,7 +89,7 @@ export function getReadinessPayload(): {
 	ready: boolean;
 	state: string;
 	criticalFailures?: string[];
-} {
+	} {
 	const report = getHealthReportSafe();
 	const criticalFailures = report?.criticalFailures || [];
 
@@ -105,7 +105,7 @@ export function getHealthReportPayload(): {
 	ready: boolean;
 	state: string;
 	report: HealthReport;
-} {
+	} {
 	const report =
 		getHealthReportSafe() ||
 		({

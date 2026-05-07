@@ -160,25 +160,25 @@ export function getNetworkErrorType(error: unknown): string {
 
 
 export function autoDetectLocalSubnets(): string[] {
-  const ifaces = os.networkInterfaces();
-  const ranges: string[] = [];
+	const ifaces = os.networkInterfaces();
+	const ranges: string[] = [];
 
-  for (const name of Object.keys(ifaces)) {
-    for (const iface of ifaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
+	for (const name of Object.keys(ifaces)) {
+		for (const iface of ifaces[name] || []) {
+			if (iface.family === 'IPv4' && !iface.internal) {
 				const subnet = subnetFromAddressAndMask(iface.address, iface.netmask);
 				if (!subnet) {
 					continue;
 				}
-        // avoid host-only / docker internal
-        if (subnet.numHosts > 10) {
-          ranges.push(`${subnet.networkAddress}/${subnet.subnetMaskLength}`);
-        }
-      }
-    }
-  }
+				// avoid host-only / docker internal
+				if (subnet.numHosts > 10) {
+					ranges.push(`${subnet.networkAddress}/${subnet.subnetMaskLength}`);
+				}
+			}
+		}
+	}
 
-  return ranges;
+	return ranges;
 }
 
 

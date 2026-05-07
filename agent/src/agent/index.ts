@@ -72,9 +72,9 @@ export class AgentManager {
 	}
 
 	/**
-	 * Create HTTP client with TLS configuration for the API endpoint
-	 * Uses centralized factory for consistent behavior
-	 */
+	* Create HTTP client with TLS configuration for the API endpoint
+	* Uses centralized factory for consistent behavior
+	*/
 	private createHttpClient(cloudApiEndpoint?: string): HttpClient {
 		// If no endpoint provided, use default unencrypted client
 		if (!cloudApiEndpoint) {
@@ -87,14 +87,14 @@ export class AgentManager {
 	}
 
 	/**
-	 * Retry wrapper with exponential backoff and timeout
-	 * Handles unreliable edge network connections
-	 * 
-	 * @param operation - Async operation to retry
-	 * @param operationName - Name for logging
-	 * @param timeout - Timeout per attempt (default: 30s)
-	 * @returns Result of successful operation
-	 */
+	* Retry wrapper with exponential backoff and timeout
+	* Handles unreliable edge network connections
+	* 
+	* @param operation - Async operation to retry
+	* @param operationName - Name for logging
+	* @param timeout - Timeout per attempt (default: 30s)
+	* @returns Result of successful operation
+	*/
 	private async retryWithBackoff<T>(
 		operation: () => Promise<T>,
 		operationName: string,
@@ -157,12 +157,12 @@ export class AgentManager {
 	}
 
 	/**
-	 * Execute operation with timeout
-	 * 
-	 * @param promise - Promise to execute
-	 * @param timeoutMs - Timeout in milliseconds
-	 * @param operationName - Name for error messages
-	 */
+	* Execute operation with timeout
+	* 
+	* @param promise - Promise to execute
+	* @param timeoutMs - Timeout in milliseconds
+	* @param operationName - Name for error messages
+	*/
 	private async withTimeout<T>(
 		promise: Promise<T>,
 		timeoutMs: number,
@@ -178,15 +178,15 @@ export class AgentManager {
 	}
 
 	/**
-	 * Sleep for specified milliseconds
-	 */
+	* Sleep for specified milliseconds
+	*/
 	private sleep(ms: number): Promise<void> {
 		return new Promise(resolve => setTimeout(resolve, ms));
 	}
 
 	/**
-	 * Initialize agent manager and load agent info from database
-	 */
+	* Initialize agent manager and load agent info from database
+	*/
 	async initialize(): Promise<void> {
 		// Initialize encryption for secure credential storage in persisted location
 		// Use DATA_DIR env var (systemd: /var/lib/iotistic/agent, Docker: /app/data)
@@ -206,7 +206,7 @@ export class AgentManager {
 			const newApiKey = generateAPIKey('v2'); // Generate v2 versioned key
 			const keyMetadata = parseAPIKey(newApiKey);
 			
-				this.agentInfo = {
+			this.agentInfo = {
 				uuid: process.env.DEVICE_UUID || this.uuidGenerator.generate(), // Use pre-assigned UUID for virtual agents
 				apiKey: newApiKey,
 				provisioned: false,
@@ -260,8 +260,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * Load agent info from database
-	 */
+	* Load agent info from database
+	*/
 	private async loadAgentInfo(): Promise<void> {
 		const record = await this.dbClient.loadAgent();
 		if (record) {
@@ -285,20 +285,20 @@ export class AgentManager {
 				provisioned: !!record.provisioned,
 				provisioningState: (record.provisioningState as any) || (record.provisioned ? 'provisioned' : 'new'),
 				tenantId: record.tenantId || undefined,
-			applicationId: record.applicationId || undefined,
-			macAddress: record.macAddress || undefined,
-			osVersion: record.osVersion || undefined,
-			agentVersion: record.agentVersion || undefined,
+				applicationId: record.applicationId || undefined,
+				macAddress: record.macAddress || undefined,
+				osVersion: record.osVersion || undefined,
+				agentVersion: record.agentVersion || undefined,
 
-			mqttBrokerConfig: record.mqttBrokerConfig ? JSON.parse(record.mqttBrokerConfig) : undefined,
-			apiTlsConfig: record.apiTlsConfig ? JSON.parse(record.apiTlsConfig) : undefined,
-		};
+				mqttBrokerConfig: record.mqttBrokerConfig ? JSON.parse(record.mqttBrokerConfig) : undefined,
+				apiTlsConfig: record.apiTlsConfig ? JSON.parse(record.apiTlsConfig) : undefined,
+			};
 		
+		}
 	}
-}
 	/**
-	 * Save agent info to database
-	 */
+	* Save agent info to database
+	*/
 	private async saveAgentInfo(): Promise<void> {
 		if (!this.agentInfo) {
 			throw new Error('No agent info to save');
@@ -329,8 +329,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * Persist tenantId for already provisioned agents (migration/repair path)
-	 */
+	* Persist tenantId for already provisioned agents (migration/repair path)
+	*/
 	async setTenantId(tenantId: string): Promise<void> {
 		if (!this.agentInfo) {
 			throw new Error('Agent manager not initialized');
@@ -341,8 +341,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * Get current agent info
-	 */
+	* Get current agent info
+	*/
 	getAgentInfo(): AgentInfo {
 		if (!this.agentInfo) {
 			throw new Error('Agent manager not initialized');
@@ -352,15 +352,15 @@ export class AgentManager {
 	}
 
 	/**
-	 * Check if agent is provisioned
-	 */
+	* Check if agent is provisioned
+	*/
 	isProvisioned(): boolean {
 		return this.agentInfo?.provisioned === true;
 	}
 
 	/**
-	 * Create authorization headers for regular authenticated API requests (JWT).
-	 */
+	* Create authorization headers for regular authenticated API requests (JWT).
+	*/
 	private createAuthHeaders(apiKey: string): Record<string, string> {
 		return {
 			'Authorization': `Bearer ${apiKey}`,
@@ -368,8 +368,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * Mark agent as running in local mode (no cloud provisioning needed)
-	 */
+	* Mark agent as running in local mode (no cloud provisioning needed)
+	*/
 	async markAsLocalMode(): Promise<void> {
 		if (!this.agentInfo) {
 			throw new Error('Agent manager not initialized');
@@ -472,8 +472,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * Update agent name
-	 */
+	* Update agent name
+	*/
 	async updateAgentName(name: string): Promise<void> {
 		if (!this.agentInfo) {
 			throw new Error('Agent manager not initialized');
@@ -484,8 +484,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * Update API endpoint
-	 */
+	* Update API endpoint
+	*/
 	async updateAPIEndpoint(endpoint: string): Promise<void> {
 		if (!this.agentInfo) {
 			throw new Error('Agent manager not initialized');
@@ -496,8 +496,8 @@ export class AgentManager {
 	}
 
 	/**
-	 * Update agent version
-	 */
+	* Update agent version
+	*/
 	async updateAgentVersion(version: string): Promise<void> {
 		if (!this.agentInfo) {
 			throw new Error('Agent manager not initialized');
@@ -508,10 +508,10 @@ export class AgentManager {
 	}
 
 	/**
-	 * Reset agent (unprovision)
-	 * Useful for testing or re-provisioning
-	 * Keeps UUID and apiKey, clears server registration and MQTT credentials
-	 */
+	* Reset agent (unprovision)
+	* Useful for testing or re-provisioning
+	* Keeps UUID and apiKey, clears server registration and MQTT credentials
+	*/
 	async reset(): Promise<void> {
 		if (!this.agentInfo) {
 			throw new Error('Agent manager not initialized');
@@ -540,10 +540,10 @@ export class AgentManager {
 	}
 	
 	/**
-	 * Factory reset - complete cleanup of all agent data
-	 * WARNING: This will delete all apps, services, state snapshots, and sensor data
-	 * Only UUID will be preserved for hardware identification
-	 */
+	* Factory reset - complete cleanup of all agent data
+	* WARNING: This will delete all apps, services, state snapshots, and sensor data
+	* Only UUID will be preserved for hardware identification
+	*/
 	async factoryReset(): Promise<void> {
 		if (!this.agentInfo) {
 			throw new Error('Agent manager not initialized');

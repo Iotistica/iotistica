@@ -36,10 +36,10 @@ export class CloudTransport {
 	}
 
 	/**
-	 * Send a report to the cloud.
-	 * Uses MQTT as primary path with HTTP as fallback.
-	 * Throws CloudTransportBufferedError when publish mode is 'buffer-only'.
-	 */
+	* Send a report to the cloud.
+	* Uses MQTT as primary path with HTTP as fallback.
+	* Throws CloudTransportBufferedError when publish mode is 'buffer-only'.
+	*/
 	async sendReport(report: AgentStateReport): Promise<'mqtt' | 'http'> {
 		const agentInfo = this.getAgentInfo();
 		const publishMode = this.getPublishMode();
@@ -112,9 +112,9 @@ export class CloudTransport {
 	}
 
 	/**
-	 * Flush offline queue with rate limiting (10 items per second) to prevent API flooding
-	 * after long offline periods.
-	 */
+	* Flush offline queue with rate limiting (10 items per second) to prevent API flooding
+	* after long offline periods.
+	*/
 	async flushOfflineQueue(): Promise<void> {
 		if (this.isFlushing) return;
 		if (this.reportQueue.isEmpty()) return;

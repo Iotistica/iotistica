@@ -63,9 +63,9 @@ export class LogSpool {
 	}
 
 	/**
-	 * Append batches to the spool file (via write coalescing buffer).
-	 * Called before sending so data survives a crash between write and ACK.
-	 */
+	* Append batches to the spool file (via write coalescing buffer).
+	* Called before sending so data survives a crash between write and ACK.
+	*/
 	async write(batches: LogBatch[]): Promise<void> {
 		try {
 			const batchLines = batches.map(b => JSON.stringify(b)).join('\n') + '\n';
@@ -150,11 +150,11 @@ export class LogSpool {
 	}
 
 	/**
-	 * Replay unsent batches from the spool into memory.
-	 *
-	 * Returns a Map of batchId → LogBatch for the caller to restore into
-	 * `pendingBatches`. Does NOT schedule a flush — that is the caller's job.
-	 */
+	* Replay unsent batches from the spool into memory.
+	*
+	* Returns a Map of batchId → LogBatch for the caller to restore into
+	* `pendingBatches`. Does NOT schedule a flush — that is the caller's job.
+	*/
 	async replay(): Promise<Map<string, LogBatch>> {
 		const result: Map<string, LogBatch> = new Map();
 
@@ -351,9 +351,9 @@ export class LogSpool {
 	}
 
 	/**
-	 * Update the ACK cursor after a batch is confirmed by the server.
-	 * Only advances monotonically — never moves the cursor backwards.
-	 */
+	* Update the ACK cursor after a batch is confirmed by the server.
+	* Only advances monotonically — never moves the cursor backwards.
+	*/
 	async updateAckCursor(batchId: string): Promise<void> {
 		try {
 			let cursor: AckCursor = { lastAckTime: 0 };
@@ -392,9 +392,9 @@ export class LogSpool {
 	// -------------------------------------------------------------------------
 
 	/**
-	 * Rotate the active spool to a timestamped segment file.
-	 * Never deletes unsent data — just starts a fresh active file.
-	 */
+	* Rotate the active spool to a timestamped segment file.
+	* Never deletes unsent data — just starts a fresh active file.
+	*/
 	private async rotate(): Promise<void> {
 		try {
 			const rotatedPath = `${this.spoolFilePath}.${Date.now()}`;
@@ -424,9 +424,9 @@ export class LogSpool {
 	}
 
 	/**
-	 * Compare two monotonic batch IDs.
-	 * Format: {deviceUuid}-{timestamp}-{counter}
-	 */
+	* Compare two monotonic batch IDs.
+	* Format: {deviceUuid}-{timestamp}-{counter}
+	*/
 	private compareBatchIds(a: string, b: string): number {
 		const parse = (id: string) => {
 			const match = id.match(/-(\d+)-(\d+)$/);
@@ -449,9 +449,9 @@ export class LogSpool {
 	}
 
 	/**
-	 * Stream a spool segment file as non-empty NDJSON lines.
-	 * Avoids loading large segment files fully into memory.
-	 */
+	* Stream a spool segment file as non-empty NDJSON lines.
+	* Avoids loading large segment files fully into memory.
+	*/
 	private async *streamSpoolLines(spoolFile: string): AsyncGenerator<string> {
 		const stream = fs.createReadStream(spoolFile, { encoding: 'utf8' });
 		const rl     = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -468,9 +468,9 @@ export class LogSpool {
 	}
 
 	/**
-	 * Return all spool segment files sorted oldest → newest.
-	 * Rotated segments come before the active file to ensure stable replay order.
-	 */
+	* Return all spool segment files sorted oldest → newest.
+	* Rotated segments come before the active file to ensure stable replay order.
+	*/
 	private async getSpoolFiles(): Promise<string[]> {
 		const baseName = path.basename(this.spoolFilePath);
 

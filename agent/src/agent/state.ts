@@ -61,8 +61,8 @@ export class StateManager extends EventEmitter {
 	private readonly reconcileDelayMs = 500; // Debounce to coalesce rapid updates from cloud
 
 	/**
-	 * Set logger (called after logger is initialized)
-	 */
+	* Set logger (called after logger is initialized)
+	*/
 	public setLogger(logger: AgentLogger): void {
 		this.logger = logger;
 		
@@ -124,8 +124,8 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Initialize state reconciler
-	 */
+	* Initialize state reconciler
+	*/
 	public async init(): Promise<void> {
 		this.logger?.infoSync('Initializing StateReconciler', {
 			component: LogComponents.stateReconciler,
@@ -162,8 +162,8 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Set target state (unified entry point)
-	 */
+	* Set target state (unified entry point)
+	*/
 	public async setTarget(state: AgentState): Promise<void> {
 		this.logger?.infoSync('Setting target state', {
 			component: LogComponents.stateReconciler,
@@ -206,10 +206,10 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Update target state quietly (without triggering reconciliation)
-	 * Use this for state updates that should not trigger a reconciliation cycle,
-	 * such as merging discovered metrics during initialization.
-	 */
+	* Update target state quietly (without triggering reconciliation)
+	* Use this for state updates that should not trigger a reconciliation cycle,
+	* such as merging discovered metrics during initialization.
+	*/
 	public async updateTargetStateQuietly(state: AgentState): Promise<void> {
 		this.logger?.debugSync('Updating target state quietly (no reconciliation)', {
 			component: LogComponents.stateReconciler,
@@ -234,9 +234,9 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Get current state (combined from both managers)
-	 * Returns the actual reconciled state from both managers
-	 */
+	* Get current state (combined from both managers)
+	* Returns the actual reconciled state from both managers
+	*/
 	public async getCurrentState(): Promise<AgentState> {
 		// Get current state from container manager (Docker runtime state)
 		const containerState = await this.containerManager.getCurrentState();
@@ -260,15 +260,15 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Get target state
-	 */
+	* Get target state
+	*/
 	public getTargetState(): AgentState {
 		return cloneDeep(this.targetState);
 	}
 
 	/**
-	 * Main reconciliation loop with pending flag to avoid lost updates
-	 */
+	* Main reconciliation loop with pending flag to avoid lost updates
+	*/
 	public async reconcile(): Promise<void> {
 		if (this.isReconciling) {
 			this.pendingReconcile = true;
@@ -328,20 +328,20 @@ export class StateManager extends EventEmitter {
 					currentApps: containerStatus.currentApps,
 					targetApps: containerStatus.targetApps,
 				});
-			// Schedule retry instead of tight loop
-			this.scheduleReconcile(2000);
-			return;
-		}
+				// Schedule retry instead of tight loop
+				this.scheduleReconcile(2000);
+				return;
+			}
 		
-		await this.reconcileAgentVersion(this.targetState);
+			await this.reconcileAgentVersion(this.targetState);
 
-		// Guaranteed semantic checkpoint: persist runtime current state
-		// after a successful reconciliation cycle.
-		await this.saveCurrentStateToDB(true);
+			// Guaranteed semantic checkpoint: persist runtime current state
+			// after a successful reconciliation cycle.
+			await this.saveCurrentStateToDB(true);
 
-		this.logger?.infoSync('Full state reconciliation complete', {
-			component: LogComponents.stateReconciler,
-			operation: 'reconcile',
+			this.logger?.infoSync('Full state reconciliation complete', {
+				component: LogComponents.stateReconciler,
+				operation: 'reconcile',
 			});
 
 			this.emit('reconciliation-complete', hasEndpointChanges);
@@ -359,8 +359,8 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Debounce reconciliation to coalesce rapid target updates
-	 */
+	* Debounce reconciliation to coalesce rapid target updates
+	*/
 	private scheduleReconcile(delayMs: number = this.reconcileDelayMs): void {
 		if (this.reconcileTimer) {
 			clearTimeout(this.reconcileTimer);
@@ -384,8 +384,8 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Set AgentUpdater reference (called after initialization)
-	 */
+	* Set AgentUpdater reference (called after initialization)
+	*/
 	public setAgentUpdater(agentUpdater: any): void {
 		this.agentUpdater = agentUpdater;
 		this.logger?.infoSync('AgentUpdater reference set', {
@@ -395,8 +395,8 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Reconcile agent version with target state
-	 */
+	* Reconcile agent version with target state
+	*/
 	private async reconcileAgentVersion(targetState: AgentState): Promise<void> {
 		this.logger?.debugSync('Entering reconcileAgentVersion', {
 			component: LogComponents.stateReconciler,
@@ -496,34 +496,34 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Load target state from database
-	 */
+	* Load target state from database
+	*/
 	private async loadTargetStateFromDB(): Promise<void> {
 		try {
 			const snapshot = StateSnapshotModel.getLatest('target');
 
-		if (snapshot) {
-			this.targetState = JSON.parse(snapshot.state);
+			if (snapshot) {
+				this.targetState = JSON.parse(snapshot.state);
 
-			// Ensure config field exists (backward compatibility)
-			if (!this.targetState.config) {
-				this.targetState.config = {};
-			}
+				// Ensure config field exists (backward compatibility)
+				if (!this.targetState.config) {
+					this.targetState.config = {};
+				}
 
-			// Load the hash for future comparisons
-			if (snapshot.stateHash) {
-				this.lastSavedStateHash = snapshot.stateHash;
-			}
+				// Load the hash for future comparisons
+				if (snapshot.stateHash) {
+					this.lastSavedStateHash = snapshot.stateHash;
+				}
 
-		this.logger?.infoSync('Loaded target state from database', {
-			component: LogComponents.stateReconciler,
-			operation: 'loadTargetState',
-			appsCount: Object.keys(this.targetState.apps).length,
-			devicesCount: this.targetState.config?.endpoints?.length || 0,
-			configKeys: Object.keys(this.targetState.config || {}),
-			hasIntervals: !!this.targetState.config?.intervals,
-			hasProtocols: !!this.targetState.config?.protocols,
-		});
+				this.logger?.infoSync('Loaded target state from database', {
+					component: LogComponents.stateReconciler,
+					operation: 'loadTargetState',
+					appsCount: Object.keys(this.targetState.apps).length,
+					devicesCount: this.targetState.config?.endpoints?.length || 0,
+					configKeys: Object.keys(this.targetState.config || {}),
+					hasIntervals: !!this.targetState.config?.intervals,
+					hasProtocols: !!this.targetState.config?.protocols,
+				});
 			}
 		} catch (error) {
 			this.logger?.errorSync(
@@ -538,8 +538,8 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Save target state to database
-	 */
+	* Save target state to database
+	*/
 	private async saveTargetStateToDB(): Promise<void> {
 		try {
 			const stateHash = this.getStateHash(this.targetState);
@@ -571,10 +571,10 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Save current state snapshot to database.
-	 * Hash-gated by default to avoid duplicate snapshots.
-	 * Set force=true for semantic checkpoint snapshots (e.g., post-reconcile).
-	 */
+	* Save current state snapshot to database.
+	* Hash-gated by default to avoid duplicate snapshots.
+	* Set force=true for semantic checkpoint snapshots (e.g., post-reconcile).
+	*/
 	private async saveCurrentStateToDB(force: boolean = false): Promise<void> {
 		try {
 			const currentState = await this.getCurrentState();
@@ -605,8 +605,8 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Generate SHA-256 hash of state
-	 */
+	* Generate SHA-256 hash of state
+	*/
 	private getStateHash(state: AgentState): string {
 		const canonical = this.canonicalizeState(state);
 		const stateJson = stableStringify(canonical);
@@ -656,8 +656,8 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Detect configuration changes and emit granular events
-	 */
+	* Detect configuration changes and emit granular events
+	*/
 	private emitConfigChangeEvents(oldState: AgentState, newState: AgentState): void {
 		const oldConfig = oldState.config || {};
 		const newConfig = newState.config || {};
@@ -736,22 +736,22 @@ export class StateManager extends EventEmitter {
 	}
 
 	/**
-	 * Get container manager (for direct access if needed)
-	 */
+	* Get container manager (for direct access if needed)
+	*/
 	public getContainerManager(): ContainerManager {
 		return this.containerManager;
 	}
 
 	/**
-	 * Get config manager (for direct access if needed)
-	 */
+	* Get config manager (for direct access if needed)
+	*/
 	public getConfigManager(): ConfigManager {
 		return this.configManager;
 	}
 
 	/**
-	 * Get status information
-	 */
+	* Get status information
+	*/
 	public async getStatus(): Promise<{
 		isReconciling: boolean;
 		currentApps: number;

@@ -72,47 +72,47 @@ let consecutiveSkippedPings: number = 0; // Observability: track skipped pings
  * @param logger - Optional logger
  */
 function sendNativeNotification(message: string, socketPath: string, logger?: AgentLogger): void {
-  try {
-    // Lazy-create Unix datagram socket
-    if (!notifySocket) {
-      notifySocket = createSocket({ type: 'unix_dgram' } as any); // Type workaround for unix_dgram
-      notifySocket.on('error', (err) => {
-        logger?.errorSync('Watchdog socket error', err, {
-          component: LogComponents.agent,
-          operation: 'sendNativeNotification'
-        });
-        // Close and recreate socket on next ping
-        notifySocket?.close();
-        notifySocket = null;
-      });
-    }
+	try {
+		// Lazy-create Unix datagram socket
+		if (!notifySocket) {
+			notifySocket = createSocket({ type: 'unix_dgram' } as any); // Type workaround for unix_dgram
+			notifySocket.on('error', (err) => {
+				logger?.errorSync('Watchdog socket error', err, {
+					component: LogComponents.agent,
+					operation: 'sendNativeNotification'
+				});
+				// Close and recreate socket on next ping
+				notifySocket?.close();
+				notifySocket = null;
+			});
+		}
     
-    // Send datagram to systemd socket
-    // @ts-ignore - Unix socket path not in official types
-    notifySocket.send(message, socketPath, (err: Error | null) => {
-      if (err) {
-        logger?.errorSync('Failed to send watchdog ping', err, {
-          component: LogComponents.agent,
-          operation: 'sendNativeNotification',
-          message
-        });
-        // Close socket on error - will recreate on next ping
-        notifySocket?.close();
-        notifySocket = null;
-      }
-    });
+		// Send datagram to systemd socket
+		// @ts-ignore - Unix socket path not in official types
+		notifySocket.send(message, socketPath, (err: Error | null) => {
+			if (err) {
+				logger?.errorSync('Failed to send watchdog ping', err, {
+					component: LogComponents.agent,
+					operation: 'sendNativeNotification',
+					message
+				});
+				// Close socket on error - will recreate on next ping
+				notifySocket?.close();
+				notifySocket = null;
+			}
+		});
     
-    logger?.debugSync(`Sent notification: ${message}`, {
-      component: LogComponents.agent,
-      operation: 'sendNativeNotification',
-      method: 'unix_socket'
-    });
-  } catch (error) {
-    logger?.errorSync(`Native notification failed: ${message}`, error instanceof Error ? error : undefined, {
-      component: LogComponents.agent,
-      operation: 'sendNativeNotification'
-    });
-  }
+		logger?.debugSync(`Sent notification: ${message}`, {
+			component: LogComponents.agent,
+			operation: 'sendNativeNotification',
+			method: 'unix_socket'
+		});
+	} catch (error) {
+		logger?.errorSync(`Native notification failed: ${message}`, error instanceof Error ? error : undefined, {
+			component: LogComponents.agent,
+			operation: 'sendNativeNotification'
+		});
+	}
 }
 
 /**
@@ -125,27 +125,27 @@ function sendNativeNotification(message: string, socketPath: string, logger?: Ag
  * @param logger - Optional logger
  */
 async function sendNotification(message: string, logger?: AgentLogger): Promise<void> {
-  const socketPath = process.env.NOTIFY_SOCKET;
+	const socketPath = process.env.NOTIFY_SOCKET;
 
-  if (socketPath) {
-    sendNativeNotification(message, socketPath, logger);
-    await new Promise(resolve => setTimeout(resolve, 25));
-    return;
-  }
+	if (socketPath) {
+		sendNativeNotification(message, socketPath, logger);
+		await new Promise(resolve => setTimeout(resolve, 25));
+		return;
+	}
 
-  try {
-    await execFileAsync('systemd-notify', ['--pid=parent', message]);
-    logger?.debugSync(`Sent notification: ${message}`, {
-      component: LogComponents.agent,
-      operation: 'sendNotification',
-      method: 'systemd-notify'
-    });
-  } catch (error) {
-    logger?.errorSync(`Failed to send notification: ${message}`, error instanceof Error ? error : undefined, {
-      component: LogComponents.agent,
-      operation: 'sendNotification'
-    });
-  }
+	try {
+		await execFileAsync('systemd-notify', ['--pid=parent', message]);
+		logger?.debugSync(`Sent notification: ${message}`, {
+			component: LogComponents.agent,
+			operation: 'sendNotification',
+			method: 'systemd-notify'
+		});
+	} catch (error) {
+		logger?.errorSync(`Failed to send notification: ${message}`, error instanceof Error ? error : undefined, {
+			component: LogComponents.agent,
+			operation: 'sendNotification'
+		});
+	}
 }
 
 /**
@@ -185,165 +185,165 @@ export type HealthCheckFn = () => boolean | Promise<boolean>;
  * @returns Async cleanup function to stop watchdog (await during shutdown to ensure STOPPING notification is flushed)
  */
 export function startWatchdog(healthCheck?: HealthCheckFn, logger?: AgentLogger): () => Promise<void> {
-  const socketPath = process.env.NOTIFY_SOCKET;
+	const socketPath = process.env.NOTIFY_SOCKET;
   
-  if (!socketPath) {
-    logger?.debugSync('NOTIFY_SOCKET not set - systemd watchdog disabled', {
-      component: LogComponents.agent,
-      operation: 'startWatchdog'
-    });
-    return async () => {}; // No-op cleanup (async)
-  }
+	if (!socketPath) {
+		logger?.debugSync('NOTIFY_SOCKET not set - systemd watchdog disabled', {
+			component: LogComponents.agent,
+			operation: 'startWatchdog'
+		});
+		return async () => {}; // No-op cleanup (async)
+	}
 
-  // Observability: Capture systemd context for diagnosing edge restarts
-  const systemdUnit = process.env.SYSTEMD_UNIT || 'unknown';
-  const invocationId = process.env.INVOCATION_ID || 'unknown';
+	// Observability: Capture systemd context for diagnosing edge restarts
+	const systemdUnit = process.env.SYSTEMD_UNIT || 'unknown';
+	const invocationId = process.env.INVOCATION_ID || 'unknown';
   
-  logger?.infoSync('Starting systemd watchdog', {
-    component: LogComponents.agent,
-    socket: socketPath,
-    method: 'native_unix_socket',
-    systemdUnit,
-    invocationId
-  });
+	logger?.infoSync('Starting systemd watchdog', {
+		component: LogComponents.agent,
+		socket: socketPath,
+		method: 'native_unix_socket',
+		systemdUnit,
+		invocationId
+	});
 
-  // Read watchdog interval from systemd (in microseconds)
-  // Best practice: ping at half the watchdog timeout
-  const watchdogUsec = Number(process.env.WATCHDOG_USEC ?? 0);
+	// Read watchdog interval from systemd (in microseconds)
+	// Best practice: ping at half the watchdog timeout
+	const watchdogUsec = Number(process.env.WATCHDOG_USEC ?? 0);
   
-  // Validate WATCHDOG_USEC (guardrails against invalid/dangerous values)
-  if (!Number.isFinite(watchdogUsec) || watchdogUsec <= 0) {
-    logger?.warnSync('WATCHDOG_USEC invalid or not set - using default interval', {
-      component: LogComponents.agent,
-      operation: 'startWatchdog',
-      watchdogUsec: process.env.WATCHDOG_USEC,
-      defaultIntervalMs: 10000
-    });
-  } else if (watchdogUsec < 1_000_000) {
-    // Too aggressive (<1 second) - can cause restart storms on edge devices
-    logger?.warnSync('WATCHDOG_USEC too aggressive - risk of restart storms', {
-      component: LogComponents.agent,
-      operation: 'startWatchdog',
-      watchdogUsec,
-      watchdogTimeoutMs: watchdogUsec / 1000,
-      minRecommendedMs: 1000,
-      recommendation: 'Increase WatchdogSec to at least 2s in systemd unit'
-    });
-  }
+	// Validate WATCHDOG_USEC (guardrails against invalid/dangerous values)
+	if (!Number.isFinite(watchdogUsec) || watchdogUsec <= 0) {
+		logger?.warnSync('WATCHDOG_USEC invalid or not set - using default interval', {
+			component: LogComponents.agent,
+			operation: 'startWatchdog',
+			watchdogUsec: process.env.WATCHDOG_USEC,
+			defaultIntervalMs: 10000
+		});
+	} else if (watchdogUsec < 1_000_000) {
+		// Too aggressive (<1 second) - can cause restart storms on edge devices
+		logger?.warnSync('WATCHDOG_USEC too aggressive - risk of restart storms', {
+			component: LogComponents.agent,
+			operation: 'startWatchdog',
+			watchdogUsec,
+			watchdogTimeoutMs: watchdogUsec / 1000,
+			minRecommendedMs: 1000,
+			recommendation: 'Increase WatchdogSec to at least 2s in systemd unit'
+		});
+	}
   
-  const intervalMs = watchdogUsec > 0 && Number.isFinite(watchdogUsec)
-    ? Math.floor(watchdogUsec / 2000) // Half interval, convert µs to ms
-    : 10000; // Fallback to 10s
+	const intervalMs = watchdogUsec > 0 && Number.isFinite(watchdogUsec)
+		? Math.floor(watchdogUsec / 2000) // Half interval, convert µs to ms
+		: 10000; // Fallback to 10s
 
-  logger?.infoSync('Watchdog interval configured', {
-    component: LogComponents.agent,
-    operation: 'startWatchdog',
-    intervalMs,
-    watchdogTimeoutMs: watchdogUsec / 1000,
-    source: watchdogUsec > 0 ? 'WATCHDOG_USEC' : 'default',
-    systemdUnit,
-    invocationId
-  });
+	logger?.infoSync('Watchdog interval configured', {
+		component: LogComponents.agent,
+		operation: 'startWatchdog',
+		intervalMs,
+		watchdogTimeoutMs: watchdogUsec / 1000,
+		source: watchdogUsec > 0 ? 'WATCHDOG_USEC' : 'default',
+		systemdUnit,
+		invocationId
+	});
 
-  // NOTE: Do NOT send READY=1 here - watchdog running != application ready
-  // Application must call notifyReady() when fully operational:
-  // - Config loaded
-  // - Network initialized
-  // - Critical connections established (MQTT, database, etc.)
-  // Use notifySystemd('STATUS=...') for intermediate states
+	// NOTE: Do NOT send READY=1 here - watchdog running != application ready
+	// Application must call notifyReady() when fully operational:
+	// - Config loaded
+	// - Network initialized
+	// - Critical connections established (MQTT, database, etc.)
+	// Use notifySystemd('STATUS=...') for intermediate states
   
-  // Initialize last ping timestamp
-  lastWatchdogPing = Date.now();
+	// Initialize last ping timestamp
+	lastWatchdogPing = Date.now();
   
-  // Send periodic watchdog ping using native socket (hot path - zero process spawning)
-  // CRITICAL: Health-gated - only send WATCHDOG=1 if application is truly healthy
-  // This enables systemd to auto-restart on deadlocks, hung network, partial failures
-  watchdogInterval = setInterval(async () => {
-    const now = Date.now();
-    const drift = now - lastWatchdogPing;
-    const maxDrift = intervalMs * 2; // Tolerance: 2x expected interval
+	// Send periodic watchdog ping using native socket (hot path - zero process spawning)
+	// CRITICAL: Health-gated - only send WATCHDOG=1 if application is truly healthy
+	// This enables systemd to auto-restart on deadlocks, hung network, partial failures
+	watchdogInterval = setInterval(async () => {
+		const now = Date.now();
+		const drift = now - lastWatchdogPing;
+		const maxDrift = intervalMs * 2; // Tolerance: 2x expected interval
     
-    // Monotonic drift protection - detect blocked event loop, CPU pegging, long GC pauses
-    if (drift > maxDrift) {
-      // Event loop blocked or CPU pegged - withhold ping to trigger systemd restart
-      consecutiveSkippedPings++;
-      logger?.errorSync('Watchdog ping skipped - timing drift detected', undefined, {
-        component: LogComponents.agent,
-        operation: 'watchdog',
-        action: 'skipped',
-        reason: 'timing_drift',
-        driftMs: drift,
-        expectedIntervalMs: intervalMs,
-        maxDriftMs: maxDrift,
-        consecutiveSkips: consecutiveSkippedPings,
-        systemdUnit,
-        invocationId,
-        consequence: 'systemd_will_restart'
-      });
-      return; // Withhold ping - systemd will restart service
-    }
+		// Monotonic drift protection - detect blocked event loop, CPU pegging, long GC pauses
+		if (drift > maxDrift) {
+			// Event loop blocked or CPU pegged - withhold ping to trigger systemd restart
+			consecutiveSkippedPings++;
+			logger?.errorSync('Watchdog ping skipped - timing drift detected', undefined, {
+				component: LogComponents.agent,
+				operation: 'watchdog',
+				action: 'skipped',
+				reason: 'timing_drift',
+				driftMs: drift,
+				expectedIntervalMs: intervalMs,
+				maxDriftMs: maxDrift,
+				consecutiveSkips: consecutiveSkippedPings,
+				systemdUnit,
+				invocationId,
+				consequence: 'systemd_will_restart'
+			});
+			return; // Withhold ping - systemd will restart service
+		}
     
-    // Check application health before sending watchdog ping (await if async)
-    const isHealthy = healthCheck ? await healthCheck() : true; // Default: always healthy
+		// Check application health before sending watchdog ping (await if async)
+		const isHealthy = healthCheck ? await healthCheck() : true; // Default: always healthy
     
-    if (isHealthy) {
-      sendNativeNotification('WATCHDOG=1', socketPath, logger);
-      lastWatchdogPing = now; // Update last successful ping time
+		if (isHealthy) {
+			sendNativeNotification('WATCHDOG=1', socketPath, logger);
+			lastWatchdogPing = now; // Update last successful ping time
       
-      // Reset skip counter on successful ping (observability)
-      if (consecutiveSkippedPings > 0) {
-        logger?.infoSync('Watchdog ping resumed after skips', {
-          component: LogComponents.agent,
-          operation: 'watchdog',
-          previousSkips: consecutiveSkippedPings
-        });
-        consecutiveSkippedPings = 0;
-      }
-    } else {
-      // Withhold watchdog ping - systemd will restart service after timeout
-      consecutiveSkippedPings++;
-      logger?.errorSync('Watchdog ping skipped - unhealthy state', undefined, {
-        component: LogComponents.agent,
-        operation: 'watchdog',
-        action: 'skipped',
-        reason: 'health_check_failed',
-        consecutiveSkips: consecutiveSkippedPings,
-        systemdUnit,
-        invocationId,
-        consequence: 'systemd_will_restart'
-      });
-    }
-  }, intervalMs);
+			// Reset skip counter on successful ping (observability)
+			if (consecutiveSkippedPings > 0) {
+				logger?.infoSync('Watchdog ping resumed after skips', {
+					component: LogComponents.agent,
+					operation: 'watchdog',
+					previousSkips: consecutiveSkippedPings
+				});
+				consecutiveSkippedPings = 0;
+			}
+		} else {
+			// Withhold watchdog ping - systemd will restart service after timeout
+			consecutiveSkippedPings++;
+			logger?.errorSync('Watchdog ping skipped - unhealthy state', undefined, {
+				component: LogComponents.agent,
+				operation: 'watchdog',
+				action: 'skipped',
+				reason: 'health_check_failed',
+				consecutiveSkips: consecutiveSkippedPings,
+				systemdUnit,
+				invocationId,
+				consequence: 'systemd_will_restart'
+			});
+		}
+	}, intervalMs);
 
-  // Return cleanup function
-  return async () => {
-    // CRITICAL: Send STOPPING notification and flush before cleanup
-    // Use native socket for instant delivery (no fork/exec race condition)
-    // Ensures systemd receives notification before process exits
-    sendNativeNotification('STOPPING=1', socketPath, logger);
+	// Return cleanup function
+	return async () => {
+		// CRITICAL: Send STOPPING notification and flush before cleanup
+		// Use native socket for instant delivery (no fork/exec race condition)
+		// Ensures systemd receives notification before process exits
+		sendNativeNotification('STOPPING=1', socketPath, logger);
     
-    // Small delay to ensure datagram is flushed to kernel
-    await new Promise(resolve => setTimeout(resolve, 50));
+		// Small delay to ensure datagram is flushed to kernel
+		await new Promise(resolve => setTimeout(resolve, 50));
 
-    if (watchdogInterval) {
-      clearInterval(watchdogInterval);
-      watchdogInterval = null;
-    }
+		if (watchdogInterval) {
+			clearInterval(watchdogInterval);
+			watchdogInterval = null;
+		}
     
-    // Close native socket
-    if (notifySocket) {
-      notifySocket.close();
-      notifySocket = null;
-    }
+		// Close native socket
+		if (notifySocket) {
+			notifySocket.close();
+			notifySocket = null;
+		}
     
-    logger?.infoSync('Watchdog stopped', {
-      component: LogComponents.agent,
-      operation: 'stopWatchdog',
-      totalSkippedPings: consecutiveSkippedPings,
-      systemdUnit: process.env.SYSTEMD_UNIT || 'unknown',
-      invocationId: process.env.INVOCATION_ID || 'unknown'
-    });
-  };
+		logger?.infoSync('Watchdog stopped', {
+			component: LogComponents.agent,
+			operation: 'stopWatchdog',
+			totalSkippedPings: consecutiveSkippedPings,
+			systemdUnit: process.env.SYSTEMD_UNIT || 'unknown',
+			invocationId: process.env.INVOCATION_ID || 'unknown'
+		});
+	};
 }
 
 /**
@@ -360,16 +360,16 @@ export function startWatchdog(healthCheck?: HealthCheckFn, logger?: AgentLogger)
  * @param logger - Optional logger
  */
 export async function notifyReady(logger?: AgentLogger): Promise<void> {
-  if (!process.env.NOTIFY_SOCKET) {
-    return; // Silently skip if not running under systemd
-  }
+	if (!process.env.NOTIFY_SOCKET) {
+		return; // Silently skip if not running under systemd
+	}
 
-  await sendNotification('READY=1', logger);
+	await sendNotification('READY=1', logger);
   
-  logger?.infoSync('Systemd READY notification sent', {
-    component: LogComponents.agent,
-    operation: 'notifyReady'
-  });
+	logger?.infoSync('Systemd READY notification sent', {
+		component: LogComponents.agent,
+		operation: 'notifyReady'
+	});
 }
 
 /**
@@ -388,9 +388,9 @@ export async function notifyReady(logger?: AgentLogger): Promise<void> {
  * @param logger - Optional logger
  */
 export function notifySystemd(status: string, logger?: AgentLogger): void {
-  if (!process.env.NOTIFY_SOCKET) {
-    return; // Silently skip if not running under systemd
-  }
+	if (!process.env.NOTIFY_SOCKET) {
+		return; // Silently skip if not running under systemd
+	}
 
-  void sendNotification(status, logger);
+	void sendNotification(status, logger);
 }

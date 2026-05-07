@@ -127,9 +127,9 @@ export class RetryManager {
 	}
 	
 	/**
-	 * Load retry state from SQLite database
-	 * Ensures retry state survives agent restarts (prevents retry storms on reboot loops)
-	 */
+	* Load retry state from SQLite database
+	* Ensures retry state survives agent restarts (prevents retry storms on reboot loops)
+	*/
 	private async loadStateFromDatabase(): Promise<void> {
 		try {
 			const rows = RetryStateModel.getAll();
@@ -160,9 +160,9 @@ export class RetryManager {
 	}
 	
 	/**
-	 * Persist retry state to SQLite database
-	 * Ensures state survives agent restarts (critical for edge devices with reboot loops)
-	 */
+	* Persist retry state to SQLite database
+	* Ensures state survives agent restarts (critical for edge devices with reboot loops)
+	*/
 	private async persistToDatabase(key: string, state: RetryState): Promise<void> {
 		try {
 			const record: RetryStateRecord = {
@@ -186,8 +186,8 @@ export class RetryManager {
 	}
 	
 	/**
-	 * Delete retry state from database
-	 */
+	* Delete retry state from database
+	*/
 	private async deleteFromDatabase(key: string): Promise<void> {
 		try {
 			RetryStateModel.delete(key);
@@ -201,8 +201,8 @@ export class RetryManager {
 	}
 	
 	/**
-	 * Check if we should retry an operation
-	 */
+	* Check if we should retry an operation
+	*/
 	public shouldRetry(key: string): boolean {
 		const state = this.retryState.get(key);
 		
@@ -226,13 +226,13 @@ export class RetryManager {
 	}
 	
 	/**
-	 * Record a failure and calculate next retry time
-	 * Adds jitter to prevent thundering herd, persists to SQLite to survive restarts
-	 * 
-	 * @param key - Unique identifier for the operation
-	 * @param error - Error message/description
-	 * @param retryable - Whether error is retryable (defaults to auto-classification)
-	 */
+	* Record a failure and calculate next retry time
+	* Adds jitter to prevent thundering herd, persists to SQLite to survive restarts
+	* 
+	* @param key - Unique identifier for the operation
+	* @param error - Error message/description
+	* @param retryable - Whether error is retryable (defaults to auto-classification)
+	*/
 	public recordFailure(key: string, error: string, retryable?: boolean): void {
 		// Auto-classify if not explicitly specified
 		const isRetryable = retryable !== undefined ? retryable : isRetryableError(error);
@@ -314,8 +314,8 @@ export class RetryManager {
 	}
 	
 	/**
-	 * Record a success (clears retry state from memory and database)
-	 */
+	* Record a success (clears retry state from memory and database)
+	*/
 	public recordSuccess(key: string): void {
 		const state = this.retryState.get(key);
 		if (state && state.count > 0) {
@@ -334,32 +334,32 @@ export class RetryManager {
 	}
 	
 	/**
-	 * Get retry state for a key
-	 */
+	* Get retry state for a key
+	*/
 	public getState(key: string): RetryState | undefined {
 		return this.retryState.get(key);
 	}
 	
 	/**
-	 * Check if max retries exceeded
-	 */
+	* Check if max retries exceeded
+	*/
 	public isMaxRetriesExceeded(key: string): boolean {
 		const state = this.retryState.get(key);
 		return state ? state.count >= this.policy.maxRetries : false;
 	}
 	
 	/**
-	 * Check if a resource is in terminal state (permanently failed)
-	 */
+	* Check if a resource is in terminal state (permanently failed)
+	*/
 	public isTerminal(key: string): boolean {
 		const state = this.retryState.get(key);
 		return state ? state.terminal : false;
 	}
 	
 	/**
-	 * Get all resources in terminal state (for cleanup/observability)
-	 * Kubernetes-style: allows external monitoring to detect permanently failed resources
-	 */
+	* Get all resources in terminal state (for cleanup/observability)
+	* Kubernetes-style: allows external monitoring to detect permanently failed resources
+	*/
 	public getTerminalStates(): Map<string, RetryState> {
 		const terminal = new Map<string, RetryState>();
 		for (const [key, state] of this.retryState) {
@@ -371,15 +371,15 @@ export class RetryManager {
 	}
 	
 	/**
-	 * Get all retry states (for reporting)
-	 */
+	* Get all retry states (for reporting)
+	*/
 	public getAllStates(): Map<string, RetryState> {
 		return new Map(this.retryState);
 	}
 	
 	/**
-	 * Clear retry state for a specific key (memory and database)
-	 */
+	* Clear retry state for a specific key (memory and database)
+	*/
 	public clearState(key: string): void {
 		this.retryState.delete(key);
 		this.deleteFromDatabase(key).catch(() => {
@@ -388,8 +388,8 @@ export class RetryManager {
 	}
 	
 	/**
-	 * Clear all retry states (memory and database)
-	 */
+	* Clear all retry states (memory and database)
+	*/
 	public async clearAllStates(): Promise<void> {
 		this.retryState.clear();
 		try {

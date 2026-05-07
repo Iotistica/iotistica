@@ -125,8 +125,8 @@ export class FusionDetector implements AnomalyDetector {
 	}
 	
 	/**
-	 * Run all detectors and combine results using weighted voting
-	 */
+	* Run all detectors and combine results using weighted voting
+	*/
 	detect(
 		value: number,
 		buffer: StatisticalBuffer,

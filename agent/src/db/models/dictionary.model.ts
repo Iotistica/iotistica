@@ -58,205 +58,205 @@ type DictionaryMetadataRow = Omit<DictionaryMetadata, 'updated_at'> & {
 };
 
 export class DictionaryModel {
-  private static readonly ENTRIES_TABLE = 'dictionary_entries';
-  private static readonly METADATA_TABLE = 'dictionary_metadata';
-  private static readonly DELTAS_TABLE = 'dictionary_deltas';
+	private static readonly ENTRIES_TABLE = 'dictionary_entries';
+	private static readonly METADATA_TABLE = 'dictionary_metadata';
+	private static readonly DELTAS_TABLE = 'dictionary_deltas';
 
-  private static getDb(): Database.Database {
-    return getDatabase();
-  }
+	private static getDb(): Database.Database {
+		return getDatabase();
+	}
 
-  private static parseDelta(row: DictionaryDeltaRow): DictionaryDelta {
-    return {
-      ...row,
-      synced_to_cloud: !!row.synced_to_cloud,
-      synced_at: row.synced_at ? new Date(row.synced_at) : undefined,
-      created_at: row.created_at ? new Date(row.created_at) : undefined,
-    };
-  }
+	private static parseDelta(row: DictionaryDeltaRow): DictionaryDelta {
+		return {
+			...row,
+			synced_to_cloud: !!row.synced_to_cloud,
+			synced_at: row.synced_at ? new Date(row.synced_at) : undefined,
+			created_at: row.created_at ? new Date(row.created_at) : undefined,
+		};
+	}
 
-  private static now(): string {
-    return new Date().toISOString();
-  }
+	private static now(): string {
+		return new Date().toISOString();
+	}
 
-  /**
+	/**
    * Load entire dictionary from database
    * Returns domain-partitioned maps for field_name -> field_index
    */
-  static async loadDictionary(): Promise<{
+	static async loadDictionary(): Promise<{
     key: Map<string, number>;
     metric: Map<string, number>;
     unit: Map<string, number>;
     quality: Map<string, number>;
     device: Map<string, number>;
   }> {
-    const entries = this.getDb()
-      .prepare(`SELECT field_name, field_index, domain FROM ${this.ENTRIES_TABLE} ORDER BY field_index ASC`)
-      .all() as Array<Pick<DictionaryEntryRow, 'field_name' | 'field_index' | 'domain'>>;
+		const entries = this.getDb()
+			.prepare(`SELECT field_name, field_index, domain FROM ${this.ENTRIES_TABLE} ORDER BY field_index ASC`)
+			.all() as Array<Pick<DictionaryEntryRow, 'field_name' | 'field_index' | 'domain'>>;
 
-    // Initialize domain maps
-    const domains = {
-      key: new Map<string, number>(),
-      metric: new Map<string, number>(),
-      unit: new Map<string, number>(),
-      quality: new Map<string, number>(),
-      device: new Map<string, number>(),
-    };
+		// Initialize domain maps
+		const domains = {
+			key: new Map<string, number>(),
+			metric: new Map<string, number>(),
+			unit: new Map<string, number>(),
+			quality: new Map<string, number>(),
+			device: new Map<string, number>(),
+		};
 
-    // Populate maps by domain
-    for (const entry of entries) {
-      const domain = (entry.domain || 'key') as DictionaryDomain;
-      domains[domain].set(entry.field_name, entry.field_index);
-    }
+		// Populate maps by domain
+		for (const entry of entries) {
+			const domain = (entry.domain || 'key') as DictionaryDomain;
+			domains[domain].set(entry.field_name, entry.field_index);
+		}
     
-    return domains;
-  }
+		return domains;
+	}
 
-  /**
+	/**
    * Save a single field entry to dictionary
    */
-  static async saveEntry(fieldName: string, fieldIndex: number, versionAdded: number, domain: DictionaryDomain = 'key'): Promise<void> {
-    this.getDb()
-      .prepare(`
+	static async saveEntry(fieldName: string, fieldIndex: number, versionAdded: number, domain: DictionaryDomain = 'key'): Promise<void> {
+		this.getDb()
+			.prepare(`
         INSERT INTO ${this.ENTRIES_TABLE} (field_name, field_index, version_added, domain, created_at)
         VALUES (@field_name, @field_index, @version_added, @domain, @created_at)
       `)
-      .run({
-        field_name: fieldName,
-        field_index: fieldIndex,
-        version_added: versionAdded,
-        domain,
-        created_at: this.now(),
-      });
-  }
+			.run({
+				field_name: fieldName,
+				field_index: fieldIndex,
+				version_added: versionAdded,
+				domain,
+				created_at: this.now(),
+			});
+	}
 
-  /**
+	/**
    * Record a delta (new field addition) for sync tracking
    */
-  static async saveDelta(fieldName: string, fieldIndex: number, version: number, domain: DictionaryDomain = 'metric'): Promise<number> {
-    const result = this.getDb()
-      .prepare(`
+	static async saveDelta(fieldName: string, fieldIndex: number, version: number, domain: DictionaryDomain = 'metric'): Promise<number> {
+		const result = this.getDb()
+			.prepare(`
         INSERT INTO ${this.DELTAS_TABLE} (version, field_name, field_index, domain, synced_to_cloud, created_at)
         VALUES (@version, @field_name, @field_index, @domain, @synced_to_cloud, @created_at)
       `)
-      .run({
-        version,
-        field_name: fieldName,
-        field_index: fieldIndex,
-        domain,
-        synced_to_cloud: 0,
-        created_at: this.now(),
-      });
+			.run({
+				version,
+				field_name: fieldName,
+				field_index: fieldIndex,
+				domain,
+				synced_to_cloud: 0,
+				created_at: this.now(),
+			});
 
-    return Number(result.lastInsertRowid);
-  }
+		return Number(result.lastInsertRowid);
+	}
 
-  /**
+	/**
    * Get all deltas not yet synced to cloud
    */
-  static async getUnsyncedDeltas(): Promise<DictionaryDelta[]> {
-    const deltas = this.getDb()
-      .prepare(`SELECT * FROM ${this.DELTAS_TABLE} WHERE synced_to_cloud = 0 ORDER BY version ASC`)
-      .all() as DictionaryDeltaRow[];
+	static async getUnsyncedDeltas(): Promise<DictionaryDelta[]> {
+		const deltas = this.getDb()
+			.prepare(`SELECT * FROM ${this.DELTAS_TABLE} WHERE synced_to_cloud = 0 ORDER BY version ASC`)
+			.all() as DictionaryDeltaRow[];
 
-    return deltas.map((delta) => this.parseDelta(delta));
-  }
+		return deltas.map((delta) => this.parseDelta(delta));
+	}
 
-  /**
+	/**
    * Get deltas for a specific version
    */
-  static async getDeltasByVersion(version: number): Promise<DictionaryDelta[]> {
-    const deltas = this.getDb()
-      .prepare(`SELECT * FROM ${this.DELTAS_TABLE} WHERE version = ? ORDER BY field_index ASC`)
-      .all(version) as DictionaryDeltaRow[];
+	static async getDeltasByVersion(version: number): Promise<DictionaryDelta[]> {
+		const deltas = this.getDb()
+			.prepare(`SELECT * FROM ${this.DELTAS_TABLE} WHERE version = ? ORDER BY field_index ASC`)
+			.all(version) as DictionaryDeltaRow[];
 
-    return deltas.map((delta) => this.parseDelta(delta));
-  }
+		return deltas.map((delta) => this.parseDelta(delta));
+	}
 
-  /**
+	/**
    * Mark deltas as synced to cloud
    */
-  static async markDeltasSynced(deltaIds: number[]): Promise<void> {
-    if (deltaIds.length === 0) return;
+	static async markDeltasSynced(deltaIds: number[]): Promise<void> {
+		if (deltaIds.length === 0) return;
 
-    const placeholders = deltaIds.map(() => '?').join(', ');
-    this.getDb()
-      .prepare(`UPDATE ${this.DELTAS_TABLE} SET synced_to_cloud = 1, synced_at = ? WHERE id IN (${placeholders})`)
-      .run(this.now(), ...deltaIds);
-  }
+		const placeholders = deltaIds.map(() => '?').join(', ');
+		this.getDb()
+			.prepare(`UPDATE ${this.DELTAS_TABLE} SET synced_to_cloud = 1, synced_at = ? WHERE id IN (${placeholders})`)
+			.run(this.now(), ...deltaIds);
+	}
 
-  /**
+	/**
    * Mark all deltas up to a version as synced
    */
-  static async markDeltasSyncedUpToVersion(version: number): Promise<void> {
-    this.getDb()
-      .prepare(`UPDATE ${this.DELTAS_TABLE} SET synced_to_cloud = 1, synced_at = ? WHERE version <= ? AND synced_to_cloud = 0`)
-      .run(this.now(), version);
-  }
+	static async markDeltasSyncedUpToVersion(version: number): Promise<void> {
+		this.getDb()
+			.prepare(`UPDATE ${this.DELTAS_TABLE} SET synced_to_cloud = 1, synced_at = ? WHERE version <= ? AND synced_to_cloud = 0`)
+			.run(this.now(), version);
+	}
 
-  /**
+	/**
    * Get current dictionary version from metadata
    */
-  static async getCurrentVersion(): Promise<number> {
-    const result = this.getDb()
-      .prepare(`SELECT value FROM ${this.METADATA_TABLE} WHERE key = 'current_version' LIMIT 1`)
-      .get() as Pick<DictionaryMetadataRow, 'value'> | undefined;
+	static async getCurrentVersion(): Promise<number> {
+		const result = this.getDb()
+			.prepare(`SELECT value FROM ${this.METADATA_TABLE} WHERE key = 'current_version' LIMIT 1`)
+			.get() as Pick<DictionaryMetadataRow, 'value'> | undefined;
     
-    return result ? parseInt(result.value, 10) : 1;
-  }
+		return result ? parseInt(result.value, 10) : 1;
+	}
 
-  /**
+	/**
    * Update current dictionary version in metadata
    */
-  static async setCurrentVersion(version: number): Promise<void> {
-    await this.setMetadata('current_version', version.toString());
-  }
+	static async setCurrentVersion(version: number): Promise<void> {
+		await this.setMetadata('current_version', version.toString());
+	}
 
-  /**
+	/**
    * Get metadata value by key
    */
-  static async getMetadata(key: string): Promise<string | null> {
-    const result = this.getDb()
-      .prepare(`SELECT value FROM ${this.METADATA_TABLE} WHERE key = ? LIMIT 1`)
-      .get(key) as Pick<DictionaryMetadataRow, 'value'> | undefined;
+	static async getMetadata(key: string): Promise<string | null> {
+		const result = this.getDb()
+			.prepare(`SELECT value FROM ${this.METADATA_TABLE} WHERE key = ? LIMIT 1`)
+			.get(key) as Pick<DictionaryMetadataRow, 'value'> | undefined;
     
-    return result ? result.value : null;
-  }
+		return result ? result.value : null;
+	}
 
-  /**
+	/**
    * Set metadata value
    */
-  static async setMetadata(key: string, value: string): Promise<void> {
-    this.getDb()
-      .prepare(`
+	static async setMetadata(key: string, value: string): Promise<void> {
+		this.getDb()
+			.prepare(`
         INSERT INTO ${this.METADATA_TABLE} (key, value, updated_at)
         VALUES (@key, @value, @updated_at)
         ON CONFLICT(key) DO UPDATE SET
           value = excluded.value,
           updated_at = excluded.updated_at
       `)
-      .run({
-        key,
-        value,
-        updated_at: this.now(),
-      });
-  }
+			.run({
+				key,
+				value,
+				updated_at: this.now(),
+			});
+	}
 
-  /**
+	/**
    * Get count of unsynced deltas
    */
-  static async getUnsyncedDeltaCount(): Promise<number> {
-    const result = this.getDb()
-      .prepare(`SELECT COUNT(*) as count FROM ${this.DELTAS_TABLE} WHERE synced_to_cloud = 0`)
-      .get() as { count: number | string } | undefined;
+	static async getUnsyncedDeltaCount(): Promise<number> {
+		const result = this.getDb()
+			.prepare(`SELECT COUNT(*) as count FROM ${this.DELTAS_TABLE} WHERE synced_to_cloud = 0`)
+			.get() as { count: number | string } | undefined;
     
-    return result ? parseInt(result.count as string, 10) : 0;
-  }
+		return result ? parseInt(result.count as string, 10) : 0;
+	}
 
-  /**
+	/**
    * Get dictionary statistics
    */
-  static async getStats(): Promise<{
+	static async getStats(): Promise<{
     totalEntries: number;
     currentVersion: number;
     totalDeltas: number;
@@ -264,177 +264,177 @@ export class DictionaryModel {
     oldestEntryDate?: Date;
     newestEntryDate?: Date;
   }> {
-    const db = this.getDb();
-    const [entriesCount, deltasCount, unsyncedCount, version, dateRange] = await Promise.all([
-      Promise.resolve(db.prepare(`SELECT COUNT(*) as count FROM ${this.ENTRIES_TABLE}`).get() as { count: number | string } | undefined),
-      Promise.resolve(db.prepare(`SELECT COUNT(*) as count FROM ${this.DELTAS_TABLE}`).get() as { count: number | string } | undefined),
-      this.getUnsyncedDeltaCount(),
-      this.getCurrentVersion(),
-      Promise.resolve(
+		const db = this.getDb();
+		const [entriesCount, deltasCount, unsyncedCount, version, dateRange] = await Promise.all([
+			Promise.resolve(db.prepare(`SELECT COUNT(*) as count FROM ${this.ENTRIES_TABLE}`).get() as { count: number | string } | undefined),
+			Promise.resolve(db.prepare(`SELECT COUNT(*) as count FROM ${this.DELTAS_TABLE}`).get() as { count: number | string } | undefined),
+			this.getUnsyncedDeltaCount(),
+			this.getCurrentVersion(),
+			Promise.resolve(
         db.prepare(`SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM ${this.ENTRIES_TABLE}`).get() as { oldest?: string | null; newest?: string | null } | undefined,
-      ),
-    ]);
+			),
+		]);
     
-    return {
-      totalEntries: entriesCount ? parseInt(entriesCount.count as string, 10) : 0,
-      currentVersion: version,
-      totalDeltas: deltasCount ? parseInt(deltasCount.count as string, 10) : 0,
-      unsyncedDeltas: unsyncedCount,
-      oldestEntryDate: dateRange?.oldest ? new Date(dateRange.oldest) : undefined,
-      newestEntryDate: dateRange?.newest ? new Date(dateRange.newest) : undefined
-    };
-  }
+		return {
+			totalEntries: entriesCount ? parseInt(entriesCount.count as string, 10) : 0,
+			currentVersion: version,
+			totalDeltas: deltasCount ? parseInt(deltasCount.count as string, 10) : 0,
+			unsyncedDeltas: unsyncedCount,
+			oldestEntryDate: dateRange?.oldest ? new Date(dateRange.oldest) : undefined,
+			newestEntryDate: dateRange?.newest ? new Date(dateRange.newest) : undefined
+		};
+	}
 
-  /**
+	/**
    * Clear all dictionary data (for reset)
    */
-  static async clearAll(): Promise<void> {
-    const db = this.getDb();
-    const clear = db.transaction(() => {
-      db.prepare(`DELETE FROM ${this.DELTAS_TABLE}`).run();
-      db.prepare(`DELETE FROM ${this.ENTRIES_TABLE}`).run();
-    });
+	static async clearAll(): Promise<void> {
+		const db = this.getDb();
+		const clear = db.transaction(() => {
+			db.prepare(`DELETE FROM ${this.DELTAS_TABLE}`).run();
+			db.prepare(`DELETE FROM ${this.ENTRIES_TABLE}`).run();
+		});
 
-    clear();
-    await this.setCurrentVersion(1);
-    await this.setMetadata('last_full_sync', '0');
-    await this.setMetadata('last_delta_sync', '0');
-  }
+		clear();
+		await this.setCurrentVersion(1);
+		await this.setMetadata('last_full_sync', '0');
+		await this.setMetadata('last_delta_sync', '0');
+	}
 
-  // ========================================================================
-  // PHASE 7: PROTOCOL-AWARE ENUM PERSISTENCE
-  // ========================================================================
+	// ========================================================================
+	// PHASE 7: PROTOCOL-AWARE ENUM PERSISTENCE
+	// ========================================================================
 
-  /**
+	/**
    * Save a promoted enum value to database
    */
-  static async savePromotedEnum(
-    type: 'metric' | 'device' | 'qualityCode',
-    protocol: string | undefined,
-    value: string,
-    index: number
-  ): Promise<void> {
-    // Store as JSON in metadata table (key = "enum:{type}:{protocol}")
-    const key = protocol ? `enum:${type}:${protocol}` : `enum:${type}`;
+	static async savePromotedEnum(
+		type: 'metric' | 'device' | 'qualityCode',
+		protocol: string | undefined,
+		value: string,
+		index: number
+	): Promise<void> {
+		// Store as JSON in metadata table (key = "enum:{type}:{protocol}")
+		const key = protocol ? `enum:${type}:${protocol}` : `enum:${type}`;
     
-    // Load existing enum object
-    const existing = await this.getMetadata(key);
-    const enumObj = existing ? JSON.parse(existing) : {};
+		// Load existing enum object
+		const existing = await this.getMetadata(key);
+		const enumObj = existing ? JSON.parse(existing) : {};
     
-    // Add new value -> index mapping
-    enumObj[value] = index;
+		// Add new value -> index mapping
+		enumObj[value] = index;
     
-    // Save back
-    await this.setMetadata(key, JSON.stringify(enumObj));
-  }
+		// Save back
+		await this.setMetadata(key, JSON.stringify(enumObj));
+	}
 
-  /**
+	/**
    * Save observation stats for an enum candidate
    */
-  static async saveEnumStats(
-    type: 'metric' | 'device' | 'qualityCode',
-    protocol: string | undefined,
-    value: string,
-    count: number,
-    firstSeen: number
-  ): Promise<void> {
-    // Store as JSON in metadata table (key = "stats:{type}:{protocol}")
-    const key = protocol ? `stats:${type}:${protocol}` : `stats:${type}`;
+	static async saveEnumStats(
+		type: 'metric' | 'device' | 'qualityCode',
+		protocol: string | undefined,
+		value: string,
+		count: number,
+		firstSeen: number
+	): Promise<void> {
+		// Store as JSON in metadata table (key = "stats:{type}:{protocol}")
+		const key = protocol ? `stats:${type}:${protocol}` : `stats:${type}`;
     
-    // Load existing stats object
-    const existing = await this.getMetadata(key);
-    const statsObj = existing ? JSON.parse(existing) : {};
+		// Load existing stats object
+		const existing = await this.getMetadata(key);
+		const statsObj = existing ? JSON.parse(existing) : {};
     
-    // Update stats for this value
-    statsObj[value] = { count, firstSeen };
+		// Update stats for this value
+		statsObj[value] = { count, firstSeen };
     
-    // Save back
-    await this.setMetadata(key, JSON.stringify(statsObj));
-  }
+		// Save back
+		await this.setMetadata(key, JSON.stringify(statsObj));
+	}
 
-  /**
+	/**
    * Load all promoted enums from database
    */
-  static async getPromotedEnums(): Promise<{
+	static async getPromotedEnums(): Promise<{
     qualityCodes: Record<string, number>;
     metrics: Record<string, Record<string, number>>; // protocol -> value -> index
     devices: Record<string, Record<string, number>>; // protocol -> value -> index
   }> {
-    const enumKeys = this.getDb()
-      .prepare(`SELECT key, value FROM ${this.METADATA_TABLE} WHERE key LIKE 'enum:%'`)
-      .all() as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
+		const enumKeys = this.getDb()
+			.prepare(`SELECT key, value FROM ${this.METADATA_TABLE} WHERE key LIKE 'enum:%'`)
+			.all() as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
     
-    const result = {
-      qualityCodes: {},
-      metrics: {} as Record<string, Record<string, number>>,
-      devices: {} as Record<string, Record<string, number>>,
-    };
+		const result = {
+			qualityCodes: {},
+			metrics: {} as Record<string, Record<string, number>>,
+			devices: {} as Record<string, Record<string, number>>,
+		};
     
-    for (const row of enumKeys) {
-      const parts = row.key.split(':'); // ["enum", "metric", "modbus"]
-      const type = parts[1];
-      const protocol = parts[2]; // undefined for qualityCode
-      const enumObj = JSON.parse(row.value);
+		for (const row of enumKeys) {
+			const parts = row.key.split(':'); // ["enum", "metric", "modbus"]
+			const type = parts[1];
+			const protocol = parts[2]; // undefined for qualityCode
+			const enumObj = JSON.parse(row.value);
       
-      if (type === 'qualityCode') {
-        result.qualityCodes = enumObj;
-      } else if (type === 'metric') {
-        if (!result.metrics[protocol]) {
-          result.metrics[protocol] = {};
-        }
-        result.metrics[protocol] = enumObj;
-      } else if (type === 'device') {
-        if (!result.devices[protocol]) {
-          result.devices[protocol] = {};
-        }
-        result.devices[protocol] = enumObj;
-      }
-    }
+			if (type === 'qualityCode') {
+				result.qualityCodes = enumObj;
+			} else if (type === 'metric') {
+				if (!result.metrics[protocol]) {
+					result.metrics[protocol] = {};
+				}
+				result.metrics[protocol] = enumObj;
+			} else if (type === 'device') {
+				if (!result.devices[protocol]) {
+					result.devices[protocol] = {};
+				}
+				result.devices[protocol] = enumObj;
+			}
+		}
     
-    return result;
-  }
+		return result;
+	}
 
-  /**
+	/**
    * Load observation stats from database
    */
-  static async getEnumStats(): Promise<{
+	static async getEnumStats(): Promise<{
     qualityCodes: Record<string, { count: number; firstSeen: number }>;
     metrics: Record<string, { count: number; firstSeen: number; protocol: string }>;
     devices: Record<string, { count: number; firstSeen: number; protocol: string }>;
   }> {
-    const statsKeys = this.getDb()
-      .prepare(`SELECT key, value FROM ${this.METADATA_TABLE} WHERE key LIKE 'stats:%'`)
-      .all() as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
+		const statsKeys = this.getDb()
+			.prepare(`SELECT key, value FROM ${this.METADATA_TABLE} WHERE key LIKE 'stats:%'`)
+			.all() as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
     
-    const result = {
-      qualityCodes: {},
-      metrics: {} as Record<string, { count: number; firstSeen: number; protocol: string }>,
-      devices: {} as Record<string, { count: number; firstSeen: number; protocol: string }>,
-    };
+		const result = {
+			qualityCodes: {},
+			metrics: {} as Record<string, { count: number; firstSeen: number; protocol: string }>,
+			devices: {} as Record<string, { count: number; firstSeen: number; protocol: string }>,
+		};
     
-    for (const row of statsKeys) {
-      const parts = row.key.split(':'); // ["stats", "metric", "modbus"]
-      const type = parts[1];
-      const protocol = parts[2]; // undefined for qualityCode
-      const statsObj = JSON.parse(row.value);
+		for (const row of statsKeys) {
+			const parts = row.key.split(':'); // ["stats", "metric", "modbus"]
+			const type = parts[1];
+			const protocol = parts[2]; // undefined for qualityCode
+			const statsObj = JSON.parse(row.value);
       
-      if (type === 'qualityCode') {
-        result.qualityCodes = statsObj;
-      } else if (type === 'metric') {
-        // Convert to flat map with protocol embedded
-        for (const [value, stats] of Object.entries(statsObj)) {
-          const key = `${protocol}:${value}`;
-          result.metrics[key] = { ...(stats as any), protocol };
-        }
-      } else if (type === 'device') {
-        // Convert to flat map with protocol embedded
-        for (const [value, stats] of Object.entries(statsObj)) {
-          const key = `${protocol}:${value}`;
-          result.devices[key] = { ...(stats as any), protocol };
-        }
-      }
-    }
+			if (type === 'qualityCode') {
+				result.qualityCodes = statsObj;
+			} else if (type === 'metric') {
+				// Convert to flat map with protocol embedded
+				for (const [value, stats] of Object.entries(statsObj)) {
+					const key = `${protocol}:${value}`;
+					result.metrics[key] = { ...(stats as any), protocol };
+				}
+			} else if (type === 'device') {
+				// Convert to flat map with protocol embedded
+				for (const [value, stats] of Object.entries(statsObj)) {
+					const key = `${protocol}:${value}`;
+					result.devices[key] = { ...(stats as any), protocol };
+				}
+			}
+		}
     
-    return result;
-  }
+		return result;
+	}
 }

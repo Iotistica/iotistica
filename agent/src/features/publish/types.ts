@@ -14,19 +14,19 @@ export enum DeviceState {
  * Sensor Configuration Schema
  */
 export const DeviceConfigSchema = z.object({
-  name: z.string().optional(),
-  protocol: z.string().optional(),
-  enabled: z.boolean().optional().default(true),
-  addr: z.string(),
-  addrPollSec: z.number().optional().default(10),
-  publishInterval: z.number().optional().default(30000), // Publish interval in milliseconds
-  bufferTimeMs: z.number().optional().default(0),
-  bufferSize: z.number().optional().default(0),
-  bufferCapacity: z.number().optional().default(1024 * 1024), // 1MB default (increased from 128KB for large OPC UA messages)
-  eomDelimiter: z.string(),
-  mqttTopic: z.string(),
-  mqttHeartbeatTopic: z.string().optional(),
-  heartbeatTimeSec: z.number().optional().default(300)
+	name: z.string().optional(),
+	protocol: z.string().optional(),
+	enabled: z.boolean().optional().default(true),
+	addr: z.string(),
+	addrPollSec: z.number().optional().default(10),
+	publishInterval: z.number().optional().default(30000), // Publish interval in milliseconds
+	bufferTimeMs: z.number().optional().default(0),
+	bufferSize: z.number().optional().default(0),
+	bufferCapacity: z.number().optional().default(1024 * 1024), // 1MB default (increased from 128KB for large OPC UA messages)
+	eomDelimiter: z.string(),
+	mqttTopic: z.string(),
+	mqttHeartbeatTopic: z.string().optional(),
+	heartbeatTimeSec: z.number().optional().default(300)
 });
 
 export type DeviceConfig = z.infer<typeof DeviceConfigSchema>;
@@ -35,8 +35,8 @@ export type DeviceConfig = z.infer<typeof DeviceConfigSchema>;
  * Sensor Publish Feature Configuration Schema
  */
 export const DevicePublishConfigSchema = z.object({
-  enabled: z.boolean().default(true),
-  endpoints: z.array(DeviceConfigSchema).max(10)
+	enabled: z.boolean().default(true),
+	endpoints: z.array(DeviceConfigSchema).max(10)
 });
 
 export type DevicePublishConfig = z.infer<typeof DevicePublishConfigSchema> & {

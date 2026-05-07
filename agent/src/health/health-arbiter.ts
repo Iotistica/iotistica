@@ -105,91 +105,91 @@ export interface HealthReport {
  * - Explicit markFatal() for unrecoverable errors
  */
 export class HealthArbiter {
-  private subsystems = new Map<string, SubsystemHealth>();
-  private checkInterval: NodeJS.Timeout | null = null;
-  private readonly DEFAULT_CHECK_INTERVAL_MS = 30000; // 30 seconds
-  private readonly DEFAULT_CRITICAL_COOLDOWN_MS = 30000; // 30s cooldown for critical subsystems
-  private fatalError: string | null = null; // Tracks fatal errors (unhandled rejections, etc.)
+	private subsystems = new Map<string, SubsystemHealth>();
+	private checkInterval: NodeJS.Timeout | null = null;
+	private readonly DEFAULT_CHECK_INTERVAL_MS = 30000; // 30 seconds
+	private readonly DEFAULT_CRITICAL_COOLDOWN_MS = 30000; // 30s cooldown for critical subsystems
+	private fatalError: string | null = null; // Tracks fatal errors (unhandled rejections, etc.)
   
-  constructor(private logger?: AgentLogger) {}
+	constructor(private logger?: AgentLogger) {}
   
-  /**
+	/**
    * Set or update logger instance
    * Call after agent initialization completes
    */
-  setLogger(logger: AgentLogger): void {
-    this.logger = logger;
-  }
+	setLogger(logger: AgentLogger): void {
+		this.logger = logger;
+	}
   
-  /**
+	/**
    * Register a subsystem for health monitoring
    * 
    * @param name - Unique subsystem identifier (e.g., 'mqtt', 'vpn', 'memory')
    * @param checkFn - Function that returns true if subsystem is healthy
    * @param options - Registration options (critical, description, etc.)
    */
-  registerSubsystem(
-    name: string,
-    checkFn: SubsystemCheckFn,
-    options: SubsystemOptions = {}
-  ): void {
-    const { 
-      critical = false, 
-      description, 
-      checkIntervalMs = this.DEFAULT_CHECK_INTERVAL_MS,
-      recoveryCooldownMs = critical ? this.DEFAULT_CRITICAL_COOLDOWN_MS : 0
-    } = options;
+	registerSubsystem(
+		name: string,
+		checkFn: SubsystemCheckFn,
+		options: SubsystemOptions = {}
+	): void {
+		const { 
+			critical = false, 
+			description, 
+			checkIntervalMs = this.DEFAULT_CHECK_INTERVAL_MS,
+			recoveryCooldownMs = critical ? this.DEFAULT_CRITICAL_COOLDOWN_MS : 0
+		} = options;
     
-    if (this.subsystems.has(name)) {
-      this.logger?.warnSync('Subsystem already registered - replacing', {
-        component: LogComponents.agent,
-        operation: 'registerSubsystem',
-        subsystem: name
-      });
-    }
+		if (this.subsystems.has(name)) {
+			this.logger?.warnSync('Subsystem already registered - replacing', {
+				component: LogComponents.agent,
+				operation: 'registerSubsystem',
+				subsystem: name
+			});
+		}
     
-    this.subsystems.set(name, {
-      name,
-      checkFn,
-      critical,
-      description,
-      healthy: false, // Start as unhealthy until first check
-      lastCheck: 0,
-      consecutiveFailures: 0,
-      checkIntervalMs,
-      recoveryCooldownMs,
-      lastFailureTime: 0,
-      latched: false
-    });
+		this.subsystems.set(name, {
+			name,
+			checkFn,
+			critical,
+			description,
+			healthy: false, // Start as unhealthy until first check
+			lastCheck: 0,
+			consecutiveFailures: 0,
+			checkIntervalMs,
+			recoveryCooldownMs,
+			lastFailureTime: 0,
+			latched: false
+		});
     
-    this.logger?.debugSync('Subsystem registered', {
-      component: LogComponents.agent,
-      operation: 'registerSubsystem',
-      subsystem: name,
-      critical,
-      recoveryCooldownMs,
-      description
-    });
+		this.logger?.debugSync('Subsystem registered', {
+			component: LogComponents.agent,
+			operation: 'registerSubsystem',
+			subsystem: name,
+			critical,
+			recoveryCooldownMs,
+			description
+		});
     
-    // Perform immediate check for newly registered subsystem
-    // Fire-and-forget: don't block registration
-    void this.checkSubsystem(name);
-  }
+		// Perform immediate check for newly registered subsystem
+		// Fire-and-forget: don't block registration
+		void this.checkSubsystem(name);
+	}
   
-  /**
+	/**
    * Unregister a subsystem from health monitoring
    */
-  unregisterSubsystem(name: string): void {
-    if (this.subsystems.delete(name)) {
-      this.logger?.debugSync('Subsystem unregistered', {
-        component: LogComponents.agent,
-        operation: 'unregisterSubsystem',
-        subsystem: name
-      });
-    }
-  }
+	unregisterSubsystem(name: string): void {
+		if (this.subsystems.delete(name)) {
+			this.logger?.debugSync('Subsystem unregistered', {
+				component: LogComponents.agent,
+				operation: 'unregisterSubsystem',
+				subsystem: name
+			});
+		}
+	}
   
-  /**
+	/**
    * Check health of a specific subsystem
    * 
    * Edge semantics:
@@ -200,115 +200,115 @@ export class HealthArbiter {
    * @param name - Subsystem name
    * @returns true if healthy, false otherwise
    */
-  private async checkSubsystem(name: string): Promise<boolean> {
-    const subsystem = this.subsystems.get(name);
-    if (!subsystem) {
-      this.logger?.warnSync('Attempted to check unknown subsystem', {
-        component: LogComponents.agent,
-        operation: 'checkSubsystem',
-        subsystem: name
-      });
-      return false;
-    }
+	private async checkSubsystem(name: string): Promise<boolean> {
+		const subsystem = this.subsystems.get(name);
+		if (!subsystem) {
+			this.logger?.warnSync('Attempted to check unknown subsystem', {
+				component: LogComponents.agent,
+				operation: 'checkSubsystem',
+				subsystem: name
+			});
+			return false;
+		}
     
-    // If subsystem is latched, it's permanently failed
-    if (subsystem.latched) {
-      this.logger?.debugSync('Subsystem check skipped - permanently latched', {
-        component: LogComponents.agent,
-        operation: 'checkSubsystem',
-        subsystem: name,
-        critical: subsystem.critical
-      });
-      return false;
-    }
+		// If subsystem is latched, it's permanently failed
+		if (subsystem.latched) {
+			this.logger?.debugSync('Subsystem check skipped - permanently latched', {
+				component: LogComponents.agent,
+				operation: 'checkSubsystem',
+				subsystem: name,
+				critical: subsystem.critical
+			});
+			return false;
+		}
     
-    try {
-      const healthy = await subsystem.checkFn();
-      const now = Date.now();
+		try {
+			const healthy = await subsystem.checkFn();
+			const now = Date.now();
       
-      // State transition: unhealthy → healthy
-      if (healthy && !subsystem.healthy) {
-        const previousFailures = subsystem.consecutiveFailures;
+			// State transition: unhealthy → healthy
+			if (healthy && !subsystem.healthy) {
+				const previousFailures = subsystem.consecutiveFailures;
 
-        // Enforce cooldown period for critical subsystems (prevents flapping)
-        if (subsystem.critical && subsystem.lastFailureTime > 0) {
-          const timeSinceFailure = now - subsystem.lastFailureTime;
-          if (timeSinceFailure < subsystem.recoveryCooldownMs) {
-            this.logger?.debugSync('Subsystem recovery suppressed - cooldown period active', {
-              component: LogComponents.agent,
-              operation: 'checkSubsystem',
-              subsystem: name,
-              timeSinceFailureMs: timeSinceFailure,
-              cooldownRemainingMs: subsystem.recoveryCooldownMs - timeSinceFailure,
-              reason: 'prevent_flapping'
-            });
-            // Keep unhealthy during cooldown
-            subsystem.lastCheck = now;
-            return false;
-          }
-        }
+				// Enforce cooldown period for critical subsystems (prevents flapping)
+				if (subsystem.critical && subsystem.lastFailureTime > 0) {
+					const timeSinceFailure = now - subsystem.lastFailureTime;
+					if (timeSinceFailure < subsystem.recoveryCooldownMs) {
+						this.logger?.debugSync('Subsystem recovery suppressed - cooldown period active', {
+							component: LogComponents.agent,
+							operation: 'checkSubsystem',
+							subsystem: name,
+							timeSinceFailureMs: timeSinceFailure,
+							cooldownRemainingMs: subsystem.recoveryCooldownMs - timeSinceFailure,
+							reason: 'prevent_flapping'
+						});
+						// Keep unhealthy during cooldown
+						subsystem.lastCheck = now;
+						return false;
+					}
+				}
 
-        // Suppress noisy initial transition logs at startup (0 prior failures).
-        if (previousFailures > 0) {
-          this.logger?.infoSync('Subsystem recovered', {
-            component: LogComponents.agent,
-            operation: 'checkSubsystem',
-            subsystem: name,
-            critical: subsystem.critical,
-            previousFailures
-          });
-        }
-      }
+				// Suppress noisy initial transition logs at startup (0 prior failures).
+				if (previousFailures > 0) {
+					this.logger?.infoSync('Subsystem recovered', {
+						component: LogComponents.agent,
+						operation: 'checkSubsystem',
+						subsystem: name,
+						critical: subsystem.critical,
+						previousFailures
+					});
+				}
+			}
       
-      // State transition: healthy → unhealthy
-      if (!healthy) {
-        subsystem.consecutiveFailures++;
-        subsystem.lastFailureTime = now;
-        subsystem.lastError = 'health_check_failed';
+			// State transition: healthy → unhealthy
+			if (!healthy) {
+				subsystem.consecutiveFailures++;
+				subsystem.lastFailureTime = now;
+				subsystem.lastError = 'health_check_failed';
 
-        // Latch critical subsystems permanently until restart (edge fail-fast)
-        if (subsystem.critical) {
-          subsystem.latched = true;
-        }
+				// Latch critical subsystems permanently until restart (edge fail-fast)
+				if (subsystem.critical) {
+					subsystem.latched = true;
+				}
 
-        this.logger?.errorSync('Subsystem health check failed', undefined, {
-          component: LogComponents.agent,
-          operation: 'checkSubsystem',
-          subsystem: name,
-          critical: subsystem.critical,
-          consecutiveFailures: subsystem.consecutiveFailures,
-          description: subsystem.description,
-          latched: subsystem.latched
-        });
-      } else {
-        subsystem.consecutiveFailures = 0;
-      }
+				this.logger?.errorSync('Subsystem health check failed', undefined, {
+					component: LogComponents.agent,
+					operation: 'checkSubsystem',
+					subsystem: name,
+					critical: subsystem.critical,
+					consecutiveFailures: subsystem.consecutiveFailures,
+					description: subsystem.description,
+					latched: subsystem.latched
+				});
+			} else {
+				subsystem.consecutiveFailures = 0;
+			}
       
-      subsystem.healthy = healthy && !subsystem.latched; // Latched failures stay unhealthy
-      subsystem.lastCheck = now;
-      subsystem.lastError = healthy ? undefined : subsystem.lastError;
+			subsystem.healthy = healthy && !subsystem.latched; // Latched failures stay unhealthy
+			subsystem.lastCheck = now;
+			subsystem.lastError = healthy ? undefined : subsystem.lastError;
       
-      return subsystem.healthy;
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      subsystem.healthy = false;
-      subsystem.lastCheck = Date.now();
-      subsystem.lastError = errorMsg;
-      subsystem.consecutiveFailures++;
+			return subsystem.healthy;
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			subsystem.healthy = false;
+			subsystem.lastCheck = Date.now();
+			subsystem.lastError = errorMsg;
+			subsystem.consecutiveFailures++;
       
-      this.logger?.errorSync('Subsystem health check threw error', error instanceof Error ? error : undefined, {
-        component: LogComponents.agent,
-        operation: 'checkSubsystem',
-        subsystem: name,
-        critical: subsystem.critical,
-        consecutiveFailures: subsystem.consecutiveFailures
-      });
+			this.logger?.errorSync('Subsystem health check threw error', error instanceof Error ? error : undefined, {
+				component: LogComponents.agent,
+				operation: 'checkSubsystem',
+				subsystem: name,
+				critical: subsystem.critical,
+				consecutiveFailures: subsystem.consecutiveFailures
+			});
       
-      return false;
-    }
-  }
+			return false;
+		}
+	}
   
-  /**
+	/**
    * Check overall system health
    * 
    * Returns false if ANY critical subsystem is unhealthy OR if fatal error marked.
@@ -316,39 +316,39 @@ export class HealthArbiter {
    * 
    * @returns true if all critical subsystems healthy, false otherwise
    */
-  async isHealthy(): Promise<boolean> {
-    // Fail immediately if fatal error marked (unhandled rejection, uncaught exception)
-    if (this.fatalError) {
-      this.logger?.debugSync('Overall health check failed - fatal error marked', {
-        component: LogComponents.agent,
-        operation: 'isHealthy',
-        fatalError: this.fatalError
-      });
-      return false;
-    }
+	async isHealthy(): Promise<boolean> {
+		// Fail immediately if fatal error marked (unhandled rejection, uncaught exception)
+		if (this.fatalError) {
+			this.logger?.debugSync('Overall health check failed - fatal error marked', {
+				component: LogComponents.agent,
+				operation: 'isHealthy',
+				fatalError: this.fatalError
+			});
+			return false;
+		}
     
-    // Check all subsystems on-demand
-    for (const name of this.subsystems.keys()) {
-      await this.checkSubsystem(name);
-    }
+		// Check all subsystems on-demand
+		for (const name of this.subsystems.keys()) {
+			await this.checkSubsystem(name);
+		}
     
-    // Fail if ANY critical subsystem is unhealthy
-    for (const [name, subsystem] of this.subsystems) {
-      if (subsystem.critical && !subsystem.healthy) {
-        this.logger?.debugSync('Overall health check failed', {
-          component: LogComponents.agent,
-          operation: 'isHealthy',
-          failedSubsystem: name,
-          consecutiveFailures: subsystem.consecutiveFailures
-        });
-        return false; // Fail fast
-      }
-    }
+		// Fail if ANY critical subsystem is unhealthy
+		for (const [name, subsystem] of this.subsystems) {
+			if (subsystem.critical && !subsystem.healthy) {
+				this.logger?.debugSync('Overall health check failed', {
+					component: LogComponents.agent,
+					operation: 'isHealthy',
+					failedSubsystem: name,
+					consecutiveFailures: subsystem.consecutiveFailures
+				});
+				return false; // Fail fast
+			}
+		}
     
-    return true;
-  }
+		return true;
+	}
   
-  /**
+	/**
    * Mark agent as fatally unhealthy
    * 
    * This causes isHealthy() to return false, which withholds watchdog pings,
@@ -365,107 +365,107 @@ export class HealthArbiter {
    * 
    * @param reason - Fatal error description (for observability)
    */
-  markFatal(reason: string): void {
-    this.fatalError = reason;
+	markFatal(reason: string): void {
+		this.fatalError = reason;
     
-    this.logger?.errorSync('Agent marked as fatally unhealthy - systemd will restart', undefined, {
-      component: LogComponents.agent,
-      operation: 'markFatal',
-      reason,
-      consequence: 'watchdog_withheld_systemd_restart'
-    });
-  }
+		this.logger?.errorSync('Agent marked as fatally unhealthy - systemd will restart', undefined, {
+			component: LogComponents.agent,
+			operation: 'markFatal',
+			reason,
+			consequence: 'watchdog_withheld_systemd_restart'
+		});
+	}
   
-  /**
+	/**
    * Get detailed health report for telemetry
    * 
    * Includes status of all subsystems (critical and non-critical).
    * Use this for cloud reporting and diagnostics.
    */
-  getHealthReport(): HealthReport {
-    const subsystems = Array.from(this.subsystems.values()).map(s => ({
-      name: s.name,
-      healthy: s.healthy,
-      critical: s.critical,
-      description: s.description,
-      lastCheck: s.lastCheck,
-      lastError: s.lastError,
-      consecutiveFailures: s.consecutiveFailures
-    }));
+	getHealthReport(): HealthReport {
+		const subsystems = Array.from(this.subsystems.values()).map(s => ({
+			name: s.name,
+			healthy: s.healthy,
+			critical: s.critical,
+			description: s.description,
+			lastCheck: s.lastCheck,
+			lastError: s.lastError,
+			consecutiveFailures: s.consecutiveFailures
+		}));
     
-    const unhealthySubsystems = subsystems
-      .filter(s => !s.healthy)
-      .map(s => s.name);
+		const unhealthySubsystems = subsystems
+			.filter(s => !s.healthy)
+			.map(s => s.name);
     
-    const criticalFailures = subsystems
-      .filter(s => s.critical && !s.healthy)
-      .map(s => s.name);
+		const criticalFailures = subsystems
+			.filter(s => s.critical && !s.healthy)
+			.map(s => s.name);
     
-    const overall = criticalFailures.length === 0;
+		const overall = criticalFailures.length === 0;
     
-    return {
-      overall,
-      subsystems,
-      unhealthySubsystems,
-      criticalFailures
-    };
-  }
+		return {
+			overall,
+			subsystems,
+			unhealthySubsystems,
+			criticalFailures
+		};
+	}
   
-  /**
+	/**
    * Start periodic health checks for all subsystems
    * 
    * @param intervalMs - Global check interval (default: 30s)
    */
-  startPeriodicChecks(intervalMs: number = this.DEFAULT_CHECK_INTERVAL_MS): void {
-    if (this.checkInterval) {
-      this.logger?.warnSync('Periodic health checks already running', {
-        component: LogComponents.agent,
-        operation: 'startPeriodicChecks'
-      });
-      return;
-    }
+	startPeriodicChecks(intervalMs: number = this.DEFAULT_CHECK_INTERVAL_MS): void {
+		if (this.checkInterval) {
+			this.logger?.warnSync('Periodic health checks already running', {
+				component: LogComponents.agent,
+				operation: 'startPeriodicChecks'
+			});
+			return;
+		}
     
-    this.logger?.debugSync('Starting periodic health checks', {
-      component: LogComponents.agent,
-      operation: 'startPeriodicChecks',
-      intervalMs,
-      registeredSubsystems: Array.from(this.subsystems.keys())
-    });
+		this.logger?.debugSync('Starting periodic health checks', {
+			component: LogComponents.agent,
+			operation: 'startPeriodicChecks',
+			intervalMs,
+			registeredSubsystems: Array.from(this.subsystems.keys())
+		});
     
-    // Immediate check on start (fire-and-forget)
-    void this.isHealthy();
+		// Immediate check on start (fire-and-forget)
+		void this.isHealthy();
     
-    // Periodic checks
-    this.checkInterval = setInterval(() => {
-      void this.isHealthy(); // Fire-and-forget: checks all subsystems
-    }, intervalMs);
-  }
+		// Periodic checks
+		this.checkInterval = setInterval(() => {
+			void this.isHealthy(); // Fire-and-forget: checks all subsystems
+		}, intervalMs);
+	}
   
-  /**
+	/**
    * Stop periodic health checks and cleanup
    * Call during graceful shutdown
    */
-  stop(): void {
-    this.stopPeriodicChecks();
+	stop(): void {
+		this.stopPeriodicChecks();
     
-    this.logger?.infoSync('Health arbiter stopped', {
-      component: LogComponents.agent,
-      operation: 'stop'
-    });
-  }
+		this.logger?.infoSync('Health arbiter stopped', {
+			component: LogComponents.agent,
+			operation: 'stop'
+		});
+	}
   
-  /**
+	/**
    * Stop periodic health checks
    */
-  stopPeriodicChecks(): void {
-    if (this.checkInterval) {
-      clearInterval(this.checkInterval);
-      this.checkInterval = null;
+	stopPeriodicChecks(): void {
+		if (this.checkInterval) {
+			clearInterval(this.checkInterval);
+			this.checkInterval = null;
       
-      this.logger?.infoSync('Periodic health checks stopped', {
-        component: LogComponents.agent,
-        operation: 'stopPeriodicChecks'
-      });
-    }
-  }
+			this.logger?.infoSync('Periodic health checks stopped', {
+				component: LogComponents.agent,
+				operation: 'stopPeriodicChecks'
+			});
+		}
+	}
 }

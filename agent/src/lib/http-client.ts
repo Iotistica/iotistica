@@ -58,8 +58,8 @@ export interface CompressionStats {
 
 export interface HttpClient {
 	/**
-	 * Make HTTP GET request
-	 */
+	* Make HTTP GET request
+	*/
 	get<T = any>(url: string, options?: {
 		headers?: Record<string, string>;
 		timeout?: number;
@@ -67,8 +67,8 @@ export interface HttpClient {
 	}): Promise<HttpResponse<T>>;
 	
 	/**
-	 * Make HTTP POST request
-	 */
+	* Make HTTP POST request
+	*/
 	post<T = any>(url: string, body: any, options?: {
 		headers?: Record<string, string>;
 		timeout?: number;
@@ -77,8 +77,8 @@ export interface HttpClient {
 	}): Promise<HttpResponse<T>>;
 	
 	/**
-	 * Make HTTP PATCH request
-	 */
+	* Make HTTP PATCH request
+	*/
 	patch<T = any>(url: string, body: any, options?: {
 		headers?: Record<string, string>;
 		timeout?: number;
@@ -147,8 +147,8 @@ export class FetchHttpClient implements HttpClient {
 			this.dispatcher = new Agent({
 				connections: 100, // Max concurrent connections per origin
 				pipelining: 10, // Max pipelined requests per connection
-			keepAliveTimeout: 10000, // 10s HTTP keep-alive timeout
-			keepAliveMaxTimeout: 600000, // Max keep-alive timeout (10min)
+				keepAliveTimeout: 10000, // 10s HTTP keep-alive timeout
+				keepAliveMaxTimeout: 600000, // Max keep-alive timeout (10min)
 				connect: {
 					ca: options.caCert,
 					rejectUnauthorized: options.rejectUnauthorized ?? true,
@@ -171,9 +171,9 @@ export class FetchHttpClient implements HttpClient {
 	}
 
 	/**
-	 * Create AbortSignal with timeout
-	 * undici supports AbortSignal natively
-	 */
+	* Create AbortSignal with timeout
+	* undici supports AbortSignal natively
+	*/
 	private createAbortSignal(timeoutMs?: number): AbortSignal | undefined {
 		if (!timeoutMs) return undefined;
 		const controller = new AbortController();
@@ -182,9 +182,9 @@ export class FetchHttpClient implements HttpClient {
 	}
 
 	/**
-	 * Unified HTTP request method
-	 * Handles GET, POST, PATCH with optional body compression
-	 */
+	* Unified HTTP request method
+	* Handles GET, POST, PATCH with optional body compression
+	*/
 	private async request<T = any>(
 		method: 'GET' | 'POST' | 'PATCH',
 		url: string,
@@ -248,14 +248,14 @@ export class FetchHttpClient implements HttpClient {
 	}
 
 	/**
-	 * Prepare request body with optional compression
-	 * Centralized logic for POST and PATCH methods
-	 * 
-	 * Compression strategy:
-	 * - Skip if < 1KB (overhead exceeds savings)
-	 * - Use Brotli for >= 10KB (better ratio)
-	 * - Use gzip for 1KB-10KB (faster)
-	 */
+	* Prepare request body with optional compression
+	* Centralized logic for POST and PATCH methods
+	* 
+	* Compression strategy:
+	* - Skip if < 1KB (overhead exceeds savings)
+	* - Use Brotli for >= 10KB (better ratio)
+	* - Use gzip for 1KB-10KB (faster)
+	*/
 	private async prepareBody(body: any, options?: {
 		headers?: Record<string, string>;
 		compress?: boolean;
@@ -312,8 +312,8 @@ export class FetchHttpClient implements HttpClient {
 	}
 
 	/**
-	 * Check response status and throw HttpError if configured
-	 */
+	* Check response status and throw HttpError if configured
+	*/
 	private async checkResponse<T>(response: Response, url: string): Promise<HttpResponse<T>> {
 		const httpResponse: HttpResponse<T> = {
 			ok: response.ok,

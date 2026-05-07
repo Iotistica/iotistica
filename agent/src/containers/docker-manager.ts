@@ -703,7 +703,7 @@ export class DockerManager extends EventEmitter {
 				StopTimeout: service.config.stopTimeout,
 				Env: service.config.environment
 					? Object.entries(service.config.environment).map(
-							([key, value]) => `${key}=${value}`,
+						([key, value]) => `${key}=${value}`,
 					)
 					: [],
 				ExposedPorts: exposedPorts,
@@ -1153,7 +1153,7 @@ export class DockerManager extends EventEmitter {
 				StopTimeout: service.config.stopTimeout,
 				Env: service.config.environment
 					? Object.entries(service.config.environment).map(
-							([key, value]) => `${key}=${value}`,
+						([key, value]) => `${key}=${value}`,
 					)
 					: [],
 				ExposedPorts: exposedPorts,

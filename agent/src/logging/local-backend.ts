@@ -40,8 +40,8 @@ export class LocalLogBackend implements LogBackend {
 	}
 
 	/**
-	 * Initialize the log backend (create directories, etc.)
-	 */
+	* Initialize the log backend (create directories, etc.)
+	*/
 	public async initialize(): Promise<void> {
 		if (this.options.enableFilePersistence) {
 			await fs.mkdir(this.options.logDir, { recursive: true });
@@ -56,8 +56,8 @@ export class LocalLogBackend implements LogBackend {
 	}
 
 	/**
-	 * Store a log message
-	 */
+	* Store a log message
+	*/
 	public async log(message: LogMessage): Promise<void> {
 		// Assign ID and ensure timestamp
 		const logEntry: LogMessage = {
@@ -81,8 +81,8 @@ export class LocalLogBackend implements LogBackend {
 	}
 
 	/**
-	 * Retrieve logs matching filter
-	 */
+	* Retrieve logs matching filter
+	*/
 	public async getLogs(filter?: LogFilter): Promise<LogMessage[]> {
 		let filtered = [...this.logs];
 
@@ -142,8 +142,8 @@ export class LocalLogBackend implements LogBackend {
 	}
 
 	/**
-	 * Clear logs older than specified time
-	 */
+	* Clear logs older than specified time
+	*/
 	public async cleanup(olderThanMs: number): Promise<number> {
 		const cutoffTime = Date.now() - olderThanMs;
 		const initialCount = this.logs.length;
@@ -161,15 +161,15 @@ export class LocalLogBackend implements LogBackend {
 	}
 
 	/**
-	 * Get total number of stored logs
-	 */
+	* Get total number of stored logs
+	*/
 	public async getLogCount(): Promise<number> {
 		return this.logs.length;
 	}
 
 	/**
-	 * Write log entry to file
-	 */
+	* Write log entry to file
+	*/
 	private async writeToFile(logEntry: LogMessage): Promise<void> {
 		if (!this.currentLogFile) {
 			return;
@@ -192,8 +192,8 @@ export class LocalLogBackend implements LogBackend {
 	}
 
 	/**
-	 * Rotate log file (create new one)
-	 */
+	* Rotate log file (create new one)
+	*/
 	private async rotateLogFile(): Promise<void> {
 		this.currentLogFile = path.join(
 			this.options.logDir,
@@ -203,8 +203,8 @@ export class LocalLogBackend implements LogBackend {
 	}
 
 	/**
-	 * Cleanup old log files
-	 */
+	* Cleanup old log files
+	*/
 	private async cleanupOldLogFiles(cutoffTime: number): Promise<void> {
 		try {
 			const files = await fs.readdir(this.options.logDir);
@@ -228,8 +228,8 @@ export class LocalLogBackend implements LogBackend {
 	}
 
 	/**
-	 * Start periodic cleanup task
-	 */
+	* Start periodic cleanup task
+	*/
 	private startPeriodicCleanup(): void {
 		// Run cleanup every hour
 		setInterval(async () => {

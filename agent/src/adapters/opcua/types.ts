@@ -22,12 +22,12 @@ export type OPCUASecurityMode = z.infer<typeof OPCUASecurityModeSchema>;
  * Common security policies supported by most OPC-UA servers
  */
 export const OPCUASecurityPolicySchema = z.enum([
-  'None',
-  'Basic128Rsa15',
-  'Basic256',
-  'Basic256Sha256',
-  'Aes128_Sha256_RsaOaep',
-  'Aes256_Sha256_RsaPss'
+	'None',
+	'Basic128Rsa15',
+	'Basic256',
+	'Basic256Sha256',
+	'Aes128_Sha256_RsaOaep',
+	'Aes256_Sha256_RsaPss'
 ]);
 export type OPCUASecurityPolicy = z.infer<typeof OPCUASecurityPolicySchema>;
 
@@ -39,48 +39,48 @@ export type OPCUACertificateTrustMode = z.infer<typeof OPCUACertificateTrustMode
  * Stored in the 'connection' JSONB field in the sensors table
  */
 export const OPCUAConnectionSchema = z.object({
-  /** OPC-UA endpoint URL (e.g., opc.tcp://10.0.0.60:4840) */
-  endpointUrl: z.string().url(),
+	/** OPC-UA endpoint URL (e.g., opc.tcp://10.0.0.60:4840) */
+	endpointUrl: z.string().url(),
   
-  /** Username for authentication (optional) */
-  username: z.string().optional(),
+	/** Username for authentication (optional) */
+	username: z.string().optional(),
   
-  /** Password for authentication (optional) */
-  password: z.string().optional(),
+	/** Password for authentication (optional) */
+	password: z.string().optional(),
   
-  /** Security mode */
-  securityMode: OPCUASecurityModeSchema.default('None'),
+	/** Security mode */
+	securityMode: OPCUASecurityModeSchema.default('None'),
   
-  /** Security policy */
-  securityPolicy: OPCUASecurityPolicySchema.default('None'),
+	/** Security policy */
+	securityPolicy: OPCUASecurityPolicySchema.default('None'),
 
-  /** How unknown server certificates are handled */
-  certificateTrustMode: OPCUACertificateTrustModeSchema.default('strict'),
+	/** How unknown server certificates are handled */
+	certificateTrustMode: OPCUACertificateTrustModeSchema.default('strict'),
 
-  /** Optional pinned SHA-1 thumbprint for the expected server certificate */
-  expectedServerThumbprint: z.string().trim().toLowerCase().regex(/^[a-f0-9]{40}$/).optional(),
+	/** Optional pinned SHA-1 thumbprint for the expected server certificate */
+	expectedServerThumbprint: z.string().trim().toLowerCase().regex(/^[a-f0-9]{40}$/).optional(),
   
-  /** Connection timeout in milliseconds */
-  connectionTimeout: z.number().int().positive().default(10000),
+	/** Connection timeout in milliseconds */
+	connectionTimeout: z.number().int().positive().default(10000),
   
-  /** Session timeout in milliseconds */
-  sessionTimeout: z.number().int().positive().default(60000),
+	/** Session timeout in milliseconds */
+	sessionTimeout: z.number().int().positive().default(60000),
   
-  /** Keep-alive interval in milliseconds */
-  keepAliveInterval: z.number().int().positive().default(5000),
+	/** Keep-alive interval in milliseconds */
+	keepAliveInterval: z.number().int().positive().default(5000),
   
-  /** Enable subscription mode (real-time streaming instead of polling) */
-  useSubscription: z.boolean().default(false),
+	/** Enable subscription mode (real-time streaming instead of polling) */
+	useSubscription: z.boolean().default(false),
   
-  /** Subscription publishing interval in milliseconds (only if useSubscription=true) */
-  publishingInterval: z.number().int().positive().default(1000),
+	/** Subscription publishing interval in milliseconds (only if useSubscription=true) */
+	publishingInterval: z.number().int().positive().default(1000),
   
-  /** Subscription sampling interval in milliseconds (only if useSubscription=true) */
-  samplingInterval: z.number().int().positive().default(500),
+	/** Subscription sampling interval in milliseconds (only if useSubscription=true) */
+	samplingInterval: z.number().int().positive().default(500),
   
-  /** Maximum monitored items per subscription (default: 100) */
-  /** Many PLCs struggle with 200+ items - this auto-splits subscriptions for load distribution */
-  maxMonitoredItemsPerSubscription: z.number().int().positive().default(100),
+	/** Maximum monitored items per subscription (default: 100) */
+	/** Many PLCs struggle with 200+ items - this auto-splits subscriptions for load distribution */
+	maxMonitoredItemsPerSubscription: z.number().int().positive().default(100),
 });
 export type OPCUAConnection = z.infer<typeof OPCUAConnectionSchema>;
 
@@ -89,13 +89,13 @@ export type OPCUAConnection = z.infer<typeof OPCUAConnectionSchema>;
  * Stored in the 'data_points' JSONB field in the sensors table
  */
 export const OPCUADataPointSchema = z.object({
-  /** Data point name (e.g., temperature, pressure) */
-  name: z.string(),
+	/** Data point name (e.g., temperature, pressure) */
+	name: z.string(),
   
-  /** OPC-UA Node ID (e.g., ns=2;s=Temperature or ns=3;i=1001) */
-  nodeId: z.string(),
+	/** OPC-UA Node ID (e.g., ns=2;s=Temperature or ns=3;i=1001) */
+	nodeId: z.string(),
   
-  /** 
+	/** 
    * Explicit semantic classification (HIGHEST AUTHORITY - user intent)
    * Use this to override auto-classification when semantics cannot be inferred from type.
    * 
@@ -110,25 +110,25 @@ export const OPCUADataPointSchema = z.object({
    * 2. OPC UA metadata (NodeClass, DataType)
    * 3. Data type (numeric = metric, non-numeric = metadata)
    */
-  semantic: z.enum(['metric', 'metadata']).optional(),
+	semantic: z.enum(['metric', 'metadata']).optional(),
   
-  /** Node classification: 'metric' (sensor data) or 'metadata' (server info, diagnostics) */
-  nodeType: z.enum(['metric', 'metadata']).default('metric'),
+	/** Node classification: 'metric' (sensor data) or 'metadata' (server info, diagnostics) */
+	nodeType: z.enum(['metric', 'metadata']).default('metric'),
   
-  /** Data type (inferred from OPC-UA, but can be specified) */
-  dataType: z.enum(['number', 'string', 'boolean', 'object']).optional(),
+	/** Data type (inferred from OPC-UA, but can be specified) */
+	dataType: z.enum(['number', 'string', 'boolean', 'object']).optional(),
   
-  /** Unit of measurement (optional) */
-  unit: z.string().optional(),
+	/** Unit of measurement (optional) */
+	unit: z.string().optional(),
   
-  /** Scaling factor (optional) */
-  scalingFactor: z.number().optional(),
+	/** Scaling factor (optional) */
+	scalingFactor: z.number().optional(),
   
-  /** Offset (optional) */
-  offset: z.number().optional(),
+	/** Offset (optional) */
+	offset: z.number().optional(),
 
-  /** Device group UUID — shared by all nodes in the same profile group */
-  device_uuid: z.string().optional(),
+	/** Device group UUID — shared by all nodes in the same profile group */
+	device_uuid: z.string().optional(),
 });
 export type OPCUADataPoint = z.infer<typeof OPCUADataPointSchema>;
 
@@ -137,26 +137,26 @@ export type OPCUADataPoint = z.infer<typeof OPCUADataPointSchema>;
  * Stored in the 'metadata' JSONB field in the sensors table
  */
 export const OPCUAMetadataSchema = z.object({
-  /** Device manufacturer */
-  manufacturer: z.string().optional(),
+	/** Device manufacturer */
+	manufacturer: z.string().optional(),
   
-  /** Device model */
-  model: z.string().optional(),
+	/** Device model */
+	model: z.string().optional(),
   
-  /** Firmware version */
-  firmwareVersion: z.string().optional(),
+	/** Firmware version */
+	firmwareVersion: z.string().optional(),
   
-  /** Application URI */
-  applicationUri: z.string().optional(),
+	/** Application URI */
+	applicationUri: z.string().optional(),
   
-  /** Application Name */
-  applicationName: z.string().optional(),
+	/** Application Name */
+	applicationName: z.string().optional(),
   
-  /** Custom tags for grouping/filtering */
-  tags: z.array(z.string()).optional(),
+	/** Custom tags for grouping/filtering */
+	tags: z.array(z.string()).optional(),
 
-  /** Optional human-readable label. When set, overrides the OPC-UA server DisplayName as the display name in payloads. */
-  displayName: z.string().optional(),
+	/** Optional human-readable label. When set, overrides the OPC-UA server DisplayName as the display name in payloads. */
+	displayName: z.string().optional(),
 });
 export type OPCUAMetadata = z.infer<typeof OPCUAMetadataSchema>;
 
@@ -165,26 +165,26 @@ export type OPCUAMetadata = z.infer<typeof OPCUAMetadataSchema>;
  * Maps to a row in the sensors table with protocol='opcua'
  */
 export const OPCUADeviceConfigSchema = z.object({
-  /** Device name (unique identifier) */
-  name: z.string(),
+	/** Device name (unique identifier) */
+	name: z.string(),
   
-  /** Protocol (must be 'opcua') */
-  protocol: z.literal('opcua'),
+	/** Protocol (must be 'opcua') */
+	protocol: z.literal('opcua'),
   
-  /** Whether device is enabled */
-  enabled: z.boolean().default(true),
+	/** Whether device is enabled */
+	enabled: z.boolean().default(true),
   
-  /** Polling interval in milliseconds */
-  pollInterval: z.number().int().positive().default(5000),
+	/** Polling interval in milliseconds */
+	pollInterval: z.number().int().positive().default(5000),
   
-  /** Connection configuration */
-  connection: OPCUAConnectionSchema,
+	/** Connection configuration */
+	connection: OPCUAConnectionSchema,
   
-  /** Data points to read */
-  dataPoints: z.array(OPCUADataPointSchema),
+	/** Data points to read */
+	dataPoints: z.array(OPCUADataPointSchema),
   
-  /** Device metadata */
-  metadata: OPCUAMetadataSchema.optional(),
+	/** Device metadata */
+	metadata: OPCUAMetadataSchema.optional(),
 });
 export type OPCUADeviceConfig = z.infer<typeof OPCUADeviceConfigSchema>;
 
@@ -193,13 +193,13 @@ export type OPCUADeviceConfig = z.infer<typeof OPCUADeviceConfigSchema>;
  * Contains all OPC-UA devices managed by this adapter
  */
 export const OPCUAAdapterConfigSchema = z.object({
-  /** Array of OPC-UA devices */
-  devices: z.array(OPCUADeviceConfigSchema),
+	/** Array of OPC-UA devices */
+	devices: z.array(OPCUADeviceConfigSchema),
   
-  /** Global timeout for all operations (ms) */
-  globalTimeout: z.number().int().positive().optional(),
+	/** Global timeout for all operations (ms) */
+	globalTimeout: z.number().int().positive().optional(),
   
-  /** Maximum concurrent connections */
-  maxConcurrentConnections: z.number().int().positive().default(5),
+	/** Maximum concurrent connections */
+	maxConcurrentConnections: z.number().int().positive().default(5),
 });
 export type OPCUAAdapterConfig = z.infer<typeof OPCUAAdapterConfigSchema>;

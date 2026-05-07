@@ -26,11 +26,11 @@ export interface DatabaseClient {
  * Default implementation using DeviceModel
  */
 export class SqliteDatabaseClient implements DatabaseClient {
-  async loadAgent(): Promise<DeviceRecord | null> {
-    return await DeviceModel.get();
-  }
+	async loadAgent(): Promise<DeviceRecord | null> {
+		return await DeviceModel.get();
+	}
   
-  async saveAgent(data: Omit<DeviceRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<void> {
-    await DeviceModel.save(data);
-  }
+	async saveAgent(data: Omit<DeviceRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<void> {
+		await DeviceModel.save(data);
+	}
 }

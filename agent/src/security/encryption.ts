@@ -32,8 +32,8 @@ export class MasterKeyManager {
 	private static keyPath: string;
 
 	/**
-	 * Initialize master key path (defaults to .iotistic directory)
-	 */
+	* Initialize master key path (defaults to .iotistic directory)
+	*/
 	static initialize(dataDir?: string): void {
 		const baseDir = dataDir || path.join(process.env.HOME || process.env.USERPROFILE || '/root', '.iotistic');
 		this.keyPath = path.join(baseDir, '.master.key');
@@ -41,9 +41,9 @@ export class MasterKeyManager {
 	}
 
 	/**
-	 * Get or generate master encryption key
-	 * Key is stored in file system with restricted permissions
-	 */
+	* Get or generate master encryption key
+	* Key is stored in file system with restricted permissions
+	*/
 	static getMasterKey(): Buffer {
 		if (this.masterKey) {
 			return this.masterKey;
@@ -84,8 +84,8 @@ export class MasterKeyManager {
 	}
 
 	/**
-	 * Rotate master key (advanced - requires re-encrypting all data)
-	 */
+	* Rotate master key (advanced - requires re-encrypting all data)
+	*/
 	static async rotateMasterKey(): Promise<Buffer> {
 		const oldKey = this.getMasterKey();
 		const newKey = crypto.randomBytes(KEY_LENGTH);

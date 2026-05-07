@@ -22,19 +22,19 @@ import crypto from 'crypto';
  * @param deviceIdValue - Optional: Device identification register value (0x2B/0x0E)
  */
 export function generateModbusFingerprint(
-  busId: string,
-  slaveId: number,
-  deviceIdValue?: string
+	busId: string,
+	slaveId: number,
+	deviceIdValue?: string
 ): string {
-  const identity = deviceIdValue 
-    ? `${busId}:${slaveId}:${deviceIdValue}`
-    : `${busId}:${slaveId}`;
+	const identity = deviceIdValue 
+		? `${busId}:${slaveId}:${deviceIdValue}`
+		: `${busId}:${slaveId}`;
   
-  return crypto
-    .createHash('sha256')
-    .update(`modbus:${identity}`)
-    .digest('hex')
-    .substring(0, 32); // Truncate to 32 chars for readability
+	return crypto
+		.createHash('sha256')
+		.update(`modbus:${identity}`)
+		.digest('hex')
+		.substring(0, 32); // Truncate to 32 chars for readability
 }
 
 /**
@@ -44,11 +44,11 @@ export function generateModbusFingerprint(
  * @param applicationUri - Server ApplicationUri (e.g., "urn:localhost:OPCUA:ServerName")
  */
 export function generateOPCUAFingerprint(applicationUri: string): string {
-  return crypto
-    .createHash('sha256')
-    .update(`opcua:${applicationUri}`)
-    .digest('hex')
-    .substring(0, 32);
+	return crypto
+		.createHash('sha256')
+		.update(`opcua:${applicationUri}`)
+		.digest('hex')
+		.substring(0, 32);
 }
 
 /**
@@ -59,18 +59,18 @@ export function generateOPCUAFingerprint(applicationUri: string): string {
  * @param manufacturerHint - Optional: Detected manufacturer from J1939/OBD-II
  */
 export function generateCANFingerprint(
-  canIdPattern: string,
-  manufacturerHint?: string
+	canIdPattern: string,
+	manufacturerHint?: string
 ): string {
-  const identity = manufacturerHint
-    ? `${canIdPattern}:${manufacturerHint}`
-    : canIdPattern;
+	const identity = manufacturerHint
+		? `${canIdPattern}:${manufacturerHint}`
+		: canIdPattern;
   
-  return crypto
-    .createHash('sha256')
-    .update(`can:${identity}`)
-    .digest('hex')
-    .substring(0, 32);
+	return crypto
+		.createHash('sha256')
+		.update(`can:${identity}`)
+		.digest('hex')
+		.substring(0, 32);
 }
 
 /**
@@ -81,17 +81,17 @@ export function generateCANFingerprint(
  * @param sysObjectID - SNMP sysObjectID (1.3.6.1.2.1.1.2.0) or fallback to sysDescr
  */
 export function generateSNMPFingerprint(
-  ipAddress: string,
-  sysObjectID: string
+	ipAddress: string,
+	sysObjectID: string
 ): string {
-  // Use sysObjectID if available (most stable), otherwise sysDescr
-  const identity = `${ipAddress}:${sysObjectID}`;
+	// Use sysObjectID if available (most stable), otherwise sysDescr
+	const identity = `${ipAddress}:${sysObjectID}`;
   
-  return crypto
-    .createHash('sha256')
-    .update(`snmp:${identity}`)
-    .digest('hex')
-    .substring(0, 32);
+	return crypto
+		.createHash('sha256')
+		.update(`snmp:${identity}`)
+		.digest('hex')
+		.substring(0, 32);
 }
 
 /**
@@ -101,11 +101,11 @@ export function generateSNMPFingerprint(
  * @param topic - MQTT topic (e.g., "device/sensor01/temperature")
  */
 export function generateMqttFingerprint(topic: string): string {
-  return crypto
-    .createHash('sha256')
-    .update(`mqtt:${topic}`)
-    .digest('hex')
-    .substring(0, 32);
+	return crypto
+		.createHash('sha256')
+		.update(`mqtt:${topic}`)
+		.digest('hex')
+		.substring(0, 32);
 }
 
 /**
@@ -116,14 +116,14 @@ export function generateMqttFingerprint(topic: string): string {
  * @param deviceInstance - BACnet device instance number (0-4194303)
  */
 export function generateBACnetFingerprint(
-  ipAddress: string,
-  deviceInstance: number
+	ipAddress: string,
+	deviceInstance: number
 ): string {
-  const identity = `${ipAddress}:${deviceInstance}`;
+	const identity = `${ipAddress}:${deviceInstance}`;
   
-  return crypto
-    .createHash('sha256')
-    .update(`bacnet:${identity}`)
-    .digest('hex')
-    .substring(0, 32);
+	return crypto
+		.createHash('sha256')
+		.update(`bacnet:${identity}`)
+		.digest('hex')
+		.substring(0, 32);
 }

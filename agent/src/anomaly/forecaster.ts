@@ -40,10 +40,10 @@ export interface Prediction {
  */
 export class LinearPredictor {
 	/**
-	 * Predict next value using linear regression
-	 * @param buffer Statistical buffer with historical data
-	 * @param lookbackWindow Number of recent points to use (default: 20)
-	 */
+	* Predict next value using linear regression
+	* @param buffer Statistical buffer with historical data
+	* @param lookbackWindow Number of recent points to use (default: 20)
+	*/
 	predict(buffer: StatisticalBuffer, lookbackWindow: number = LINEAR_PREDICTOR_LOOKBACK): Prediction | null {
 		if (buffer.size < 5) {
 			return null; // Need minimum data
@@ -94,8 +94,8 @@ export class LinearPredictor {
 	}
 	
 	/**
-	 * Estimate time until threshold is reached
-	 */
+	* Estimate time until threshold is reached
+	*/
 	estimateTimeToThreshold(
 		buffer: StatisticalBuffer,
 		threshold: number,
@@ -157,8 +157,8 @@ export class LinearPredictor {
 	}
 	
 	/**
-	 * Calculate trend direction
-	 */
+	* Calculate trend direction
+	*/
 	private calculateTrend(slope: number, stdDev: number, mean: number): { direction: 'increasing' | 'decreasing' | 'stable' } {
 		const threshold = Math.max(
 			stdDev * 0.1,
@@ -176,8 +176,8 @@ export class LinearPredictor {
 	}
 	
 	/**
-	 * Calculate trend strength (0-1)
-	 */
+	* Calculate trend strength (0-1)
+	*/
 	private calculateTrendStrength(slope: number, stdDev: number, mean: number): number {
 		const denom = Math.max(stdDev, Math.abs(mean) * 0.01, 1e-9);
 		const normalizedSlope = Math.abs(slope) / denom;
@@ -185,8 +185,8 @@ export class LinearPredictor {
 	}
 	
 	/**
-	 * Calculate prediction confidence using R-squared
-	 */
+	* Calculate prediction confidence using R-squared
+	*/
 	private calculateConfidence(values: number[], slope: number, intercept: number, stdDev: number): number {
 		const n = values.length;
 		
@@ -224,8 +224,8 @@ export class EMAPredictor {
 	}
 	
 	/**
-	 * Predict next value using EMA
-	 */
+	* Predict next value using EMA
+	*/
 	predict(buffer: StatisticalBuffer): Prediction | null {
 		if (buffer.size < 3) {
 			return null;

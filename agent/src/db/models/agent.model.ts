@@ -6,11 +6,11 @@
 import Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 import { 
-  encryptData, 
-  decryptData, 
-  isEncrypted, 
-  MasterKeyManager,
-  ENCRYPTED_DEVICE_FIELDS 
+	encryptData, 
+	decryptData, 
+	isEncrypted, 
+	MasterKeyManager,
+	ENCRYPTED_DEVICE_FIELDS 
 } from '../../security/encryption';
 
 export interface Agent {
@@ -44,211 +44,211 @@ type AgentRow = Omit<Agent, 'provisioned'> & {
 };
 
 export class AgentModel {
-  private static table = 'agent';
-  private static encryptionEnabled = false;
-  private static readonly WRITE_COLUMNS: ReadonlyArray<keyof Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>> = [
-    'uuid',
-    'name',
-    'type',
-    'deviceApiKey',
-    'provisioningApiKey',
-    'apiKey',
-    'apiEndpoint',
-    'registeredAt',
-    'provisioned',
-    'provisioningState',
-    'tenantId',
-    'applicationId',
-    'macAddress',
-    'osVersion',
-    'agentVersion',
-    'mqttUsername',
-    'mqttPassword',
-    'mqttBrokerUrl',
-    'mqttBrokerConfig',
-    'apiTlsConfig',
-  ];
+	private static table = 'agent';
+	private static encryptionEnabled = false;
+	private static readonly WRITE_COLUMNS: ReadonlyArray<keyof Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>> = [
+		'uuid',
+		'name',
+		'type',
+		'deviceApiKey',
+		'provisioningApiKey',
+		'apiKey',
+		'apiEndpoint',
+		'registeredAt',
+		'provisioned',
+		'provisioningState',
+		'tenantId',
+		'applicationId',
+		'macAddress',
+		'osVersion',
+		'agentVersion',
+		'mqttUsername',
+		'mqttPassword',
+		'mqttBrokerUrl',
+		'mqttBrokerConfig',
+		'apiTlsConfig',
+	];
 
-  private static getDb(): Database.Database {
-    return getDatabase();
-  }
+	private static getDb(): Database.Database {
+		return getDatabase();
+	}
 
-  private static toAgent(row: AgentRow): Agent {
-    const decryptedDevice: Agent = {
-      ...row,
-      provisioned: !!row.provisioned,
-    };
+	private static toAgent(row: AgentRow): Agent {
+		const decryptedDevice: Agent = {
+			...row,
+			provisioned: !!row.provisioned,
+		};
 
-    if (this.encryptionEnabled) {
-      const rowValues = row as Record<string, unknown>;
-      const decryptedValues = decryptedDevice as unknown as Record<string, unknown>;
+		if (this.encryptionEnabled) {
+			const rowValues = row as Record<string, unknown>;
+			const decryptedValues = decryptedDevice as unknown as Record<string, unknown>;
 
-      for (const field of ENCRYPTED_DEVICE_FIELDS) {
-        const value = rowValues[field];
-        if (value && typeof value === 'string' && isEncrypted(value)) {
-          try {
-            decryptedValues[field] = decryptData(value);
-          } catch (error) {
-            console.error(`[DeviceModel] Failed to decrypt ${field}:`, error);
-          }
-        }
-      }
-    }
+			for (const field of ENCRYPTED_DEVICE_FIELDS) {
+				const value = rowValues[field];
+				if (value && typeof value === 'string' && isEncrypted(value)) {
+					try {
+						decryptedValues[field] = decryptData(value);
+					} catch (error) {
+						console.error(`[DeviceModel] Failed to decrypt ${field}:`, error);
+					}
+				}
+			}
+		}
 
-    return decryptedDevice;
-  }
+		return decryptedDevice;
+	}
 
-  private static buildCreateData(device: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Record<string, unknown> {
-    const now = new Date().toISOString();
-    const createData: Record<string, unknown> = {
-      createdAt: now,
-      updatedAt: now,
-    };
+	private static buildCreateData(device: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Record<string, unknown> {
+		const now = new Date().toISOString();
+		const createData: Record<string, unknown> = {
+			createdAt: now,
+			updatedAt: now,
+		};
 
-    for (const column of this.WRITE_COLUMNS) {
-      const value = device[column];
-      if (value === undefined) {
-        continue;
-      }
+		for (const column of this.WRITE_COLUMNS) {
+			const value = device[column];
+			if (value === undefined) {
+				continue;
+			}
 
-      createData[column] = column === 'provisioned' ? (value ? 1 : 0) : value;
-    }
+			createData[column] = column === 'provisioned' ? (value ? 1 : 0) : value;
+		}
 
-    return createData;
-  }
+		return createData;
+	}
 
-  private static buildUpdateData(updates: Partial<Agent>): Record<string, unknown> {
-    const updateData: Record<string, unknown> = {
-      updatedAt: new Date().toISOString(),
-    };
+	private static buildUpdateData(updates: Partial<Agent>): Record<string, unknown> {
+		const updateData: Record<string, unknown> = {
+			updatedAt: new Date().toISOString(),
+		};
 
-    for (const column of this.WRITE_COLUMNS) {
-      const value = updates[column];
-      if (value === undefined) {
-        continue;
-      }
+		for (const column of this.WRITE_COLUMNS) {
+			const value = updates[column];
+			if (value === undefined) {
+				continue;
+			}
 
-      updateData[column] = column === 'provisioned' ? (value ? 1 : 0) : value;
-    }
+			updateData[column] = column === 'provisioned' ? (value ? 1 : 0) : value;
+		}
 
-    if (this.encryptionEnabled) {
-      for (const field of ENCRYPTED_DEVICE_FIELDS) {
-        const value = updates[field];
-        if (value && typeof value === 'string' && !isEncrypted(value)) {
-          try {
-            updateData[field] = encryptData(value);
-          } catch (error) {
-            console.error(`[DeviceModel] Failed to encrypt ${field}:`, error);
-          }
-        }
-      }
-    }
+		if (this.encryptionEnabled) {
+			for (const field of ENCRYPTED_DEVICE_FIELDS) {
+				const value = updates[field];
+				if (value && typeof value === 'string' && !isEncrypted(value)) {
+					try {
+						updateData[field] = encryptData(value);
+					} catch (error) {
+						console.error(`[DeviceModel] Failed to encrypt ${field}:`, error);
+					}
+				}
+			}
+		}
 
-    return updateData;
-  }
+		return updateData;
+	}
 
-  /**
+	/**
    * Initialize encryption (must be called before first use)
    * @param dataDir - Directory for master key storage (defaults to /app/data for Docker)
    */
-  static initializeEncryption(dataDir?: string): void {
-    try {
-      MasterKeyManager.initialize(dataDir);
-      this.encryptionEnabled = true;
-    } catch (error) {
-      console.error('[DeviceModel] Failed to initialize encryption:', error);
-      this.encryptionEnabled = false;
-    }
-  }
+	static initializeEncryption(dataDir?: string): void {
+		try {
+			MasterKeyManager.initialize(dataDir);
+			this.encryptionEnabled = true;
+		} catch (error) {
+			console.error('[DeviceModel] Failed to initialize encryption:', error);
+			this.encryptionEnabled = false;
+		}
+	}
 
-  /**
+	/**
    * Get device record (single device per agent)
    */
-  static async get(): Promise<Agent | null> {
-    const device = this.getDb()
-      .prepare(`SELECT * FROM ${this.table} LIMIT 1`)
-      .get() as AgentRow | undefined;
+	static async get(): Promise<Agent | null> {
+		const device = this.getDb()
+			.prepare(`SELECT * FROM ${this.table} LIMIT 1`)
+			.get() as AgentRow | undefined;
     
-    if (!device) {
-      return null;
-    }
+		if (!device) {
+			return null;
+		}
 
-    return this.toAgent(device);
-  }
+		return this.toAgent(device);
+	}
 
-  /**
+	/**
    * Create device record
    */
-  static async create(device: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Promise<Agent> {
-    const createData = this.buildCreateData(device);
-    const columns = Object.keys(createData);
+	static async create(device: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Promise<Agent> {
+		const createData = this.buildCreateData(device);
+		const columns = Object.keys(createData);
 
-    this.getDb()
-      .prepare(
-        `INSERT INTO ${this.table} (${columns.map((column) => `"${column}"`).join(', ')}) VALUES (${columns.map((column) => `@${column}`).join(', ')})`,
-      )
-      .run(createData);
+		this.getDb()
+			.prepare(
+				`INSERT INTO ${this.table} (${columns.map((column) => `"${column}"`).join(', ')}) VALUES (${columns.map((column) => `@${column}`).join(', ')})`,
+			)
+			.run(createData);
 
-    return await this.get() as Agent;
-  }
+		return await this.get() as Agent;
+	}
 
-  /**
+	/**
    * Update device record
    */
-  static async update(updates: Partial<Agent>): Promise<Agent | null> {
-    const updateData = this.buildUpdateData(updates);
-    const columns = Object.keys(updateData);
+	static async update(updates: Partial<Agent>): Promise<Agent | null> {
+		const updateData = this.buildUpdateData(updates);
+		const columns = Object.keys(updateData);
 
-    this.getDb()
-      .prepare(`UPDATE ${this.table} SET ${columns.map((column) => `"${column}" = @${column}`).join(', ')}`)
-      .run(updateData);
+		this.getDb()
+			.prepare(`UPDATE ${this.table} SET ${columns.map((column) => `"${column}" = @${column}`).join(', ')}`)
+			.run(updateData);
 
-    return await this.get();
-  }
+		return await this.get();
+	}
 
-  /**
+	/**
    * Save device record (insert or update)
    */
-  static async save(data: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Promise<Agent | null> {
-    const existing = await this.get();
+	static async save(data: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Promise<Agent | null> {
+		const existing = await this.get();
 
-    if (existing) {
-      return await this.update(data);
-    } else {
-      return await this.create(data);
-    }
-  }
+		if (existing) {
+			return await this.update(data);
+		} else {
+			return await this.create(data);
+		}
+	}
 
-  /**
+	/**
    * Delete device record
    */
-  static async delete(): Promise<boolean> {
-    const result = this.getDb()
-      .prepare(`DELETE FROM ${this.table}`)
-      .run();
-    return result.changes > 0;
-  }
+	static async delete(): Promise<boolean> {
+		const result = this.getDb()
+			.prepare(`DELETE FROM ${this.table}`)
+			.run();
+		return result.changes > 0;
+	}
 
-  /**
+	/**
    * Check if device is provisioned
    */
-  static async isProvisioned(): Promise<boolean> {
-    const device = await this.get();
-    return !!device?.provisioned;
-  }
+	static async isProvisioned(): Promise<boolean> {
+		const device = await this.get();
+		return !!device?.provisioned;
+	}
 
-  /**
+	/**
    * Get device UUID
    */
-  static async getUuid(): Promise<string | null> {
-    const device = await this.get();
-    return device?.uuid || null;
-  }
+	static async getUuid(): Promise<string | null> {
+		const device = await this.get();
+		return device?.uuid || null;
+	}
 
-  /**
+	/**
    * Update provisioning status
    */
-  static async setProvisioned(provisioned: boolean): Promise<Agent | null> {
-    return await this.update({ provisioned });
-  }
+	static async setProvisioned(provisioned: boolean): Promise<Agent | null> {
+		return await this.update({ provisioned });
+	}
 }

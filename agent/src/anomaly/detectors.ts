@@ -428,9 +428,9 @@ export class EWMADetector implements AnomalyDetector {
 	}
 	
 	/**
-	 * Evict least recently used EWMA values (LRU cache)
-	 * Prevents unbounded memory growth
-	 */
+	* Evict least recently used EWMA values (LRU cache)
+	* Prevents unbounded memory growth
+	*/
 	private evictLRU(): void {
 		const entries = Array.from(this.ewmaValues.entries());
 		

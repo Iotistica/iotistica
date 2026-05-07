@@ -132,8 +132,8 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Process a new data point
-	 */
+	* Process a new data point
+	*/
 	processDataPoint(dataPoint: DataPoint): void {
 		if (!this.enabled) return;
 
@@ -244,11 +244,11 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Get the latest anomaly score for a metric
-	 * Returns undefined if metric has never been scored
-	 * Returns 0.0 if metric is normal or buffer is still building
-	 * Returns 0.0-1.0 based on maximum confidence from all detectors
-	 */
+	* Get the latest anomaly score for a metric
+	* Returns undefined if metric has never been scored
+	* Returns 0.0 if metric is normal or buffer is still building
+	* Returns 0.0-1.0 based on maximum confidence from all detectors
+	*/
 	getAnomalyScore(metricName: string): number | undefined {
 		if (this.anomalyScores.has(metricName)) {
 			return this.anomalyScores.get(metricName);
@@ -268,9 +268,9 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Get anomaly metadata for a metric (threshold, methods, sample count)
-	 * Used for ML training and debugging
-	 */
+	* Get anomaly metadata for a metric (threshold, methods, sample count)
+	* Used for ML training and debugging
+	*/
 	getAnomalyMetadata(metricName: string): { threshold: number; methods: string[]; samples: number } | undefined {
 		if (this.anomalyMetadata.has(metricName)) {
 			return this.anomalyMetadata.get(metricName);
@@ -287,16 +287,16 @@ export class AnomalyDetectionService {
 	}
 
 	/**
-	 * Get predictions for all tracked metrics
-	 * Returns forecast data including trend, predicted_next, confidence, and time_to_threshold
-	 */
+	* Get predictions for all tracked metrics
+	* Returns forecast data including trend, predicted_next, confidence, and time_to_threshold
+	*/
 	getPredictions(): Record<string, Prediction> | undefined {
 		return this.generatePredictions();
 	}
 	
 	/**
-	 * Run all configured detection methods on a data point
-	 */
+	* Run all configured detection methods on a data point
+	*/
 	private async runDetection(
 		dataPoint: DataPoint,
 		buffer: StatisticalBuffer,
@@ -506,8 +506,8 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Emit single canonical anomaly event (MQTT-friendly)
-	 */
+	* Emit single canonical anomaly event (MQTT-friendly)
+	*/
 	private emitAnomalyEvent(
 		dataPoint: DataPoint,
 		alerts: AnomalyAlert[],
@@ -643,8 +643,8 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Create an anomaly alert from detection result
-	 */
+	* Create an anomaly alert from detection result
+	*/
 	private createAlert(
 		dataPoint: DataPoint,
 		buffer: StatisticalBuffer,
@@ -681,11 +681,11 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Calculate severity based on confidence, deviation, and detection method
-	 * 
-	 * MAD detector is downgraded to 'warning' max severity for slow-moving signals
-	 * ExpectedRange and RateChange remain 'critical' for hard threshold violations
-	 */
+	* Calculate severity based on confidence, deviation, and detection method
+	* 
+	* MAD detector is downgraded to 'warning' max severity for slow-moving signals
+	* ExpectedRange and RateChange remain 'critical' for hard threshold violations
+	*/
 	private calculateSeverity(confidence: number, deviation: number, method?: string): AnomalySeverity {
 		// Simulation fast-path: always critical (injected ground-truth anomaly)
 		if (method === 'simulation') {
@@ -713,8 +713,8 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Generate severity reason for auditability and tuning
-	 */
+	* Generate severity reason for auditability and tuning
+	*/
 	private generateSeverityReason(
 		score: number,
 		deviation: number,
@@ -744,9 +744,9 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Calculate confidence (post-fusion certainty)
-	 * Adjusts anomalyScore based on baseline quality factors
-	 */
+	* Calculate confidence (post-fusion certainty)
+	* Adjusts anomalyScore based on baseline quality factors
+	*/
 	private calculateConfidence(
 		anomalyScore: number,
 		baseline: import('./types').BaselineInfo
@@ -773,18 +773,18 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Get metric configuration by name.
-	 *
-	 * Matching priority:
-	 *  1. Exact match on `m.name` (handles system metrics like "cpu_usage" and
-	 *     legacy pre-qualified names like "endpointUuid_level").
-	 *  2. Device-scoped match: a config entry with both `name` and `deviceName` set
-	 *     matches an incoming metric whose name is `"${deviceName}_${name}"`.
-	 *     e.g., { name: "level", deviceName: "Zone A-abc12345" } matches "Zone A-abc12345_level".
-	 *  3. Canonical metric fallback: strip the runtime prefixes from endpoint/system
-	 *     metric keys and retry with the bare metric name so env/default configs like
-	 *     "temperature" still apply to canonical keys.
-	 */
+	* Get metric configuration by name.
+	*
+	* Matching priority:
+	*  1. Exact match on `m.name` (handles system metrics like "cpu_usage" and
+	*     legacy pre-qualified names like "endpointUuid_level").
+	*  2. Device-scoped match: a config entry with both `name` and `deviceName` set
+	*     matches an incoming metric whose name is `"${deviceName}_${name}"`.
+	*     e.g., { name: "level", deviceName: "Zone A-abc12345" } matches "Zone A-abc12345_level".
+	*  3. Canonical metric fallback: strip the runtime prefixes from endpoint/system
+	*     metric keys and retry with the bare metric name so env/default configs like
+	*     "temperature" still apply to canonical keys.
+	*/
 	private getMetricConfig(metricName: string): MetricConfig | undefined {
 		// Exact match (system metrics, pre-qualified legacy names)
 		const exact = this.config.metrics.find(m => m.name === metricName);
@@ -823,13 +823,13 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Get effective config for a metric by merging defaults with overrides
-	 * Used for per-datapoint anomaly detection with inheritance
-	 * 
-	 * @param metricName - Metric identifier (e.g., "device_uuid_endpoint_datapoint")
-	 * @param override - Per-datapoint anomaly config (optional, can be partial)
-	 * @returns Effective MetricConfig with all fields populated
-	 */
+	* Get effective config for a metric by merging defaults with overrides
+	* Used for per-datapoint anomaly detection with inheritance
+	* 
+	* @param metricName - Metric identifier (e.g., "device_uuid_endpoint_datapoint")
+	* @param override - Per-datapoint anomaly config (optional, can be partial)
+	* @returns Effective MetricConfig with all fields populated
+	*/
 	public getEffectiveConfig(
 		metricName: string,
 		override?: Partial<{
@@ -909,8 +909,8 @@ export class AnomalyDetectionService {
 	}
 
 	/**
-	 * Get all unique detection methods across metrics
-	 */
+	* Get all unique detection methods across metrics
+	*/
 	private getUniqueDetectionMethods(): DetectionMethod[] {
 		const methods = new Set<DetectionMethod>();
 		for (const metric of this.config.metrics) {
@@ -922,36 +922,36 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Get all alerts
-	 */
+	* Get all alerts
+	*/
 	getAlerts(since?: number): AnomalyAlert[] {
 		return this.alertManager.getAlerts(since);
 	}
 	
 	/**
-	 * Get alerts by severity
-	 */
+	* Get alerts by severity
+	*/
 	getAlertsBySeverity(severity: AnomalySeverity): AnomalyAlert[] {
 		return this.alertManager.getAlertsBySeverity(severity);
 	}
 	
 	/**
-	 * Get alerts by metric
-	 */
+	* Get alerts by metric
+	*/
 	getAlertsByMetric(metric: string): AnomalyAlert[] {
 		return this.alertManager.getAlertsByMetric(metric);
 	}
 	
 	/**
-	 * Clear all alerts
-	 */
+	* Clear all alerts
+	*/
 	clearAlerts(): void {
 		this.alertManager.clearAlerts();
 	}
 	
 	/**
-	 * Get service statistics
-	 */
+	* Get service statistics
+	*/
 	getStats() {
 		const uniqueMetrics = new Set(
 			Array.from(this.buffers.keys()).map(k => this.parseBufferKey(k).metricName)
@@ -968,9 +968,9 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Get summary for cloud reporting (lightweight)
-	 * Includes recent alerts, statistics, and predictions
-	 */
+	* Get summary for cloud reporting (lightweight)
+	* Includes recent alerts, statistics, and predictions
+	*/
 	getSummaryForReport(maxRecentAlerts: number = 10) {
 		if (!this.enabled) {
 			return undefined;
@@ -1012,8 +1012,8 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Generate predictions for all tracked metrics
-	 */
+	* Generate predictions for all tracked metrics
+	*/
 	private generatePredictions(): Record<string, Prediction> | undefined {
 		if (this.buffers.size === 0) {
 			return undefined;
@@ -1119,8 +1119,8 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Enable/disable detection
-	 */
+	* Enable/disable detection
+	*/
 	setEnabled(enabled: boolean): void {
 		this.enabled = enabled;
 		this.logger?.infoSync(`Anomaly detection ${enabled ? 'enabled' : 'disabled'}`, {
@@ -1129,8 +1129,8 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Stop and cleanup anomaly detection service
-	 */
+	* Stop and cleanup anomaly detection service
+	*/
 	stop(): void {
 		this.enabled = false;
 		this.buffers.clear();
@@ -1157,8 +1157,8 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Update configuration
-	 */
+	* Update configuration
+	*/
 	updateConfig(config: Partial<AnomalyConfig>): void {
 		this.config = { ...this.config, ...config };
 
@@ -1197,8 +1197,8 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Start periodic baseline saving
-	 */
+	* Start periodic baseline saving
+	*/
 	private startPeriodicBaselineSave(): void {
 		if (!this.storage) return;
 		
@@ -1213,9 +1213,9 @@ export class AnomalyDetectionService {
 	}
 
 	/**
-	 * Check if sufficient baselines exist and skip warm-up if so
-	 * This prevents repeated 15-minute alert blackouts after agent restarts
-	 */
+	* Check if sufficient baselines exist and skip warm-up if so
+	* This prevents repeated 15-minute alert blackouts after agent restarts
+	*/
 	private async checkAndSkipWarmupIfBaselinesExist(): Promise<void> {
 		if (!this.storage) return;
 
@@ -1257,9 +1257,9 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Save current statistical baselines to database
-	 * Public for manual triggering and testing
-	 */
+	* Save current statistical baselines to database
+	* Public for manual triggering and testing
+	*/
 	async saveBaselines(): Promise<void> {
 		if (!this.storage) {
 			this.logger?.warnSync('Cannot save baselines - storage not initialized', {
@@ -1347,17 +1347,17 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Get storage service (for external queries)
-	 */
+	* Get storage service (for external queries)
+	*/
 	getStorage(): AnomalyStorageService | undefined {
 		return this.storage;
 	}
 	
 	/**
-	 * Set profile for a metric pattern (e.g., set 'Generic' for 'modbus_slave_%' metrics)
-	 * @param metricPattern - Metric pattern (e.g., 'modbus_slave_1', 'modbus_slave_%')
-	 * @param profile - Profile identifier (e.g., 'Generic', 'COMAP')
-	 */
+	* Set profile for a metric pattern (e.g., set 'Generic' for 'modbus_slave_%' metrics)
+	* @param metricPattern - Metric pattern (e.g., 'modbus_slave_1', 'modbus_slave_%')
+	* @param profile - Profile identifier (e.g., 'Generic', 'COMAP')
+	*/
 	setProfileForMetrics(metricPattern: string, profile: string): void {
 		this.metricProfiles.set(metricPattern, profile);
 		
@@ -1369,16 +1369,16 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Handle profile change - reset in-memory buffers for fresh baseline learning
-	 * 
-	 * NOTE: Database baselines are NOT filtered by profile (profile is metadata only)
-	 * If you change simulator scenarios, manually clear anomaly_baselines table to avoid
-	 * mixing baselines from different data distributions:
-	 *   DELETE FROM anomaly_baselines WHERE metric LIKE 'modbus_%';
-	 * 
-	 * @param newProfile - New profile identifier (metadata only)
-	 * @param metricPattern - Pattern to match metrics (e.g., 'modbus_slave_%')
-	 */
+	* Handle profile change - reset in-memory buffers for fresh baseline learning
+	* 
+	* NOTE: Database baselines are NOT filtered by profile (profile is metadata only)
+	* If you change simulator scenarios, manually clear anomaly_baselines table to avoid
+	* mixing baselines from different data distributions:
+	*   DELETE FROM anomaly_baselines WHERE metric LIKE 'modbus_%';
+	* 
+	* @param newProfile - New profile identifier (metadata only)
+	* @param metricPattern - Pattern to match metrics (e.g., 'modbus_slave_%')
+	*/
 	handleProfileChange(newProfile: string, metricPattern: string = 'modbus_%'): void {
 		this.logger?.infoSync('Handling profile change', {
 			component: LogComponents.anomaly,
@@ -1418,9 +1418,9 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	 * Get profile for a metric (extracts from metric name prefix)
-	 * Returns profile from cache or null for system metrics
-	 */
+	* Get profile for a metric (extracts from metric name prefix)
+	* Returns profile from cache or null for system metrics
+	*/
 	private getProfileForMetric(metricName: string): string | null {
 		// Check cached profile mappings
 		for (const [pattern, profile] of this.metricProfiles.entries()) {
@@ -1443,18 +1443,18 @@ export class AnomalyDetectionService {
 	}
 
 	/**
-	 * Validate a baseline loaded from storage before using it for anomaly detection.
-	 *
-	 * Checks (all must pass):
-	 *   1. metric        — must match the current data point metric
-	 *   2. device_state  — must match the resolved device state
-	 *   3. sample_count  — must meet the minimum samples requirement
-	 *   4. calculated_at — must not exceed max age (default: 7 days, configurable via storage.baselineMaxAgeDays)
-	 *   5. profile       — must match current profile when both sides are non-null
-	 *   6. time_slot     — must match current time slot when seasonality is active
-	 *
-	 * Returns false if any check fails; the caller should set dbBaseline = null and rely on buffer stats.
-	 */
+	* Validate a baseline loaded from storage before using it for anomaly detection.
+	*
+	* Checks (all must pass):
+	*   1. metric        — must match the current data point metric
+	*   2. device_state  — must match the resolved device state
+	*   3. sample_count  — must meet the minimum samples requirement
+	*   4. calculated_at — must not exceed max age (default: 7 days, configurable via storage.baselineMaxAgeDays)
+	*   5. profile       — must match current profile when both sides are non-null
+	*   6. time_slot     — must match current time slot when seasonality is active
+	*
+	* Returns false if any check fails; the caller should set dbBaseline = null and rely on buffer stats.
+	*/
 	private isBaselineValid(
 		baseline: AnomalyBaselineRecord,
 		dataPoint: DataPoint,
@@ -1628,8 +1628,8 @@ export class AnomalyDetectionService {
 	}
 
 	/**
-	 * Get MQTT manager for publishing data (used by simulator)
-	 */
+	* Get MQTT manager for publishing data (used by simulator)
+	*/
 	getMqttManager(): CloudMqttClient | undefined {
 		return this.mqttManager;
 	}

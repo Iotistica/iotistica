@@ -153,11 +153,11 @@ export async function syncStateFromDocker(
 				ports:
 					container.ports && container.ports.length > 0
 						? Array.from(
-								new Set(
-									container.ports
-										.filter((p) => p.PublicPort && p.PrivatePort)
-										.map((p) => `${p.PublicPort}:${p.PrivatePort}`),
-								),
+							new Set(
+								container.ports
+									.filter((p) => p.PublicPort && p.PrivatePort)
+									.map((p) => `${p.PublicPort}:${p.PrivatePort}`),
+							),
 						)
 						: [],
 				volumes: volumes.length > 0 ? volumes : [],

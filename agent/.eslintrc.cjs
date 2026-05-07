@@ -16,6 +16,10 @@ module.exports = {
     // Keep initial adoption low-friction for this codebase.
     '@typescript-eslint/no-explicit-any': 'off',
     '@typescript-eslint/ban-ts-comment': 'off',
+    // Enforce indentation consistency as a blocking rule.
+    indent: ['error', 'tab', { SwitchCase: 1 }],
+    // Allow tabs for indentation with spaces for alignment in legacy blocks.
+    'no-mixed-spaces-and-tabs': ['error', 'smart-tabs'],
     '@typescript-eslint/no-unused-vars': [
       'warn',
       {

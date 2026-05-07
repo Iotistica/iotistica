@@ -18,7 +18,7 @@ export interface OPCUADiscoveryOptions {
 }
 
 export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
-  private configManager?: ConfigManager;
+	private configManager?: ConfigManager;
 
 	private scoreSecurityMode(securityMode: number | string | undefined): number {
 		const mode = typeof securityMode === 'string' ? securityMode : String(securityMode ?? '0');
@@ -100,19 +100,19 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 		return createHash('sha1').update(certificate).digest('hex');
 	}
 
-  constructor(logger?: AgentLogger, configManager?: ConfigManager) {
-    super('opcua', logger);
-    this.configManager = configManager;
-  }
+	constructor(logger?: AgentLogger, configManager?: ConfigManager) {
+		super('opcua', logger);
+		this.configManager = configManager;
+	}
 
-  /**
+	/**
    * Phase 1: Fast endpoint enumeration
    */
-  async discover(_options?: OPCUADiscoveryOptions): Promise<DiscoveredDevice[]> {
-    const discovered: DiscoveredDevice[] = [];
+	async discover(_options?: OPCUADiscoveryOptions): Promise<DiscoveredDevice[]> {
+		const discovered: DiscoveredDevice[] = [];
 
-    // Get discovery targets from endpoints (those with endpointUrl but no dataPoints)
-    const discoveryTargets = this.configManager?.getDiscoveryTargets?.('opcua') || [];
+		// Get discovery targets from endpoints (those with endpointUrl but no dataPoints)
+		const discoveryTargets = this.configManager?.getDiscoveryTargets?.('opcua') || [];
     
 		this.logger?.debugSync('OPC-UA discovery targets received', {
 			component: LogComponents.discovery + "] [" + this.protocol as any,
@@ -385,34 +385,34 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 
 		return discovered;
 	}
-  /**
+	/**
    * Phase 2: Validate server (read ServerInfo)
    */
-  async validate(device: DiscoveredDevice, _timeout = 5000): Promise<any> {
-    this.logger?.debugSync('Validating OPC-UA server', {
-      component: LogComponents.discovery + "] [" + this.protocol as any,
-      endpoint: device.connection.endpointUrl,
-      phase: 'validation'
-    });
+	async validate(device: DiscoveredDevice, _timeout = 5000): Promise<any> {
+		this.logger?.debugSync('Validating OPC-UA server', {
+			component: LogComponents.discovery + "] [" + this.protocol as any,
+			endpoint: device.connection.endpointUrl,
+			phase: 'validation'
+		});
 
-    // TODO: Implement OPC-UA server validation
-    // - Read Server_ServerStatus node
-    // - Read Server_ServerArray
-    // - Read manufacturer info from namespace 0
+		// TODO: Implement OPC-UA server validation
+		// - Read Server_ServerStatus node
+		// - Read Server_ServerArray
+		// - Read manufacturer info from namespace 0
     
-    return null; // Placeholder
-  }
+		return null; // Placeholder
+	}
 
-  /**
+	/**
    * Check if OPC-UA client is available
    */
-  async isAvailable(): Promise<boolean> {
-    try {
-      await import('node-opcua-client');
-      return true;
-    } catch {
-      return false;
-    }
-  }
+	async isAvailable(): Promise<boolean> {
+		try {
+			await import('node-opcua-client');
+			return true;
+		} catch {
+			return false;
+		}
+	}
 }
 

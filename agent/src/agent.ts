@@ -22,11 +22,11 @@ import { CloudMqttClient } from "./mqtt";
 import { AgentFirewall } from "./network/firewall.js";
 import { AgentUpdater } from "./updater.js";
 import { 
-  setMemoryLogger,
-  startMemoryMonitoring,
-  stopMemoryMonitoring,
-  startMemoryLeakSimulation,
-  stopMemoryLeakSimulation
+	setMemoryLogger,
+	startMemoryMonitoring,
+	stopMemoryMonitoring,
+	startMemoryLeakSimulation,
+	stopMemoryLeakSimulation
 } from "./system/memory.js";
 import { AnomalyDetectionService } from "./anomaly/index.js";
 import { SimulationOrchestrator } from "./anomaly/simulator.js";
@@ -34,641 +34,641 @@ import { DiscoveryService } from "./adapters/discovery/service.js";
 import { FeatureInitializer } from "./init/features.js";
 import type { ConfigManager } from "./agent/config.js";
 import {
-  initCore as runInitCore,
+	initCore as runInitCore,
 } from './init/core.js';
 import type { AgentInitContext } from './init/context.js';
 import { initLogging as runInitLogging } from './init/logging.js';
 import { initDevice as runInitDevice } from './init/agent.js';
 import {
-  initInfrastructure as runInitInfrastructure,
+	initInfrastructure as runInitInfrastructure,
 } from './init/infra.js';
 import {
-  initFeatures as runInitFeatures,
+	initFeatures as runInitFeatures,
 } from './init/features.js';
 import { initSync as runInitSync } from './init/sync.js';
 import { AgentLifecycle, AgentState } from './lifecycle.js';
 
 
 export default class Agent {
-  private readonly lifecycle = new AgentLifecycle();
-  private stateReconciler!: StateManager; // Main state manager
-  private containerManager!: ContainerManager; // Keep for backward compatibility with DeviceAPI
-  private agentManager!: AgentManager;
-  private agentInfo!: AgentInfo; // Cache agent info after initialization
-  private agentAPI!: DeviceAPI;
-  private cloudSync?: CloudSync;
-  public agentLogger!: AgentLogger; // Structured logging for agent-level events (public for external access)
-  private firewall?: AgentFirewall; // Network firewall protection
-  private updater?: AgentUpdater; // Agent self-update handler
-  private featureInitializer?: FeatureInitializer;
-  private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and sensors
-  private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
-  private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
-  private configManager!: ConfigManager; // Configuration manager (centralized config access)
-  private dictionaryManager?: import('./mqtt/dictionary.js').DictionaryManager; // MQTT message key compaction (top-level service)
-  private sharedHttpClient?: import('./lib/http-client').HttpClient; // Shared HTTP client for connection pooling
+	private readonly lifecycle = new AgentLifecycle();
+	private stateReconciler!: StateManager; // Main state manager
+	private containerManager!: ContainerManager; // Keep for backward compatibility with DeviceAPI
+	private agentManager!: AgentManager;
+	private agentInfo!: AgentInfo; // Cache agent info after initialization
+	private agentAPI!: DeviceAPI;
+	private cloudSync?: CloudSync;
+	public agentLogger!: AgentLogger; // Structured logging for agent-level events (public for external access)
+	private firewall?: AgentFirewall; // Network firewall protection
+	private updater?: AgentUpdater; // Agent self-update handler
+	private featureInitializer?: FeatureInitializer;
+	private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and sensors
+	private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
+	private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
+	private configManager!: ConfigManager; // Configuration manager (centralized config access)
+	private dictionaryManager?: import('./mqtt/dictionary.js').DictionaryManager; // MQTT message key compaction (top-level service)
+	private sharedHttpClient?: import('./lib/http-client').HttpClient; // Shared HTTP client for connection pooling
 
-  // System settings (config-driven with env var defaults)
-  // Note: All settings now accessed via configManager getters (intervals, endpoints, ports, etc.)
-  // Scheduled restart timer (controlled from cloud config)
-  private scheduledRestartTimer?: NodeJS.Timeout;
-  private memoryLeakSimulationTimer?: NodeJS.Timeout;
-  private lastOperationalFailureKey?: string;
-  private lastOperationalFailureLogAt = 0;
+	// System settings (config-driven with env var defaults)
+	// Note: All settings now accessed via configManager getters (intervals, endpoints, ports, etc.)
+	// Scheduled restart timer (controlled from cloud config)
+	private scheduledRestartTimer?: NodeJS.Timeout;
+	private memoryLeakSimulationTimer?: NodeJS.Timeout;
+	private lastOperationalFailureKey?: string;
+	private lastOperationalFailureLogAt = 0;
 
-  // Note: Configuration change handling done by ConfigManager reactive handlers
-  // ConfigManager listens to StateReconciler events and applies changes automatically
+	// Note: Configuration change handling done by ConfigManager reactive handlers
+	// ConfigManager listens to StateReconciler events and applies changes automatically
 
-  constructor() {
-    // StateReconciler and ConfigManager will be initialized in init()
-    // (StateReconciler needs async init() to load target state from SQLite)
-    this.configureLifecycleHooks();
-  }
+	constructor() {
+		// StateReconciler and ConfigManager will be initialized in init()
+		// (StateReconciler needs async init() to load target state from SQLite)
+		this.configureLifecycleHooks();
+	}
 
-  private configureLifecycleHooks(): void {
-    this.lifecycle.onExit(AgentState.RUNNING, () => {
-      this.stopRuntimeServices();
-    });
+	private configureLifecycleHooks(): void {
+		this.lifecycle.onExit(AgentState.RUNNING, () => {
+			this.stopRuntimeServices();
+		});
 
-    this.lifecycle.onError(({ state, error }) => {
-      this.agentLogger?.errorSync(
-        'Lifecycle transition failed',
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: LogComponents.agent,
-          state,
-        }
-      );
-    });
-  }
+		this.lifecycle.onError(({ state, error }) => {
+			this.agentLogger?.errorSync(
+				'Lifecycle transition failed',
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					component: LogComponents.agent,
+					state,
+				}
+			);
+		});
+	}
 
-  public async init(): Promise<void> {
-      const currentState = this.lifecycle.getState();
-      if (currentState === AgentState.INIT || currentState === AgentState.STOPPING) {
-        throw new Error(`Cannot initialize agent while state is ${currentState}`);
-      }
-      if (currentState === AgentState.RUNNING || currentState === AgentState.READY) {
-        this.agentLogger?.warnSync('Agent init skipped - already initialized', {
-          component: LogComponents.agent,
-          state: currentState,
-        });
-        return;
-      }
+	public async init(): Promise<void> {
+		const currentState = this.lifecycle.getState();
+		if (currentState === AgentState.INIT || currentState === AgentState.STOPPING) {
+			throw new Error(`Cannot initialize agent while state is ${currentState}`);
+		}
+		if (currentState === AgentState.RUNNING || currentState === AgentState.READY) {
+			this.agentLogger?.warnSync('Agent init skipped - already initialized', {
+				component: LogComponents.agent,
+				state: currentState,
+			});
+			return;
+		}
 
-      const ctx: AgentInitContext = {
-        agent: this,
-        stateReconciler: this.stateReconciler,
-        configManager: this.configManager,
-        agentLogger: this.agentLogger,
-        sharedHttpClient: this.sharedHttpClient,
-        agentManager: this.agentManager,
-        agentInfo: this.agentInfo,
-        containerManager: this.containerManager,
-        logMonitor: (this as any).logMonitor,
-        agentAPI: this.agentAPI,
-        cloudSync: this.cloudSync,
-        firewall: this.firewall,
-        updater: this.updater,
-        featureInitializer: this.featureInitializer,
-        anomalyService: this.anomalyService,
-        simulationOrchestrator: this.simulationOrchestrator,
-        discoveryService: this.discoveryService,
-        dictionaryManager: this.dictionaryManager,
-        scheduledRestartTimer: this.scheduledRestartTimer,
-      };
+		const ctx: AgentInitContext = {
+			agent: this,
+			stateReconciler: this.stateReconciler,
+			configManager: this.configManager,
+			agentLogger: this.agentLogger,
+			sharedHttpClient: this.sharedHttpClient,
+			agentManager: this.agentManager,
+			agentInfo: this.agentInfo,
+			containerManager: this.containerManager,
+			logMonitor: (this as any).logMonitor,
+			agentAPI: this.agentAPI,
+			cloudSync: this.cloudSync,
+			firewall: this.firewall,
+			updater: this.updater,
+			featureInitializer: this.featureInitializer,
+			anomalyService: this.anomalyService,
+			simulationOrchestrator: this.simulationOrchestrator,
+			discoveryService: this.discoveryService,
+			dictionaryManager: this.dictionaryManager,
+			scheduledRestartTimer: this.scheduledRestartTimer,
+		};
 
-      await this.lifecycle.transition(AgentState.INIT, async () => {
-        await this.runInitPhase('core', () => runInitCore(ctx));
-        await this.runInitPhase('logging', () => runInitLogging(ctx));
-        await this.runInitPhase('device', () => runInitDevice(ctx));
-        await this.runInitPhase('infrastructure', () => runInitInfrastructure(ctx));
-        await this.runInitPhase('features', () => runInitFeatures(ctx));
-        await this.runInitPhase('sync', () => runInitSync(ctx));
-      });
+		await this.lifecycle.transition(AgentState.INIT, async () => {
+			await this.runInitPhase('core', () => runInitCore(ctx));
+			await this.runInitPhase('logging', () => runInitLogging(ctx));
+			await this.runInitPhase('device', () => runInitDevice(ctx));
+			await this.runInitPhase('infrastructure', () => runInitInfrastructure(ctx));
+			await this.runInitPhase('features', () => runInitFeatures(ctx));
+			await this.runInitPhase('sync', () => runInitSync(ctx));
+		});
 
-      await this.lifecycle.transition(AgentState.READY, async () => {
-        this.applyInitContext(ctx);
-      });
+		await this.lifecycle.transition(AgentState.READY, async () => {
+			this.applyInitContext(ctx);
+		});
 
-      await this.lifecycle.transition(AgentState.RUNNING, async () => {
-        await this.startServices();
-        this.logStartupSummary();
-      });
-  }
+		await this.lifecycle.transition(AgentState.RUNNING, async () => {
+			await this.startServices();
+			this.logStartupSummary();
+		});
+	}
 
-  private async runInitPhase(name: string, operation: () => Promise<void>): Promise<void> {
-    const startedAt = Date.now();
-    console.log(`[INIT] ${name} start`);
+	private async runInitPhase(name: string, operation: () => Promise<void>): Promise<void> {
+		const startedAt = Date.now();
+		console.log(`[INIT] ${name} start`);
 
-    try {
-      await operation();
-      const durationMs = Date.now() - startedAt;
-      console.log(`[INIT] ${name} complete (${durationMs}ms)`);
-      this.agentLogger?.infoSync('Agent init phase completed', {
-        component: LogComponents.agent,
-        phase: name,
-        durationMs,
-      });
-    } catch (error) {
-      const durationMs = Date.now() - startedAt;
-      console.error(`[INIT] ${name} failed after ${durationMs}ms`, error);
-      this.agentLogger?.errorSync(
-        'Agent init phase failed',
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: LogComponents.agent,
-          phase: name,
-          durationMs,
-        }
-      );
-      throw error;
-    }
-  }
+		try {
+			await operation();
+			const durationMs = Date.now() - startedAt;
+			console.log(`[INIT] ${name} complete (${durationMs}ms)`);
+			this.agentLogger?.infoSync('Agent init phase completed', {
+				component: LogComponents.agent,
+				phase: name,
+				durationMs,
+			});
+		} catch (error) {
+			const durationMs = Date.now() - startedAt;
+			console.error(`[INIT] ${name} failed after ${durationMs}ms`, error);
+			this.agentLogger?.errorSync(
+				'Agent init phase failed',
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					component: LogComponents.agent,
+					phase: name,
+					durationMs,
+				}
+			);
+			throw error;
+		}
+	}
 
-  private applyInitContext(ctx: AgentInitContext): void {
-    this.stateReconciler = ctx.stateReconciler!;
-    this.configManager = ctx.configManager!;
-    this.agentLogger = ctx.agentLogger!;
-    this.lifecycle.setLogger(this.agentLogger);
-    this.sharedHttpClient = ctx.sharedHttpClient;
-    this.agentManager = ctx.agentManager;
-    this.agentInfo = ctx.agentInfo;
-    this.containerManager = ctx.containerManager;
-    (this as any).logMonitor = ctx.logMonitor;
-    this.agentAPI = ctx.agentAPI;
-    this.cloudSync = ctx.cloudSync;
-    this.firewall = ctx.firewall;
-    this.updater = ctx.updater;
-    this.featureInitializer = ctx.featureInitializer;
-    this.anomalyService = ctx.anomalyService;
-    this.simulationOrchestrator = ctx.simulationOrchestrator;
-    this.discoveryService = ctx.discoveryService;
-    this.dictionaryManager = ctx.dictionaryManager;
-    this.scheduledRestartTimer = ctx.scheduledRestartTimer;
-  }
+	private applyInitContext(ctx: AgentInitContext): void {
+		this.stateReconciler = ctx.stateReconciler!;
+		this.configManager = ctx.configManager!;
+		this.agentLogger = ctx.agentLogger!;
+		this.lifecycle.setLogger(this.agentLogger);
+		this.sharedHttpClient = ctx.sharedHttpClient;
+		this.agentManager = ctx.agentManager;
+		this.agentInfo = ctx.agentInfo;
+		this.containerManager = ctx.containerManager;
+		(this as any).logMonitor = ctx.logMonitor;
+		this.agentAPI = ctx.agentAPI;
+		this.cloudSync = ctx.cloudSync;
+		this.firewall = ctx.firewall;
+		this.updater = ctx.updater;
+		this.featureInitializer = ctx.featureInitializer;
+		this.anomalyService = ctx.anomalyService;
+		this.simulationOrchestrator = ctx.simulationOrchestrator;
+		this.discoveryService = ctx.discoveryService;
+		this.dictionaryManager = ctx.dictionaryManager;
+		this.scheduledRestartTimer = ctx.scheduledRestartTimer;
+	}
 
-  private async startServices(): Promise<void> {
-    this.startAutoReconciliation();
-    this.startMemoryMonitoring();
-  }
+	private async startServices(): Promise<void> {
+		this.startAutoReconciliation();
+		this.startMemoryMonitoring();
+	}
 
-  private stopRuntimeServices(): void {
-    if (this.containerManager) {
-      this.containerManager.stopAutoReconciliation();
-      this.agentLogger?.infoSync("Auto-reconciliation stopped", {
-        component: LogComponents.agent,
-      });
-    }
+	private stopRuntimeServices(): void {
+		if (this.containerManager) {
+			this.containerManager.stopAutoReconciliation();
+			this.agentLogger?.infoSync("Auto-reconciliation stopped", {
+				component: LogComponents.agent,
+			});
+		}
 
-    stopMemoryMonitoring();
-    this.agentLogger?.infoSync("Memory monitoring stopped", {
-      component: LogComponents.agent,
-    });
+		stopMemoryMonitoring();
+		this.agentLogger?.infoSync("Memory monitoring stopped", {
+			component: LogComponents.agent,
+		});
 
-    this.clearPendingMemoryLeakSimulation();
-  }
+		this.clearPendingMemoryLeakSimulation();
+	}
 
-  private async safeStopSubsystem(
-    name: string,
-    shouldStop: boolean,
-    stopFn: () => Promise<void> | void,
-    failures: string[],
-  ): Promise<void> {
-    if (!shouldStop) {
-      return;
-    }
+	private async safeStopSubsystem(
+		name: string,
+		shouldStop: boolean,
+		stopFn: () => Promise<void> | void,
+		failures: string[],
+	): Promise<void> {
+		if (!shouldStop) {
+			return;
+		}
 
-    try {
-      await stopFn();
-      this.agentLogger?.infoSync(`${name} stopped`, {
-        component: LogComponents.agent,
-        subsystem: name,
-      });
-    } catch (error) {
-      failures.push(name);
-      this.agentLogger?.warnSync(`Error stopping ${name}`, {
-        component: LogComponents.agent,
-        subsystem: name,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
+		try {
+			await stopFn();
+			this.agentLogger?.infoSync(`${name} stopped`, {
+				component: LogComponents.agent,
+				subsystem: name,
+			});
+		} catch (error) {
+			failures.push(name);
+			this.agentLogger?.warnSync(`Error stopping ${name}`, {
+				component: LogComponents.agent,
+				subsystem: name,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
 
-  private async stopLogBackends(failures: string[]): Promise<void> {
-    await this.safeStopSubsystem('Log backends', !!this.agentLogger, async () => {
-      for (const backend of this.agentLogger?.getBackends() || []) {
-        try {
-          if ('disconnect' in backend && typeof backend.disconnect === 'function') {
-            await backend.disconnect();
-          } else if ('stop' in backend && typeof backend.stop === 'function') {
-            await (backend as any).stop();
-          }
-        } catch (error) {
-          const backendName = backend?.constructor?.name || 'UnknownLogBackend';
-          this.agentLogger?.warnSync('Error stopping log backend', {
-            component: LogComponents.agent,
-            subsystem: 'Log backends',
-            backend: backendName,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-    }, failures);
-  }
+	private async stopLogBackends(failures: string[]): Promise<void> {
+		await this.safeStopSubsystem('Log backends', !!this.agentLogger, async () => {
+			for (const backend of this.agentLogger?.getBackends() || []) {
+				try {
+					if ('disconnect' in backend && typeof backend.disconnect === 'function') {
+						await backend.disconnect();
+					} else if ('stop' in backend && typeof backend.stop === 'function') {
+						await (backend as any).stop();
+					}
+				} catch (error) {
+					const backendName = backend?.constructor?.name || 'UnknownLogBackend';
+					this.agentLogger?.warnSync('Error stopping log backend', {
+						component: LogComponents.agent,
+						subsystem: 'Log backends',
+						backend: backendName,
+						error: error instanceof Error ? error.message : String(error),
+					});
+				}
+			}
+		}, failures);
+	}
 
-  private logStartupSummary(): void {
-    const mode = this.agentInfo.provisioned ? "Cloud-connected" : "Standalone";
-    const intervals = this.configManager.getIntervalConfig();
+	private logStartupSummary(): void {
+		const mode = this.agentInfo.provisioned ? "Cloud-connected" : "Standalone";
+		const intervals = this.configManager.getIntervalConfig();
 
-    this.agentLogger.infoSync("Agent initialized", {
-      component: LogComponents.agent,
-      mode,
-      deviceApiPort: this.configManager.getAgentApiPort(),
-      reconciliationInterval: intervals.reconciliationIntervalMs,
-      cloudApiEndpoint: this.configManager.getCloudApiEndpoint(),
-      cloudFeaturesEnabled: this.agentInfo.provisioned && !!this.cloudSync,
-    });
-  }
+		this.agentLogger.infoSync("Agent initialized", {
+			component: LogComponents.agent,
+			mode,
+			deviceApiPort: this.configManager.getAgentApiPort(),
+			reconciliationInterval: intervals.reconciliationIntervalMs,
+			cloudApiEndpoint: this.configManager.getCloudApiEndpoint(),
+			cloudFeaturesEnabled: this.agentInfo.provisioned && !!this.cloudSync,
+		});
+	}
 
-  private startAutoReconciliation(): void {
-    const intervals = this.configManager.getIntervalConfig();
-    this.containerManager.startAutoReconciliation(
+	private startAutoReconciliation(): void {
+		const intervals = this.configManager.getIntervalConfig();
+		this.containerManager.startAutoReconciliation(
       intervals.reconciliationIntervalMs!
-    );
-    this.agentLogger?.infoSync("Auto-reconciliation started", {
-      component: LogComponents.agent,
-      intervalMs: intervals.reconciliationIntervalMs,
-    });
-  }
+		);
+		this.agentLogger?.infoSync("Auto-reconciliation started", {
+			component: LogComponents.agent,
+			intervalMs: intervals.reconciliationIntervalMs,
+		});
+	}
 
-  /**
+	/**
    * Start active memory monitoring (independent of /ping healthcheck)
    */
-  private startMemoryMonitoring(): void {
-    const performanceConfig = this.configManager.getPerformanceConfig();
-    const memoryCheckInterval = performanceConfig.memoryCheckIntervalMs!;
-    const memoryThreshold = performanceConfig.memoryThresholdMb! * 1024 * 1024; // Convert MB to bytes
+	private startMemoryMonitoring(): void {
+		const performanceConfig = this.configManager.getPerformanceConfig();
+		const memoryCheckInterval = performanceConfig.memoryCheckIntervalMs!;
+		const memoryThreshold = performanceConfig.memoryThresholdMb! * 1024 * 1024; // Convert MB to bytes
 
-    setMemoryLogger(this.agentLogger);
+		setMemoryLogger(this.agentLogger);
     
-    // Start monitoring with callback for threshold breach
-    startMemoryMonitoring(
-      memoryCheckInterval,
-      memoryThreshold,
-      () => {
-        // Callback when memory threshold is breached
-        this.agentLogger?.errorSync(
-          'Memory threshold breached - agent may need restart',
-          undefined,
-          {
-            component: LogComponents.agent,
-            thresholdMB: memoryThreshold / (1024 * 1024),
-            action: 'Consider restarting agent or investigating memory leak'
-          }
-        );
+		// Start monitoring with callback for threshold breach
+		startMemoryMonitoring(
+			memoryCheckInterval,
+			memoryThreshold,
+			() => {
+				// Callback when memory threshold is breached
+				this.agentLogger?.errorSync(
+					'Memory threshold breached - agent may need restart',
+					undefined,
+					{
+						component: LogComponents.agent,
+						thresholdMB: memoryThreshold / (1024 * 1024),
+						action: 'Consider restarting agent or investigating memory leak'
+					}
+				);
 
-        // Optional: Trigger graceful shutdown or restart
-        // Uncomment if you want automatic restart on memory leak
-        // process.exit(1);
-      }
-    );
+				// Optional: Trigger graceful shutdown or restart
+				// Uncomment if you want automatic restart on memory leak
+				// process.exit(1);
+			}
+		);
 
-    this.agentLogger?.debugSync("Active memory monitoring started", {
-      component: LogComponents.agent,
-      intervalMs: memoryCheckInterval,
-      thresholdMB: memoryThreshold / (1024 * 1024)
-    });
+		this.agentLogger?.debugSync("Active memory monitoring started", {
+			component: LogComponents.agent,
+			intervalMs: memoryCheckInterval,
+			thresholdMB: memoryThreshold / (1024 * 1024)
+		});
 
-    // Start memory leak simulation if enabled (for testing only)
-    if (process.env.SIMULATE_MEMORY_LEAK === 'true') {
-      this.clearPendingMemoryLeakSimulation();
+		// Start memory leak simulation if enabled (for testing only)
+		if (process.env.SIMULATE_MEMORY_LEAK === 'true') {
+			this.clearPendingMemoryLeakSimulation();
 
-      this.agentLogger?.warnSync("MEMORY LEAK SIMULATION ENABLED - FOR TESTING ONLY", {
-        component: LogComponents.agent,
-        leakType: process.env.LEAK_TYPE || 'gradual',
-        leakRateMB: process.env.LEAK_RATE_MB || '1',
-        leakIntervalMs: process.env.LEAK_INTERVAL_MS || '5000',
-        leakMaxMB: process.env.LEAK_MAX_MB || '50'
-      });
+			this.agentLogger?.warnSync("MEMORY LEAK SIMULATION ENABLED - FOR TESTING ONLY", {
+				component: LogComponents.agent,
+				leakType: process.env.LEAK_TYPE || 'gradual',
+				leakRateMB: process.env.LEAK_RATE_MB || '1',
+				leakIntervalMs: process.env.LEAK_INTERVAL_MS || '5000',
+				leakMaxMB: process.env.LEAK_MAX_MB || '50'
+			});
       
-      // Wait 30 seconds after startup before starting simulation
-      // This allows baseline memory to be established
-      this.memoryLeakSimulationTimer = setTimeout(() => {
-        this.memoryLeakSimulationTimer = undefined;
-        startMemoryLeakSimulation();
-      }, 30000);
+			// Wait 30 seconds after startup before starting simulation
+			// This allows baseline memory to be established
+			this.memoryLeakSimulationTimer = setTimeout(() => {
+				this.memoryLeakSimulationTimer = undefined;
+				startMemoryLeakSimulation();
+			}, 30000);
 
-      this.memoryLeakSimulationTimer.unref?.();
-    }
-  }
+			this.memoryLeakSimulationTimer.unref?.();
+		}
+	}
 
-  private clearPendingMemoryLeakSimulation(): void {
-    if (!this.memoryLeakSimulationTimer) {
-      return;
-    }
+	private clearPendingMemoryLeakSimulation(): void {
+		if (!this.memoryLeakSimulationTimer) {
+			return;
+		}
 
-    clearTimeout(this.memoryLeakSimulationTimer);
-    this.memoryLeakSimulationTimer = undefined;
-  }
+		clearTimeout(this.memoryLeakSimulationTimer);
+		this.memoryLeakSimulationTimer = undefined;
+	}
 
-  public async stop(): Promise<void> {
-    const currentState = this.lifecycle.getState();
-    if (currentState === AgentState.STOPPING) {
-      this.agentLogger?.warnSync('Stop skipped - agent is already stopping', {
-        component: LogComponents.agent,
-        state: currentState,
-      });
-      return;
-    }
-    if (currentState !== AgentState.RUNNING && currentState !== AgentState.READY && currentState !== AgentState.ERROR) {
-      throw new Error(`Cannot stop agent from lifecycle state ${currentState}`);
-    }
+	public async stop(): Promise<void> {
+		const currentState = this.lifecycle.getState();
+		if (currentState === AgentState.STOPPING) {
+			this.agentLogger?.warnSync('Stop skipped - agent is already stopping', {
+				component: LogComponents.agent,
+				state: currentState,
+			});
+			return;
+		}
+		if (currentState !== AgentState.RUNNING && currentState !== AgentState.READY && currentState !== AgentState.ERROR) {
+			throw new Error(`Cannot stop agent from lifecycle state ${currentState}`);
+		}
 
-    await this.lifecycle.transition(AgentState.STOPPING, async () => {
-      this.agentLogger?.infoSync("Stopping Agent", { component: LogComponents.agent });
-      const cleanupFailures: string[] = [];
+		await this.lifecycle.transition(AgentState.STOPPING, async () => {
+			this.agentLogger?.infoSync("Stopping Agent", { component: LogComponents.agent });
+			const cleanupFailures: string[] = [];
 
-      await this.safeStopSubsystem('Features', !!this.featureInitializer, async () => {
-        try {
-          await this.featureInitializer?.cleanup();
-        } finally {
-          this.featureInitializer = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Features', !!this.featureInitializer, async () => {
+				try {
+					await this.featureInitializer?.cleanup();
+				} finally {
+					this.featureInitializer = undefined;
+				}
+			}, cleanupFailures);
      
-      await this.safeStopSubsystem('API Binder', !!this.cloudSync, async () => {
-        try {
-          await this.cloudSync?.stop();
-        } finally {
-          this.cloudSync = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('API Binder', !!this.cloudSync, async () => {
+				try {
+					await this.cloudSync?.stop();
+				} finally {
+					this.cloudSync = undefined;
+				}
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Firewall', !!this.firewall, async () => {
-        try {
-          await this.firewall?.stop();
-        } finally {
-          this.firewall = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Firewall', !!this.firewall, async () => {
+				try {
+					await this.firewall?.stop();
+				} finally {
+					this.firewall = undefined;
+				}
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Agent Updater', !!this.updater, async () => {
-        try {
-          await this.updater?.cleanup();
-        } finally {
-          this.updater = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Agent Updater', !!this.updater, async () => {
+				try {
+					await this.updater?.cleanup();
+				} finally {
+					this.updater = undefined;
+				}
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Simulation orchestrator', !!this.simulationOrchestrator, async () => {
-        try {
-          await this.simulationOrchestrator?.stop();
-        } finally {
-          this.simulationOrchestrator = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Simulation orchestrator', !!this.simulationOrchestrator, async () => {
+				try {
+					await this.simulationOrchestrator?.stop();
+				} finally {
+					this.simulationOrchestrator = undefined;
+				}
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Memory leak simulation', true, async () => {
-        this.clearPendingMemoryLeakSimulation();
-        stopMemoryLeakSimulation();
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Memory leak simulation', true, async () => {
+				this.clearPendingMemoryLeakSimulation();
+				stopMemoryLeakSimulation();
+			}, cleanupFailures);
 
-      this.agentLogger?.infoSync("Stopping log backends", {
-        component: LogComponents.agent,
-      });
-      await this.stopLogBackends(cleanupFailures);
+			this.agentLogger?.infoSync("Stopping log backends", {
+				component: LogComponents.agent,
+			});
+			await this.stopLogBackends(cleanupFailures);
 
-      await this.safeStopSubsystem('Dictionary Manager', !!this.dictionaryManager, async () => {
-        try {
-          await this.dictionaryManager?.shutdown();
-        } finally {
-          this.dictionaryManager = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Dictionary Manager', !!this.dictionaryManager, async () => {
+				try {
+					await this.dictionaryManager?.shutdown();
+				} finally {
+					this.dictionaryManager = undefined;
+				}
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Cloud MQTT Client', CloudMqttClient.getInstance().isConnected(), async () => {
-        const mqttManager = CloudMqttClient.getInstance();
-        await mqttManager.disconnect();
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Cloud MQTT Client', CloudMqttClient.getInstance().isConnected(), async () => {
+				const mqttManager = CloudMqttClient.getInstance();
+				await mqttManager.disconnect();
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Agent API', !!this.agentAPI, async () => {
-        try {
-          await this.agentAPI?.stop();
-        } finally {
-          this.agentAPI = undefined as unknown as DeviceAPI;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Agent API', !!this.agentAPI, async () => {
+				try {
+					await this.agentAPI?.stop();
+				} finally {
+					this.agentAPI = undefined as unknown as DeviceAPI;
+				}
+			}, cleanupFailures);
 
-      // Runtime-only services are stopped by lifecycle RUNNING exit hooks
+			// Runtime-only services are stopped by lifecycle RUNNING exit hooks
 
-      if (this.scheduledRestartTimer) {
-        clearTimeout(this.scheduledRestartTimer);
-        this.scheduledRestartTimer = undefined;
-        this.agentLogger?.infoSync("Scheduled restart timer cleared", {
-          component: LogComponents.agent,
-        });
-      }
+			if (this.scheduledRestartTimer) {
+				clearTimeout(this.scheduledRestartTimer);
+				this.scheduledRestartTimer = undefined;
+				this.agentLogger?.infoSync("Scheduled restart timer cleared", {
+					component: LogComponents.agent,
+				});
+			}
       
-      await this.safeStopSubsystem('Discovery service', !!this.discoveryService, async () => {
-        try {
-          this.discoveryService?.stopPeriodicDiscovery();
-        } finally {
-          this.discoveryService = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Discovery service', !!this.discoveryService, async () => {
+				try {
+					this.discoveryService?.stopPeriodicDiscovery();
+				} finally {
+					this.discoveryService = undefined;
+				}
+			}, cleanupFailures);
 
-      // ConfigManager handles its own cleanup (event listeners)
-      // No manual removal needed since ConfigManager is garbage collected
+			// ConfigManager handles its own cleanup (event listeners)
+			// No manual removal needed since ConfigManager is garbage collected
 
-      await this.safeStopSubsystem('Database connection', true, async () => {
-        const { gracefulShutdown: shutdownDatabase } = await import('./db/connection.js');
-        await shutdownDatabase();
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Database connection', true, async () => {
+				const { gracefulShutdown: shutdownDatabase } = await import('./db/connection.js');
+				await shutdownDatabase();
+			}, cleanupFailures);
 
-      if (cleanupFailures.length > 0) {
-        this.agentLogger?.warnSync('Agent stopped with cleanup warnings', {
-          component: LogComponents.agent,
-          cleanupFailures,
-        });
-        return;
-      }
+			if (cleanupFailures.length > 0) {
+				this.agentLogger?.warnSync('Agent stopped with cleanup warnings', {
+					component: LogComponents.agent,
+					cleanupFailures,
+				});
+				return;
+			}
 
-      this.agentLogger?.infoSync('Agent stopped successfully', {
-        component: LogComponents.agent,
-      });
-    }).catch((error) => {
-      this.agentLogger?.errorSync(
-        "Error stopping Agent",
-        error instanceof Error ? error : new Error(String(error)),
-        {
-          component: LogComponents.agent,
-        }
-      );
-      throw error;
-    });
+			this.agentLogger?.infoSync('Agent stopped successfully', {
+				component: LogComponents.agent,
+			});
+		}).catch((error) => {
+			this.agentLogger?.errorSync(
+				"Error stopping Agent",
+				error instanceof Error ? error : new Error(String(error)),
+				{
+					component: LogComponents.agent,
+				}
+			);
+			throw error;
+		});
 
-    await this.lifecycle.transition(AgentState.STOPPED);
-  }
+		await this.lifecycle.transition(AgentState.STOPPED);
+	}
 
-  /**
+	/**
    * Restart all agent services except the API server and MQTT
    * This is a soft restart that keeps the HTTP server and MQTT connection running
    */
-  public async restartServices(): Promise<void> {
-    const state = this.lifecycle.getState();
-    if (state !== AgentState.RUNNING) {
-      throw new Error(`Cannot restart services while agent is in ${state} state`);
-    }
+	public async restartServices(): Promise<void> {
+		const state = this.lifecycle.getState();
+		if (state !== AgentState.RUNNING) {
+			throw new Error(`Cannot restart services while agent is in ${state} state`);
+		}
 
-    await this.lifecycle.transition(AgentState.STOPPING, async () => {
-      this.agentLogger?.infoSync('Starting agent services restart (soft restart)', {
-        component: LogComponents.agent,
-        note: 'API and MQTT will remain running',
-      });
-      const cleanupFailures: string[] = [];
+		await this.lifecycle.transition(AgentState.STOPPING, async () => {
+			this.agentLogger?.infoSync('Starting agent services restart (soft restart)', {
+				component: LogComponents.agent,
+				note: 'API and MQTT will remain running',
+			});
+			const cleanupFailures: string[] = [];
 
-      await this.safeStopSubsystem('Features', !!this.featureInitializer, async () => {
-        try {
-          await this.featureInitializer?.cleanup(true);
-        } finally {
-          this.featureInitializer = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Features', !!this.featureInitializer, async () => {
+				try {
+					await this.featureInitializer?.cleanup(true);
+				} finally {
+					this.featureInitializer = undefined;
+				}
+			}, cleanupFailures);
       
-      await this.safeStopSubsystem('Cloud sync', !!this.cloudSync, async () => {
-        try {
-          await this.cloudSync?.stop();
-        } finally {
-          this.cloudSync = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Cloud sync', !!this.cloudSync, async () => {
+				try {
+					await this.cloudSync?.stop();
+				} finally {
+					this.cloudSync = undefined;
+				}
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Firewall', !!this.firewall, async () => {
-        try {
-          await this.firewall?.stop();
-        } finally {
-          this.firewall = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Firewall', !!this.firewall, async () => {
+				try {
+					await this.firewall?.stop();
+				} finally {
+					this.firewall = undefined;
+				}
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Agent updater', !!this.updater, async () => {
-        try {
-          await this.updater?.cleanup();
-        } finally {
-          this.updater = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Agent updater', !!this.updater, async () => {
+				try {
+					await this.updater?.cleanup();
+				} finally {
+					this.updater = undefined;
+				}
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Simulation orchestrator', !!this.simulationOrchestrator, async () => {
-        try {
-          await this.simulationOrchestrator?.stop();
-        } finally {
-          this.simulationOrchestrator = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Simulation orchestrator', !!this.simulationOrchestrator, async () => {
+				try {
+					await this.simulationOrchestrator?.stop();
+				} finally {
+					this.simulationOrchestrator = undefined;
+				}
+			}, cleanupFailures);
 
-      await this.safeStopSubsystem('Memory leak simulation', true, async () => {
-        this.clearPendingMemoryLeakSimulation();
-        stopMemoryLeakSimulation();
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Memory leak simulation', true, async () => {
+				this.clearPendingMemoryLeakSimulation();
+				stopMemoryLeakSimulation();
+			}, cleanupFailures);
 
-      this.agentLogger?.infoSync('Stopping log backends...', {
-        component: LogComponents.agent,
-      });
-      await this.stopLogBackends(cleanupFailures);
+			this.agentLogger?.infoSync('Stopping log backends...', {
+				component: LogComponents.agent,
+			});
+			await this.stopLogBackends(cleanupFailures);
 
-      await this.safeStopSubsystem('Dictionary manager', !!this.dictionaryManager, async () => {
-        try {
-          await this.dictionaryManager?.shutdown();
-        } finally {
-          this.dictionaryManager = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Dictionary manager', !!this.dictionaryManager, async () => {
+				try {
+					await this.dictionaryManager?.shutdown();
+				} finally {
+					this.dictionaryManager = undefined;
+				}
+			}, cleanupFailures);
 
-      // SKIP MQTT - keep it running for shell session and MQTT monitoring
-      this.agentLogger?.infoSync('✓ MQTT connection preserved (not restarted)', {
-        component: LogComponents.agent,
-      });
+			// SKIP MQTT - keep it running for shell session and MQTT monitoring
+			this.agentLogger?.infoSync('✓ MQTT connection preserved (not restarted)', {
+				component: LogComponents.agent,
+			});
 
-      // NOTE: Skip agentAPI - keep it running!
+			// NOTE: Skip agentAPI - keep it running!
 
-      // Runtime-only services are stopped by lifecycle RUNNING exit hooks
+			// Runtime-only services are stopped by lifecycle RUNNING exit hooks
 
-      if (this.scheduledRestartTimer) {
-        clearTimeout(this.scheduledRestartTimer);
-        this.scheduledRestartTimer = undefined;
-        this.agentLogger?.infoSync('Scheduled restart timer cleared', {
-          component: LogComponents.agent,
-        });
-      }
+			if (this.scheduledRestartTimer) {
+				clearTimeout(this.scheduledRestartTimer);
+				this.scheduledRestartTimer = undefined;
+				this.agentLogger?.infoSync('Scheduled restart timer cleared', {
+					component: LogComponents.agent,
+				});
+			}
       
-      await this.safeStopSubsystem('Discovery service', !!this.discoveryService, async () => {
-        try {
-          this.discoveryService?.stopPeriodicDiscovery();
-        } finally {
-          this.discoveryService = undefined;
-        }
-      }, cleanupFailures);
+			await this.safeStopSubsystem('Discovery service', !!this.discoveryService, async () => {
+				try {
+					this.discoveryService?.stopPeriodicDiscovery();
+				} finally {
+					this.discoveryService = undefined;
+				}
+			}, cleanupFailures);
 
-      this.agentLogger?.infoSync('Service shutdown phase completed, reinitializing...', {
-        component: LogComponents.agent,
-        cleanupFailures,
-      });
+			this.agentLogger?.infoSync('Service shutdown phase completed, reinitializing...', {
+				component: LogComponents.agent,
+				cleanupFailures,
+			});
 
-    }).catch((error) => {
-      this.agentLogger?.errorSync(
-        'Agent restart failed',
-        error instanceof Error ? error : new Error(String(error)),
-        { component: LogComponents.agent }
-      );
-      throw error;
-    });
+		}).catch((error) => {
+			this.agentLogger?.errorSync(
+				'Agent restart failed',
+				error instanceof Error ? error : new Error(String(error)),
+				{ component: LogComponents.agent }
+			);
+			throw error;
+		});
 
-    await this.lifecycle.transition(AgentState.STOPPED, async () => {
-      await new Promise(resolve => setTimeout(resolve, 500));
-    });
+		await this.lifecycle.transition(AgentState.STOPPED, async () => {
+			await new Promise(resolve => setTimeout(resolve, 500));
+		});
 
-    // Re-initialize all services (reuse init logic)
-    await this.init();
+		// Re-initialize all services (reuse init logic)
+		await this.init();
 
-    this.agentLogger?.infoSync('✓ Agent services restarted successfully', {
-      component: LogComponents.agent,
-      note: 'All services reinitialized (API and MQTT preserved)',
-    });
-  }
+		this.agentLogger?.infoSync('✓ Agent services restarted successfully', {
+			component: LogComponents.agent,
+			note: 'All services reinitialized (API and MQTT preserved)',
+		});
+	}
 
-  public getLifecycleState(): AgentState {
-    return this.lifecycle.getState();
-  }
+	public getLifecycleState(): AgentState {
+		return this.lifecycle.getState();
+	}
 
-  // Getters for external access (if needed)
-  public getContainerManager(): ContainerManager {
-    return this.containerManager;
-  }
+	// Getters for external access (if needed)
+	public getContainerManager(): ContainerManager {
+		return this.containerManager;
+	}
 
-  public getAgentManager(): AgentManager {
-    return this.agentManager;
-  }
+	public getAgentManager(): AgentManager {
+		return this.agentManager;
+	}
 
-  public getDeviceAPI(): DeviceAPI {
-    return this.agentAPI;
-  }
+	public getDeviceAPI(): DeviceAPI {
+		return this.agentAPI;
+	}
 
-  public getCloudSync(): CloudSync | undefined {
-    return this.cloudSync;
-  }
+	public getCloudSync(): CloudSync | undefined {
+		return this.cloudSync;
+	}
 
-  /** Returns true when sensor data is routed to an external cloud (IoT Hub, AWS, GCP) instead of Iotistica. */
-  public isExternalPublishTarget(): boolean {
-    const t = (process.env.PUBLISH_TARGET || '').toLowerCase();
-    return t !== '' && t !== 'iotistica';
-  }
+	/** Returns true when sensor data is routed to an external cloud (IoT Hub, AWS, GCP) instead of Iotistica. */
+	public isExternalPublishTarget(): boolean {
+		const t = (process.env.PUBLISH_TARGET || '').toLowerCase();
+		return t !== '' && t !== 'iotistica';
+	}
 
-  public isProvisioned(): boolean {
-    return this.agentInfo?.provisioned === true;
-  }
+	public isProvisioned(): boolean {
+		return this.agentInfo?.provisioned === true;
+	}
 
-  /**
+	/**
    * Check if agent is fully operational and ready for systemd READY=1
    * 
    * This is a strict readiness check - all critical subsystems must be initialized
@@ -678,60 +678,60 @@ export default class Agent {
    * 
    * @returns true if all critical components are operational
    */
-  public isFullyOperational(): boolean {
-    // CI mode: Skip provisioning-dependent checks (MQTT, CloudSync)
-    // Allows agent to start and test basic functionality without cloud connection
-    const isCiMode = process.env.CI === 'true';
+	public isFullyOperational(): boolean {
+		// CI mode: Skip provisioning-dependent checks (MQTT, CloudSync)
+		// Allows agent to start and test basic functionality without cloud connection
+		const isCiMode = process.env.CI === 'true';
     
-    // Critical components that MUST be operational for READY=1
-    const checks = {
-      database: !!this.stateReconciler,
-      logging: !!this.agentLogger,
-      agentInfo: !!this.agentInfo,
-      // For already-provisioned agents (state loaded from SQLite), the agent must continue
-      // running even if the local API is unavailable. For unprovisioned agents, keep the API
-      // startup-critical so provisioning/setup flows still require it.
-      agentAPI: !!this.agentInfo?.provisioned || !!this.agentAPI,
-      containerManager: !!this.containerManager,
-      // MQTT connectivity is not startup-critical. A provisioned agent must continue running
-      // and buffering local state/data when broker auth or the API backing auth is unavailable.
-      mqtt: true,
-      // CloudSync is critical only if agent is provisioned (skip in CI mode).
-      // Only require the instance to exist (provisioning config was valid + service was wired).
-      // Whether it is currently connected is a runtime/health concern - a cloud outage must not
-      // prevent the agent from sending READY=1 or operating as a standalone agent.
-      // Also skip when the active publish target doesn't use Iotistica (e.g. iothub).
-      cloudSync: isCiMode || !this.agentInfo?.provisioned || !!this.cloudSync
+		// Critical components that MUST be operational for READY=1
+		const checks = {
+			database: !!this.stateReconciler,
+			logging: !!this.agentLogger,
+			agentInfo: !!this.agentInfo,
+			// For already-provisioned agents (state loaded from SQLite), the agent must continue
+			// running even if the local API is unavailable. For unprovisioned agents, keep the API
+			// startup-critical so provisioning/setup flows still require it.
+			agentAPI: !!this.agentInfo?.provisioned || !!this.agentAPI,
+			containerManager: !!this.containerManager,
+			// MQTT connectivity is not startup-critical. A provisioned agent must continue running
+			// and buffering local state/data when broker auth or the API backing auth is unavailable.
+			mqtt: true,
+			// CloudSync is critical only if agent is provisioned (skip in CI mode).
+			// Only require the instance to exist (provisioning config was valid + service was wired).
+			// Whether it is currently connected is a runtime/health concern - a cloud outage must not
+			// prevent the agent from sending READY=1 or operating as a standalone agent.
+			// Also skip when the active publish target doesn't use Iotistica (e.g. iothub).
+			cloudSync: isCiMode || !this.agentInfo?.provisioned || !!this.cloudSync
         || this.isExternalPublishTarget()
-    };
+		};
 
-    const now = Date.now();
+		const now = Date.now();
 
-    // Check all critical components
-    for (const [component, operational] of Object.entries(checks)) {
-      if (!operational) {
-        const shouldLog =
+		// Check all critical components
+		for (const [component, operational] of Object.entries(checks)) {
+			if (!operational) {
+				const shouldLog =
           this.lastOperationalFailureKey !== component ||
           now - this.lastOperationalFailureLogAt >= 30000;
 
-        if (shouldLog) {
-          this.agentLogger?.warnSync('Agent not fully operational - missing critical component', {
-            component: LogComponents.agent,
-            operation: 'isFullyOperational',
-            missingComponent: component,
-            checks
-          });
-          this.lastOperationalFailureKey = component;
-          this.lastOperationalFailureLogAt = now;
-        }
+				if (shouldLog) {
+					this.agentLogger?.warnSync('Agent not fully operational - missing critical component', {
+						component: LogComponents.agent,
+						operation: 'isFullyOperational',
+						missingComponent: component,
+						checks
+					});
+					this.lastOperationalFailureKey = component;
+					this.lastOperationalFailureLogAt = now;
+				}
 
-        return false;
-      }
-    }
+				return false;
+			}
+		}
 
-    this.lastOperationalFailureKey = undefined;
-    this.lastOperationalFailureLogAt = 0;
+		this.lastOperationalFailureKey = undefined;
+		this.lastOperationalFailureLogAt = 0;
 
-    return true;
-  }
+		return true;
+	}
 }

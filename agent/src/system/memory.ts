@@ -113,132 +113,132 @@ export function startMemoryMonitoring(
 				const mem = memoryUsage();
 				const currentHeap = mem.heapUsed;
 				const currentRSS = mem.rss;
-			const currentExternal = mem.external;
-			const heapStats = getHeapStatistics();
-			const heapGrowthRate = calculateHeapGrowthRate();
-			const externalGrowthRate = calculateExternalGrowthRate();
-			const mallocedGrowthRate = calculateMallocedGrowthRate();
-			const heapTotalGrowthRate = calculateHeapTotalGrowthRate();
-			const survivorGrowth = calculateSurvivorGrowthRate();
-			const heapGrowthFromBaseline = currentHeap - baselineHeap;
-			const heapGrowthFromInitial = currentHeap - initialHeap;
-			const rssGrowthFromBaseline = currentRSS - baselineRSS;
-			const rssGrowthFromInitial = currentRSS - initialMemory;
-			const externalGrowthFromBaseline = currentExternal - baselineExternal;
-			const externalGrowthFromInitial = currentExternal - initialExternal;
-			const leakPattern = detectLeakPattern(currentHeap, currentRSS, currentExternal);
+				const currentExternal = mem.external;
+				const heapStats = getHeapStatistics();
+				const heapGrowthRate = calculateHeapGrowthRate();
+				const externalGrowthRate = calculateExternalGrowthRate();
+				const mallocedGrowthRate = calculateMallocedGrowthRate();
+				const heapTotalGrowthRate = calculateHeapTotalGrowthRate();
+				const survivorGrowth = calculateSurvivorGrowthRate();
+				const heapGrowthFromBaseline = currentHeap - baselineHeap;
+				const heapGrowthFromInitial = currentHeap - initialHeap;
+				const rssGrowthFromBaseline = currentRSS - baselineRSS;
+				const rssGrowthFromInitial = currentRSS - initialMemory;
+				const externalGrowthFromBaseline = currentExternal - baselineExternal;
+				const externalGrowthFromInitial = currentExternal - initialExternal;
+				const leakPattern = detectLeakPattern(currentHeap, currentRSS, currentExternal);
 			
-			// Log specific leak pattern with accurate message
-			let leakMessage: string;
-			if (leakPattern.pattern === 'survivor-leak') {
-				leakMessage = '🚨 Survivor space leak detected - long-lived objects accumulating';
-			} else if (leakPattern.pattern === 'buffer-crypto-native-leak') {
-				leakMessage = '🚨 Buffer/Crypto/Native leak detected - all metrics growing';
-			} else if (leakPattern.pattern === 'external-cache-leak') {
-				leakMessage = '🚨 External memory leak detected - cache or native structures growing';
-			} else if (leakPattern.pattern === 'js-object-retention') {
-				leakMessage = '🚨 JavaScript object retention detected - heap growing';
-			} else if (leakPattern.pattern === 'gc-pressure') {
-				leakMessage = '🚨 GC pressure detected - heap and RSS growing';
-			} else if (leakPattern.pattern === 'mixed-leak-jemalloc') {
-				leakMessage = '🚨 Mixed leak detected - heap and RSS divergence (jemalloc)';
-			} else if (leakPattern.pattern === 'external-leak') {
-				leakMessage = '🚨 External memory threshold breached - sustained growth';
-			} else if (leakPattern.pattern === 'rss-leak') {
-				leakMessage = '🚨 RSS leak detected - resident set growing';
-			} else {
-				leakMessage = '🚨 Memory anomaly detected - investigation required';
-			}
-			
-			logger?.errorSync(leakMessage, undefined, {
-				component: LogComponents.metrics,
-				// Heap metrics
-				currentHeapMB: bytesToMB(currentHeap),
-				baselineHeapMB: bytesToMB(baselineHeap),
-				initialHeapMB: bytesToMB(initialHeap),
-				heapGrowthFromBaselineMB: (heapGrowthFromBaseline / (1024 * 1024)).toFixed(2),
-				heapGrowthFromInitialMB: (heapGrowthFromInitial / (1024 * 1024)).toFixed(2),
-				heapGrowthRateMBperMin: heapGrowthRate?.toFixed(2) || 'null',
-				heapThresholdMBperMin: getAdaptiveHeapThreshold(false).toFixed(2),
-				heapThresholdBase: HEAP_GROWTH_RATE_MB_PER_MIN,
-				heapThresholdAdaptive: (baselineHeap / (1024 * 1024) * ADAPTIVE_THRESHOLD_PERCENTAGE).toFixed(2),
-				// Heap utilization (heapUsed vs heapTotal ratio)
-				heapUtilization: ((heapStats.used_heap_size / heapStats.total_heap_size) * 100).toFixed(1) + '%',
-				heapTotalGrowthRateMBperMin: heapTotalGrowthRate?.toFixed(2) || 'null',
-				// RSS metrics
-				currentRSSMB: bytesToMB(currentRSS),
-				baselineRSSMB: bytesToMB(baselineRSS),
-				rssGrowthFromBaselineMB: (rssGrowthFromBaseline / (1024 * 1024)).toFixed(2),
-				rssGrowthFromInitialMB: (rssGrowthFromInitial / (1024 * 1024)).toFixed(2),
-				// External memory metrics (Buffers, crypto, native)
-				currentExternalMB: bytesToMB(currentExternal),
-				baselineExternalMB: bytesToMB(baselineExternal),
-				externalGrowthFromBaselineMB: (externalGrowthFromBaseline / (1024 * 1024)).toFixed(2),
-				externalGrowthFromInitialMB: (externalGrowthFromInitial / (1024 * 1024)).toFixed(2),
-				externalGrowthRateMBperMin: externalGrowthRate?.toFixed(2) || 'null',
-				externalThresholdMBperMin: EXTERNAL_GROWTH_RATE_MB_PER_MIN,
-				// GC signals (allocation pressure)
-				totalHeapSizeMB: bytesToMB(heapStats.total_heap_size),
-				heapSizeLimitMB: bytesToMB(heapStats.heap_size_limit),
-				heapFragmentationMB: bytesToMB(heapStats.total_heap_size - heapStats.used_heap_size),
-				heapLimitPressure: ((heapStats.used_heap_size / heapStats.heap_size_limit) * 100).toFixed(1) + '%',
-				mallocedMemoryMB: bytesToMB(heapStats.malloced_memory),
-				mallocedGrowthRateMBperMin: mallocedGrowthRate?.toFixed(2) || 'null',
-				// Survivor tracking (long-lived objects)
-				survivorBaselineMB: bytesToMB(survivorBaseline),
-				survivorGrowthRateMBperMin: survivorGrowth?.rate.toFixed(2) || 'null',
-				survivorFloorMonotonic: survivorGrowth?.isMonotonic ?? 'unknown',
-				survivorRetainedMB: survivorGrowth?.retainedGrowth.toFixed(1) || 'null',
-				// Leak pattern analysis
-				leakPattern: leakPattern.pattern,
-				leakDescription: leakPattern.description,
-				uptimeSeconds: processUptime(),
-				samples: heapSamples.length
-			});
-			
-			if (onThresholdBreached) {
-				// Check restart policy before invoking callback
-				const eligibility = canAttemptRestart();
-				
-				if (eligibility.allowed) {
-					logger?.warnSync('Restart policy allows restart - invoking callback', {
-						component: LogComponents.metrics,
-						attemptNumber: restartAttemptsSinceStartup + 1,
-						maxAttempts: MAX_RESTART_ATTEMPTS
-					});
-					
-					// Record attempt before callback (in case callback restarts immediately)
-					recordRestartAttempt();
-					
-					onThresholdBreached();
+				// Log specific leak pattern with accurate message
+				let leakMessage: string;
+				if (leakPattern.pattern === 'survivor-leak') {
+					leakMessage = '🚨 Survivor space leak detected - long-lived objects accumulating';
+				} else if (leakPattern.pattern === 'buffer-crypto-native-leak') {
+					leakMessage = '🚨 Buffer/Crypto/Native leak detected - all metrics growing';
+				} else if (leakPattern.pattern === 'external-cache-leak') {
+					leakMessage = '🚨 External memory leak detected - cache or native structures growing';
+				} else if (leakPattern.pattern === 'js-object-retention') {
+					leakMessage = '🚨 JavaScript object retention detected - heap growing';
+				} else if (leakPattern.pattern === 'gc-pressure') {
+					leakMessage = '🚨 GC pressure detected - heap and RSS growing';
+				} else if (leakPattern.pattern === 'mixed-leak-jemalloc') {
+					leakMessage = '🚨 Mixed leak detected - heap and RSS divergence (jemalloc)';
+				} else if (leakPattern.pattern === 'external-leak') {
+					leakMessage = '🚨 External memory threshold breached - sustained growth';
+				} else if (leakPattern.pattern === 'rss-leak') {
+					leakMessage = '🚨 RSS leak detected - resident set growing';
 				} else {
-					logger?.errorSync('Restart blocked by policy - memory leak persists', undefined, {
-						component: LogComponents.metrics,
-						reason: eligibility.reason,
-						attemptsSinceStartup: restartAttemptsSinceStartup,
-						maxAttempts: MAX_RESTART_ATTEMPTS,
-						lastRestartAgo: lastRestartAttempt > 0 
-							? `${Math.floor((Date.now() - lastRestartAttempt) / (60 * 1000))} minutes ago`
-							: 'never'
-					});
+					leakMessage = '🚨 Memory anomaly detected - investigation required';
+				}
+			
+				logger?.errorSync(leakMessage, undefined, {
+					component: LogComponents.metrics,
+					// Heap metrics
+					currentHeapMB: bytesToMB(currentHeap),
+					baselineHeapMB: bytesToMB(baselineHeap),
+					initialHeapMB: bytesToMB(initialHeap),
+					heapGrowthFromBaselineMB: (heapGrowthFromBaseline / (1024 * 1024)).toFixed(2),
+					heapGrowthFromInitialMB: (heapGrowthFromInitial / (1024 * 1024)).toFixed(2),
+					heapGrowthRateMBperMin: heapGrowthRate?.toFixed(2) || 'null',
+					heapThresholdMBperMin: getAdaptiveHeapThreshold(false).toFixed(2),
+					heapThresholdBase: HEAP_GROWTH_RATE_MB_PER_MIN,
+					heapThresholdAdaptive: (baselineHeap / (1024 * 1024) * ADAPTIVE_THRESHOLD_PERCENTAGE).toFixed(2),
+					// Heap utilization (heapUsed vs heapTotal ratio)
+					heapUtilization: ((heapStats.used_heap_size / heapStats.total_heap_size) * 100).toFixed(1) + '%',
+					heapTotalGrowthRateMBperMin: heapTotalGrowthRate?.toFixed(2) || 'null',
+					// RSS metrics
+					currentRSSMB: bytesToMB(currentRSS),
+					baselineRSSMB: bytesToMB(baselineRSS),
+					rssGrowthFromBaselineMB: (rssGrowthFromBaseline / (1024 * 1024)).toFixed(2),
+					rssGrowthFromInitialMB: (rssGrowthFromInitial / (1024 * 1024)).toFixed(2),
+					// External memory metrics (Buffers, crypto, native)
+					currentExternalMB: bytesToMB(currentExternal),
+					baselineExternalMB: bytesToMB(baselineExternal),
+					externalGrowthFromBaselineMB: (externalGrowthFromBaseline / (1024 * 1024)).toFixed(2),
+					externalGrowthFromInitialMB: (externalGrowthFromInitial / (1024 * 1024)).toFixed(2),
+					externalGrowthRateMBperMin: externalGrowthRate?.toFixed(2) || 'null',
+					externalThresholdMBperMin: EXTERNAL_GROWTH_RATE_MB_PER_MIN,
+					// GC signals (allocation pressure)
+					totalHeapSizeMB: bytesToMB(heapStats.total_heap_size),
+					heapSizeLimitMB: bytesToMB(heapStats.heap_size_limit),
+					heapFragmentationMB: bytesToMB(heapStats.total_heap_size - heapStats.used_heap_size),
+					heapLimitPressure: ((heapStats.used_heap_size / heapStats.heap_size_limit) * 100).toFixed(1) + '%',
+					mallocedMemoryMB: bytesToMB(heapStats.malloced_memory),
+					mallocedGrowthRateMBperMin: mallocedGrowthRate?.toFixed(2) || 'null',
+					// Survivor tracking (long-lived objects)
+					survivorBaselineMB: bytesToMB(survivorBaseline),
+					survivorGrowthRateMBperMin: survivorGrowth?.rate.toFixed(2) || 'null',
+					survivorFloorMonotonic: survivorGrowth?.isMonotonic ?? 'unknown',
+					survivorRetainedMB: survivorGrowth?.retainedGrowth.toFixed(1) || 'null',
+					// Leak pattern analysis
+					leakPattern: leakPattern.pattern,
+					leakDescription: leakPattern.description,
+					uptimeSeconds: processUptime(),
+					samples: heapSamples.length
+				});
+			
+				if (onThresholdBreached) {
+				// Check restart policy before invoking callback
+					const eligibility = canAttemptRestart();
+				
+					if (eligibility.allowed) {
+						logger?.warnSync('Restart policy allows restart - invoking callback', {
+							component: LogComponents.metrics,
+							attemptNumber: restartAttemptsSinceStartup + 1,
+							maxAttempts: MAX_RESTART_ATTEMPTS
+						});
+					
+						// Record attempt before callback (in case callback restarts immediately)
+						recordRestartAttempt();
+					
+						onThresholdBreached();
+					} else {
+						logger?.errorSync('Restart blocked by policy - memory leak persists', undefined, {
+							component: LogComponents.metrics,
+							reason: eligibility.reason,
+							attemptsSinceStartup: restartAttemptsSinceStartup,
+							maxAttempts: MAX_RESTART_ATTEMPTS,
+							lastRestartAgo: lastRestartAttempt > 0 
+								? `${Math.floor((Date.now() - lastRestartAttempt) / (60 * 1000))} minutes ago`
+								: 'never'
+						});
+					}
 				}
 			}
-		}
 		
-		// Reset flag if memory returns to normal
-		if (isHealthy && memoryThresholdBreached) {
-			memoryThresholdBreached = false;
-			logger?.infoSync('Memory returned to normal levels', {
-				component: LogComponents.metrics
-			});
+			// Reset flag if memory returns to normal
+			if (isHealthy && memoryThresholdBreached) {
+				memoryThresholdBreached = false;
+				logger?.infoSync('Memory returned to normal levels', {
+					component: LogComponents.metrics
+				});
+			}
+		} catch (error) {
+			logger?.errorSync(
+				'Memory monitoring check failed',
+				error instanceof Error ? error : new Error(String(error))
+			);
 		}
-	} catch (error) {
-		logger?.errorSync(
-			'Memory monitoring check failed',
-			error instanceof Error ? error : new Error(String(error))
-		);
-	}
-}, intervalMs);
+	}, intervalMs);
 }
 
 /**
@@ -735,9 +735,9 @@ function isHeapStable(): boolean {
  * - GC pressure: Heap + RSS growing, external stable
  */
 function detectLeakPattern(
-    currentHeap: number,
-    currentRSS: number,
-    _currentExternal: number
+	currentHeap: number,
+	currentRSS: number,
+	_currentExternal: number
 ): {
     pattern:
         | 'survivor-leak'
@@ -752,116 +752,116 @@ function detectLeakPattern(
         | 'unknown';
     description: string;
 } {
-    // --- Calculate growth trends ---
-    const heapGrowthRate = calculateHeapGrowthRate(); // MB/min
-    const externalGrowthRate = calculateExternalGrowthRate(); // MB/min
-    const survivorGrowth = calculateSurvivorGrowthRate(); // { rate, retainedGrowth, isMonotonic }
+	// --- Calculate growth trends ---
+	const heapGrowthRate = calculateHeapGrowthRate(); // MB/min
+	const externalGrowthRate = calculateExternalGrowthRate(); // MB/min
+	const survivorGrowth = calculateSurvivorGrowthRate(); // { rate, retainedGrowth, isMonotonic }
 
-    // --- Define adaptive thresholds ---
-    const HEAP_THRESHOLD = getAdaptiveHeapThreshold(false);
-    const EXTERNAL_THRESHOLD = getAdaptiveExternalThreshold(false);
-    const SURVIVOR_THRESHOLD = getAdaptiveSurvivorThreshold();
-    const RSS_GROWTH_THRESHOLD = 5 * 1024 * 1024; // 5MB absolute growth
+	// --- Define adaptive thresholds ---
+	const HEAP_THRESHOLD = getAdaptiveHeapThreshold(false);
+	const EXTERNAL_THRESHOLD = getAdaptiveExternalThreshold(false);
+	const SURVIVOR_THRESHOLD = getAdaptiveSurvivorThreshold();
+	const RSS_GROWTH_THRESHOLD = 5 * 1024 * 1024; // 5MB absolute growth
 
-    // --- Determine metric states ---
-    const heapGrowing = heapGrowthRate !== null && heapGrowthRate > HEAP_THRESHOLD;
-    const externalGrowing = externalGrowthRate !== null && externalGrowthRate > EXTERNAL_THRESHOLD;
+	// --- Determine metric states ---
+	const heapGrowing = heapGrowthRate !== null && heapGrowthRate > HEAP_THRESHOLD;
+	const externalGrowing = externalGrowthRate !== null && externalGrowthRate > EXTERNAL_THRESHOLD;
 	const survivorGrowing =
         survivorGrowth !== null &&
         survivorGrowth.rate > SURVIVOR_THRESHOLD &&
 		survivorGrowth.isMonotonic &&
 		survivorGrowth.retainedGrowth >= MIN_SURVIVOR_RETAINED_MB &&
 		processUptime() >= MIN_SURVIVOR_UPTIME_SECONDS;
-    const rssGrowing = (currentRSS - baselineRSS) > RSS_GROWTH_THRESHOLD;
+	const rssGrowing = (currentRSS - baselineRSS) > RSS_GROWTH_THRESHOLD;
 
-    // --- Priority 1: Survivor leak ---
-    if (survivorGrowing) {
-        return {
-            pattern: 'survivor-leak',
-            description: `Long-lived objects growing at ${survivorGrowth.rate.toFixed(
-                2
-            )} MB/min - floor rising monotonically, retained: ${survivorGrowth.retainedGrowth.toFixed(
-                1
-            )} MB (real leak)`
-        };
-    }
+	// --- Priority 1: Survivor leak ---
+	if (survivorGrowing) {
+		return {
+			pattern: 'survivor-leak',
+			description: `Long-lived objects growing at ${survivorGrowth.rate.toFixed(
+				2
+			)} MB/min - floor rising monotonically, retained: ${survivorGrowth.retainedGrowth.toFixed(
+				1
+			)} MB (real leak)`
+		};
+	}
 
-    // --- Priority 2: Other correlation-based patterns ---
-    if (heapGrowing && externalGrowing && rssGrowing) {
-        return {
-            pattern: 'buffer-crypto-native-leak',
-            description: `Buffer/crypto/native leak - heap: ${heapGrowthRate?.toFixed(
-                2
-            )} MB/min, external: ${externalGrowthRate?.toFixed(2)} MB/min, RSS growing`
-        };
-    }
+	// --- Priority 2: Other correlation-based patterns ---
+	if (heapGrowing && externalGrowing && rssGrowing) {
+		return {
+			pattern: 'buffer-crypto-native-leak',
+			description: `Buffer/crypto/native leak - heap: ${heapGrowthRate?.toFixed(
+				2
+			)} MB/min, external: ${externalGrowthRate?.toFixed(2)} MB/min, RSS growing`
+		};
+	}
 
-    if (!heapGrowing && externalGrowing && !rssGrowing) {
-        return {
-            pattern: 'external-cache-leak',
-            description: `External cache leak - external: ${externalGrowthRate?.toFixed(
-                2
-            )} MB/min, heap stable`
-        };
-    }
+	if (!heapGrowing && externalGrowing && !rssGrowing) {
+		return {
+			pattern: 'external-cache-leak',
+			description: `External cache leak - external: ${externalGrowthRate?.toFixed(
+				2
+			)} MB/min, heap stable`
+		};
+	}
 
-    if (heapGrowing && !externalGrowing && !rssGrowing) {
-        return {
-            pattern: 'js-object-retention',
-            description: `JS object retention - heap: ${heapGrowthRate?.toFixed(2)} MB/min, external stable`
-        };
-    }
+	if (heapGrowing && !externalGrowing && !rssGrowing) {
+		return {
+			pattern: 'js-object-retention',
+			description: `JS object retention - heap: ${heapGrowthRate?.toFixed(2)} MB/min, external stable`
+		};
+	}
 
-    if (heapGrowing && !externalGrowing && rssGrowing) {
-        return {
-            pattern: 'gc-pressure',
-            description: `GC pressure - heap: ${heapGrowthRate?.toFixed(
-                2
-            )} MB/min, RSS growing, external stable`
-        };
-    }
+	if (heapGrowing && !externalGrowing && rssGrowing) {
+		return {
+			pattern: 'gc-pressure',
+			description: `GC pressure - heap: ${heapGrowthRate?.toFixed(
+				2
+			)} MB/min, RSS growing, external stable`
+		};
+	}
 
-    if (heapGrowing && externalGrowing && !rssGrowing) {
-        return {
-            pattern: 'mixed-leak-jemalloc',
-            description: `Mixed leak - heap: ${heapGrowthRate?.toFixed(
-                2
-            )} MB/min, external: ${externalGrowthRate?.toFixed(
-                2
-            )} MB/min, RSS stable (jemalloc reusing arenas)`
-        };
-    }
+	if (heapGrowing && externalGrowing && !rssGrowing) {
+		return {
+			pattern: 'mixed-leak-jemalloc',
+			description: `Mixed leak - heap: ${heapGrowthRate?.toFixed(
+				2
+			)} MB/min, external: ${externalGrowthRate?.toFixed(
+				2
+			)} MB/min, RSS stable (jemalloc reusing arenas)`
+		};
+	}
 
-    if (!heapGrowing && externalGrowing && rssGrowing) {
-        return {
-            pattern: 'external-leak',
-            description: `External leak - external: ${externalGrowthRate?.toFixed(
-                2
-            )} MB/min, heap stable`
-        };
-    }
+	if (!heapGrowing && externalGrowing && rssGrowing) {
+		return {
+			pattern: 'external-leak',
+			description: `External leak - external: ${externalGrowthRate?.toFixed(
+				2
+			)} MB/min, heap stable`
+		};
+	}
 
-    if (!heapGrowing && !externalGrowing && rssGrowing) {
-        return {
-            pattern: 'rss-leak',
-            description: `RSS leak - heap/external stable but RSS growing`
-        };
-    }
+	if (!heapGrowing && !externalGrowing && rssGrowing) {
+		return {
+			pattern: 'rss-leak',
+			description: `RSS leak - heap/external stable but RSS growing`
+		};
+	}
 
-    // --- Priority 3: Heap stable ---
-    const heapStable = isHeapStable(); // Make sure this considers survivor space too
-    if (heapStable) {
-        return {
-            pattern: 'stable',
-            description: 'Memory stable - no leak detected'
-        };
-    }
+	// --- Priority 3: Heap stable ---
+	const heapStable = isHeapStable(); // Make sure this considers survivor space too
+	if (heapStable) {
+		return {
+			pattern: 'stable',
+			description: 'Memory stable - no leak detected'
+		};
+	}
 
-    // --- Fallback ---
-    return {
-        pattern: 'unknown',
-        description: 'Memory pattern unclear - insufficient data or transient spike'
-    };
+	// --- Fallback ---
+	return {
+		pattern: 'unknown',
+		description: 'Memory pattern unclear - insufficient data or transient spike'
+	};
 }
 
 

@@ -58,31 +58,31 @@ export class AgentLogger {
 
 
 	/**
-	 * Add a log backend after initialization
-	 * Useful for adding cloud logging after device provisioning
-	 */
+	* Add a log backend after initialization
+	* Useful for adding cloud logging after device provisioning
+	*/
 	public addBackend(backend: LogBackend): void {
 		this.backends.push(backend);
 	}
 
 	/**
-	 * Get all configured log backends
-	 */
+	* Get all configured log backends
+	*/
 	public getBackends(): LogBackend[] {
 		return this.backends;
 	}
 
 	/**
-	 * Set device ID for all logs
-	 */
+	* Set device ID for all logs
+	*/
 	public setDeviceId(deviceId: string): void {
 		this.deviceId = deviceId;
 	}
 
 	/**
-	 * Update the minimum log level
-	 * @param level - 'debug', 'info', 'warn', or 'error'
-	 */
+	* Update the minimum log level
+	* @param level - 'debug', 'info', 'warn', or 'error'
+	*/
 	public setLogLevel(level: LogLevel): void {
 		const _oldLevel = this.minLogLevel;
 		this.minLogLevel = level;
@@ -94,43 +94,43 @@ export class AgentLogger {
 	}
 
 	/**
-	 * Get the current minimum log level
-	 */
+	* Get the current minimum log level
+	*/
 	public getLogLevel(): LogLevel {
 		return this.minLogLevel;
 	}
 
 	/**
-	 * Check if a log level should be logged
-	 */
+	* Check if a log level should be logged
+	*/
 	private shouldLog(level: LogLevel): boolean {
 		return LOG_LEVELS[level] >= LOG_LEVELS[this.minLogLevel];
 	}
 
 	/**
-	 * Log debug message
-	 */
+	* Log debug message
+	*/
 	public async debug(message: string, context?: LogContext): Promise<void> {
 		await this.log('debug', message, context);
 	}
 
 	/**
-	 * Log info message
-	 */
+	* Log info message
+	*/
 	public async info(message: string, context?: LogContext): Promise<void> {
 		await this.log('info', message, context);
 	}
 
 	/**
-	 * Log warning message
-	 */
+	* Log warning message
+	*/
 	public async warn(message: string, context?: LogContext): Promise<void> {
 		await this.log('warn', message, context);
 	}
 
 	/**
-	 * Log error message
-	 */
+	* Log error message
+	*/
 	public async error(message: string, error?: Error, context?: LogContext): Promise<void> {
 		const errorContext = error ? {
 			error: {
@@ -147,8 +147,8 @@ export class AgentLogger {
 	}
 
 	/**
-	 * Core logging method
-	 */
+	* Core logging method
+	*/
 	private async log(level: LogLevel, message: string, context?: LogContext): Promise<void> {
 		// Filter based on minimum log level
 		if (!this.shouldLog(level)) {
@@ -187,8 +187,8 @@ export class AgentLogger {
 	}
 
 	/**
-	 * Console output (for development and Docker logs)
-	 */
+	* Console output (for development and Docker logs)
+	*/
 	private consoleLog(level: LogLevel, message: string, context?: LogContext): void {
 		const timestamp = new Date().toISOString();
 		const component = context?.component || 'agent';
@@ -241,9 +241,9 @@ export class AgentLogger {
 	}
 
 	/**
-	 * Synchronous log methods (for places where async is difficult)
-	 * These don't wait for backend writes
-	 */
+	* Synchronous log methods (for places where async is difficult)
+	* These don't wait for backend writes
+	*/
 	public debugSync(message: string, context?: LogContext): void {
 		this.log('debug', message, context);
 	}

@@ -1,0 +1,14 @@
+C:\Users\Dan\iotistica\agent\src\adapters\can\discovery.ts
+C:\Users\Dan\iotistica\agent\src\adapters\common\socket-server.ts
+C:\Users\Dan\iotistica\agent\src\adapters\index.ts
+C:\Users\Dan\iotistica\agent\src\adapters\mqtt\adapter.ts
+C:\Users\Dan\iotistica\agent\src\adapters\mqtt\discovery.ts
+C:\Users\Dan\iotistica\agent\src\adapters\mqtt\payload.ts
+C:\Users\Dan\iotistica\agent\src\adapters\snmp\discovery.ts
+C:\Users\Dan\iotistica\agent\src\adapters\types.ts
+C:\Users\Dan\iotistica\agent\src\agent\config.ts
+C:\Users\Dan\iotistica\agent\src\features\base-feature.ts
+C:\Users\Dan\iotistica\agent\src\features\publish\anomaly\enrich.ts
+C:\Users\Dan\iotistica\agent\src\features\publish\anomaly\feed.ts
+C:\Users\Dan\iotistica\agent\src\features\publish\schema\drift.ts
+C:\Users\Dan\iotistica\agent\src\mqtt\manager.ts

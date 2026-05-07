@@ -153,22 +153,22 @@ export class CredentialManager extends EventEmitter {
 	}
 
 	/**
-	 * Get current API key
-	 */
+	* Get current API key
+	*/
 	getApiKey(): string {
 		return this.deviceApiKey;
 	}
 
 	/**
-	 * Get previous API key if still within grace period
-	 * 
-	 * During rotation, both keys are accepted for 5 minutes to prevent
-	 * in-flight request failures. Subscribers should send both:
-	 * - X-Device-API-Key: <current>
-	 * - X-Device-API-Key-Previous: <previous>
-	 * 
-	 * @returns Previous key if within grace period, undefined otherwise
-	 */
+	* Get previous API key if still within grace period
+	* 
+	* During rotation, both keys are accepted for 5 minutes to prevent
+	* in-flight request failures. Subscribers should send both:
+	* - X-Device-API-Key: <current>
+	* - X-Device-API-Key-Previous: <previous>
+	* 
+	* @returns Previous key if within grace period, undefined otherwise
+	*/
 	getPreviousApiKey(): string | undefined {
 		if (!this.previousApiKey || !this.gracePeriodEndsAt) {
 			return undefined;
@@ -189,37 +189,37 @@ export class CredentialManager extends EventEmitter {
 	}
 
 	/**
-	 * Get device UUID
-	 */
+	* Get device UUID
+	*/
 	getDeviceUuid(): string {
 		return this.deviceUuid;
 	}
 
 	/**
-	 * Generate SHA-256 fingerprint of API key for traceability
-	 * 
-	 * Returns first 8 characters of SHA-256 hash.
-	 * Safe to log without exposing the actual secret.
-	 * 
-	 * @param key API key to fingerprint
-	 * @returns 8-character hex fingerprint
-	 */
+	* Generate SHA-256 fingerprint of API key for traceability
+	* 
+	* Returns first 8 characters of SHA-256 hash.
+	* Safe to log without exposing the actual secret.
+	* 
+	* @param key API key to fingerprint
+	* @returns 8-character hex fingerprint
+	*/
 	private generateKeyFingerprint(key: string): string {
 		return createHash('sha256').update(key).digest('hex').slice(0, 8);
 	}
 
 	/**
-	 * Zero out sensitive string in memory
-	 * 
-	 * Overwrites string contents with zeros to prevent memory scraping attacks.
-	 * Critical for IoT/edge devices that may be physically accessible.
-	 * 
-	 * Note: JavaScript strings are immutable, but this makes a best-effort
-	 * to overwrite the internal buffer if accessible. Primarily serves as
-	 * defense-in-depth and documentation of security intent.
-	 * 
-	 * @param str Sensitive string to zero out
-	 */
+	* Zero out sensitive string in memory
+	* 
+	* Overwrites string contents with zeros to prevent memory scraping attacks.
+	* Critical for IoT/edge devices that may be physically accessible.
+	* 
+	* Note: JavaScript strings are immutable, but this makes a best-effort
+	* to overwrite the internal buffer if accessible. Primarily serves as
+	* defense-in-depth and documentation of security intent.
+	* 
+	* @param str Sensitive string to zero out
+	*/
 	private zeroizeString(str: string): void {
 		if (!str) return;
 
@@ -239,19 +239,19 @@ export class CredentialManager extends EventEmitter {
 	}
 
 	/**
-	 * Hot-swap API key without restart
-	 * 
-	 * Flow:
-	 * 1. Validate new key with test request
-	 * 2. Update in-memory key
-	 * 3. Persist to SQLite database (including rotation metadata)
-	 * 4. Emit 'apiKeyRotated' event to subscribers
-	 * 5. Rollback on any failure
-	 * 
-	 * @param newKey New device API key
-	 * @param reason Reason for rotation (for audit trail)
-	 * @returns true if successfully rotated, false otherwise
-	 */
+	* Hot-swap API key without restart
+	* 
+	* Flow:
+	* 1. Validate new key with test request
+	* 2. Update in-memory key
+	* 3. Persist to SQLite database (including rotation metadata)
+	* 4. Emit 'apiKeyRotated' event to subscribers
+	* 5. Rollback on any failure
+	* 
+	* @param newKey New device API key
+	* @param reason Reason for rotation (for audit trail)
+	* @returns true if successfully rotated, false otherwise
+	*/
 	async updateApiKey(newKey: string, reason: RotationReason = 'cloud_rotate'): Promise<boolean> {
 		// Prevent concurrent rotations
 		if (this.rotationInProgress) {
@@ -436,14 +436,14 @@ export class CredentialManager extends EventEmitter {
 	}
 
 	/**
-	 * Validate new API key with test request
-	 * 
-	 * Uses /device/{uuid}/ping endpoint to verify key is valid
-	 * without side effects.
-	 * 
-	 * @param key API key to validate
-	 * @returns true if valid, false otherwise
-	 */
+	* Validate new API key with test request
+	* 
+	* Uses /device/{uuid}/ping endpoint to verify key is valid
+	* without side effects.
+	* 
+	* @param key API key to validate
+	* @returns true if valid, false otherwise
+	*/
 	private async validateKey(key: string): Promise<boolean> {
 		try {
 			// Create test HTTP client with new key
@@ -487,14 +487,14 @@ export class CredentialManager extends EventEmitter {
 	}
 
 	/**
-	 * Persist API key to SQLite database
-	 * 
-	 * Updates device table with new deviceApiKey (and legacy apiKey field
-	 * for backward compatibility), plus rotation audit metadata.
-	 * 
-	 * @param newKey New API key to persist
-	 * @param reason Rotation reason for audit trail
-	 */
+	* Persist API key to SQLite database
+	* 
+	* Updates device table with new deviceApiKey (and legacy apiKey field
+	* for backward compatibility), plus rotation audit metadata.
+	* 
+	* @param newKey New API key to persist
+	* @param reason Rotation reason for audit trail
+	*/
 	private async persistToDatabase(newKey: string, reason?: RotationReason): Promise<void> {
 		// Load current device record
 		const device = await this.dbClient.loadAgent();
@@ -528,20 +528,20 @@ export class CredentialManager extends EventEmitter {
 	}
 
 	/**
-	 * Notify all subscribers of new API key and verify application
-	 * 
-	 * Two-phase commit pattern:
-	 * 1. Database already persisted (Phase 1)
-	 * 2. Notify subscribers to apply new key (Phase 2)
-	 * 3. If any critical subscriber fails, caller rolls back Phase 1
-	 * 
-	 * SECURITY: Never emit raw keys - use fingerprint for traceability
-	 * RESILIENCE: Isolate subscriber failures to prevent process crash
-	 * 
-	 * @param newKey New API key to distribute
-	 * @param reason Rotation reason for audit trail
-	 * @returns true if all critical subscribers applied successfully
-	 */
+	* Notify all subscribers of new API key and verify application
+	* 
+	* Two-phase commit pattern:
+	* 1. Database already persisted (Phase 1)
+	* 2. Notify subscribers to apply new key (Phase 2)
+	* 3. If any critical subscriber fails, caller rolls back Phase 1
+	* 
+	* SECURITY: Never emit raw keys - use fingerprint for traceability
+	* RESILIENCE: Isolate subscriber failures to prevent process crash
+	* 
+	* @param newKey New API key to distribute
+	* @param reason Rotation reason for audit trail
+	* @returns true if all critical subscribers applied successfully
+	*/
 	private async notifySubscribers(newKey: string, reason: RotationReason): Promise<boolean> {
 		const event: ApiKeyRotatedEvent = {
 			rotatedAt: Date.now(),
@@ -583,8 +583,8 @@ export class CredentialManager extends EventEmitter {
 	}
 
 	/**
-	 * Check if rotation is currently in progress
-	 */
+	* Check if rotation is currently in progress
+	*/
 	isRotating(): boolean {
 		return this.rotationInProgress;
 	}

@@ -39,12 +39,12 @@ export interface CompressorOptions {
 
 // Only compress when beneficial: payload > 4 KB AND CPU < 70 %
 function shouldDeflate(payloadSize: number, cpuLoad: number): boolean {
-  return payloadSize > 4 * 1024 && cpuLoad < 70;
+	return payloadSize > 4 * 1024 && cpuLoad < 70;
 }
 
 // Every 1000th publish uses bare JSON (no-op control) to calibrate overhead
 function shouldMeasureBaseline(publishCount: number): boolean {
-  return (publishCount % 1000) === 0;
+	return (publishCount % 1000) === 0;
 }
 
 /**
@@ -52,175 +52,175 @@ function shouldMeasureBaseline(publishCount: number): boolean {
  * Strategy priority: dictionary → msgpack → json  (each optionally + deflate).
  */
 export class PayloadCompressor {
-  constructor(
+	constructor(
     private readonly opts: CompressorOptions,
     private readonly mqttConnection: MqttConnection,
     private readonly dictionaryManager?: any,
     private readonly protocol?: Protocol,
-  ) {}
+	) {}
 
-  async compress(
-    data: unknown,
-    baselineSize: number,
-    publishCount: number,
-  ): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
-    if (shouldMeasureBaseline(publishCount)) {
-      return this.baseline(data, baselineSize);
-    }
-    if (this.dictionaryManager && this.opts.useKeyCompaction) {
-      return this.applyDictionary(data, baselineSize);
-    }
-    return this.applyMsgpackOrJson(data, baselineSize);
-  }
+	async compress(
+		data: unknown,
+		baselineSize: number,
+		publishCount: number,
+	): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
+		if (shouldMeasureBaseline(publishCount)) {
+			return this.baseline(data, baselineSize);
+		}
+		if (this.dictionaryManager && this.opts.useKeyCompaction) {
+			return this.applyDictionary(data, baselineSize);
+		}
+		return this.applyMsgpackOrJson(data, baselineSize);
+	}
 
-  // --- strategies -------------------------------------------------------------
+	// --- strategies -------------------------------------------------------------
 
-  private sizeOf(payload: Payload): number {
-    return typeof payload === 'string' ? Buffer.byteLength(payload, 'utf-8') : payload.length;
-  }
+	private sizeOf(payload: Payload): number {
+		return typeof payload === 'string' ? Buffer.byteLength(payload, 'utf-8') : payload.length;
+	}
 
-  private buildInfo(
-    method: CompressionInfo['method'],
-    baselineSize: number,
-    compressedSize: number,
-    t0: number,
-    isBaseline = false,
-    cpuUsage?: CompressionInfo['cpuUsage'],
-  ): CompressionInfo {
-    return {
-      method,
-      originalSize: baselineSize,
-      compressedSize,
-      ratio: isBaseline ? 0 : ((baselineSize - compressedSize) / baselineSize) * 100,
-      compressionMs: Date.now() - t0,
-      ...(isBaseline ? { isBaseline: true } : {}),
-      ...(cpuUsage ? { cpuUsage } : {}),
-    };
-  }
+	private buildInfo(
+		method: CompressionInfo['method'],
+		baselineSize: number,
+		compressedSize: number,
+		t0: number,
+		isBaseline = false,
+		cpuUsage?: CompressionInfo['cpuUsage'],
+	): CompressionInfo {
+		return {
+			method,
+			originalSize: baselineSize,
+			compressedSize,
+			ratio: isBaseline ? 0 : ((baselineSize - compressedSize) / baselineSize) * 100,
+			compressionMs: Date.now() - t0,
+			...(isBaseline ? { isBaseline: true } : {}),
+			...(cpuUsage ? { cpuUsage } : {}),
+		};
+	}
 
-  private dictionaryMethod(useMsgpack: boolean, useDeflate: boolean):
+	private dictionaryMethod(useMsgpack: boolean, useDeflate: boolean):
     'dictionary' | 'dictionary+msgpack' | 'dictionary+deflate' | 'dictionary+msgpack+deflate' {
-    if (useMsgpack) return useDeflate ? 'dictionary+msgpack+deflate' : 'dictionary+msgpack';
-    return useDeflate ? 'dictionary+deflate' : 'dictionary';
-  }
+		if (useMsgpack) return useDeflate ? 'dictionary+msgpack+deflate' : 'dictionary+msgpack';
+		return useDeflate ? 'dictionary+deflate' : 'dictionary';
+	}
 
-  private standardMethod(useMsgpack: boolean, useDeflate: boolean):
+	private standardMethod(useMsgpack: boolean, useDeflate: boolean):
     'json' | 'json+deflate' | 'msgpack' | 'msgpack+deflate' {
-    if (useMsgpack) return useDeflate ? 'msgpack+deflate' : 'msgpack';
-    return useDeflate ? 'json+deflate' : 'json';
-  }
+		if (useMsgpack) return useDeflate ? 'msgpack+deflate' : 'msgpack';
+		return useDeflate ? 'json+deflate' : 'json';
+	}
 
-  private async maybeDeflatePayload(
-    payload: Payload,
-    enabled: boolean,
-  ): Promise<{ payload: Payload; deflateCpu?: { user: number; system: number } }> {
-    if (!enabled) {
-      return { payload };
-    }
+	private async maybeDeflatePayload(
+		payload: Payload,
+		enabled: boolean,
+	): Promise<{ payload: Payload; deflateCpu?: { user: number; system: number } }> {
+		if (!enabled) {
+			return { payload };
+		}
 
-    const buf = typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload;
-    if (!shouldDeflate(buf.length, await getCpuUsage())) {
-      return { payload: buf };
-    }
+		const buf = typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload;
+		if (!shouldDeflate(buf.length, await getCpuUsage())) {
+			return { payload: buf };
+		}
 
-    const cpu1 = process.cpuUsage();
-    const finalPayload = await deflateAsync(buf);
-    const deflateCpu = process.cpuUsage(cpu1);
+		const cpu1 = process.cpuUsage();
+		const finalPayload = await deflateAsync(buf);
+		const deflateCpu = process.cpuUsage(cpu1);
 
-    return { payload: finalPayload, deflateCpu };
-  }
+		return { payload: finalPayload, deflateCpu };
+	}
 
-  private async baseline(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
-    const t0 = Date.now();
-    const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
-    const payload = serializePayload(createJsonPayload(data as object, msgIdGen));
-    const compressedSize = this.sizeOf(payload);
-    return {
-      payload,
-      info: this.buildInfo('baseline', baselineSize, compressedSize, t0, true),
-    };
-  }
+	private async baseline(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
+		const t0 = Date.now();
+		const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
+		const payload = serializePayload(createJsonPayload(data as object, msgIdGen));
+		const compressedSize = this.sizeOf(payload);
+		return {
+			payload,
+			info: this.buildInfo('baseline', baselineSize, compressedSize, t0, true),
+		};
+	}
 
-  private async applyDictionary(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
-    const t0 = Date.now();
-    const cpu0 = process.cpuUsage();
+	private async applyDictionary(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
+		const t0 = Date.now();
+		const cpu0 = process.cpuUsage();
 
-    const dictCpu0 = process.cpuUsage();
-    const { compacted } = await this.dictionaryManager.compact(data, this.protocol);
-    const dictCpu = process.cpuUsage(dictCpu0);
+		const dictCpu0 = process.cpuUsage();
+		const { compacted } = await this.dictionaryManager.compact(data, this.protocol);
+		const dictCpu = process.cpuUsage(dictCpu0);
 
-    let msgpackCpu: { user: number; system: number } | undefined;
-    let intermediate: Buffer | string;
-    if (this.opts.useMsgpack) {
-      const cpu1 = process.cpuUsage();
-      intermediate = msgpack.encode(compacted);
-      msgpackCpu = process.cpuUsage(cpu1);
-    } else {
-      intermediate = JSON.stringify(compacted);
-    }
+		let msgpackCpu: { user: number; system: number } | undefined;
+		let intermediate: Buffer | string;
+		if (this.opts.useMsgpack) {
+			const cpu1 = process.cpuUsage();
+			intermediate = msgpack.encode(compacted);
+			msgpackCpu = process.cpuUsage(cpu1);
+		} else {
+			intermediate = JSON.stringify(compacted);
+		}
 
-    const { payload: finalPayload, deflateCpu } = await this.maybeDeflatePayload(intermediate, this.opts.useDeflate);
+		const { payload: finalPayload, deflateCpu } = await this.maybeDeflatePayload(intermediate, this.opts.useDeflate);
 
-    const finalSize = this.sizeOf(finalPayload);
-    const method = this.dictionaryMethod(this.opts.useMsgpack, this.opts.useDeflate);
+		const finalSize = this.sizeOf(finalPayload);
+		const method = this.dictionaryMethod(this.opts.useMsgpack, this.opts.useDeflate);
 
-    const serializationMethod = this.opts.useMsgpack ? 'msgpack' as const : 'dictionary' as const;
-    const serializationCpu = this.opts.useMsgpack ? (msgpackCpu || dictCpu) : dictCpu;
+		const serializationMethod = this.opts.useMsgpack ? 'msgpack' as const : 'dictionary' as const;
+		const serializationCpu = this.opts.useMsgpack ? (msgpackCpu || dictCpu) : dictCpu;
 
-    return {
-      payload: finalPayload,
-      info: this.buildInfo(method, baselineSize, finalSize, t0, false, {
-        serialization: { method: serializationMethod, cpu: serializationCpu },
-        compression: deflateCpu ? { method: 'deflate', cpu: deflateCpu } : undefined,
-        total: process.cpuUsage(cpu0),
-      }),
-    };
-  }
+		return {
+			payload: finalPayload,
+			info: this.buildInfo(method, baselineSize, finalSize, t0, false, {
+				serialization: { method: serializationMethod, cpu: serializationCpu },
+				compression: deflateCpu ? { method: 'deflate', cpu: deflateCpu } : undefined,
+				total: process.cpuUsage(cpu0),
+			}),
+		};
+	}
 
-  private async applyMsgpackOrJson(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
-    const t0 = Date.now();
-    const cpu0 = process.cpuUsage();
-    const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
+	private async applyMsgpackOrJson(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
+		const t0 = Date.now();
+		const cpu0 = process.cpuUsage();
+		const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
 
-    let msgpackCpu: { user: number; system: number } | undefined;
-    let deflateCpu: { user: number; system: number } | undefined;
-    let finalPayload: Buffer | string;
-    let compressedSize: number;
+		let msgpackCpu: { user: number; system: number } | undefined;
+		let deflateCpu: { user: number; system: number } | undefined;
+		let finalPayload: Buffer | string;
+		let compressedSize: number;
 
-    if (this.opts.useMsgpack) {
-      const cpu1 = process.cpuUsage();
-      const payload = serializePayload(createMsgpackPayload(data as object, msgIdGen));
-      msgpackCpu = process.cpuUsage(cpu1);
+		if (this.opts.useMsgpack) {
+			const cpu1 = process.cpuUsage();
+			const payload = serializePayload(createMsgpackPayload(data as object, msgIdGen));
+			msgpackCpu = process.cpuUsage(cpu1);
 
-      const deflated = await this.maybeDeflatePayload(payload, this.opts.useDeflate);
-      finalPayload = deflated.payload;
-      deflateCpu = deflated.deflateCpu;
-      compressedSize = this.sizeOf(finalPayload);
-    } else {
-      const payload = serializePayload(createJsonPayload(data as object, msgIdGen));
+			const deflated = await this.maybeDeflatePayload(payload, this.opts.useDeflate);
+			finalPayload = deflated.payload;
+			deflateCpu = deflated.deflateCpu;
+			compressedSize = this.sizeOf(finalPayload);
+		} else {
+			const payload = serializePayload(createJsonPayload(data as object, msgIdGen));
 
-      if (this.opts.useDeflate) {
-        const deflated = await this.maybeDeflatePayload(payload, true);
-        finalPayload = deflated.payload;
-        deflateCpu = deflated.deflateCpu;
-        compressedSize = this.sizeOf(finalPayload);
-      } else {
-        finalPayload = payload;
-        compressedSize = baselineSize;
-      }
-    }
+			if (this.opts.useDeflate) {
+				const deflated = await this.maybeDeflatePayload(payload, true);
+				finalPayload = deflated.payload;
+				deflateCpu = deflated.deflateCpu;
+				compressedSize = this.sizeOf(finalPayload);
+			} else {
+				finalPayload = payload;
+				compressedSize = baselineSize;
+			}
+		}
 
-    const method = this.standardMethod(this.opts.useMsgpack, this.opts.useDeflate);
+		const method = this.standardMethod(this.opts.useMsgpack, this.opts.useDeflate);
 
-    return {
-      payload: finalPayload!,
-      info: this.buildInfo(method, baselineSize, compressedSize!, t0, false, {
-        serialization: msgpackCpu
-          ? { method: 'msgpack', cpu: msgpackCpu }
-          : { method: 'json', cpu: { user: 0, system: 0 } },
-        compression: deflateCpu ? { method: 'deflate', cpu: deflateCpu } : undefined,
-        total: process.cpuUsage(cpu0),
-      }),
-    };
-  }
+		return {
+			payload: finalPayload!,
+			info: this.buildInfo(method, baselineSize, compressedSize!, t0, false, {
+				serialization: msgpackCpu
+					? { method: 'msgpack', cpu: msgpackCpu }
+					: { method: 'json', cpu: { user: 0, system: 0 } },
+				compression: deflateCpu ? { method: 'deflate', cpu: deflateCpu } : undefined,
+				total: process.cpuUsage(cpu0),
+			}),
+		};
+	}
 }

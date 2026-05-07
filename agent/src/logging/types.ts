@@ -14,79 +14,79 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  *   logger.info('Connection restored', { component: LogComponents.connectionMonitor });
  */
 export const LogComponents = {
-  // Core Agent
-  agent: 'Agent',
-  agentConfig: 'AgentConfig',
-  agentUpdater: 'AgentUpdater',
+	// Core Agent
+	agent: 'Agent',
+	agentConfig: 'AgentConfig',
+	agentUpdater: 'AgentUpdater',
   
-  // API Integration
-  cloudSync: 'Sync',
-  apiPoller: 'ApiPoller',
+	// API Integration
+	cloudSync: 'Sync',
+	apiPoller: 'ApiPoller',
   
-  // Connectivity
-  connectionMonitor: 'ConnectionMonitor',
+	// Connectivity
+	connectionMonitor: 'ConnectionMonitor',
   
-  // State Management
-  sync: 'Sync',
-  stateReconciler: 'Reconciler',
-  configManager: 'ConfigManager',
+	// State Management
+	sync: 'Sync',
+	stateReconciler: 'Reconciler',
+	configManager: 'ConfigManager',
   
-  // Container Orchestration
-  containerManager: 'ContainerManager',
-  dockerManager: 'DockerManager',
-  dockerDriver: 'DockerDriver',
-  k3sDriver: 'K3sDriver',
-  orchestratorDriver: 'OrchestratorDriver',
-  driverFactory: 'DriverFactory',
+	// Container Orchestration
+	containerManager: 'ContainerManager',
+	dockerManager: 'DockerManager',
+	dockerDriver: 'DockerDriver',
+	k3sDriver: 'K3sDriver',
+	orchestratorDriver: 'OrchestratorDriver',
+	driverFactory: 'DriverFactory',
   
-  // Protocol Adapters
-  discovery: 'Discovery',
-  modbus: 'Modbus',
-  modbusRtu: 'ModbusRTU',
-  modbusTcp: 'ModbusTCP',
-  mqtt: 'MQTT',
-  dictionary: 'Dictionary',
+	// Protocol Adapters
+	discovery: 'Discovery',
+	modbus: 'Modbus',
+	modbusRtu: 'ModbusRTU',
+	modbusTcp: 'ModbusTCP',
+	mqtt: 'MQTT',
+	dictionary: 'Dictionary',
   
-  // Logging System
-  logMonitor: 'LogMonitor',
-  localLogBackend: 'LocalLog',
-  cloudLogBackend: 'CloudLog',
-  logs: 'Logs',
-  offlineQueue: 'OfflineQueue',
+	// Logging System
+	logMonitor: 'LogMonitor',
+	localLogBackend: 'LocalLog',
+	cloudLogBackend: 'CloudLog',
+	logs: 'Logs',
+	offlineQueue: 'OfflineQueue',
   
-  // Device API
-  deviceApi: 'DeviceAPI',
-  cloudApi: 'CloudAPI',
+	// Device API
+	deviceApi: 'DeviceAPI',
+	cloudApi: 'CloudAPI',
   
-  // Provisioning
-  agentManager: 'AgentManager',
+	// Provisioning
+	agentManager: 'AgentManager',
   
-  // Security
-  security: 'Security',
+	// Security
+	security: 'Security',
   
-  // Network
-  firewall: 'Firewall',
-  wireGuardManager: 'WireGuardManager',
-  tailscaleManager: 'TailscaleManager',
-  networkRouteManager: 'NetworkRouteManager',
+	// Network
+	firewall: 'Firewall',
+	wireGuardManager: 'WireGuardManager',
+	tailscaleManager: 'TailscaleManager',
+	networkRouteManager: 'NetworkRouteManager',
   
-  // Database
-  database: 'Database',
-  migrations: 'Migrations',
+	// Database
+	database: 'Database',
+	migrations: 'Migrations',
   
-  // System
-  systemInfo: 'SystemInfo',
-  metrics: 'Metrics',
+	// System
+	systemInfo: 'SystemInfo',
+	metrics: 'Metrics',
 	anomaly: 'Anomaly',
   
-  // Features
-  jobEngine: 'JobEngine',
-  jobs: 'Jobs',
-  sshTunnel: 'SSHTunnel',
-  remoteAccess: 'RemoteAccess',
-  sensor: 'Sensor',
-  sensorPublish: 'Publish',
-  shell: 'Shell',
+	// Features
+	jobEngine: 'JobEngine',
+	jobs: 'Jobs',
+	sshTunnel: 'SSHTunnel',
+	remoteAccess: 'RemoteAccess',
+	sensor: 'Sensor',
+	sensorPublish: 'Publish',
+	shell: 'Shell',
 } as const;
 
 export type LogComponent = typeof LogComponents[keyof typeof LogComponents];

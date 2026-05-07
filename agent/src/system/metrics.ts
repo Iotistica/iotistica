@@ -314,12 +314,12 @@ export async function getNetworkInterfaces(): Promise<NetworkInterfaceInfo[]> {
 				(base as any).signalLevel = iface.signalLevel;
 			}
 
-	return base;
-	});
+			return base;
+		});
 
-	// Cache with timestamp for 30-second TTL
-	cachedNetworkInterfaces = { ts: now, data: formatted };
-	return formatted;
+		// Cache with timestamp for 30-second TTL
+		cachedNetworkInterfaces = { ts: now, data: formatted };
+		return formatted;
 	} catch (_error) {
 		// Don't cache errors - allow retry on next call
 		return [];
@@ -399,15 +399,15 @@ export async function getMemoryInfo(): Promise<{
 		const totalMb = bytesToMb(mem.total);
 		const percent = Math.round((usedMb / totalMb) * 100);
 	
-	return {
-		used: usedMb,
-		total: totalMb,
-		percent,
-	};
-} catch (_error) {
+		return {
+			used: usedMb,
+			total: totalMb,
+			percent,
+		};
+	} catch (_error) {
 	// Silently return zero values - caller will handle
-	return { used: 0, total: 0, percent: 0 };
-}
+		return { used: 0, total: 0, percent: 0 };
+	}
 }
 
 /**
@@ -513,18 +513,18 @@ export async function getStorageInfo(): Promise<{
 		
 		if (!targetPartition) {
 			return { used: null, total: null, percent: null };
-	}
+		}
 	
-	return {
-		used: bytesToMb(targetPartition.used),
-		total: bytesToMb(targetPartition.size),
-		// use is already 0-100 from systeminformation, round to integer for display
-		percent: Math.round(targetPartition.use),
-	};
-} catch (_error) {
+		return {
+			used: bytesToMb(targetPartition.used),
+			total: bytesToMb(targetPartition.size),
+			// use is already 0-100 from systeminformation, round to integer for display
+			percent: Math.round(targetPartition.use),
+		};
+	} catch (_error) {
 	// Silently return null values - caller will handle
-	return { used: null, total: null, percent: null };
-}
+		return { used: null, total: null, percent: null };
+	}
 }// ============================================================================
 // SYSTEM INFO
 // ============================================================================
@@ -631,66 +631,66 @@ export async function getTopProcesses(): Promise<ProcessInfo[]> {
 		// This is acceptable trade-off for 1+ second performance gain
 		const processes = await systeminformation.processes();
 		
-	// If systeminformation returns empty, try fallback method
-	if (processes.list.length === 0) {
+		// If systeminformation returns empty, try fallback method
+		if (processes.list.length === 0) {
 		// Silently fallback - debug logging removed
+			return await getTopProcessesFallback();
+		}
+	
+		// CRITICAL: CPU percentages on Linux are per-core (e.g., 400% on 4-core system)
+		// We normalize to per-system percentage for consistent comparison
+		// Note: We're already on Linux here (Windows takes early return above)
+		const cpuCoreCount = await getCpuCores();
+	
+		// GARBAGE-OPTIMIZED: Single pass filter+score+sort without intermediate arrays
+		// Pre-allocate result array to avoid resizing
+		const result: ProcessInfo[] = new Array(10);
+		let resultCount = 0;
+	
+		// Score and collect top 10 in single pass (no intermediate arrays)
+		const scored: Array<{ proc: any; score: number }> = [];
+	
+		for (let i = 0; i < processes.list.length; i++) {
+			const proc = processes.list[i];
+		
+			// Filter kernel threads and empty names inline
+			if (proc.name.startsWith('[') || proc.name === '') continue;
+		
+			// Normalize CPU percentage from per-core to per-system
+			const normalizedCpu = proc.cpu / cpuCoreCount;
+		
+			// Calculate score (CPU 60%, memory 40%) using normalized CPU
+			const score = (normalizedCpu * 0.6) + (proc.mem * 0.4);
+			scored.push({ proc, score });
+		}
+	
+		// Sort scored array in-place (mutates, no new array)
+		scored.sort((a, b) => b.score - a.score);
+	
+		// Take top 10 and format directly into result array
+		const limit = Math.min(10, scored.length);
+		for (let i = 0; i < limit; i++) {
+			const proc = scored[i].proc;
+		
+			// Store normalized CPU (per-system, not per-core)
+			const normalizedCpu = proc.cpu / cpuCoreCount;
+		
+			result[resultCount++] = {
+				pid: proc.pid,
+				name: proc.name,
+				cpu: Math.round(normalizedCpu * 10) / 10,
+				mem: Math.round(proc.mem * 10) / 10,
+			};
+		}
+	
+		// Trim array to actual count (no extra null entries)
+		result.length = resultCount;
+	
+		return result;
+	} catch (_error) {
+	// Silently try fallback method - debug logging removed
 		return await getTopProcessesFallback();
 	}
-	
-	// CRITICAL: CPU percentages on Linux are per-core (e.g., 400% on 4-core system)
-	// We normalize to per-system percentage for consistent comparison
-	// Note: We're already on Linux here (Windows takes early return above)
-	const cpuCoreCount = await getCpuCores();
-	
-	// GARBAGE-OPTIMIZED: Single pass filter+score+sort without intermediate arrays
-	// Pre-allocate result array to avoid resizing
-	const result: ProcessInfo[] = new Array(10);
-	let resultCount = 0;
-	
-	// Score and collect top 10 in single pass (no intermediate arrays)
-	const scored: Array<{ proc: any; score: number }> = [];
-	
-	for (let i = 0; i < processes.list.length; i++) {
-		const proc = processes.list[i];
-		
-		// Filter kernel threads and empty names inline
-		if (proc.name.startsWith('[') || proc.name === '') continue;
-		
-		// Normalize CPU percentage from per-core to per-system
-		const normalizedCpu = proc.cpu / cpuCoreCount;
-		
-		// Calculate score (CPU 60%, memory 40%) using normalized CPU
-		const score = (normalizedCpu * 0.6) + (proc.mem * 0.4);
-		scored.push({ proc, score });
-	}
-	
-	// Sort scored array in-place (mutates, no new array)
-	scored.sort((a, b) => b.score - a.score);
-	
-	// Take top 10 and format directly into result array
-	const limit = Math.min(10, scored.length);
-	for (let i = 0; i < limit; i++) {
-		const proc = scored[i].proc;
-		
-		// Store normalized CPU (per-system, not per-core)
-		const normalizedCpu = proc.cpu / cpuCoreCount;
-		
-		result[resultCount++] = {
-			pid: proc.pid,
-			name: proc.name,
-			cpu: Math.round(normalizedCpu * 10) / 10,
-			mem: Math.round(proc.mem * 10) / 10,
-		};
-	}
-	
-	// Trim array to actual count (no extra null entries)
-	result.length = resultCount;
-	
-	return result;
-} catch (_error) {
-	// Silently try fallback method - debug logging removed
-	return await getTopProcessesFallback();
-}
 }/**
  * Fallback method using ps command directly
  * Used when systeminformation fails to get process list
@@ -717,20 +717,20 @@ async function getTopProcessesFallback(): Promise<ProcessInfo[]> {
 				
 				processes.push({
 					pid,
-				name,
-				cpu: Math.round(cpu * 10) / 10,
-				mem: Math.round(mem * 10) / 10,
-				command,
-			});
+					name,
+					cpu: Math.round(cpu * 10) / 10,
+					mem: Math.round(mem * 10) / 10,
+					command,
+				});
+			}
 		}
-	}
 	
-	// Debug logging removed - processes collected successfully
-	return processes;
-} catch (_error) {
+		// Debug logging removed - processes collected successfully
+		return processes;
+	} catch (_error) {
 	// Silently return empty array - caller will handle
-	return [];
-}
+		return [];
+	}
 }
 
 async function getTopProcessesWindows(): Promise<ProcessInfo[]> {
@@ -856,38 +856,38 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 			return metrics;
 		}
 
-			// Feed all numeric metrics to edge AI for local ML processing
-			const metricsToFeed = [
-				{ metric: 'cpu_usage', value: cpuUsage, unit: '%' },
-				{ metric: 'cpu_temp', value: cpuTemp, unit: '°C' },
-				{ metric: 'cpu_cores', value: cpuCores, unit: 'count' },
-				{ metric: 'memory_usage', value: memoryInfo.used, unit: 'MB' },
-				{ metric: 'memory_total', value: memoryInfo.total, unit: 'MB' },
-				{ metric: 'memory_percent', value: memoryInfo.percent, unit: '%' },
-				{ metric: 'storage_usage', value: storageInfo.used, unit: 'MB' },
-				{ metric: 'storage_total', value: storageInfo.total, unit: 'MB' },
-				{ metric: 'storage_percent', value: storageInfo.percent, unit: '%' },
-				{ metric: 'uptime', value: uptime, unit: 'seconds' },
-			];
+		// Feed all numeric metrics to edge AI for local ML processing
+		const metricsToFeed = [
+			{ metric: 'cpu_usage', value: cpuUsage, unit: '%' },
+			{ metric: 'cpu_temp', value: cpuTemp, unit: '°C' },
+			{ metric: 'cpu_cores', value: cpuCores, unit: 'count' },
+			{ metric: 'memory_usage', value: memoryInfo.used, unit: 'MB' },
+			{ metric: 'memory_total', value: memoryInfo.total, unit: 'MB' },
+			{ metric: 'memory_percent', value: memoryInfo.percent, unit: '%' },
+			{ metric: 'storage_usage', value: storageInfo.used, unit: 'MB' },
+			{ metric: 'storage_total', value: storageInfo.total, unit: 'MB' },
+			{ metric: 'storage_percent', value: storageInfo.percent, unit: '%' },
+			{ metric: 'uptime', value: uptime, unit: 'seconds' },
+		];
 
-			// Process only metrics that are configured for anomaly detection
-			for (const item of metricsToFeed) {
-				const canonicalMetricName = `${deviceUuid}_system_${item.metric}`;
-				if (item.value !== null && item.value !== undefined && anomalyService.isMetricConfigured(canonicalMetricName)) {
-					anomalyService.processDataPoint({
-						source: 'system',
-						protocol: 'system', // Agent system metrics
-						deviceState: 'running',
-						deviceId: 'system-endpoint',
-						metric: canonicalMetricName,
-						value: item.value,
-						unit: item.unit,
-						timestamp,
-						quality: 'GOOD', // System metrics are always high quality
-					});
-				}
+		// Process only metrics that are configured for anomaly detection
+		for (const item of metricsToFeed) {
+			const canonicalMetricName = `${deviceUuid}_system_${item.metric}`;
+			if (item.value !== null && item.value !== undefined && anomalyService.isMetricConfigured(canonicalMetricName)) {
+				anomalyService.processDataPoint({
+					source: 'system',
+					protocol: 'system', // Agent system metrics
+					deviceState: 'running',
+					deviceId: 'system-endpoint',
+					metric: canonicalMetricName,
+					value: item.value,
+					unit: item.unit,
+					timestamp,
+					quality: 'GOOD', // System metrics are always high quality
+				});
 			}
 		}
+	}
 
 	return metrics;
 }

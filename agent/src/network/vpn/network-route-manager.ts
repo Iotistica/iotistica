@@ -37,9 +37,9 @@ export class NetworkRouteManager {
 	}
 
 	/**
-	 * Get the best endpoint for cloud API communication
-	 * Prefers VPN when available, falls back to public internet
-	 */
+	* Get the best endpoint for cloud API communication
+	* Prefers VPN when available, falls back to public internet
+	*/
 	async getEndpoint(config: RouteConfig): Promise<RouteStatus> {
 		const preferVpn = config.preferVpn !== false; // Default to true
 
@@ -96,9 +96,9 @@ export class NetworkRouteManager {
 	}
 
 	/**
-	 * Check if VPN tunnel is available and healthy
-	 * Cached to avoid excessive checks
-	 */
+	* Check if VPN tunnel is available and healthy
+	* Cached to avoid excessive checks
+	*/
 	private async isVpnAvailable(): Promise<boolean> {
 		// Check cache
 		if (this.lastVpnCheck) {
@@ -149,16 +149,16 @@ export class NetworkRouteManager {
 	}
 
 	/**
-	 * Force a fresh VPN status check (bypass cache)
-	 */
+	* Force a fresh VPN status check (bypass cache)
+	*/
 	async refreshVpnStatus(): Promise<boolean> {
 		this.lastVpnCheck = null;
 		return this.isVpnAvailable();
 	}
 
 	/**
-	 * Get detailed route information for debugging
-	 */
+	* Get detailed route information for debugging
+	*/
 	async getRouteInfo(config: RouteConfig): Promise<{
 		status: RouteStatus;
 		vpnStatus: any;

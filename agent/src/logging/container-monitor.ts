@@ -37,17 +37,17 @@ export class ContainerLogMonitor {
 	}
 
 	/**
-	 * Check if a container is already attached
-	 */
+	* Check if a container is already attached
+	*/
 	public isAttached(containerId: string): boolean {
 		const attachment = this.attachments.get(containerId);
 		return attachment?.isAttached ?? false;
 	}
 
 	/**
-	 * Find container ID by service name
-	 * Returns null if container not found
-	 */
+	* Find container ID by service name
+	* Returns null if container not found
+	*/
 	private async findContainerByServiceName(serviceName: string): Promise<string | null> {
 		try {
 			// List all containers (including stopped ones)
@@ -80,8 +80,8 @@ export class ContainerLogMonitor {
 	}
 
 	/**
-	 * Attach to a container's logs
-	 */
+	* Attach to a container's logs
+	*/
 	public async attach(options: LogStreamOptions): Promise<ContainerLogAttachment> {
 		const { containerId, serviceId, serviceName } = options;
 
@@ -201,8 +201,8 @@ export class ContainerLogMonitor {
 	}
 
 	/**
-	 * Detach from a container's logs
-	 */
+	* Detach from a container's logs
+	*/
 	public async detach(containerId: string): Promise<void> {
 		const attachment = this.attachments.get(containerId);
 		if (attachment) {
@@ -211,9 +211,9 @@ export class ContainerLogMonitor {
 	}
 
 	/**
-	 * Schedule reconnection with exponential backoff
-	 * Uses RetryManager to prevent retry storms during mass failures
-	 */
+	* Schedule reconnection with exponential backoff
+	* Uses RetryManager to prevent retry storms during mass failures
+	*/
 	private scheduleReconnection(containerId: string, error: string): void {
 		const options = this.reconnectionOptions.get(containerId);
 		if (!options) {
@@ -271,8 +271,8 @@ export class ContainerLogMonitor {
 	}
 
 	/**
-	 * Attempt to reconnect to a container's log stream
-	 */
+	* Attempt to reconnect to a container's log stream
+	*/
 	private async attemptReconnection(containerId: string): Promise<void> {
 		const options = this.reconnectionOptions.get(containerId);
 		if (!options) {
@@ -355,8 +355,8 @@ export class ContainerLogMonitor {
 	}
 
 	/**
-	 * Detach from all containers
-	 */
+	* Detach from all containers
+	*/
 	public async detachAll(): Promise<void> {
 		const detachPromises = Array.from(this.attachments.values()).map((attachment) =>
 			attachment.detach(),
@@ -365,23 +365,23 @@ export class ContainerLogMonitor {
 	}
 
 	/**
-	 * Get list of attached containers
-	 */
+	* Get list of attached containers
+	*/
 	public getAttachedContainers(): string[] {
 		return Array.from(this.attachments.keys());
 	}
 
 	/**
-	 * Demultiplex Docker log stream
-	 * 
-	 * Docker uses a special format for multiplexed streams:
-	 * [8 bytes header][payload]
-	 * 
-	 * Header format:
-	 * - Byte 0: stream type (0=stdin, 1=stdout, 2=stderr)
-	 * - Bytes 1-3: padding
-	 * - Bytes 4-7: payload size (big-endian uint32)
-	 */
+	* Demultiplex Docker log stream
+	* 
+	* Docker uses a special format for multiplexed streams:
+	* [8 bytes header][payload]
+	* 
+	* Header format:
+	* - Byte 0: stream type (0=stdin, 1=stdout, 2=stderr)
+	* - Bytes 1-3: padding
+	* - Bytes 4-7: payload size (big-endian uint32)
+	*/
 	private demultiplexStream(
 		stream: NodeJS.ReadableStream,
 		containerId: string,
@@ -579,8 +579,8 @@ export class ContainerLogMonitor {
 	}
 
 	/**
-	 * Log a system message
-	 */
+	* Log a system message
+	*/
 	public async logSystemMessage(
 		message: string,
 		level: 'debug' | 'info' | 'warn' | 'error' = 'info',
@@ -600,8 +600,8 @@ export class ContainerLogMonitor {
 	}
 
 	/**
-	 * Log a manager event
-	 */
+	* Log a manager event
+	*/
 	public async logManagerEvent(
 		event: string,
 		details?: Record<string, any>,
@@ -617,13 +617,13 @@ export class ContainerLogMonitor {
 			level,
 			source: {
 				type: 'manager',
-			name: 'container-manager',
-		},
-		isSystem: true,
-	};
+				name: 'container-manager',
+			},
+			isSystem: true,
+		};
 
-	await Promise.all(
-		this.logBackends.map((backend) => backend.log(logMessage)),
-	);
-}
+		await Promise.all(
+			this.logBackends.map((backend) => backend.log(logMessage)),
+		);
+	}
 }

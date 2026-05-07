@@ -220,8 +220,8 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Initialize storage service and start cleanup job
-	 */
+	* Initialize storage service and start cleanup job
+	*/
 	async initialize(): Promise<void> {
 		// Verify tables exist
 		const alertsTableExists = this.hasTable('anomaly_alerts');
@@ -243,9 +243,9 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Store an anomaly alert
-	 * Backward compatible: falls back to old schema if suppression columns don't exist
-	 */
+	* Store an anomaly alert
+	* Backward compatible: falls back to old schema if suppression columns don't exist
+	*/
 	async storeAlert(alert: AnomalyAlert): Promise<void> {
 		try {
 			const expectedRange = Array.isArray(alert.expectedRange)
@@ -313,8 +313,8 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Store statistical baseline for a metric
-	 */
+	* Store statistical baseline for a metric
+	*/
 	async storeBaseline(
 		metric: string,
 		buffer: StatisticalBuffer,
@@ -395,22 +395,22 @@ export class AnomalyStorageService {
 
 			const { sql, values } = this.buildInsertStatement('anomaly_baselines', record, conflictColumns);
 			this.db.prepare(sql).run(...values);
-	} catch (error) {
-		this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
-			component: LogComponents.anomaly,
-			metric,
-			device_id: deviceId,
-			device_state: deviceState,
-			error: error instanceof Error ? error.message : String(error),
-			stack: error instanceof Error ? error.stack : undefined,
-		});
+		} catch (error) {
+			this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
+				component: LogComponents.anomaly,
+				metric,
+				device_id: deviceId,
+				device_state: deviceState,
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack : undefined,
+			});
 		// Don't re-throw - baseline storage failures shouldn't break anomaly detection
+		}
 	}
-}
 
 	/**
-	 * Get recent alerts for a metric
-	 */
+	* Get recent alerts for a metric
+	*/
 	async getRecentAlerts(
 		metric: string,
 		limit: number = 100
@@ -437,8 +437,8 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Get alerts within a time range
-	 */
+	* Get alerts within a time range
+	*/
 	async getAlertsByTimeRange(
 		startTimestamp: number,
 		endTimestamp: number,
@@ -472,9 +472,9 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Check if sufficient baselines exist for warm-up skip logic
-	 * Returns true if baselines exist for at least minCoveragePercent of metrics with minSamples each
-	 */
+	* Check if sufficient baselines exist for warm-up skip logic
+	* Returns true if baselines exist for at least minCoveragePercent of metrics with minSamples each
+	*/
 	async checkBaselineCoverage(
 		metrics: string[],
 		minSamples: number = 30,
@@ -510,7 +510,7 @@ export class AnomalyStorageService {
 					SELECT metric
 					FROM anomaly_baselines
 					WHERE sample_count >= ?
-					  AND ${clause}
+					AND ${clause}
 					GROUP BY metric
 				`)
 				.all(minSamples, ...params) as Array<{ metric: string }>;
@@ -531,9 +531,9 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Get the latest baseline for a metric by metric name only, ignoring device_id and device_state.
-	 * Used by live simulation interceptor to look up baselines using the full canonical metric key.
-	 */
+	* Get the latest baseline for a metric by metric name only, ignoring device_id and device_state.
+	* Used by live simulation interceptor to look up baselines using the full canonical metric key.
+	*/
 	async getBaselineForMetric(
 		metric: string,
 		minimumSamples: number = 10,
@@ -542,11 +542,11 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Get latest baseline for a metric and time slot
-	 * Falls back to overall baseline (-1) if seasonal baseline not found or has insufficient data
-	 * Backward compatible: falls back to old schema if time_slot column doesn't exist
-	 * Automatically retries with pool recovery on timeout
-	 */
+	* Get latest baseline for a metric and time slot
+	* Falls back to overall baseline (-1) if seasonal baseline not found or has insufficient data
+	* Backward compatible: falls back to old schema if time_slot column doesn't exist
+	* Automatically retries with pool recovery on timeout
+	*/
 	async getLatestBaseline(
 		metric: string,
 		timeSlot: number = -1,
@@ -631,8 +631,8 @@ export class AnomalyStorageService {
 
 
 	/**
-	 * Get alert statistics for a metric
-	 */
+	* Get alert statistics for a metric
+	*/
 	async getAlertStats(metric: string, days: number = 7): Promise<{
 		total: number;
 		by_severity: Record<string, number>;
@@ -675,12 +675,12 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Clear baselines for a specific profile (OPTIONAL - for manual cleanup only)
-	 * Normally not needed - profile field automatically filters baselines
-	 * Use only when permanently removing a profile config from system
-	 * @param profile - Profile identifier (e.g., 'Generic', 'COMAP')
-	 * @param metricPattern - Optional metric pattern (e.g., 'modbus_%' for all Modbus metrics)
-	 */
+	* Clear baselines for a specific profile (OPTIONAL - for manual cleanup only)
+	* Normally not needed - profile field automatically filters baselines
+	* Use only when permanently removing a profile config from system
+	* @param profile - Profile identifier (e.g., 'Generic', 'COMAP')
+	* @param metricPattern - Optional metric pattern (e.g., 'modbus_%' for all Modbus metrics)
+	*/
 	async clearBaselinesForProfile(profile: string, metricPattern?: string): Promise<number> {
 		try {
 			const whereParts = ['profile = ?'];
@@ -716,8 +716,8 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Clean up old records based on historyDays configuration
-	 */
+	* Clean up old records based on historyDays configuration
+	*/
 	async cleanup(): Promise<void> {
 		try {
 			const cutoffTimestamp = Date.now() - this.retention * 24 * 60 * 60 * 1000;
@@ -748,8 +748,8 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Start periodic cleanup job
-	 */
+	* Start periodic cleanup job
+	*/
 	private startPeriodicCleanup(): void {
 		// Run cleanup immediately
 		this.cleanup();
@@ -766,8 +766,8 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Stop the storage service and cleanup timers
-	 */
+	* Stop the storage service and cleanup timers
+	*/
 	stop(): void {
 		if (this.cleanupTimer) {
 			(globalThis as any).clearInterval(this.cleanupTimer);
@@ -780,8 +780,8 @@ export class AnomalyStorageService {
 	}
 
 	/**
-	 * Update retention period
-	 */
+	* Update retention period
+	*/
 	updateRetention(days: number): void {
 		this.retention = days;
 		this.logger?.infoSync('Updated anomaly retention period', {

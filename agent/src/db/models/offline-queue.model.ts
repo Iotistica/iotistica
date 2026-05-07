@@ -127,10 +127,10 @@ export class OfflineQueueModel {
 	}
 
 	/**
-	 * Delete all items older than the given cutoff timestamp (ms).
-	 * Returns the number of rows deleted.
-	 * Mirrors EdgeHub CleanupProcessor TTL eviction logic.
-	 */
+	* Delete all items older than the given cutoff timestamp (ms).
+	* Returns the number of rows deleted.
+	* Mirrors EdgeHub CleanupProcessor TTL eviction logic.
+	*/
 	static deleteOlderThan(queueName: string, cutoffMs: number): number {
 		const result = this.getDb()
 			.prepare(`DELETE FROM ${this.table} WHERE queueName = ? AND createdAt < ?`)

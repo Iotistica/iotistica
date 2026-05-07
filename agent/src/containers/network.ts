@@ -194,7 +194,7 @@ class NetworkImpl implements NetworkIface {
 
 	public toDockerConfig(): dockerode.NetworkCreateOptions & {
 		ConfigOnly: boolean;
-	} {
+		} {
 		return {
 			Name: Network.generateDockerName(this.appUuid!, this.name),
 			Driver: this.config.driver,

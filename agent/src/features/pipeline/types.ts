@@ -9,16 +9,16 @@
 
 /** Allowed Node-RED node types for pipeline flows (transformation-safe only). */
 export const PIPELINE_ALLOWED_NODE_TYPES = [
-  'function',
-  'change',
-  'switch',
-  'template',
-  'json',
-  'debug',
-  'comment',
-  'tab',
-  'iotistica-pipeline-in',
-  'iotistica-pipeline-out',
+	'function',
+	'change',
+	'switch',
+	'template',
+	'json',
+	'debug',
+	'comment',
+	'tab',
+	'iotistica-pipeline-in',
+	'iotistica-pipeline-out',
 ] as const;
 
 export type PipelineNodeType = (typeof PIPELINE_ALLOWED_NODE_TYPES)[number];

@@ -39,12 +39,12 @@ export class OfflineQueue<T> {
 	private logger?: AgentLogger;
 	
 	/**
-	 * @param queueName  - Unique name for this queue (used as SQLite partition key)
-	 * @param maxSize    - Maximum items before oldest is evicted (count-based cap)
-	 * @param ttlMs      - Optional TTL in ms. Items older than this are pruned on enqueue
-	 *                     and at flush time. Mirrors EdgeHub CleanupProcessor TTL behaviour.
-	 * @param logger     - Optional structured logger
-	 */
+	* @param queueName  - Unique name for this queue (used as SQLite partition key)
+	* @param maxSize    - Maximum items before oldest is evicted (count-based cap)
+	* @param ttlMs      - Optional TTL in ms. Items older than this are pruned on enqueue
+	*                     and at flush time. Mirrors EdgeHub CleanupProcessor TTL behaviour.
+	* @param logger     - Optional structured logger
+	*/
 	constructor(queueName: string, maxSize: number = 1000, ttlMs?: number, logger?: AgentLogger) {
 		this.queueName = queueName;
 		this.maxSize = maxSize;
@@ -57,8 +57,8 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Initialize queue (create table if needed, load from disk)
-	 */
+	* Initialize queue (create table if needed, load from disk)
+	*/
 	public async init(): Promise<void> {
 		if (this.isInitialized) {
 			return;
@@ -92,8 +92,8 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Add item to queue
-	 */
+	* Add item to queue
+	*/
 	public async enqueue(item: T): Promise<void> {
 		if (!this.isInitialized) {
 			await this.init();
@@ -138,9 +138,9 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Dequeue (remove and return oldest item from queue)
-	 * Returns null if queue is empty
-	 */
+	* Dequeue (remove and return oldest item from queue)
+	* Returns null if queue is empty
+	*/
 	public async dequeue(): Promise<T | null> {
 		if (!this.isInitialized) {
 			await this.init();
@@ -168,9 +168,9 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Flush queue (send all items)
-	 * Returns number of successfully sent items
-	 */
+	* Flush queue (send all items)
+	* Returns number of successfully sent items
+	*/
 	public async flush(
 		sendFn: (item: T) => Promise<void>,
 		options?: { maxRetries?: number; continueOnError?: boolean }
@@ -259,12 +259,12 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Prune items older than ttlMs from both in-memory queue and SQLite.
-	 * Mirrors EdgeHub's CleanupProcessor TTL eviction:
-	 *   - Called automatically on enqueue (when ttlMs is set)
-	 *   - Can also be called explicitly before a flush
-	 * Returns the number of items pruned.
-	 */
+	* Prune items older than ttlMs from both in-memory queue and SQLite.
+	* Mirrors EdgeHub's CleanupProcessor TTL eviction:
+	*   - Called automatically on enqueue (when ttlMs is set)
+	*   - Can also be called explicitly before a flush
+	* Returns the number of items pruned.
+	*/
 	public pruneExpired(ttlMs?: number): number {
 		const effectiveTtl = ttlMs ?? this.ttlMs;
 		if (effectiveTtl === undefined) return 0;
@@ -292,22 +292,22 @@ export class OfflineQueue<T> {
 	}
 
 	/**
-	 * Get queue size
-	 */
+	* Get queue size
+	*/
 	public size(): number {
 		return this.inMemoryQueue.length;
 	}
 	
 	/**
-	 * Check if queue is empty
-	 */
+	* Check if queue is empty
+	*/
 	public isEmpty(): boolean {
 		return this.inMemoryQueue.length === 0;
 	}
 
 	/**
-	 * Get queue statistics from persisted storage.
-	 */
+	* Get queue statistics from persisted storage.
+	*/
 	public async getStats(): Promise<QueueStats> {
 		if (!this.isInitialized) {
 			await this.init();
@@ -330,8 +330,8 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Clear queue
-	 */
+	* Clear queue
+	*/
 	public async clear(): Promise<void> {
 		if (!this.isInitialized) {
 			await this.init();
@@ -348,8 +348,8 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Load queue from disk
-	 */
+	* Load queue from disk
+	*/
 	private async loadFromDisk(): Promise<void> {
 		try {
 			const items = OfflineQueueModel.getPayloads(this.queueName);
@@ -365,8 +365,8 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Remove oldest item from disk
-	 */
+	* Remove oldest item from disk
+	*/
 	private async removeOldestFromDisk(): Promise<void> {
 		const oldest = OfflineQueueModel.getOldest(this.queueName);
 
@@ -376,8 +376,8 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Increment attempts counter for item at index
-	 */
+	* Increment attempts counter for item at index
+	*/
 	private async incrementAttempts(index: number): Promise<void> {
 		const items = this.getRowsOrdered();
 
@@ -387,8 +387,8 @@ export class OfflineQueue<T> {
 	}
 	
 	/**
-	 * Get attempts count for item at index
-	 */
+	* Get attempts count for item at index
+	*/
 	private async getAttempts(index: number): Promise<number> {
 		const items = this.getRowsOrdered();
 		return items[index]?.attempts || 0;

@@ -20,47 +20,47 @@ import { randomBytes } from 'crypto';
  * Message ID generator (singleton per device)
  */
 export class MessageIdGenerator {
-  private deviceUuid: string;
-  private sequence: number = 0;
-  private lastTimestamp: number = 0;
+	private deviceUuid: string;
+	private sequence: number = 0;
+	private lastTimestamp: number = 0;
 
-  constructor(deviceUuid: string) {
-    this.deviceUuid = deviceUuid;
-  }
+	constructor(deviceUuid: string) {
+		this.deviceUuid = deviceUuid;
+	}
 
-  /**
+	/**
    * Generate unique message ID
    * 
    * @returns Message ID string (e.g., "abc123-1705334400000-42-x7k9p")
    */
-  public generate(): string {
-    const now = Date.now();
+	public generate(): string {
+		const now = Date.now();
     
-    // Reset sequence if timestamp changed
-    if (now !== this.lastTimestamp) {
-      this.sequence = 0;
-      this.lastTimestamp = now;
-    } else {
-      this.sequence++;
-    }
+		// Reset sequence if timestamp changed
+		if (now !== this.lastTimestamp) {
+			this.sequence = 0;
+			this.lastTimestamp = now;
+		} else {
+			this.sequence++;
+		}
 
-    // Generate random suffix (5 chars, alphanumeric)
-    const randomSuffix = randomBytes(3)
-      .toString('base64')
-      .replace(/[^a-zA-Z0-9]/g, '')
-      .substring(0, 5)
-      .toLowerCase();
+		// Generate random suffix (5 chars, alphanumeric)
+		const randomSuffix = randomBytes(3)
+			.toString('base64')
+			.replace(/[^a-zA-Z0-9]/g, '')
+			.substring(0, 5)
+			.toLowerCase();
 
-    return `${this.deviceUuid}-${now}-${this.sequence}-${randomSuffix}`;
-  }
+		return `${this.deviceUuid}-${now}-${this.sequence}-${randomSuffix}`;
+	}
 
-  /**
+	/**
    * Reset sequence counter (for testing)
    */
-  public reset(): void {
-    this.sequence = 0;
-    this.lastTimestamp = 0;
-  }
+	public reset(): void {
+		this.sequence = 0;
+		this.lastTimestamp = 0;
+	}
 }
 
 /**
@@ -75,10 +75,10 @@ let globalGenerator: MessageIdGenerator | null = null;
  * @param deviceUuid - Device UUID
  */
 export function initMessageIdGenerator(deviceUuid: string): void {
-  if (globalGenerator && globalGenerator['deviceUuid'] !== deviceUuid) {
-    throw new Error(`Message ID generator already initialized with different device UUID`);
-  }
-  globalGenerator = new MessageIdGenerator(deviceUuid);
+	if (globalGenerator && globalGenerator['deviceUuid'] !== deviceUuid) {
+		throw new Error(`Message ID generator already initialized with different device UUID`);
+	}
+	globalGenerator = new MessageIdGenerator(deviceUuid);
 }
 
 /**
@@ -88,10 +88,10 @@ export function initMessageIdGenerator(deviceUuid: string): void {
  * @throws Error if generator not initialized
  */
 export function generateMessageId(): string {
-  if (!globalGenerator) {
-    throw new Error('Message ID generator not initialized. Call initMessageIdGenerator() first.');
-  }
-  return globalGenerator.generate();
+	if (!globalGenerator) {
+		throw new Error('Message ID generator not initialized. Call initMessageIdGenerator() first.');
+	}
+	return globalGenerator.generate();
 }
 
 /**
@@ -100,5 +100,5 @@ export function generateMessageId(): string {
  * @returns Generator instance or null if not initialized
  */
 export function getMessageIdGenerator(): MessageIdGenerator | null {
-  return globalGenerator;
+	return globalGenerator;
 }
