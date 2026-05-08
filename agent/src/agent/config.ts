@@ -114,7 +114,7 @@ export interface LoggingConfig {
 
 export interface FeatureToggles {
 	enableSensorPublish: boolean;
-	enableDeviceSensorPublish: boolean;
+	enableDevicePublish: boolean;
 	enableAnomalyDetection: boolean;
 	enableDeviceJobs: boolean;
 	enableDeviceRemoteAccess: boolean;
@@ -124,7 +124,7 @@ export interface IntervalConfig {
 	discoveryFullIntervalMs?: number;
 	discoveryLightIntervalMs?: number;
 	targetStatePollIntervalMs?: number;
-	deviceReportIntervalMs?: number;
+	reportIntervalMs?: number;
 	metricsIntervalMs?: number;
 	reconciliationIntervalMs?: number;
 }
@@ -137,10 +137,6 @@ interface ConfigManagerEvents {
 	"features-changed": (change: { old: any; new: any }) => void;
 	"anomaly-config-changed": (change: { old: any; new: any }) => void;
 	"restart-discovery-timers": (intervals: IntervalConfig) => void;
-	"schedule-restart": (config: {
-		restartTimeMs: number;
-		restartConfig: any;
-	}) => void;
 	"endpoints-reload-required": (data: {
 		changeType: { added: any[]; removed: any[]; modified: any[] };
 		endpoints: any[];
@@ -158,7 +154,6 @@ export class ConfigManager extends EventEmitter {
 	private cloudSync?: CloudSync;
 	private discoveryLightTimer?: NodeJS.Timeout;
 	private discoveryFullTimer?: NodeJS.Timeout;
-	private scheduledRestartTimer?: NodeJS.Timeout;
 	private discoveryService?: DiscoveryService;
 
 	constructor(logger?: AgentLogger) {
@@ -620,11 +615,11 @@ export class ConfigManager extends EventEmitter {
 	public getFeatures(): FeatureToggles {
 		const cloud = this.targetConfig.features;
 		const sensorPublishEnabled =
-			cloud?.enableDeviceSensorPublish ?? cloud?.enableSensorPublish ?? false;
+			cloud?.enableDevicePublish ?? cloud?.enableDevicePublish ?? false;
 
 		return {
 			enableSensorPublish: sensorPublishEnabled,
-			enableDeviceSensorPublish: sensorPublishEnabled,
+			enableDevicePublish: sensorPublishEnabled,
 			enableAnomalyDetection: cloud?.enableAnomalyDetection ?? false,
 			enableDeviceJobs: cloud?.enableDeviceJobs ?? true,
 			enableDeviceRemoteAccess: cloud?.enableDeviceRemoteAccess ?? true,
@@ -636,7 +631,7 @@ export class ConfigManager extends EventEmitter {
 	 */
 	public getIntervalConfig(): IntervalConfig {
 		const cloud = this.targetConfig.intervals;
-		const cloudDevice = (cloud)?.device;
+		const cloudAgent = (cloud as any)?.agent;
 		const cloudDiscovery = (cloud)?.discovery;
 
 		return {
@@ -649,19 +644,18 @@ export class ConfigManager extends EventEmitter {
 				(cloud)?.discoveryLightIntervalMs ??
 				14400000,
 			targetStatePollIntervalMs:
-				cloudDevice?.targetStatePollIntervalMs ??
+				cloudAgent?.targetStatePollIntervalMs ??
 				(cloud)?.targetStatePollIntervalMs ??
 				60000,
-			deviceReportIntervalMs:
-				cloudDevice?.reportIntervalMs ??
-				(cloud)?.deviceReportIntervalMs ??
+			reportIntervalMs:
+				cloudAgent?.reportIntervalMs ??
 				60000,
 			metricsIntervalMs:
-				cloudDevice?.metricsIntervalMs ??
+				cloudAgent?.metricsIntervalMs ??
 				(cloud)?.metricsIntervalMs ??
 				300000,
 			reconciliationIntervalMs:
-				cloudDevice?.reconciliationIntervalMs ??
+				cloudAgent?.reconciliationIntervalMs ??
 				(cloud)?.reconciliationIntervalMs ??
 				30000,
 		};
@@ -1881,7 +1875,7 @@ export class ConfigManager extends EventEmitter {
 				{
 					component: LogComponents.configManager,
 					oldIntervalMs:
-						change.old?.device?.reconciliationIntervalMs ||
+						change.old?.agent?.reconciliationIntervalMs ||
 						change.old?.reconciliationIntervalMs,
 					newIntervalMs: intervals.reconciliationIntervalMs,
 					intervalMinutes: intervals.reconciliationIntervalMs! / 60000,
@@ -1892,14 +1886,14 @@ export class ConfigManager extends EventEmitter {
 		if (this.cloudSync) {
 			this.cloudSync.updateIntervals({
 				pollInterval: intervals.targetStatePollIntervalMs!,
-				reportInterval: intervals.deviceReportIntervalMs!,
+				reportInterval: intervals.reportIntervalMs!,
 				metricsInterval: intervals.metricsIntervalMs!,
 			});
 
 			this.logger?.infoSync("CloudSync intervals updated from cloud", {
 				component: LogComponents.configManager,
 				pollIntervalMs: intervals.targetStatePollIntervalMs,
-				reportIntervalMs: intervals.deviceReportIntervalMs,
+				reportIntervalMs: intervals.reportIntervalMs,
 				metricsIntervalMs: intervals.metricsIntervalMs,
 			});
 		}
@@ -1937,57 +1931,6 @@ export class ConfigManager extends EventEmitter {
 				});
 			},
 		);
-	}
-
-	/**
-	 * Handle scheduled restart configuration changes
-	 */
-	public handleScheduledRestartConfig(change: { old: any; new: any }): void {
-		const restartConfig = change.new;
-
-		if (this.scheduledRestartTimer) {
-			clearTimeout(this.scheduledRestartTimer);
-			this.scheduledRestartTimer = undefined;
-			this.logger?.infoSync("Cleared existing scheduled restart timer", {
-				component: LogComponents.configManager,
-			});
-		}
-
-		if (!restartConfig?.enabled) {
-			this.logger?.debugSync("Scheduled restart disabled or not configured", {
-				component: LogComponents.configManager,
-				config: restartConfig || "not set",
-			});
-			return;
-		}
-
-		const intervalDays = parseInt(restartConfig.intervalDays, 10);
-		if (isNaN(intervalDays) || intervalDays < 1 || intervalDays > 90) {
-			this.logger?.warnSync(
-				"Invalid scheduled restart intervalDays, must be 1-90",
-				{
-					component: LogComponents.configManager,
-					providedValue: restartConfig.intervalDays,
-					using: "disabled",
-				},
-			);
-			return;
-		}
-
-		const restartTimeMs = intervalDays * 24 * 60 * 60 * 1000;
-		const restartAt = new Date(Date.now() + restartTimeMs);
-
-		this.logger?.infoSync("Scheduled restart configured from cloud", {
-			component: LogComponents.configManager,
-			enabled: true,
-			intervalDays,
-			restartAtISO: restartAt.toISOString(),
-			restartAtLocal: restartAt.toLocaleString(),
-			reason: restartConfig.reason || "heap_fragmentation_cleanup",
-			configSource: "cloud_target_state",
-		});
-
-		this.emit("schedule-restart", { restartTimeMs, restartConfig });
 	}
 
 	/**

@@ -67,7 +67,7 @@ export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
 		{
 			cloudApiEndpoint,
 			pollInterval: intervals.targetStatePollIntervalMs!,
-			reportInterval: intervals.deviceReportIntervalMs!,
+			reportInterval: intervals.reportIntervalMs!,
 			metricsInterval: intervals.metricsIntervalMs!,
 		},
 		ctx.agentLogger,

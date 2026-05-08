@@ -90,18 +90,12 @@ export interface FeaturesConfig {
   enableDeviceJobs: boolean;
   enableAnomalyDetection: boolean;
   enableDeviceRemoteAccess: boolean;
-  enableDeviceSensorPublish: boolean;
+  enableDevicePublish: boolean;
 }
 
 // ============================================================================
 // Runtime
 // ============================================================================
-
-export interface ScheduledRestart {
-  reason: string;
-  enabled: boolean;
-  intervalDays: number;
-}
 
 export interface MemoryConfig {
   thresholdMb: number;
@@ -109,7 +103,6 @@ export interface MemoryConfig {
 }
 
 export interface RuntimeConfig {
-  scheduledRestart: ScheduledRestart;
   memory: MemoryConfig;
 }
 
@@ -143,7 +136,7 @@ export interface DiscoveryIntervalsConfig {
 }
 
 export interface IntervalsConfig {
-  device: DeviceIntervalsConfig;
+  agent: DeviceIntervalsConfig;
   discovery: DiscoveryIntervalsConfig;
 }
 

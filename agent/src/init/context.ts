@@ -31,6 +31,5 @@ export interface AgentInitContext {
 	simulationOrchestrator?: any;
 	discoveryService?: DiscoveryService;
 	dictionaryManager?: any;
-	scheduledRestartTimer?: NodeJS.Timeout;
 	sensorConnection?: MqttConnection;
 }

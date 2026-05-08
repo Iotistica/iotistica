@@ -393,13 +393,6 @@ export interface TargetState {
 			memoryCheckIntervalMs?: number;
 			memoryThresholdMb?: number;
 			
-			// Scheduled restart configuration
-			scheduledRestart?: {
-				enabled?: boolean;
-				intervalDays?: number;
-				reason?: string;
-			};
-			
 			// Logging settings
 			logMaxAge?: number;
 			maxLogFileSize?: number;
@@ -409,7 +402,7 @@ export interface TargetState {
 			enableDeviceJobs?: boolean;
 			enableAnomalyDetection?: boolean;
 			enableDeviceRemoteAccess?: boolean;
-			enableDeviceSensorPublish?: boolean;
+			enableDevicePublish?: boolean;
 
 			// Legacy aliases (backward compatibility)
 			enableSensorPublish?: boolean;

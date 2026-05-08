@@ -40,7 +40,6 @@ interface StateReconcilerEvents {
 	'logging-config-changed': (change: { old: any; new: any }) => void;
 	'intervals-changed': (change: { old: any; new: any }) => void;
 	'memory-config-changed': (change: { old: any; new: any }) => void;
-	'scheduled-restart-changed': (change: { old: any; new: any }) => void;
 	'endpoints-changed': (change: { old: any; new: any }) => void;
 	'features-changed': (change: { old: any; new: any }) => void;
 	'anomaly-config-changed': (change: { old: any; new: any }) => void;
@@ -112,10 +111,6 @@ export class StateManager extends EventEmitter {
 		
 		this.on('memory-config-changed', (change) => {
 			this.configManager.handleMemoryConfigChanges(change);
-		});
-		
-		this.on('scheduled-restart-changed', (change) => {
-			this.configManager.handleScheduledRestartConfig(change);
 		});
 
 		this.on('endpoints-changed', (change) => {
@@ -707,18 +702,6 @@ export class StateManager extends EventEmitter {
 			this.emit('memory-config-changed', {
 				old: oldMemoryConfig,
 				new: newMemoryConfig,
-			});
-		}
-
-		// Check scheduled restart changes
-		if (!deepEqual(oldConfig.settings?.scheduledRestart, newConfig.settings?.scheduledRestart)) {
-			this.logger?.debugSync('Scheduled restart configuration changed', {
-				component: LogComponents.stateReconciler,
-				operation: 'emitConfigChangeEvents',
-			});
-			this.emit('scheduled-restart-changed', {
-				old: oldConfig.settings?.scheduledRestart,
-				new: newConfig.settings?.scheduledRestart,
 			});
 		}
 

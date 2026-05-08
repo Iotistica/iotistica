@@ -40,21 +40,16 @@ const DEFAULT_SETTINGS = {
     memory: {
       thresholdMb: 30,
       checkIntervalMs: 30000
-    },
-    scheduledRestart: {
-      reason: "heap_fragmentation_cleanup",
-      enabled: true,
-      intervalDays: 7
     }
   },
   features: {
     enableDeviceJobs: false,
     enableAnomalyDetection: false,
     enableDeviceRemoteAccess: true,
-    enableDeviceSensorPublish: true
+    enableDevicePublish: true
   },
   intervals: {
-    device: {
+    agent: {
       reportIntervalMs: 60000,
       metricsIntervalMs: 60000,
       reconciliationIntervalMs: 30000,
@@ -129,12 +124,11 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
     ...pendingConfig,
     logging: { ...DEFAULT_SETTINGS.logging, ...pendingConfig.logging },
     runtime: {
-      memory: { ...DEFAULT_SETTINGS.runtime.memory, ...pendingConfig.runtime?.memory },
-      scheduledRestart: { ...DEFAULT_SETTINGS.runtime.scheduledRestart, ...pendingConfig.runtime?.scheduledRestart }
+      memory: { ...DEFAULT_SETTINGS.runtime.memory, ...pendingConfig.runtime?.memory }
     },
     features: { ...DEFAULT_SETTINGS.features, ...pendingConfig.features },
     intervals: {
-      device: { ...DEFAULT_SETTINGS.intervals.device, ...pendingConfig.intervals?.device },
+      agent: { ...DEFAULT_SETTINGS.intervals.agent, ...pendingConfig.intervals?.agent },
       discovery: { ...DEFAULT_SETTINGS.intervals.discovery, ...pendingConfig.intervals?.discovery }
     },
     anomalyDetection: { ...DEFAULT_SETTINGS.anomalyDetection, ...pendingConfig.anomalyDetection }
@@ -402,7 +396,7 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
               <Zap className="h-5 w-5" />
               Runtime & Performance
             </CardTitle>
-            <CardDescription>Memory management and scheduled restarts</CardDescription>
+            <CardDescription>Memory management settings</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-4">
@@ -427,40 +421,6 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
                   />
                 </div>
               </div>
-            </div>
-
-            <div className="space-y-4 pt-4 border-t border-border">
-              <h3 className="text-sm font-semibold text-foreground">Scheduled Restart</h3>
-              <FeatureToggle
-                label="Enable Scheduled Restart"
-                description="Automatically restart agent to prevent memory fragmentation"
-                enabled={settings.runtime.scheduledRestart.enabled}
-                onToggle={() => updateSetting('runtime.scheduledRestart.enabled', !settings.runtime.scheduledRestart.enabled)}
-              />
-              {settings.runtime.scheduledRestart.enabled && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 ml-4">
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-2 block">Interval (days)</label>
-                    <input
-                      type="number"
-                      value={settings.runtime.scheduledRestart.intervalDays}
-                      onChange={(e) => updateSetting('runtime.scheduledRestart.intervalDays', parseInt(e.target.value))}
-                      className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
-                      min={1}
-                      max={30}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-2 block">Reason</label>
-                    <input
-                      type="text"
-                      value={settings.runtime.scheduledRestart.reason}
-                      onChange={(e) => updateSetting('runtime.scheduledRestart.reason', e.target.value)}
-                      className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           </CardContent>
         </Card>
@@ -496,8 +456,8 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
             <FeatureToggle
               label="Sensor Publishing"
               description="Automatically publish sensor data to MQTT broker"
-              enabled={settings.features.enableDeviceSensorPublish}
-              onToggle={() => updateSetting('features.enableDeviceSensorPublish', !settings.features.enableDeviceSensorPublish)}
+              enabled={settings.features.enableDevicePublish}
+              onToggle={() => updateSetting('features.enableDevicePublish', !settings.features.enableDevicePublish)}
             />
           </CardContent>
         </Card>
@@ -519,8 +479,8 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Report Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.device.reportIntervalMs}
-                    onChange={(e) => updateSetting('intervals.device.reportIntervalMs', parseInt(e.target.value))}
+                    value={settings.intervals.agent.reportIntervalMs}
+                    onChange={(e) => updateSetting('intervals.agent.reportIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
                 </div>
@@ -528,8 +488,8 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Metrics Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.device.metricsIntervalMs}
-                    onChange={(e) => updateSetting('intervals.device.metricsIntervalMs', parseInt(e.target.value))}
+                    value={settings.intervals.agent.metricsIntervalMs}
+                    onChange={(e) => updateSetting('intervals.agent.metricsIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
                 </div>
@@ -537,8 +497,8 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Reconciliation Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.device.reconciliationIntervalMs}
-                    onChange={(e) => updateSetting('intervals.device.reconciliationIntervalMs', parseInt(e.target.value))}
+                    value={settings.intervals.agent.reconciliationIntervalMs}
+                    onChange={(e) => updateSetting('intervals.agent.reconciliationIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
                 </div>
@@ -546,8 +506,8 @@ export default function DeviceSettingsPage({ deviceUuid }: Props) {
                   <label className="text-sm font-medium text-foreground mb-2 block">Target State Poll Interval (ms)</label>
                   <input
                     type="number"
-                    value={settings.intervals.device.targetStatePollIntervalMs}
-                    onChange={(e) => updateSetting('intervals.device.targetStatePollIntervalMs', parseInt(e.target.value))}
+                    value={settings.intervals.agent.targetStatePollIntervalMs}
+                    onChange={(e) => updateSetting('intervals.agent.targetStatePollIntervalMs', parseInt(e.target.value))}
                     className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background text-foreground"
                   />
                 </div>

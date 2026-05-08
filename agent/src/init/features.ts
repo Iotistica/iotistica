@@ -157,12 +157,12 @@ export class FeatureInitializer {
 
 	private isDevicePublishEnabled(): boolean {
 		const dynamicFeatures = this.context.stateReconciler?.getConfigManager?.().getFeatures?.();
-		if (dynamicFeatures && typeof dynamicFeatures.enableDeviceSensorPublish === 'boolean') {
-			return dynamicFeatures.enableDeviceSensorPublish;
+		if (dynamicFeatures && typeof dynamicFeatures.enableDevicePublish === 'boolean') {
+			return dynamicFeatures.enableDevicePublish;
 		}
 
-		return this.context.configFeatures?.enableDeviceSensorPublish
-      ?? this.context.configFeatures?.enableSensorPublish
+		return this.context.configFeatures?.enableDevicePublish
+      ?? this.context.configFeatures?.enableDevicePublish
       ?? false;
 	}
 
@@ -274,7 +274,7 @@ export class FeatureInitializer {
 				// Dynamic runtime disable — log at INFO so operators know it was explicitly turned off
 				logger.infoSync('Device Publish Feature disabled by feature toggle', {
 					component: LogComponents.agent,
-					enableDeviceSensorPublish: devicePublishEnabled,
+					enableDevicePublish: devicePublishEnabled,
 				});
 			} else {
 				// Feature is disabled in local state before cloud sync has delivered the real
@@ -282,7 +282,7 @@ export class FeatureInitializer {
 				// Log at DEBUG only to avoid misleading the operator.
 				logger.debugSync('Device Publish Feature skipped (disabled in current state, pending cloud sync)', {
 					component: LogComponents.agent,
-					enableDeviceSensorPublish: devicePublishEnabled,
+					enableDevicePublish: devicePublishEnabled,
 				});
 			}
 			return;

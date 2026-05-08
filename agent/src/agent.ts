@@ -70,8 +70,6 @@ export default class Agent {
 
 	// System settings (config-driven with env var defaults)
 	// Note: All settings now accessed via configManager getters (intervals, endpoints, ports, etc.)
-	// Scheduled restart timer (controlled from cloud config)
-	private scheduledRestartTimer?: NodeJS.Timeout;
 	private memoryLeakSimulationTimer?: NodeJS.Timeout;
 	private lastOperationalFailureKey?: string;
 	private lastOperationalFailureLogAt = 0;
@@ -134,7 +132,6 @@ export default class Agent {
 			simulationOrchestrator: this.simulationOrchestrator,
 			discoveryService: this.discoveryService,
 			dictionaryManager: this.dictionaryManager,
-			scheduledRestartTimer: this.scheduledRestartTimer,
 		};
 
 		await this.lifecycle.transition(AgentState.INIT, async () => {
@@ -204,7 +201,6 @@ export default class Agent {
 		this.simulationOrchestrator = ctx.simulationOrchestrator;
 		this.discoveryService = ctx.discoveryService;
 		this.dictionaryManager = ctx.dictionaryManager;
-		this.scheduledRestartTimer = ctx.scheduledRestartTimer;
 	}
 
 	private async startServices(): Promise<void> {
@@ -461,14 +457,7 @@ export default class Agent {
 
 			// Runtime-only services are stopped by lifecycle RUNNING exit hooks
 
-			if (this.scheduledRestartTimer) {
-				clearTimeout(this.scheduledRestartTimer);
-				this.scheduledRestartTimer = undefined;
-				this.agentLogger?.infoSync("Scheduled restart timer cleared", {
-					component: LogComponents.agent,
-				});
-			}
-      
+			
 			await this.safeStopSubsystem('Discovery service', !!this.discoveryService, async () => {
 				try {
 					this.discoveryService?.stopPeriodicDiscovery();
@@ -594,14 +583,7 @@ export default class Agent {
 
 			// Runtime-only services are stopped by lifecycle RUNNING exit hooks
 
-			if (this.scheduledRestartTimer) {
-				clearTimeout(this.scheduledRestartTimer);
-				this.scheduledRestartTimer = undefined;
-				this.agentLogger?.infoSync('Scheduled restart timer cleared', {
-					component: LogComponents.agent,
-				});
-			}
-      
+			
 			await this.safeStopSubsystem('Discovery service', !!this.discoveryService, async () => {
 				try {
 					this.discoveryService?.stopPeriodicDiscovery();

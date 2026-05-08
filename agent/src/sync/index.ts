@@ -133,7 +133,7 @@ export class CloudSync extends EventEmitter {
 			if (intervals) {
 				this.updateIntervals({
 					pollInterval: intervals.targetStatePollIntervalMs || this.config.pollInterval,
-					reportInterval: intervals.deviceReportIntervalMs || this.config.reportInterval,
+					reportInterval: intervals.reportIntervalMs || this.config.reportInterval,
 					metricsInterval: intervals.metricsIntervalMs || this.config.metricsInterval,
 				});
 			}

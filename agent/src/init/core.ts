@@ -48,8 +48,8 @@ export function setupConfigEventListeners(ctx: AgentInitContext): void {
 			}
 		}
 
-		if (change.old.enableDeviceSensorPublish !== change.new.enableDeviceSensorPublish) {
-			if (!change.new.enableDeviceSensorPublish) {
+		if (change.old.enableDevicePublish !== change.new.enableDevicePublish) {
+			if (!change.new.enableDevicePublish) {
 				logger?.infoSync('Stopping Device Publish Feature (dynamically disabled)', {
 					component: LogComponents.agent
 				});
@@ -138,36 +138,5 @@ export function setupConfigEventListeners(ctx: AgentInitContext): void {
 
 	ctx.configManager?.on('restart-discovery-timers', () => {
 		ctx.discoveryService?.startPeriodicDiscovery();
-	});
-
-	ctx.configManager?.on('schedule-restart', ({ restartTimeMs, restartConfig }: any) => {
-		const logger = ctx.agentLogger;
-		ctx.scheduledRestartTimer = setTimeout(async () => {
-			logger?.infoSync('Initiating scheduled restart', {
-				component: LogComponents.agent,
-				trigger: 'scheduled_timer',
-				reason: restartConfig.reason || 'heap_fragmentation_cleanup',
-				memoryUsage: process.memoryUsage(),
-				timestamp: new Date().toISOString()
-			});
-
-			try {
-				await ctx.agent.stop();
-				logger?.infoSync('Graceful shutdown complete, exiting for restart', {
-					component: LogComponents.agent,
-					exitCode: 0
-				});
-				process.exit(0);
-			} catch (error) {
-				logger?.errorSync(
-					'Error during scheduled restart shutdown',
-					error instanceof Error ? error : new Error(String(error)),
-					{ component: LogComponents.agent, action: 'forcing_exit' }
-				);
-				process.exit(1);
-			}
-		}, restartTimeMs);
-
-		ctx.scheduledRestartTimer.unref();
 	});
 }

@@ -1,0 +1,106 @@
+{
+  "agent": {
+    "version": "1.0.505"
+  },
+  "logging": {
+    "level": "debug",
+    "maxLogs": 10000,
+    "logMaxAge": 86400000,
+    "maxLogFileSize": 52428800,
+    "enableCompression": true,
+    "enableRemoteLogging": true,
+    "enableFilePersistence": false
+  },
+  "runtime": {
+    "memory": {
+      "thresholdMb": 30,
+      "checkIntervalMs": 30000
+    }
+  },
+  "features": {
+    "enableDeviceJobs": false,
+    "enableDevicePublish": true,
+    "enableAnomalyDetection": false,
+    "enableDeviceRemoteAccess": true
+  },
+  "endpoints": [],
+  "intervals": {
+    "agent": {
+      "reportIntervalMs": 60000,
+      "metricsIntervalMs": 60000,
+      "reconciliationIntervalMs": 30000,
+      "targetStatePollIntervalMs": 60000
+    },
+    "discovery": {
+      "fullIntervalMs": 86400000,
+      "lightIntervalMs": 14400000
+    }
+  },
+  "anomalyDetection": {
+    "alerts": {
+      "cooldownMs": 300000,
+      "maxQueueSize": 1000,
+      "minConfidence": 0.7
+    },
+    "enabled": true,
+    "metrics": [
+      {
+        "name": "cpu_usage",
+        "enabled": true,
+        "methods": [
+          "zscore",
+          "ewma"
+        ],
+        "threshold": 3,
+        "windowSize": 100,
+        "expectedRange": [
+          0,
+          85
+        ]
+      },
+      {
+        "name": "memory_percent",
+        "enabled": true,
+        "methods": [
+          "zscore",
+          "ewma",
+          "rate_change"
+        ],
+        "threshold": 3,
+        "windowSize": 200,
+        "expectedRange": [
+          0,
+          85
+        ]
+      },
+      {
+        "name": "cpu_temp",
+        "enabled": true,
+        "methods": [
+          "zscore",
+          "mad"
+        ],
+        "threshold": 3,
+        "windowSize": 300,
+        "expectedRange": [
+          30,
+          80
+        ]
+      }
+    ],
+    "storage": {
+      "retention": 30,
+      "minSamples": 5
+    },
+    "defaults": {
+      "methods": [
+        "mad"
+      ],
+      "threshold": 3,
+      "minSamples": 5,
+      "windowSize": 120
+    },
+    "sensitivity": 5,
+    "warmupPeriodMs": 900000
+  }
+}

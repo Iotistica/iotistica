@@ -148,21 +148,16 @@ export function generateDefaultTargetStateConfig(
       enableDeviceJobs: false,
       enableAnomalyDetection: false,
       enableDeviceRemoteAccess: true,
-      enableDeviceSensorPublish: true,
+      enableDevicePublish: true,
     },
     runtime: {
-      scheduledRestart: {
-        reason: 'heap_fragmentation_cleanup',
-        enabled: false,
-        intervalDays: 7,
-      },
       memory: {
         thresholdMb: 30,
         checkIntervalMs: 30000,  // 30 seconds
       },
     },
     intervals: {
-      device: {
+      agent: {
         metricsIntervalMs: 60000,  // 60 seconds
         reportIntervalMs: 60000,  // 60 seconds
         reconciliationIntervalMs: 30000,  // 30 seconds
