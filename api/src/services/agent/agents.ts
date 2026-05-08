@@ -497,9 +497,33 @@ export class AgentCurrentStateModel {
 
     const configJson = config !== undefined && config !== null ? JSON.stringify(config) : null;
 
+    if (configJson === null) {
+      const targetConfigCheck = await query<{ config: any }>(
+        `SELECT config FROM agent_target_state WHERE agent_uuid = $1`,
+        [deviceUuid]
+      );
+
+      const targetConfig = targetConfigCheck.rows[0]?.config;
+      if (targetConfig === undefined || targetConfig === null) {
+        throw new Error(
+          `Missing target-state config for ${deviceUuid}; cannot persist current state without config payload`
+        );
+      }
+    }
+
     const result = await query<AgentCurrentState>(
       `INSERT INTO agent_current_state (agent_uuid, apps, config, system_info, version, reported_at)
-       VALUES ($1, $2, COALESCE($3::jsonb, '{}'::jsonb), $4, $5, CURRENT_TIMESTAMP)
+       VALUES (
+         $1,
+         $2,
+         COALESCE(
+           $3::jsonb,
+           (SELECT ats.config FROM agent_target_state ats WHERE ats.agent_uuid = $1)
+         ),
+         $4,
+         $5,
+         CURRENT_TIMESTAMP
+       )
        ON CONFLICT (agent_uuid) DO UPDATE SET
          apps = $2,
          config = CASE WHEN $3 IS NOT NULL THEN $3::jsonb ELSE agent_current_state.config END,

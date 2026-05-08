@@ -20,6 +20,7 @@ export interface StateReporterDeps {
 	stateManager: StateManager;
 	transport: CloudTransport;
 	connectionMonitor: ConnectionMonitor;
+	getTargetVersion: () => number;
 	getAgentInfo: () => {
 		uuid: string;
 		apiKey?: string;
@@ -350,9 +351,15 @@ export class StateReporter {
 		const devicesHash = calculateHash(devicesForReport);
 		const devicesChanged = devicesHash !== this.lastDevicesHash;
 
-		const effectiveVersion = Number.isFinite((this.deps as any).currentVersion) && (this.deps as any).currentVersion >= 1
-			? Math.floor((this.deps as any).currentVersion)
+		const polledVersion = this.deps.getTargetVersion();
+		const effectiveVersion = Number.isFinite(polledVersion) && polledVersion >= 1
+			? Math.floor(polledVersion)
 			: 1;
+
+		const shouldIncludeConfig =
+			configChanged ||
+			this.lastConfigHash === undefined ||
+			this.forceNextReport;
 
 		// Build full report (may include metrics, health, etc.)
 		const stateReport: AgentStateReport = {
@@ -363,9 +370,11 @@ export class StateReporter {
 			},
 		};
 
-		stateReport[agentInfo.uuid].config = runtimeConfig;
+		if (shouldIncludeConfig) {
+			stateReport[agentInfo.uuid].config = runtimeConfig;
+		}
 
-		if (configChanged) {
+		if (configChanged || this.lastConfigHash === undefined) {
 			this.deps.logger?.infoSync('Devices config changed - including in report', {
 				component: LogComponents.cloudSync,
 				operation: 'config-change-detected',

@@ -54,6 +54,10 @@ export interface CloudSyncConfig {
 	apiTimeout?: number;      // Default: 30000ms (30s)
 }
 
+export interface CurrentStateVersionSource {
+	getCurrentVersion(): number;
+}
+
 export interface TargetStateResponse {
 	[deviceUuid: string]: {
 		apps: { [appId: string]: any };

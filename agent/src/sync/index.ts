@@ -146,6 +146,7 @@ export class CloudSync extends EventEmitter {
 			stateManager,
 			transport: this.transport,
 			connectionMonitor: this.connectionMonitor,
+			getTargetVersion: () => this.poller.getCurrentVersion(),
 			getAgentInfo: () => this.deviceManager.getAgentInfo(),
 			getConfig: () => ({
 				reportInterval: this.config.reportInterval,
