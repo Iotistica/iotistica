@@ -1,4 +1,4 @@
-name: Build Yocto Linux Image
+name: Build Yocto Linux Iotistica Image
 
 on:
   workflow_dispatch:
