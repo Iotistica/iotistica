@@ -16,6 +16,15 @@ export class DeploymentWorker {
   private isRunning = false;
 
   /**
+   * Local mode (GitOps disabled) should bypass Argo CD sync and monitor jobs.
+   */
+  private shouldBypassArgo(): boolean {
+    const gitOpsEnabled = process.env.GITOPS_ENABLED === 'true';
+
+    return !gitOpsEnabled;
+  }
+
+  /**
    * Start the worker
    */
   async start() {
@@ -258,20 +267,18 @@ export class DeploymentWorker {
         console.log('📊 Progress: 60% - GitOps deployment complete');
         await job.progress(60);
 
-        // Deploy job ends here (60%) - monitoring job handles 60 → 100%
+        // Deploy job ends here (60%) - monitoring job handles 60 -> 100% in k8s mode
         const instanceUrl = `https://client-${clientId}.${domain || process.env.CLIENT_BASE_DOMAIN || 'iotistica.com'}`;
-        console.log('\n🔄 Updating customer status to: argo_syncing');
-        await CustomerModel.updateDeploymentStatus(customerId, 'argo_syncing', {
-          instanceNamespace: clientNamespace,
-          instanceUrl,
-        });
 
-        // Enqueue Argo CD monitoring job (runs separately, can take 8-15 min)
-        const skipArgoCheck = process.env.SKIP_ARGOCD_STATUS_CHECK === 'true';
+        // Enqueue Argo CD monitoring job only when running k8s/Argo flow.
+        const skipArgoCheck = this.shouldBypassArgo();
         
         if (skipArgoCheck) {
-          console.log('\n⏭️  Skipping Argo CD monitoring (SKIP_ARGOCD_STATUS_CHECK=true)');
-          logger.info('Skipping Argo CD monitoring (SKIP_ARGOCD_STATUS_CHECK=true)', { clientId });
+          console.log(`\n⏭️  Skipping Argo CD stage (gitops=${process.env.GITOPS_ENABLED === 'true'})`);
+          logger.info('Skipping Argo CD stage for deployment flow', {
+            clientId,
+            gitOpsEnabled: process.env.GITOPS_ENABLED === 'true',
+          });
           
           // Mark as ready immediately
           await CustomerModel.updateDeploymentStatus(customerId, 'ready', {
@@ -280,6 +287,12 @@ export class DeploymentWorker {
             deploymentError: '',
           });
         } else {
+          console.log('\n🔄 Updating customer status to: argo_syncing');
+          await CustomerModel.updateDeploymentStatus(customerId, 'argo_syncing', {
+            instanceNamespace: clientNamespace,
+            instanceUrl,
+          });
+
           console.log('\n📋 Enqueueing Argo CD monitoring job...');
           await deploymentQueue.addMonitorArgoJob({
             customerId,
@@ -499,11 +512,14 @@ export class DeploymentWorker {
 
         await job.progress(60);
 
-        // Wait for Argo CD to sync changes (optional)
-        const skipArgoCheck = process.env.SKIP_ARGOCD_STATUS_CHECK === 'true';
+        // Wait for Argo CD to sync changes only when k8s/Argo flow is enabled.
+          const skipArgoCheck = this.shouldBypassArgo();
         
         if (skipArgoCheck) {
-          logger.info('Skipping Argo CD status check (SKIP_ARGOCD_STATUS_CHECK=true)', { clientId });
+            logger.info('Skipping Argo CD status check for update flow', {
+              clientId,
+              gitOpsEnabled: process.env.GITOPS_ENABLED === 'true',
+            });
         } else {
           const isReady = await argoStatusService.waitForApplicationReady(clientId);
 

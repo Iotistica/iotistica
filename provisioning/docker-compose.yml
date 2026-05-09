@@ -142,7 +142,7 @@ services:
       SIMULATE_ONEPASSWORD: ${SIMULATE_ONEPASSWORD:-true}
       
       # GitOps Configuration (NEW)
-      GITOPS_ENABLED: ${GITOPS_ENABLED:-true}
+      GITOPS_ENABLED: ${GITOPS_ENABLED:-false}
       GITOPS_REPO_URL: ${GITOPS_REPO_URL:-https://github.com/Iotistica/iot-k8s.git}
       GITOPS_REPO_DIR: /tmp/iot-k8s-main
       GITOPS_BRANCH: ${GITOPS_BRANCH:-main}
@@ -156,7 +156,6 @@ services:
       ARGOCD_NAMESPACE: ${ARGOCD_NAMESPACE:-argocd}
       ARGOCD_MAX_RETRIES: ${ARGOCD_MAX_RETRIES:-10}
       ARGOCD_RETRY_DELAY: ${ARGOCD_RETRY_DELAY:-5000}
-      SKIP_ARGOCD_STATUS_CHECK: ${SKIP_ARGOCD_STATUS_CHECK:-false}
       ARGOCD_TEST_CLIENT_ID: ${ARGOCD_TEST_CLIENT_ID:-}  # For testing: use existing app (e.g., db949acf)
       
       # API migrations path (used by create-template-db script)
@@ -260,7 +259,7 @@ services:
       SIMULATE_ONEPASSWORD: ${SIMULATE_ONEPASSWORD:-true}
       
       # GitOps Configuration
-      GITOPS_ENABLED: ${GITOPS_ENABLED:-true}
+      GITOPS_ENABLED: ${GITOPS_ENABLED:-false}
       GITOPS_REPO_URL: ${GITOPS_REPO_URL:-https://github.com/Iotistica/iot-k8s.git}
       GITOPS_REPO_DIR: /tmp/iot-k8s-main
       GITOPS_BRANCH: ${GITOPS_BRANCH:-main}
@@ -274,7 +273,6 @@ services:
       ARGOCD_NAMESPACE: ${ARGOCD_NAMESPACE:-argocd}
       ARGOCD_MAX_RETRIES: ${ARGOCD_MAX_RETRIES:-10}
       ARGOCD_RETRY_DELAY: ${ARGOCD_RETRY_DELAY:-5000}
-      SKIP_ARGOCD_STATUS_CHECK: ${SKIP_ARGOCD_STATUS_CHECK:-false}
       ARGOCD_TEST_CLIENT_ID: ${ARGOCD_TEST_CLIENT_ID:-}  # For testing: use existing app (e.g., db949acf)
       
       # Legacy Helm deployment
