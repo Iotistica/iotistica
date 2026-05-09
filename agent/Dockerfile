@@ -52,13 +52,8 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # Copy source code and shared config
 COPY agent/src ./src
-COPY agent/cli ./cli
-
-# Build TypeScript using build-specific config (excludes CLI)
+# Build TypeScript using build-specific config
 RUN npx tsc --project tsconfig.build.json && npm run copy:db-assets
-
-# Build CLI separately
-RUN npx tsc cli/iotctl.ts --outDir dist/cli --module commonjs --target es2020
 
 # ---- Production stage ------
 FROM node:20-alpine AS production
@@ -108,11 +103,9 @@ COPY --from=builder --chown=agentuser:agentgroup /app/dist ./dist
 COPY agent/bin/*.sh /app/bin/
 COPY agent/docker-entrypoint.sh /app/docker-entrypoint.sh
 
-# Create iotctl symlink and set permissions
-RUN chmod +x /app/dist/cli/iotctl.js && \
-    chmod +x /app/bin/*.sh && \
-    chmod +x /app/docker-entrypoint.sh && \
-    ln -s /app/dist/cli/iotctl.js /usr/local/bin/iotctl
+# Set permissions on scripts and entrypoint
+RUN chmod +x /app/bin/*.sh && \
+    chmod +x /app/docker-entrypoint.sh
 
 # Remove npm/npx from runtime image to reduce attack surface and npm-bundled CVEs.
 RUN rm -rf /usr/local/lib/node_modules/npm && \

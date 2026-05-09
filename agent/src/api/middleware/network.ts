@@ -66,16 +66,12 @@ function isPrivateNetwork(ip: string): boolean {
 }
 
 /**
- * Get client IP from request (handles proxies)
+ * Get client IP from request.
+ *
+ * Security note: we intentionally do not trust X-Forwarded-For headers.
+ * This API is intended for local/device access and forwarded headers can be spoofed.
  */
 function getClientIP(req: Request): string {
-	// Check X-Forwarded-For header (if behind proxy)
-	const forwarded = req.headers['x-forwarded-for'];
-	if (forwarded) {
-		const ips = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-		return ips.split(',')[0].trim();
-	}
-	
 	// Use direct connection IP
 	return req.socket.remoteAddress || 'unknown';
 }

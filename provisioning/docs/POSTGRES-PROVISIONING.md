@@ -46,6 +46,16 @@ All `PROVISIONING_PG_*` variables are only read when `DB_PROVIDER=postgres`. The
 
 ---
 
+## Dry-Run / Simulation Mode
+
+Set `SIMULATE_POSTGRES_PROVISIONING=true` to run without performing any real database operations. The service logs what it would do and returns mock connection details. Useful during CI or when validating the rest of the deployment pipeline.
+
+```bash
+SIMULATE_POSTGRES_PROVISIONING=true
+```
+
+---
+
 ## Setting Up the Admin User
 
 The admin credentials (`PROVISIONING_PG_ADMIN_USER` / `PROVISIONING_PG_ADMIN_PASSWORD`) must belong to a PostgreSQL role that has the `CREATEDB` and `CREATEROLE` privileges.
@@ -218,16 +228,6 @@ After a customer signs up and a deployment job completes, confirm the database w
 
 ```bash
 psql -h localhost -p 5433 -U billing -d postgres -c "\l" | grep client-
-```
-
----
-
-## Dry-Run / Simulation Mode
-
-Set `SIMULATE_POSTGRES_PROVISIONING=true` to run without performing any real database operations. The service logs what it would do and returns mock connection details. Useful during CI or when validating the rest of the deployment pipeline.
-
-```bash
-SIMULATE_POSTGRES_PROVISIONING=true
 ```
 
 ---

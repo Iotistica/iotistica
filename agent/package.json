@@ -13,8 +13,6 @@
     "dev": "tsx watch src/app.ts",
     "dev:cloud": "tsx watch src/api/cloud-server.ts",
     "dev:old-api": "tsx watch src/api/server.ts",
-    "cli": "tsx cli/iotctl.ts",
-    "cli:build": "tsc cli/iotctl.ts --outDir dist/cli --module commonjs --target es2020",
     "start": "node --security-revert=CVE-2023-46809 dist/app.js",
     "start:device": "node --security-revert=CVE-2023-46809 dist/app.js",
     "start:cloud": "node --security-revert=CVE-2023-46809 dist/api/cloud-server.js",
@@ -29,9 +27,6 @@
     "test:coverage": "jest --coverage",
     "test:coverage:unit": "jest --config jest.config.unit.js --coverage",
     "test:coverage:integration": "jest --config jest.config.integration.js --coverage"
-  },
-  "bin": {
-    "iotctl": "./dist/cli/iotctl.js"
   },
   "keywords": [
     "device-agent",

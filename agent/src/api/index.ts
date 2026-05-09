@@ -87,8 +87,12 @@ export class DeviceAPI {
 		// Ping endpoint
 		this.api.get('/ping', (_req, res) => res.send('OK'));
 
-		// Authentication middleware (optional - can be enabled/disabled)
-		if (process.env.ENABLE_AUTH === 'true') {
+		// Authentication middleware:
+		// - Explicitly enabled with ENABLE_AUTH=true
+		// - Implicitly required when API_SECURITY_MODE=API_KEY
+		const securityMode = process.env.API_SECURITY_MODE || 'LOCALHOST_ONLY';
+		const authEnabled = process.env.ENABLE_AUTH === 'true' || securityMode === 'API_KEY';
+		if (authEnabled) {
 			this.api.use(middleware.auth);
 		}
 
@@ -106,11 +110,20 @@ export class DeviceAPI {
 	}
 
 	public async listen(port: number, timeout: number = 300000): Promise<void> {
+		const securityMode = process.env.API_SECURITY_MODE || 'LOCALHOST_ONLY';
+		const host = process.env.DEVICE_API_HOST || (securityMode === 'LOCALHOST_ONLY' ? '127.0.0.1' : '0.0.0.0');
+
 		return new Promise((resolve) => {
-			this.server = this.api.listen(port, () => {
+			this.server = this.api.listen(port, host, () => {
 				if (this.server) {
 					this.server.timeout = timeout;
 				}
+				this.logger?.infoSync('Device API listening', {
+					component: LogComponents.agent,
+					port,
+					host,
+					securityMode,
+				});
 				return resolve();
 			});
 		});

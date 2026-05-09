@@ -1,0 +1,32 @@
+{
+  "name": "iotistica-agent-cli",
+  "version": "1.0.0",
+  "description": "Standalone iotctl CLI for Iotistica device management",
+  "main": "dist/iotctl.js",
+  "types": "dist/iotctl.d.ts",
+  "bin": {
+    "iotctl": "./dist/iotctl.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "watch": "tsc -p tsconfig.build.json --watch",
+    "clean": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true});\""
+  },
+  "keywords": [
+    "iot",
+    "cli",
+    "iotctl",
+    "device-management"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "undici": "7.24.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.7",
+    "typescript": "^5.9.3"
+  }
+}

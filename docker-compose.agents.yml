@@ -35,7 +35,8 @@ services:
       - REQUIRE_PROVISIONING=false
       - PROVISIONING_KEY=95ad6ce7f150bd5418e4537ecc1a44a7869889080b204a0ee32ecdc9142b8a44
       - API_SECURITY_MODE=LOCALHOST_ONLY
-      - FIREWALL_ENABLED=false
+      - FIREWALL_ENABLED=true
+      - FIREWALL_MODE=auto
       # Testing & Development (not dashboard-controlled)
       - SIMULATION_MODE=false
       - SIMULATION_PROFILE=disabled

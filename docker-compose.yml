@@ -722,8 +722,43 @@ services:
             retries: 3
             start_period: 30s
 
+    # Agent CLI - persistent helper container for local development
+    # Start once: docker compose up -d agent-cli --build
+    # Run commands: docker exec -it iotistic-agent-cli iotctl <command>
+    # Examples:
+    #   docker exec -it iotistic-agent-cli iotctl status
+    #   docker exec -it iotistic-agent-cli iotctl provision status
+    #   docker exec -it iotistic-agent-cli iotctl endpoints list
+    # This container uses host networking so localhost targets the local-agent API.
+    # Override DEVICE_API_PORT when needed (for example DEVICE_API_PORT=48519).
+    agent-cli:
+        build:
+            context: ./agent-cli
+            dockerfile: Dockerfile
+        image: iotistic/agent-cli:dev
+        container_name: iotistic-agent-cli
+        network_mode: host
+        entrypoint: ["/bin/sh", "-c"]
+        command: ["tail -f /dev/null"]
+        tty: true
+        environment:
+            - DEVICE_API_PORT=${DEVICE_API_PORT:-48519}
+            - DEVICE_API_URL=${DEVICE_API_URL:-http://localhost:48519}
+            - CONFIG_DIR=/app/data
+            - DEBUG=${DEBUG:-false}
+        volumes:
+            # Persistent CLI data (provisioning state, sqlite) if running against a containerised agent
+            - agent-cli-data:/app/data
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "5m"
+                max-file: "2"
+
 volumes:
     wg-data:
+    agent-cli-data:
+        driver: local
     agent-20-data:
         driver: local
     iotistic-pg-data:
