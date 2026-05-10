@@ -15,7 +15,7 @@ env:
 jobs:
   build-and-deploy:
     name: Build and Deploy Redirect Service
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     permissions:
       contents: read
     

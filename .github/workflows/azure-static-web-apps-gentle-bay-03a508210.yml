@@ -17,7 +17,7 @@ on:
 jobs:
   build_and_deploy_job:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action != 'closed')
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     name: Build and Deploy Job
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +40,7 @@ jobs:
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     name: Close Pull Request Job
     steps:
       - name: Close Pull Request

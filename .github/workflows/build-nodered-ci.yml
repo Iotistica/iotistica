@@ -18,7 +18,7 @@ on:
 jobs:
   buildx:
     name: Build & Push Node-RED Image
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     permissions:
       contents: read
     outputs:
@@ -113,7 +113,7 @@ jobs:
   report:
     name: Generate Build Report
     needs: buildx
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     if: always()
     
     steps:

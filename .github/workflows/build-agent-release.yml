@@ -17,7 +17,7 @@ concurrency:
 jobs:
   publish:
     name: Promote Azure Latest to Version
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     permissions:
       contents: write
     if: success() && github.ref == 'refs/heads/master'

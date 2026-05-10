@@ -11,7 +11,7 @@ on:
 jobs:
   test:
     name: Validate Python & Syntax
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
 
     steps:
       - name: Checkout repository
@@ -45,7 +45,7 @@ jobs:
   version:
     name: Bump Version
     needs: test
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     permissions:
       contents: write
     outputs:
@@ -136,7 +136,7 @@ jobs:
   buildx:
     name: Build & Push to Docker
     needs: version
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     permissions:
       contents: write
 
@@ -212,7 +212,7 @@ jobs:
   report:
     name: Generate Reports
     needs: [version, buildx]
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     if: always()
 
     steps:

@@ -35,7 +35,7 @@ env:
 jobs:
   prepare:
     name: Validate & tag release
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     outputs:
       release_version: ${{ steps.set_version.outputs.release_version }}
     steps:
@@ -138,7 +138,7 @@ jobs:
 
   release:
     name: Promote images, create release & deploy
-    runs-on: [arc-runner-set-iotistica-light]
+    runs-on: [arc-runner-set-iotistica-light-v2]
     needs: [prepare]
     if: needs.prepare.result == 'success'
     steps:
