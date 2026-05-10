@@ -1031,3 +1031,59 @@ EOFJOURNALD
         journalctl -u "${SERVICE_NAME}" -n 50 --no-pager
         exit 1
     fi
+
+    # ============================================================================
+    # CLI (iotctl) INSTALLATION
+    # Install the iotctl CLI tool so operators can manage the device from the
+    # command line. Skipped when IOTISTICA_INSTALL_CLI=no.
+    # ============================================================================
+    INSTALL_CLI="${IOTISTICA_INSTALL_CLI:-yes}"
+    if [ "$INSTALL_CLI" = "no" ] || [ "$INSTALL_CLI" = "false" ] || [ "$INSTALL_CLI" = "0" ]; then
+        echo ""
+        echo "Skipping CLI installation (IOTISTICA_INSTALL_CLI=$INSTALL_CLI)"
+        echo "To install later: curl -sfL https://get.iotistica.com/agent-cli | sudo sh"
+    else
+        echo ""
+        echo "=================================="
+        echo "Installing iotctl CLI"
+        echo "=================================="
+
+        # Export the same download base URL so cli-install.sh can derive its URL
+        export DOWNLOAD_BASE_URL
+
+        # Locate cli-install.sh: prefer a copy bundled with the agent tarball,
+        # fall back to downloading it from the CDN.
+        CLI_INSTALLER="/opt/iotistic/agent/bin/cli-install.sh"
+
+        if [ ! -f "$CLI_INSTALLER" ]; then
+            echo "cli-install.sh not found in agent bundle, downloading from CDN..."
+            CLI_CDN_BASE="${DOWNLOAD_BASE_URL:-https://get.iotistica.com/agent/artifacts}"
+            CLI_CDN_BASE="${CLI_CDN_BASE%/artifacts*}"
+            CLI_INSTALLER_URL="${CLI_CDN_BASE}/agent-cli/cli-install.sh"
+
+            if command -v curl >/dev/null 2>&1; then
+                curl -fSL -o /tmp/cli-install.sh "$CLI_INSTALLER_URL" || {
+                    echo "Warning: Could not download cli-install.sh - skipping CLI install"
+                    CLI_INSTALLER=""
+                }
+            elif command -v wget >/dev/null 2>&1; then
+                wget -O /tmp/cli-install.sh "$CLI_INSTALLER_URL" || {
+                    echo "Warning: Could not download cli-install.sh - skipping CLI install"
+                    CLI_INSTALLER=""
+                }
+            else
+                echo "Warning: Neither curl nor wget available - skipping CLI install"
+                CLI_INSTALLER=""
+            fi
+
+            [ -n "$CLI_INSTALLER" ] && CLI_INSTALLER="/tmp/cli-install.sh"
+        fi
+
+        if [ -n "$CLI_INSTALLER" ] && [ -f "$CLI_INSTALLER" ]; then
+            chmod +x "$CLI_INSTALLER"
+            sh "$CLI_INSTALLER" && echo "✓ iotctl CLI installed" || {
+                echo "Warning: CLI installation failed (non-fatal)"
+                echo "You can install it later: curl -sfL https://get.iotistica.com/agent-cli | sudo sh"
+            }
+        fi
+    fi
