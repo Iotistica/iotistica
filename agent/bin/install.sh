@@ -1058,7 +1058,8 @@ EOFJOURNALD
         if [ ! -f "$CLI_INSTALLER" ]; then
             echo "cli-install.sh not found in agent bundle, downloading from CDN..."
             CLI_CDN_BASE="${DOWNLOAD_BASE_URL:-https://get.iotistica.com/agent/artifacts}"
-            CLI_CDN_BASE="${CLI_CDN_BASE%/artifacts*}"
+            CLI_CDN_BASE="${CLI_CDN_BASE%/agent/artifacts*}"
+            CLI_CDN_BASE="${CLI_CDN_BASE%/agent}"
             CLI_INSTALLER_URL="${CLI_CDN_BASE}/agent-cli/cli-install.sh"
 
             if command -v curl >/dev/null 2>&1; then

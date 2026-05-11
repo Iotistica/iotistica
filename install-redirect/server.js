@@ -135,6 +135,13 @@ app.get('/agent-cli', (req, res) => {
   proxyFromStorage(CLI_INSTALL_URL, req, res, 'text/x-shellscript', 'Failed to fetch CLI installation script');
 });
 
+// Backward-compatibility route for older published install.sh versions that
+// incorrectly build /agent/agent-cli/cli-install.sh.
+app.get('/agent/agent-cli/cli-install.sh', (req, res) => {
+  console.log(`[${new Date().toISOString()}] Legacy CLI install script endpoint hit ${JSON.stringify(getRequestContext(req))}`);
+  proxyFromStorage(CLI_INSTALL_URL, req, res, 'text/x-shellscript', 'Failed to fetch CLI installation script');
+});
+
 // Tarball proxy endpoint used by install.sh so clients do not need direct Azure URLs.
 app.get('/agent/artifacts/*', (req, res) => {
   const requestedPath = req.params[0];
