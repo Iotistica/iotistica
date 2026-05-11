@@ -16,16 +16,18 @@ const AZURE_STORAGE_ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT || 'iotistic';
 const AZURE_STORAGE_CONTAINER = process.env.AZURE_STORAGE_CONTAINER || 'scripts';
 const BLOB_INSTALL_PATH = process.env.BLOB_INSTALL_PATH || 'agent/install.sh';
 const BLOB_INSTALL_SHA256_PATH = process.env.BLOB_INSTALL_SHA256_PATH || 'agent/install.sh.sha256';
+const BLOB_CLI_INSTALL_PATH = process.env.BLOB_CLI_INSTALL_PATH || 'agent-cli/cli-install.sh';
 
 // Construct Azure Blob Storage URLs
 const INSTALL_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BLOB_INSTALL_PATH}`;
 const INSTALL_SHA256_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BLOB_INSTALL_SHA256_PATH}`;
+const CLI_INSTALL_URL = `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BLOB_CLI_INSTALL_PATH}`;
 
 function buildStorageUrl(blobPath) {
   return `https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${blobPath}`;
 }
 
-function normalizeArtifactPath(requestPath) {
+function normalizeArtifactPath(prefix, requestPath) {
   if (!requestPath || requestPath.startsWith('/') || requestPath.includes('..')) {
     return null;
   }
@@ -34,7 +36,7 @@ function normalizeArtifactPath(requestPath) {
     return null;
   }
 
-  return `agent/${requestPath}`;
+  return `${prefix}/${requestPath}`;
 }
 
 function getRequestContext(req) {
@@ -127,10 +129,16 @@ app.get('/agent.sha256', (req, res) => {
   proxyFromStorage(INSTALL_SHA256_URL, req, res, 'text/plain');
 });
 
+// CLI installer endpoint: curl -sfL https://get.iotistica.com/agent-cli | sh
+app.get('/agent-cli', (req, res) => {
+  console.log(`[${new Date().toISOString()}] CLI install script endpoint hit ${JSON.stringify(getRequestContext(req))}`);
+  proxyFromStorage(CLI_INSTALL_URL, req, res, 'text/x-shellscript', 'Failed to fetch CLI installation script');
+});
+
 // Tarball proxy endpoint used by install.sh so clients do not need direct Azure URLs.
 app.get('/agent/artifacts/*', (req, res) => {
   const requestedPath = req.params[0];
-  const blobPath = normalizeArtifactPath(requestedPath);
+  const blobPath = normalizeArtifactPath('agent', requestedPath);
 
   console.log(`[${new Date().toISOString()}] Artifact endpoint hit ${JSON.stringify({
     ...getRequestContext(req),
@@ -161,6 +169,42 @@ app.get('/agent/artifacts/*', (req, res) => {
   );
 });
 
+// CLI artifact proxy endpoint so clients do not need direct Azure URLs.
+app.get('/agent-cli/artifacts/*', (req, res) => {
+  const requestedPath = req.params[0];
+  const blobPath = normalizeArtifactPath('agent-cli', requestedPath);
+
+  console.log(`[${new Date().toISOString()}] CLI artifact endpoint hit ${JSON.stringify({
+    ...getRequestContext(req),
+    requestedPath,
+    resolvedBlobPath: blobPath || ''
+  })}`);
+
+  if (!blobPath) {
+    res.status(400).json({
+      error: 'Bad Request',
+      message: 'Invalid artifact path'
+    });
+    return;
+  }
+
+  const contentType = blobPath.endsWith('.sha256')
+    ? 'text/plain'
+    : blobPath.endsWith('.json')
+      ? 'application/json'
+      : blobPath.endsWith('.sh')
+        ? 'text/x-shellscript'
+        : 'application/gzip';
+
+  proxyFromStorage(
+    buildStorageUrl(blobPath),
+    req,
+    res,
+    contentType,
+    'Failed to fetch CLI artifact'
+  );
+});
+
 // Info endpoint - shows what would be executed
 app.get('/agent/info', (req, res) => {
   const publicDomain = req.get('host') || 'get.iotistica.com';
@@ -177,12 +221,25 @@ app.get('/agent/info', (req, res) => {
   });
 });
 
+app.get('/agent-cli/info', (req, res) => {
+  const publicDomain = req.get('host') || 'get.iotistica.com';
+  const protocol = req.secure || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+
+  res.json({
+    description: 'Iotistica CLI Installer',
+    usage: `curl -sfL ${protocol}://${publicDomain}/agent-cli | sh`,
+    install_url: `${protocol}://${publicDomain}/agent-cli`,
+    artifacts_base_url: `${protocol}://${publicDomain}/agent-cli/artifacts`,
+    documentation: 'https://iotistica.com/documentation.html#agent-cli'
+  });
+});
+
 // Catch-all 404
 app.use((req, res) => {
   console.warn(`[${new Date().toISOString()}] Unmatched route ${JSON.stringify(getRequestContext(req))}`);
   res.status(404).json({ 
     error: 'Not Found',
-    message: 'Use: curl -sfL https://get.iotistica.com/agent | sh'
+    message: 'Use: curl -sfL https://get.iotistica.com/agent | sh or curl -sfL https://get.iotistica.com/agent-cli | sh'
   });
 });
 

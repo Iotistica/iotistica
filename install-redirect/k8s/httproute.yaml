@@ -22,14 +22,29 @@ spec:
             type: Exact
             value: /agent/info
         - path:
+          type: Exact
+          value: /agent-cli
+        - path:
+          type: Exact
+          value: /agent-cli/info
+        - path:
             type: Exact
             value: /agent/artifacts
+        - path:
+          type: Exact
+          value: /agent-cli/artifacts
         - path:
             type: PathPrefix
             value: /agent/artifacts/
         - path:
+          type: PathPrefix
+          value: /agent-cli/artifacts/
+        - path:
             type: PathPrefix
             value: /agent/
+        - path:
+          type: PathPrefix
+          value: /agent-cli/
       backendRefs:
         - name: install-redirect
           port: 80

@@ -7,5 +7,6 @@ data:
   AZURE_STORAGE_CONTAINER: "scripts"
   BLOB_INSTALL_PATH: "agent/install.sh"
   BLOB_INSTALL_SHA256_PATH: "agent/install.sh.sha256"
+  BLOB_CLI_INSTALL_PATH: "agent-cli/cli-install.sh"
   NODE_ENV: "production"
   PORT: "3000"
