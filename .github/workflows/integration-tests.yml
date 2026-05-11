@@ -199,7 +199,7 @@ jobs:
           PROVISIONING_JSON=$(docker compose -f "$COMPOSE_FILE" exec -T api node --input-type=module - <<'NODE'
           import crypto from 'crypto';
           import { query } from './dist/db/connection.js';
-          import { createProvisioningKey } from './dist/utils/provisioning-keys.js';
+          import { createProvisioningKey } from './dist/services/provisioning/provisioning-keys.js';
 
           const fleetUuid = crypto.randomUUID();
           const customerId = '00000000-0000-0000-0000-000000000001';
