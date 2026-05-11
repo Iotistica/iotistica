@@ -154,7 +154,8 @@ jobs:
       - name: Verify API can reach ingestion control plane
         run: |
           docker compose -f "$COMPOSE_FILE" exec -T api node --input-type=module - <<'NODE'
-          const response = await fetch('http://ingestion:4003/health');
+          const baseUrl = (process.env.INGESTION_INTERNAL_URL || 'http://ingestion:3003').replace(/\/$/, '');
+          const response = await fetch(`${baseUrl}/health`);
           if (!response.ok) {
             throw new Error(`Ingestion health probe failed: ${response.status} ${response.statusText}`);
           }
