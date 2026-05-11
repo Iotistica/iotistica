@@ -154,8 +154,11 @@ jobs:
       - name: Verify API can reach ingestion control plane
         run: |
           docker compose -f "$COMPOSE_FILE" exec -T api node --input-type=module - <<'NODE'
-          const { getRemoteIngestionHealth } = await import('./dist/services/telemetry/client.js');
-          const payload = await getRemoteIngestionHealth();
+          const response = await fetch('http://ingestion:4003/health');
+          if (!response.ok) {
+            throw new Error(`Ingestion health probe failed: ${response.status} ${response.statusText}`);
+          }
+          const payload = await response.json();
           console.log(JSON.stringify(payload, null, 2));
           NODE
 
