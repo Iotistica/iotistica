@@ -16,8 +16,8 @@ import {
   AgentModel,
   AgentCurrentStateModel,
 } from './agents';
-import { EventPublisher, objectsAreEqual } from '../audit/event-sourcing';
-import EventSourcingConfig from '../../events/event-sourcing';
+import { EventPublisher, objectsAreEqual } from '../events/event-sourcing';
+import EventSourcingConfig from '../events/config';
 import { deviceSensorSync, syncAgentDevices } from './devices';
 import { getTenantId } from '../../redis/tenant-keys';
 import logger from '../../utils/logger';

@@ -12,7 +12,7 @@
  */
 
 import { query } from '../../db/connection';
-import { EventPublisher } from '../audit/event-sourcing';
+import { EventPublisher } from '../events/event-sourcing';
 import logger from '../../utils/logger';
 import { randomUUID as uuidv4 } from 'crypto';
 import { AgentTargetStateModel } from './agents';

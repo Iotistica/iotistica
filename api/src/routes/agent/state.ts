@@ -28,7 +28,7 @@ import {
   AgentLogsModel,
 } from '../../services/agent/agents';
 import { validateTargetStateConfigMiddleware } from '../../services/provisioning/validation';
-import { EventPublisher, objectsAreEqual } from '../../services/audit/event-sourcing';
+import { EventPublisher, objectsAreEqual } from '../../services/events/event-sourcing';
 import deviceAuth, { deviceAuthFromBody } from '../../middleware/agent-auth';
 import { processAgentStateReport, type AgentStateReport } from '../../services/agent/state';
 import logger from '../../utils/logger';

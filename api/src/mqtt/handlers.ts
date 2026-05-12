@@ -10,7 +10,7 @@ import type { DeviceDataMessage, StateMessage } from './manager';
 import { processAgentStateReport } from '../services/agent/state';
 import { ingestion } from '../services/telemetry';
 import { getAnomalyEventHandler, type AnomalyEvent } from './anomaly-handler';
-import { EventPublisher } from '../services/audit/event-sourcing';
+import { EventPublisher } from '../services/events/event-sourcing';
 import { getTenantId } from '../redis/tenant-keys';
 import { mqttDevicePattern, mqttDeviceTopic } from './topics';
 import logger from '../utils/logger';

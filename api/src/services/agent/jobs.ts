@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { query, transaction } from '../../db/connection';
-import { EventPublisher } from '../audit/event-sourcing';
+import { EventPublisher } from '../events/event-sourcing';
 import { publishJobNotification } from '../../mqtt/handlers';
 import { logger } from '../../utils/logger';
 
