@@ -16,7 +16,7 @@ import msgpack from 'msgpackr';
 import zlib from 'zlib';
 import { pLimit } from '../utils/p-limit';
 import logger, { logOperation } from '../utils/logger';
-import { isDuplicateMessage } from '../utils/mqtt-deduplication';
+import { isDuplicateMessage } from './deduplication';
 import { CloudDictionaryManager } from './dictionary';
 import { mqttDevicePattern, parseMqttTopic } from './topics';
 import { getTenantId } from '../redis/tenant-keys';

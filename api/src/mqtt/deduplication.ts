@@ -23,7 +23,7 @@
 
 import type Redis from 'ioredis';
 import { redisClient } from '../redis/client';
-import logger from './logger';
+import logger from '../utils/logger';
 
 /**
  * Message deduplication configuration

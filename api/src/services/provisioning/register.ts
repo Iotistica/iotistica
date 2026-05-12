@@ -30,7 +30,7 @@ import {
   AuditEventType,
   AuditSeverity
 } from '../../utils/audit-logger';
-import { EventPublisher } from '../events/event-sourcing';
+import { EventPublisher } from '../audit/event-sourcing';
 import {
   getBrokerConfigForExternalDevice,
   getStandaloneBrokerConfig,

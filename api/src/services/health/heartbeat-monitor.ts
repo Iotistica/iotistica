@@ -10,7 +10,7 @@
 
 import { query } from '../../db/connection';
 import { logAuditEvent, AuditEventType, AuditSeverity } from '../../utils/audit-logger';
-import { EventPublisher } from '../events/event-sourcing';
+import { EventPublisher } from '../audit/event-sourcing';
 import logger from '../../utils/logger';
 
 const HEARTBEAT_STATE_KEY = 'heartbeat_last_check';

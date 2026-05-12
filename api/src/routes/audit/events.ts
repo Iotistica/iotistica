@@ -13,7 +13,7 @@ import {
   searchEvents,
   type Event,
   type EventSearchCriteria,
-} from '../../services/events/event-sourcing';
+} from '../../services/audit/event-sourcing';
 import { jwtAuth, requireRole } from '../../middleware/jwt-auth';
 import { logger } from '../../utils/logger';
 

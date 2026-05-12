@@ -2,7 +2,7 @@ import { randomUUID, randomBytes, createHmac } from 'crypto';
 import * as mqtt from 'mqtt';
 import { query } from '../../db/connection';
 import { logAuditEvent, AuditEventType, AuditSeverity } from '../../utils/audit-logger';
-import { EventPublisher } from '../events/event-sourcing';
+import { EventPublisher } from '../audit/event-sourcing';
 import { logger } from '../../utils/logger';
 import { SystemConfig } from '../config/system-config';
 import { virtualAgentDeployer } from '../provisioning/virtual-agent-deployer';
