@@ -338,7 +338,10 @@ jobs:
           tar -xzf /tmp/iotistic-cli-latest-${ARCH}.tar.gz -C /tmp/iotistic-cli
 
           echo "Installing CLI binary..."
-          sudo cp /tmp/iotistic-cli/dist/iotctl.js /usr/local/bin/iotctl
+          CLI_LIB_DIR="/opt/iotistic/cli"
+          sudo mkdir -p "$CLI_LIB_DIR"
+          sudo cp -r /tmp/iotistic-cli/. "$CLI_LIB_DIR/"
+          printf '#!/bin/sh\nexec node "%s/dist/iotctl.js" "$@"\n' "$CLI_LIB_DIR" | sudo tee /usr/local/bin/iotctl > /dev/null
           sudo chmod +x /usr/local/bin/iotctl
 
           echo "Verifying CLI is on PATH"
