@@ -123,18 +123,23 @@ cp -r "$TMP_DIR/extracted/." "$CLI_LIB_DIR/"
 # Ensure the entry point is executable
 chmod +x "$CLI_LIB_DIR/dist/iotctl.js"
 
-# Create wrapper symlink in PATH
-SYMLINK_PATH="$CLI_INSTALL_DIR/iotctl"
-rm -f "$SYMLINK_PATH"
-ln -s "$CLI_LIB_DIR/dist/iotctl.js" "$SYMLINK_PATH"
-chmod +x "$SYMLINK_PATH"
+# Create wrapper launcher in PATH instead of a JS symlink.
+# Running a symlinked JS directly can break relative requires (e.g. ./core)
+# because Node resolves them from /usr/local/bin instead of dist/.
+LAUNCHER_PATH="$CLI_INSTALL_DIR/iotctl"
+rm -f "$LAUNCHER_PATH"
+cat > "$LAUNCHER_PATH" <<EOF
+#!/bin/sh
+exec node "$CLI_LIB_DIR/dist/iotctl.js" "$@"
+EOF
+chmod +x "$LAUNCHER_PATH"
 
 # Verify installation
-if ! "$SYMLINK_PATH" --version >/dev/null 2>&1; then
-    echo "Warning: iotctl --version returned non-zero; symlink is in place but binary may need the agent running."
+if ! "$LAUNCHER_PATH" --version >/dev/null 2>&1; then
+    echo "Warning: iotctl --version returned non-zero; launcher is in place but binary may need the agent running."
 fi
 
-echo "✓ iotctl installed to $SYMLINK_PATH"
+echo "✓ iotctl installed to $LAUNCHER_PATH"
 echo ""
 echo "Try it:"
 echo "  iotctl status"
