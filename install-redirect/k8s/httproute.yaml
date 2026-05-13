@@ -22,29 +22,50 @@ spec:
             type: Exact
             value: /agent/info
         - path:
-          type: Exact
-          value: /agent-cli
+            type: Exact
+            value: /agent-cli
         - path:
-          type: Exact
-          value: /agent-cli/info
+            type: Exact
+            value: /agent-cli/info
         - path:
             type: Exact
             value: /agent/artifacts
         - path:
-          type: Exact
-          value: /agent-cli/artifacts
+            type: Exact
+            value: /agent-cli/artifacts
         - path:
             type: PathPrefix
             value: /agent/artifacts/
-        - path:
-          type: PathPrefix
-          value: /agent-cli/artifacts/
+      backendRefs:
+        - name: install-redirect
+          port: 80
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            add:
+              - name: X-Forwarded-Proto
+                value: https
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            add:
+              - name: X-Content-Type-Options
+                value: nosniff
+              - name: X-Frame-Options
+                value: DENY
+              - name: X-XSS-Protection
+                value: "1; mode=block"
+              - name: Cache-Control
+                value: "public, max-age=3600"
+    - matches:
         - path:
             type: PathPrefix
             value: /agent/
         - path:
-          type: PathPrefix
-          value: /agent-cli/
+            type: PathPrefix
+            value: /agent-cli/artifacts/
+        - path:
+            type: PathPrefix
+            value: /agent-cli/
       backendRefs:
         - name: install-redirect
           port: 80
