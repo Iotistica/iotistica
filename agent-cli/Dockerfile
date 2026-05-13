@@ -18,9 +18,11 @@ RUN npm ci --omit=dev --prefer-offline --no-audit
 
 COPY --from=builder /app/dist ./dist
 
-# Make iotctl executable
+# Install iotctl launcher in PATH. A JS symlink at /usr/local/bin breaks
+# relative requires (e.g. ./core) because Node resolves from symlink location.
 RUN chmod +x dist/iotctl.js && \
-	ln -sf /app/dist/iotctl.js /usr/local/bin/iotctl
+	printf '#!/bin/sh\nexec node /app/dist/iotctl.js "$@"\n' > /usr/local/bin/iotctl && \
+	chmod +x /usr/local/bin/iotctl
 
 ENTRYPOINT ["node", "dist/iotctl.js"]
 CMD ["help"]
