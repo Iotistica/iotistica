@@ -409,6 +409,18 @@ jobs:
             --auth-mode key \
             --content-type application/json
 
+      - name: Upload CLI installer script (x86_64 only)
+        if: matrix.arch == 'x86_64'
+        run: |
+          az storage blob upload \
+            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+            --container-name scripts \
+            --name agent-cli/cli-install.sh \
+            --file "${{ github.workspace }}/agent-cli/bin/cli-install.sh" \
+            --overwrite true \
+            --auth-mode key \
+            --content-type text/x-shellscript
+
   docker:
     name: Docker Build, Scan & Push
     needs: build
