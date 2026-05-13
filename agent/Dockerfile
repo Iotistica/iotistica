@@ -1,5 +1,5 @@
 # ---- Shared base stage ----
-FROM node:20-alpine AS base
+FROM node:20-alpine3.22 AS base
 
 WORKDIR /app
 
@@ -56,7 +56,7 @@ COPY agent/src ./src
 RUN npx tsc --project tsconfig.build.json && npm run copy:db-assets
 
 # ---- Production stage ------
-FROM node:20-alpine AS production
+FROM node:20-alpine3.22 AS production
 
 WORKDIR /app
 
