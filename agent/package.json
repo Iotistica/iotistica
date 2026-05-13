@@ -85,7 +85,7 @@
     "jsrsasign": "11.1.1",
     "path-to-regexp": "0.1.13",
     "picomatch": "4.0.4",
-    "protobufjs": "8.0.1",
+    "protobufjs": "7.5.6",
     "@protobufjs/utf8": "1.1.1",
     "ip-address": ">=10.1.1"
   }
