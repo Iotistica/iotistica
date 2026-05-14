@@ -397,15 +397,22 @@ jobs:
 
       - name: Verify agent cloud MQTT connection
         run: |
-          echo "Waiting for agent to establish cloud MQTT session..."
+          echo "Verifying MQTT broker is reachable on localhost:5883..."
+          nc -zv localhost 5883 || { echo "FAIL: MQTT broker port 5883 not reachable"; exit 1; }
+
+          echo "Waiting for agent MQTT subsystem to become healthy..."
           timeout 120 bash -c '
-            until sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -q "Connected to MQTT broker"; do
+            until curl -fsS http://localhost:48484/v1/health/report 2>/dev/null | \
+              jq -e ".report.subsystems | map(select(.name == \"mqtt\")) | length > 0 and (.[0].healthy == true)" > /dev/null 2>&1; do
               sleep 5
             done
           '
 
-          echo "=== Agent cloud MQTT log excerpt ==="
-          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -E "Provisioning response received|Device provisioned successfully|Connected to MQTT broker|MQTT manager initialized|MQTT broker disconnected" || true
+          echo "=== Agent MQTT subsystem health ==="
+          curl -fsS http://localhost:48484/v1/health/report | jq '.report.subsystems[] | select(.name == "mqtt")'
+
+          echo "=== Agent MQTT log excerpt ==="
+          sudo journalctl -u iotistica-agent --no-pager --since "1 hour ago" | grep -E "Connected to MQTT broker|Iotistica MQTT connected|MQTT connection error|MQTT client offline|MQTT client reconnecting|MQTT broker disconnected" || true
 
       - name: Verify agent was registered in backend
         run: |
