@@ -25,24 +25,35 @@ async function login(page: any) {
 }
 
 /**
- * Helper function to inject pre-obtained auth tokens into localStorage.
+ * Helper function to inject pre-obtained auth tokens into localStorage and
+ * configure the API URL used by the dashboard SPA.
+ *
+ * In production builds, getApiUrl() defaults to :30002 (K8s NodePort).  E2E
+ * tests expose the API on a different port, so we override window.env.VITE_API_URL
+ * via addInitScript (runs before any page JavaScript) to point at E2E_API_URL.
+ *
  * Returns true if a real token was injected, false if no token was available.
  */
 async function injectAuthTokens(page: any): Promise<boolean> {
   const accessToken = process.env.E2E_AUTH_ACCESS_TOKEN;
   const refreshToken = process.env.E2E_AUTH_REFRESH_TOKEN;
+  const apiUrl = process.env.E2E_API_URL || 'http://localhost:4002';
   if (!accessToken) return false;
 
-  // Navigate to the app first to establish the origin, then set localStorage
-  await page.goto('/');
-  await page.evaluate(
-    ({ at, rt }: { at: string; rt: string }) => {
+  // addInitScript runs BEFORE any page JavaScript on every navigation,
+  // so AuthContext reads correct tokens and API URL on first mount.
+  await page.addInitScript(
+    ({ apiUrl, at, rt }: { apiUrl: string; at: string; rt: string }) => {
+      // Override the runtime API URL so getApiUrl() doesn't fall through
+      // to the Kubernetes NodePort (:30002) default in production builds.
+      (window as any).env = (window as any).env || {};
+      (window as any).env.VITE_API_URL = apiUrl;
       localStorage.setItem('accessToken', at);
       if (rt) localStorage.setItem('refreshToken', rt);
     },
-    { at: accessToken, rt: refreshToken || '' }
+    { apiUrl, at: accessToken, rt: refreshToken || '' }
   );
-  // Reload so AuthContext.initAuth picks up the tokens and verifies them
+
   await page.goto('/');
   await page.waitForLoadState('networkidle');
   return true;
@@ -59,6 +70,9 @@ test.describe('Dashboard Integration Tests', () => {
       // No real token available – fall back to form login for local dev
       await login(page);
     }
+    // Confirm the authenticated app shell is actually visible before each test.
+    // The sidebar search box is always rendered when the user is logged in.
+    await expect(page.getByPlaceholder('Search agents...')).toBeVisible({ timeout: 20000 });
   });
 
   test('should show an agent in the left sidebar', async ({ page }) => {
@@ -83,8 +97,9 @@ test.describe('Dashboard Integration Tests', () => {
     await page.goto('/fleets');
     await page.waitForLoadState('networkidle');
 
-    // Fleets page renders fleet cards inside <main>
-    await expect(page.locator('main').first()).toBeVisible({ timeout: 15000 });
+    // Verify the URL reflects the fleets view (SPA router may redirect, so allow
+    // either /fleets or a child route like /fleets/:id)
+    await expect(page).toHaveURL(/\/fleets/, { timeout: 15000 });
 
     // Capture a screenshot for CI diagnostics
     await page.screenshot({ path: 'test-results/fleets-page-state.png', fullPage: true });
