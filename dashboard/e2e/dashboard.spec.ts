@@ -24,6 +24,139 @@ async function login(page: any) {
   }
 }
 
+/**
+ * Helper function to inject pre-obtained auth tokens into localStorage.
+ * Returns true if a real token was injected, false if no token was available.
+ */
+async function injectAuthTokens(page: any): Promise<boolean> {
+  const accessToken = process.env.E2E_AUTH_ACCESS_TOKEN;
+  const refreshToken = process.env.E2E_AUTH_REFRESH_TOKEN;
+  if (!accessToken) return false;
+
+  // Navigate to the app first to establish the origin, then set localStorage
+  await page.goto('/');
+  await page.evaluate(
+    ({ at, rt }: { at: string; rt: string }) => {
+      localStorage.setItem('accessToken', at);
+      if (rt) localStorage.setItem('refreshToken', rt);
+    },
+    { at: accessToken, rt: refreshToken || '' }
+  );
+  // Reload so AuthContext.initAuth picks up the tokens and verifies them
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  return true;
+}
+
+/**
+ * Integration tests that require a live stack with a registered agent.
+ * These use real auth tokens injected via environment variables set by CI.
+ */
+test.describe('Dashboard Integration Tests', () => {
+  test.beforeEach(async ({ page }) => {
+    const authed = await injectAuthTokens(page);
+    if (!authed) {
+      // No real token available – fall back to form login for local dev
+      await login(page);
+    }
+  });
+
+  test('should show an agent in the left sidebar', async ({ page }) => {
+    const agentName = process.env.E2E_EXPECTED_AGENT_NAME || '';
+
+    // Agent names are truncated to 15 characters in the sidebar <h3> elements
+    const displayName = agentName.length > 15 ? agentName.substring(0, 15) : agentName;
+
+    if (displayName) {
+      await expect(
+        page.locator('h3').filter({ hasText: displayName }).first()
+      ).toBeVisible({ timeout: 20000 });
+    } else {
+      // No expected name provided – verify the sidebar search input exists at minimum
+      await expect(
+        page.getByPlaceholder('Search agents...')
+      ).toBeVisible({ timeout: 20000 });
+    }
+  });
+
+  test('should capture the fleets page state', async ({ page }) => {
+    await page.goto('/fleets');
+    await page.waitForLoadState('networkidle');
+
+    // Fleets page renders fleet cards inside <main>
+    await expect(page.locator('main').first()).toBeVisible({ timeout: 15000 });
+
+    // Capture a screenshot for CI diagnostics
+    await page.screenshot({ path: 'test-results/fleets-page-state.png', fullPage: true });
+  });
+
+  test('should show system metrics for the selected agent', async ({ page }) => {
+    // Wait for at least one agent card to appear in the sidebar
+    await expect(page.locator('h3').first()).toBeVisible({ timeout: 20000 });
+
+    // Click the first agent card – the app defaults to the metrics (system) view
+    await page.locator('h3').first().click();
+
+    // URL transitions to /fleets/:fleetId/agents/:agentId[/system]
+    await page.waitForURL(/\/fleets\/.+\/agents\//i, { timeout: 15000 });
+
+    // If the current URL doesn't include the system view segment, navigate there explicitly
+    const currentUrl = page.url();
+    if (!currentUrl.includes('/system')) {
+      await page.goto(currentUrl.replace(/\/$/, '') + '/system');
+      await page.waitForLoadState('networkidle');
+    }
+
+    // Overview.tsx renders data-testid="system-metrics" when the metrics view is active
+    await expect(
+      page.locator('[data-testid="system-metrics"]').or(
+        page.locator('[data-testid="system-metrics-cards"]')
+      ).first()
+    ).toBeVisible({ timeout: 20000 });
+  });
+
+  test('should add a new MQTT device', async ({ page }) => {
+    const agentUuid = process.env.E2E_EXPECTED_AGENT_UUID;
+    const accessToken = process.env.E2E_AUTH_ACCESS_TOKEN;
+    const apiUrl = process.env.E2E_API_URL || 'http://localhost:4002';
+
+    if (!agentUuid || !accessToken) {
+      test.skip();
+      return;
+    }
+
+    // POST directly to the backend API to create a persistent MQTT endpoint device.
+    // Using a fixed name so repeated runs produce a predictable 409 rather than orphaned records.
+    const deviceName = 'e2e-mqtt-sensor';
+    const response = await page.request.post(
+      `${apiUrl}/api/v1/agents/${agentUuid}/devices`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        data: {
+          name: deviceName,
+          protocol: 'mqtt',
+          connection: {
+            brokerUrl: 'mqtt://mosquitto:1883',
+          },
+          discoveryRoots: ['e2e/+/telemetry'],
+        },
+        failOnStatusCode: false,
+      }
+    );
+
+    // 201 = created successfully; 409 = already exists from a prior run – both are acceptable
+    expect([201, 409]).toContain(response.status());
+
+    if (response.status() === 201) {
+      const body = await response.json();
+      expect(body.status).toBe('ok');
+    }
+  });
+});
+
 test.describe('Dashboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
