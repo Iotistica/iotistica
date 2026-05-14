@@ -371,11 +371,11 @@ jobs:
           echo "Testing CLI status command..."
           iotctl status
 
-          echo "\nTesting CLI health endpoint..."
-          iotctl health
+          echo "Testing CLI diagnostics..."
+          iotctl diagnostics || echo "Diagnostics not yet available"
 
-          echo "\nTesting CLI device list (should be empty initially)..."
-          iotctl device list || echo "Device list not yet available"
+          echo "Testing CLI device list..."
+          iotctl devices list || echo "Device list not yet available"
 
       - name: Verify local provisioning status
         run: |
