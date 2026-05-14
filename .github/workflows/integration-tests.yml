@@ -366,13 +366,15 @@ jobs:
       - name: Verify CLI connectivity and basic commands
         env:
           DEVICE_API_URL: http://localhost:48484
-          DEVICE_API_PORT: 48484
+          DEVICE_API_PORT: "48484"
+          CONFIG_DIR: /var/lib/iotistic/agent
+          IOTISTICA_API: http://localhost:4002
         run: |
           echo "Testing CLI status command..."
           iotctl status
 
           echo "Testing CLI diagnostics..."
-          iotctl diagnostics || echo "Diagnostics not yet available"
+          iotctl diagnostics
 
           echo "Testing CLI device list..."
           iotctl devices list || echo "Device list not yet available"
