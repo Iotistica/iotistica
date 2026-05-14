@@ -561,7 +561,7 @@ jobs:
           echo ""
           echo "=== DIAGNOSTIC: Cloud agent_target_state (raw JSON the agent polls) ==="
           docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U postgres -d iotistic -c \
-            "SELECT uuid, version, updated_at, config::text FROM agent_target_state WHERE uuid = '${AGENT_UUID}';" || true
+            "SELECT agent_uuid, version, updated_at, needs_deployment, config::text FROM agent_target_state WHERE agent_uuid = '${AGENT_UUID}';" || true
 
           echo ""
           echo "=== DIAGNOSTIC: Agent reported current-state (what the agent last sent back) ==="
