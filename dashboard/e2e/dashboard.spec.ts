@@ -110,8 +110,32 @@ test.describe('Dashboard Integration Tests', () => {
     }
   });
 
-  test('should show an agent in the left sidebar', async ({ page }) => {
+  test('should show an agent in the left sidebar', async ({ page }, testInfo) => {
     const agentName = process.env.E2E_EXPECTED_AGENT_NAME || '';
+
+    // Navigate to fleets page and click the Default Fleet row so the app
+    // pre-selects that fleet and navigates to /fleets/:uuid (which sets
+    // selectedFleetId in FleetContext and triggers the agent list to render).
+    await page.goto('/fleets');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('heading', { name: 'Fleet Management' })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('Loading fleets...')).toBeHidden({ timeout: 15000 });
+
+    // Click the first fleet row (the h3 with the fleet name inside the list)
+    const fleetRow = page.locator('div.space-y-3 h3').first();
+    await expect(fleetRow).toBeVisible({ timeout: 15000 });
+    const fleetName = await fleetRow.textContent();
+    console.log('[E2E] Clicking fleet row:', fleetName);
+    await fleetRow.click();
+
+    // App navigates to /fleets/:uuid — wait for URL change
+    await page.waitForURL(/\/fleets\/[^/]+$/, { timeout: 15000 });
+    await page.waitForLoadState('networkidle');
+    console.log('[E2E] Navigated to fleet URL:', page.url());
+
+    // Take a screenshot of the state after fleet click for diagnostics
+    const screenshotBytes = await page.screenshot({ fullPage: true });
+    await testInfo.attach('sidebar-after-fleet-click', { body: screenshotBytes, contentType: 'image/png' });
 
     // Agent names are truncated to 15 characters in the sidebar <h3> elements
     const displayName = agentName.length > 15 ? agentName.substring(0, 15) : agentName;
