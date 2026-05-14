@@ -538,6 +538,28 @@ jobs:
           E2E_FLEET_UUID: ${{ steps.provision.outputs.fleet_uuid }}
         run: npx playwright test e2e/dashboard.spec.ts --grep "should add a new MQTT device"
 
+      - name: Deploy agent target state after MQTT device creation
+        env:
+          ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
+          AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
+        run: |
+          # When a device is added via the API, needs_deployment is set to true and the API
+          # returns 304 to agent polls, blocking config delivery until an explicit deploy
+          # clears the flag.  Trigger the deploy so the agent can pick up the new endpoint.
+          echo "Triggering deploy to clear needs_deployment flag..."
+          DEPLOY_RESP=$(curl -fsS -X POST "http://localhost:4002/api/v1/agents/${AGENT_UUID}/deploy" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"deployedBy":"ci"}')
+          echo "$DEPLOY_RESP" | jq .
+          # 400 "nothing to deploy" means it was already clear – treat as success
+          STATUS=$(echo "$DEPLOY_RESP" | jq -r '.status // .error // "unknown"')
+          if [ "$STATUS" = "ok" ] || echo "$DEPLOY_RESP" | grep -q "already deployed\|Nothing to deploy"; then
+            echo "Deploy succeeded (or already deployed)"
+          else
+            echo "WARNING: unexpected deploy response – continuing anyway"
+          fi
+
       - name: Verify agent Mosquitto passwd and ACL after MQTT device reconciliation
         env:
           ACCESS_TOKEN: ${{ steps.dashboard_auth.outputs.e2e_auth_access_token }}
