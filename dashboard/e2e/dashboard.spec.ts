@@ -164,29 +164,36 @@ test.describe('Dashboard Integration Tests', () => {
     await page.screenshot({ path: 'test-results/fleets-page-state.png', fullPage: true });
   });
 
-  test('should show system metrics for the selected agent', async ({ page }) => {
+  test('should show system metrics for the selected agent', async ({ page }, testInfo) => {
     // Wait for at least one agent card to appear in the sidebar
-    await expect(page.locator('h3').first()).toBeVisible({ timeout: 20000 });
+    const agentCard = page.locator('h3').first();
+    await expect(agentCard).toBeVisible({ timeout: 20000 });
+    console.log('[E2E] Agent card text:', await agentCard.textContent());
 
-    // Click the first agent card – the app defaults to the metrics (system) view
-    await page.locator('h3').first().click();
+    // Click the agent card — uses onSelectDevice() which sets selectedDevice in React state.
+    // Do NOT use page.goto() here: a full navigation resets React state and leaves
+    // selectedDevice = null, which renders "No Agents Yet" instead of SystemMetrics.
+    await agentCard.click();
 
-    // URL transitions to /fleets/:fleetId/agents/:agentId[/system]
+    // URL transitions to /fleets/:fleetId/agents/:agentId (no explicit /metrics segment needed)
     await page.waitForURL(/\/fleets\/.+\/agents\//i, { timeout: 15000 });
+    await page.waitForLoadState('networkidle');
+    console.log('[E2E] Agent URL:', page.url());
 
-    // If the current URL doesn't include the system view segment, navigate there explicitly
-    const currentUrl = page.url();
-    if (!currentUrl.includes('/system')) {
-      await page.goto(currentUrl.replace(/\/$/, '') + '/system');
-      await page.waitForLoadState('networkidle');
-    }
+    await testInfo.attach('after-agent-click', {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: 'image/png',
+    });
 
-    // Overview.tsx renders data-testid="system-metrics" when the metrics view is active
-    await expect(
-      page.locator('[data-testid="system-metrics"]').or(
-        page.locator('[data-testid="system-metrics-cards"]')
-      ).first()
-    ).toBeVisible({ timeout: 20000 });
+    // SystemMetrics.tsx is rendered under currentView === 'metrics' (the default agent view).
+    // It now carries data-testid="system-metrics" on its root div.
+    await expect(page.locator('[data-testid="system-metrics"]')).toBeVisible({ timeout: 20000 });
+
+    await testInfo.attach('system-metrics-visible', {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: 'image/png',
+    });
+    console.log('[E2E] SystemMetrics panel is visible');
   });
 
   test('should add a new MQTT device', async ({ page }) => {

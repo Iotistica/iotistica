@@ -574,7 +574,7 @@ export function SystemMetrics({
   const networkGapTimes = useMemo(() => networkChartData.filter(point => point.isGap).map(point => point.time), [networkChartData]);
 
   return (
-    <div className="flex-1 bg-background overflow-auto">
+    <div data-testid="system-metrics" className="flex-1 bg-background overflow-auto">
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
 
         {/* Quick Metrics */}
