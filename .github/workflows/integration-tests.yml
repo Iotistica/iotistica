@@ -507,7 +507,8 @@ jobs:
           E2E_AUTH_USER_JSON: ${{ steps.dashboard_auth.outputs.e2e_auth_user_json }}
           E2E_EXPECTED_AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
           E2E_EXPECTED_AGENT_NAME: ${{ steps.registered_agent.outputs.agent_name }}
-        run: npx playwright test e2e/dashboard.spec.ts --grep "should show an agent in the left sidebar|should capture the fleets page state|should show system metrics for the selected agent"
+          E2E_FLEET_UUID: ${{ steps.provision.outputs.fleet_uuid }}
+        run: npx playwright test e2e/dashboard.spec.ts --grep "should display fleet on the fleets page|should show an agent in the left sidebar|should capture the fleets page state|should show system metrics for the selected agent"
 
       - name: Test MQTT device management
         working-directory: dashboard
@@ -522,6 +523,7 @@ jobs:
           E2E_AUTH_USER_JSON: ${{ steps.dashboard_auth.outputs.e2e_auth_user_json }}
           E2E_EXPECTED_AGENT_UUID: ${{ steps.registered_agent.outputs.agent_uuid }}
           E2E_EXPECTED_AGENT_NAME: ${{ steps.registered_agent.outputs.agent_name }}
+          E2E_FLEET_UUID: ${{ steps.provision.outputs.fleet_uuid }}
         run: npx playwright test e2e/dashboard.spec.ts --grep "should add a new MQTT device"
 
       - name: Verify agent Mosquitto passwd and ACL after MQTT device reconciliation

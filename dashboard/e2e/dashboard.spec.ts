@@ -75,6 +75,40 @@ test.describe('Dashboard Integration Tests', () => {
     await expect(page.getByPlaceholder('Search agents...')).toBeVisible({ timeout: 20000 });
   });
 
+  test('should display fleet on the fleets page', async ({ page }) => {
+    const expectedFleetUuid = process.env.E2E_FLEET_UUID || '';
+
+    await page.goto('/fleets');
+    await page.waitForLoadState('networkidle');
+
+    // Page heading confirms the fleets view rendered
+    await expect(page.getByRole('heading', { name: 'Fleet Management' })).toBeVisible({ timeout: 15000 });
+
+    // Wait for the fleets card to finish loading (loader disappears, list appears)
+    await expect(page.getByText('Loading fleets...')).toBeHidden({ timeout: 15000 });
+
+    // Capture page state for CI diagnostics
+    await page.screenshot({ path: 'test-results/fleets-page-diagnostic.png', fullPage: true });
+
+    // Log the CardDescription count text for the CI log
+    const countText = await page.locator('text=/\\d+ fleet/').first().textContent().catch(() => 'not found');
+    console.log('[E2E] Fleets count description:', countText);
+
+    // Assert at least one fleet row exists (h3 inside the fleet list)
+    const fleetRows = page.locator('div.space-y-3 h3');
+    await expect(fleetRows.first()).toBeVisible({ timeout: 15000 });
+
+    const fleetCount = await fleetRows.count();
+    console.log('[E2E] Fleet rows visible:', fleetCount);
+
+    // If we know the expected fleet UUID, verify its row is shown
+    if (expectedFleetUuid) {
+      await expect(
+        page.locator(`code`, { hasText: expectedFleetUuid.substring(0, 8) })
+      ).toBeVisible({ timeout: 10000 });
+    }
+  });
+
   test('should show an agent in the left sidebar', async ({ page }) => {
     const agentName = process.env.E2E_EXPECTED_AGENT_NAME || '';
 
