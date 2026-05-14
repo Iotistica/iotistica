@@ -531,7 +531,7 @@ export function DeviceSidebar({ devices, selectedDeviceId, onAddDevice, onEditDe
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 space-y-3">
           {filteredDevices.map((device) => {
-            const Icon = deviceIcons[device.type];
+            const Icon = deviceIcons[device.type] || Server;
             const isSelected = device.id === selectedDeviceId;
             
             return (
