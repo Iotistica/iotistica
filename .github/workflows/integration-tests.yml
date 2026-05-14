@@ -496,6 +496,16 @@ jobs:
           echo "$RESPONSE" | jq '.'
           test "$(echo "$RESPONSE" | jq -r '.ingestionHealthy')" = "true"
 
+      - name: Run login E2E tests
+        working-directory: dashboard
+        env:
+          CI: true
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          E2E_API_URL: http://localhost:4002
+          E2E_AUTH_USERNAME: ${{ steps.dashboard_auth.outputs.e2e_auth_username }}
+          E2E_AUTH_PASSWORD: ${{ steps.dashboard_auth.outputs.e2e_auth_password }}
+        run: npx playwright test e2e/login.spec.ts
+
       - name: Verify dashboard sidebar and capture dashboard diagnostics
         working-directory: dashboard
         env:

@@ -23,13 +23,16 @@ test.describe('Dashboard Login', () => {
   });
 
   test('should login with valid credentials', async ({ page }) => {
-    // Fill in login form with admin credentials
+    // Fill in login form - use env vars set by CI seeding, fall back to local dev defaults
+    const username = process.env.E2E_AUTH_USERNAME || 'admin';
+    const password = process.env.E2E_AUTH_PASSWORD || 'admin';
+
     const emailInput = page.getByLabel(/email|username/i);
     const passwordInput = page.getByLabel(/password/i);
     const loginButton = page.getByRole('button', { name: /login|sign in/i });
 
-    await emailInput.fill('admin');
-    await passwordInput.fill('admin');
+    await emailInput.fill(username);
+    await passwordInput.fill(password);
     await loginButton.click();
 
     // Should redirect to dashboard after successful login
