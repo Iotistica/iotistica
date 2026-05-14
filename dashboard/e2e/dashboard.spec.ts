@@ -204,6 +204,15 @@ test.describe('Dashboard Integration Tests', () => {
     console.log('[E2E] SystemMetrics panel is visible');
   });
 
+});
+
+/**
+ * API-only tests that call the backend directly.
+ * These do not interact with the dashboard UI and do not require the app shell
+ * to be visible, so they run in their own describe block without the
+ * sidebar-dependent beforeEach.
+ */
+test.describe('Dashboard API Tests', () => {
   test('should add a new MQTT device', async ({ page }) => {
     const agentUuid = process.env.E2E_EXPECTED_AGENT_UUID;
     const accessToken = process.env.E2E_AUTH_ACCESS_TOKEN;
