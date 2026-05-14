@@ -175,7 +175,7 @@ test.describe('Dashboard Integration Tests', () => {
     // selectedDevice = null, which renders "No Agents Yet" instead of SystemMetrics.
     await agentCard.click();
 
-    // URL transitions to /fleets/:fleetId/agents/:agentId (no explicit /metrics segment needed)
+    // URL transitions to /fleets/:fleetId/agents/:agentId/metrics
     await page.waitForURL(/\/fleets\/.+\/agents\//i, { timeout: 15000 });
     await page.waitForLoadState('networkidle');
     console.log('[E2E] Agent URL:', page.url());
@@ -185,8 +185,16 @@ test.describe('Dashboard Integration Tests', () => {
       contentType: 'image/png',
     });
 
-    // SystemMetrics.tsx is rendered under currentView === 'metrics' (the default agent view).
-    // It now carries data-testid="system-metrics" on its root div.
+    // Explicitly click the System tab to ensure we are on the metrics view.
+    // This is resilient to whatever view the app lands on after agent selection.
+    const systemTab = page.getByRole('button', { name: /system/i });
+    await expect(systemTab).toBeVisible({ timeout: 10000 });
+    await systemTab.click();
+    await page.waitForLoadState('networkidle');
+    console.log('[E2E] Clicked System tab, URL:', page.url());
+
+    // SystemMetrics.tsx is rendered under currentView === 'metrics'.
+    // It carries data-testid="system-metrics" on its root div.
     await expect(page.locator('[data-testid="system-metrics"]')).toBeVisible({ timeout: 20000 });
 
     await testInfo.attach('system-metrics-visible', {

@@ -921,7 +921,10 @@ export default function App() {
       // This prevents showing tabs/views from agents in the previous fleet
       const previousFleet = selectedDevice?.fleet_uuid;
       const isChangingFleets = previousFleet && previousFleet !== fleetUuid;
-      const targetView = isChangingFleets ? 'metrics' : currentView;
+      // Also default to metrics when current view is not an agent-specific view
+      // (e.g. when navigating from the home page or any global view)
+      const isCurrentViewAgentView = agentViews.includes(currentView as typeof agentViews[number]);
+      const targetView = (isChangingFleets || !isCurrentViewAgentView) ? 'metrics' : currentView;
       
       // Save as last viewed agent for restoration
       setLastViewedAgent({
