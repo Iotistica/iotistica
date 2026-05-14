@@ -75,7 +75,7 @@ test.describe('Dashboard Integration Tests', () => {
     await expect(page.getByPlaceholder('Search agents...')).toBeVisible({ timeout: 20000 });
   });
 
-  test('should display fleet on the fleets page', async ({ page }) => {
+  test('should display fleet on the fleets page', async ({ page }, testInfo) => {
     const expectedFleetUuid = process.env.E2E_FLEET_UUID || '';
 
     await page.goto('/fleets');
@@ -87,8 +87,9 @@ test.describe('Dashboard Integration Tests', () => {
     // Wait for the fleets card to finish loading (loader disappears, list appears)
     await expect(page.getByText('Loading fleets...')).toBeHidden({ timeout: 15000 });
 
-    // Capture page state for CI diagnostics
-    await page.screenshot({ path: 'test-results/fleets-page-diagnostic.png', fullPage: true });
+    // Capture and attach screenshot so it appears in the Playwright HTML report
+    const screenshotBytes = await page.screenshot({ fullPage: true });
+    await testInfo.attach('fleets-page', { body: screenshotBytes, contentType: 'image/png' });
 
     // Log the CardDescription count text for the CI log
     const countText = await page.locator('text=/\\d+ fleet/').first().textContent().catch(() => 'not found');
