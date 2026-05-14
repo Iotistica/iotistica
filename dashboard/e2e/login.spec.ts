@@ -35,12 +35,10 @@ test.describe('Dashboard Login', () => {
     await passwordInput.fill(password);
     await loginButton.click();
 
-    // Should redirect to dashboard after successful login
-    await page.waitForURL(/dashboard|devices|home/i, { timeout: 10000 });
-    
-    // Verify we're logged in - check for user menu or logout button
-    const userMenu = page.getByRole('button', { name: /logout|profile|user|admin/i });
-    await expect(userMenu).toBeVisible({ timeout: 5000 });
+    // SPA stays at '/' and renders the authenticated shell in-place — no URL change.
+    // Wait for the sidebar search box which is always present when logged in.
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByPlaceholder('Search agents...')).toBeVisible({ timeout: 20000 });
   });
 
   test('should show error for invalid credentials', async ({ page }) => {
