@@ -497,7 +497,7 @@ export default function App() {
         
         // Get auth token from localStorage
         const accessToken = localStorage.getItem('accessToken');
-        const apiUrl = buildApiUrl('/api/v1/devices?limit=100');
+        const apiUrl = buildApiUrl('/api/v1/agents?limit=100');
         console.log('[DEBUG] API URL:', apiUrl);
         console.log('[DEBUG] Fetching devices with token:', accessToken ? `${accessToken.substring(0, 20)}...` : 'NULL');
         console.log('[DEBUG] Full auth header:', `Bearer ${accessToken}`);
@@ -521,11 +521,11 @@ export default function App() {
         const data = await response.json();
         
         console.log('Devices API response:', data);
-        console.log('[FLEET DEBUG] Raw devices with fleet_uuid:', data.devices.map((d: any) => ({ uuid: d.uuid, name: d.device_name, fleet_uuid: d.fleet_uuid })));
+        console.log('[FLEET DEBUG] Raw devices with fleet_uuid:', data.agents.map((d: any) => ({ uuid: d.uuid, name: d.device_name, fleet_uuid: d.fleet_uuid })));
         
         // Transform API response to match Device interface
         // CRITICAL: Use stable UUID as ID instead of index to prevent React remounts
-        const transformedDevices: Device[] = data.devices.map((apiDevice: any) => ({
+        const transformedDevices: Device[] = data.agents.map((apiDevice: any) => ({
           id: apiDevice.uuid, // Use stable UUID instead of index
           deviceUuid: apiDevice.uuid,
           name: apiDevice.device_name || 'Unnamed Device',
@@ -743,7 +743,7 @@ export default function App() {
         
         // Update device basic info
         const accessToken = localStorage.getItem('accessToken');
-        const response = await fetch(buildApiUrl(`/api/v1/devices/${deviceData.id}`), {
+        const response = await fetch(buildApiUrl(`/api/v1/agents/${deviceData.id}`), {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -771,10 +771,10 @@ export default function App() {
           console.log('[DEBUG] Updating tags for device:', {
             deviceUuid: deviceData.deviceUuid,
             tags: deviceData.tags,
-            url: buildApiUrl(`/api/v1/devices/${deviceData.deviceUuid}/tags`)
+            url: buildApiUrl(`/api/v1/agents/${deviceData.deviceUuid}/tags`)
           });
           
-          const tagsResponse = await fetch(buildApiUrl(`/api/v1/devices/${deviceData.deviceUuid}/tags`), {
+          const tagsResponse = await fetch(buildApiUrl(`/api/v1/agents/${deviceData.deviceUuid}/tags`), {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -837,7 +837,7 @@ export default function App() {
           requestBody.tags = Object.entries(deviceData.tags).map(([key, value]) => ({ key, value }));
         }
         
-        const response = await fetch(buildApiUrl('/api/v1/devices'), {
+        const response = await fetch(buildApiUrl('/api/v1/agents'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
