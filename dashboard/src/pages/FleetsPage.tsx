@@ -16,7 +16,7 @@ interface Fleet {
   fleet_id: string;
   fleet_name: string;
   customer_id: string;
-  fleet_type: 'virtual' | 'physical' | 'mixed';
+  fleet_type: 'virtual' | 'physical';
   status: 'active' | 'stopped' | 'deleted';
   environment: string;
   location: string | null;
@@ -173,7 +173,7 @@ export function FleetsPage() {
                     >
                       All ({fleets.length})
                     </DropdownMenuCheckboxItem>
-                    {['virtual', 'physical', 'mixed'].map(type => {
+                    {['virtual', 'physical'].map(type => {
                       const count = fleets.filter(f => f.fleet_type === type).length;
                       if (count === 0) return null;
                       return (

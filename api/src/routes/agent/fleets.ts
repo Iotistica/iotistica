@@ -313,10 +313,10 @@ const plugin: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      if (!['virtual', 'physical', 'mixed'].includes(fleet_type)) {
+      if (!['virtual', 'physical'].includes(fleet_type)) {
         return reply.status(400).send({
           error: 'Invalid fleet_type',
-          allowed: ['virtual', 'physical', 'mixed'],
+          allowed: ['virtual', 'physical'],
         });
       }
 

@@ -211,7 +211,7 @@ jobs:
               'default-fleet',
               'Default Fleet',
               customerId,
-              'mixed',
+              'physical',
               'Auto-created by integration workflow for provisioning keys',
               fleetUuid,
               'integration-tests'

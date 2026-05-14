@@ -13,7 +13,7 @@ interface Fleet {
   fleet_uuid?: string;
   fleet_id: string;
   fleet_name: string;
-  fleet_type: 'virtual' | 'physical' | 'mixed';
+  fleet_type: 'virtual' | 'physical';
   environment: string;
   location: string | null;
   billing_enabled: boolean;
@@ -31,7 +31,7 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
   const [formData, setFormData] = useState({
     fleet_uuid: '',
     fleet_name: '',
-    fleet_type: 'virtual' as 'virtual' | 'physical' | 'mixed',
+    fleet_type: 'virtual' as 'virtual' | 'physical',
     environment: 'dev',
     location: '',
     billing_enabled: false,
@@ -186,7 +186,7 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
               <Label htmlFor="fleet_type">Fleet Type</Label>
               <Select
                 value={formData.fleet_type}
-                onValueChange={(value: 'virtual' | 'physical' | 'mixed') =>
+                onValueChange={(value: 'virtual' | 'physical') =>
                   setFormData({ ...formData, fleet_type: value })
                 }
               >
@@ -196,7 +196,6 @@ export function EditFleetDialog({ open, onOpenChange, fleet, onSuccess }: EditFl
                 <SelectContent>
                   <SelectItem value="virtual">Virtual</SelectItem>
                   <SelectItem value="physical">Physical</SelectItem>
-                  <SelectItem value="mixed">Mixed</SelectItem>
                 </SelectContent>
               </Select>
             </div>

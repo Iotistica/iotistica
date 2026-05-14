@@ -615,7 +615,7 @@ VALUES (
     'default-fleet',
     'Default Fleet',
     '$defaultCustomerId'::uuid,
-    'mixed',
+    'physical',
     'Auto-created by scripts/generate-agents.ps1 for provisioning keys',
     'active',
     'generate-agents.ps1',
