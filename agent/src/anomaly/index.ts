@@ -15,6 +15,9 @@ import type {
 	DataPoint,
 	AnomalyConfig,
 	AnomalyAlert,
+	DetectionResult,
+	CompositeBaseline,
+	DetectorBaseline,
 	MetricConfig,
 	StatisticalBuffer,
 	DetectionMethod,
@@ -24,19 +27,52 @@ import type {
 	BaselineInfo,
 	AnomalyEvent,
 } from './types';
-import { createBuffer, addValue, getRecentValues, getTrend, getMedian } from './buffer';
-import { getDetector } from './detectors';
+import { createBuffer, addValue, getMedian } from './buffer';
 import { AlertManager } from './alerts';
 import { LINEAR_PREDICTOR_LOOKBACK, LinearPredictor, MIN_TIME_TO_THRESHOLD_CONFIDENCE, recordForecastResult, shouldPublishForecast, shouldRunForecast } from './forecaster';
 import type { ForecastCadenceConfig, ForecastCadenceState, Prediction } from './forecaster';
 import { AnomalyStorageService, type AnomalyBaselineRecord } from './storage';
 import { getTimeSlot, getMinimumSamplesForSeasonalBaseline } from './seasonality';
-import { normalizeDeviceState } from './device-state';
+import { runDetectionMethods } from './detection-runner';
+import {
+	calculateConfidence,
+	createAnomalyAlert,
+	generateSeverityReason,
+} from './alert-factory';
+import {
+	getMetricConfig as selectMetricConfig,
+	resolveDeviceState as resolveDataPointDeviceState,
+	resolveDeviceId as resolveDataPointDeviceId,
+	resolveEventDeviceType as resolveDataPointEventDeviceType,
+	getBufferKey as buildBufferKey,
+	parseBufferKey as decodeBufferKey,
+} from './metric-router';
 
-function createId(): string {
-	const now = Date.now().toString(36);
-	const rand = Math.random().toString(36).slice(2, 12);
-	return `${now}-${rand}`;
+function mapDbBaselineToDetectorBaseline(
+	baseline: AnomalyBaselineRecord,
+): DetectorBaseline {
+	const domainBaseline: CompositeBaseline = {
+		kind: 'composite',
+		sampleCount: baseline.sample_count,
+	};
+
+	if (baseline.mean !== null) {
+		domainBaseline.mean = baseline.mean;
+	}
+
+	if (baseline.std_dev !== null) {
+		domainBaseline.stdDev = baseline.std_dev;
+	}
+
+	if (baseline.median !== null) {
+		domainBaseline.median = baseline.median;
+	}
+
+	if (baseline.mad !== null) {
+		domainBaseline.mad = baseline.mad;
+	}
+
+	return domainBaseline;
 }
 
 export class AnomalyDetectionService {
@@ -290,7 +326,7 @@ export class AnomalyDetectionService {
 
 	/**
 	* Get predictions for all tracked metrics
-	* Returns forecast data including trend, predicted_next, confidence, and time_to_threshold
+	* Returns forecast data including trend, predictedNext, confidence, and timeToThreshold
 	*/
 	getPredictions(): Record<string, Prediction> | undefined {
 		return this.generatePredictions();
@@ -340,7 +376,7 @@ export class AnomalyDetectionService {
 		// CRITICAL: Pass null profile to avoid filtering - we removed profile dependency
 		// This means baselines are shared across all scenarios (intentional since profile is metadata)
 		// If you need scenario isolation, clear anomaly_baselines table when changing scenarios
-		let dbBaseline: any = null;
+		let dbBaseline: AnomalyBaselineRecord | null = null;
 		const deviceState = this.resolveDeviceState(dataPoint);
 		const deviceId = this.resolveDeviceId(dataPoint);
 		if (this.storage) {
@@ -387,76 +423,33 @@ export class AnomalyDetectionService {
 			});
 			dbBaseline = null;
 		}
+
+		const detectorBaseline = dbBaseline ? mapDbBaselineToDetectorBaseline(dbBaseline) : undefined;
 		
-		// Build list of methods to run
-		const methodsToRun = [...metricConfig.methods];
-		
-		// Auto-add expected_range if expectedRange is configured but not in methods
-		if (metricConfig.expectedRange && !methodsToRun.includes('expected_range')) {
-			methodsToRun.unshift('expected_range'); // Add first for priority
-		}
-		
-		this.logger?.debugSync('Running detection methods', {
-			component: LogComponents.anomaly,
+		const minConfidence = metricConfig.minConfidence || this.config.alerts.minConfidence || 0.7;
+		const detectionResult = runDetectionMethods({
 			metric: dataPoint.metric,
-			deviceState,
 			value: dataPoint.value,
-			methods: methodsToRun.join(','),
-			hasDbBaseline: !!dbBaseline,
-			bufferSize: buffer.size,
+			buffer,
+			metricConfig,
+			detectorBaseline,
+			minConfidence,
+			logger: this.logger,
+			createAlert: (method, baselineSource, confidence, deviation, expectedRange, message) =>
+				createAnomalyAlert(dataPoint, buffer, metricConfig, {
+					method,
+					isAnomaly: true,
+					baselineSource,
+					confidence,
+					deviation,
+					expectedRange,
+					message,
+				}, deviceState),
 		});
-		
-		// Run each configured detection method
-		for (const method of methodsToRun) {
-			const detector = getDetector(method);
-			if (!detector) {
-				this.logger?.warnSync(`Unknown detection method: ${method}`, {
-					component: LogComponents.anomaly,
-				});
-				continue;
-			}
-			
-			const result = detector.detect(dataPoint.value, buffer, metricConfig, dbBaseline);
-			
-			this.logger?.debugSync(`Detector result: ${method}`, {
-				component: LogComponents.anomaly,
-				metric: dataPoint.metric,
-				method,
-				isAnomaly: result.isAnomaly,
-				confidence: result.confidence?.toFixed(3) ?? 'N/A',
-				deviation: result.deviation?.toFixed(3) ?? 'N/A',
-				expectedRange: `[${result.expectedRange?.[0]?.toFixed(2) ?? 'N/A'}, ${result.expectedRange?.[1]?.toFixed(2) ?? 'N/A'}]`,
-				baselineSource: result.baselineSource || 'N/A',
-				message: result.message,
-			});
-			
-			// Track maximum confidence across all methods (for anomaly score)
-			if (result.confidence > maxConfidence) {
-				maxConfidence = result.confidence;
-			}
-			
-			// Filter by confidence threshold for alerts
-			const minConfidence = metricConfig.minConfidence || this.config.alerts.minConfidence || 0.7; // Default: 0.7
-			if (result.isAnomaly && result.confidence >= minConfidence) {
-				this.logger?.infoSync('Creating alert (confidence threshold met)', {
-					component: LogComponents.anomaly,
-					metric: dataPoint.metric,
-					method,
-					confidence: result.confidence?.toFixed(3) ?? 'N/A',
-					minConfidence: minConfidence?.toFixed(3) ?? 'N/A',
-				});
-				const alert = this.createAlert(dataPoint, buffer, metricConfig, result);
-				results.push(alert);
-			} else if (result.isAnomaly) {
-				this.logger?.debugSync('Anomaly detected but confidence below threshold', {
-					component: LogComponents.anomaly,
-					metric: dataPoint.metric,
-					method,
-					confidence: result.confidence?.toFixed(3) ?? 'N/A',
-					minConfidence: minConfidence?.toFixed(3) ?? 'N/A',
-				});
-			}
-		}
+
+		const methodsToRun = detectionResult.methodsToRun;
+		maxConfidence = detectionResult.maxConfidence;
+		results.push(...detectionResult.alerts);
 		
 		// Cache the anomaly score for this metric (0.0-1.0 range)
 		this.anomalyScores.set(this.getBufferKey(dataPoint.metric, deviceState, deviceId), maxConfidence);
@@ -553,14 +546,14 @@ export class AnomalyDetectionService {
 		};
 		
 		// Generate severity reason for auditability
-		const severityReason = this.generateSeverityReason(
+		const severityReason = generateSeverityReason(
 			anomalyScore,
 			primaryAlert.deviation,
 			primaryAlert.severity
 		);
 		
 		// Calculate confidence (post-fusion certainty adjusted for baseline quality)
-		const confidence = this.calculateConfidence(anomalyScore, baseline);
+		const confidence = calculateConfidence(anomalyScore, baseline);
 		
 		// Determine device type: Prefer protocol from data point, fall back to constructor value
 		// This allows per-metric protocol specification (modbus, opcua, system, etc.)
@@ -645,136 +638,6 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
-	* Create an anomaly alert from detection result
-	*/
-	private createAlert(
-		dataPoint: DataPoint,
-		buffer: StatisticalBuffer,
-		metricConfig: MetricConfig,
-		result: any
-	): AnomalyAlert {
-		const severity = this.calculateSeverity(result.confidence, result.deviation, result.method);
-		
-		return {
-			id: createId(),
-			severity,
-			deviceState: this.resolveDeviceState(dataPoint),
-			metric: dataPoint.metric,
-			value: dataPoint.value,
-			expectedRange: result.expectedRange,
-			deviation: result.deviation,
-			detectionMethod: result.method,
-			timestamp: dataPoint.timestamp,
-			confidence: result.confidence,
-			context: {
-				recent_values: getRecentValues(buffer, 10),
-				baseline: buffer.mean,
-				trend: getTrend(buffer),
-				windowSize: buffer.size,
-			},
-			message: `${result.message} (state: ${this.resolveDeviceState(dataPoint)})`,
-			fingerprint: '', // Set by AlertManager
-			count: 1,
-			// Suppression metadata (populated by AlertManager)
-			cooldownSec: Math.floor((metricConfig.cooldownMs || 30000) / 1000),  // 30s for testing
-			firstSeen: dataPoint.timestamp,
-			consecutiveCount: 1,
-		};
-	}
-	
-	/**
-	* Calculate severity based on confidence, deviation, and detection method
-	* 
-	* MAD detector is downgraded to 'warning' max severity for slow-moving signals
-	* ExpectedRange and RateChange remain 'critical' for hard threshold violations
-	*/
-	private calculateSeverity(confidence: number, deviation: number, method?: string): AnomalySeverity {
-		// Simulation fast-path: always critical (injected ground-truth anomaly)
-		if (method === 'simulation') {
-			return 'critical';
-		}
-
-		// MAD detector: Downgrade to warning max (frequency deviations not critical unless persistent)
-		if (method === 'mad') {
-			if (confidence >= 0.7 || deviation >= 3.0) {
-				return 'warning';
-			} else {
-				return 'info';
-			}
-		}
-		
-		// ExpectedRange and RateChange: Keep critical severity (hard violations)
-		// ZScore, IQR, EWMA: Use standard thresholds
-		if (confidence >= 0.85 || deviation >= 5.0) {
-			return 'critical';
-		} else if (confidence >= 0.7 || deviation >= 3.0) {
-			return 'warning';
-		} else {
-			return 'info';
-		}
-	}
-	
-	/**
-	* Generate severity reason for auditability and tuning
-	*/
-	private generateSeverityReason(
-		score: number,
-		deviation: number,
-		severity: AnomalySeverity
-	): string {
-		const reasons: string[] = [];
-		
-		// Document which thresholds were met
-		if (score >= 0.85) {
-			reasons.push('score>=0.85');
-		} else if (score >= 0.7) {
-			reasons.push('score>=0.7');
-		}
-		
-		if (deviation >= 5.0) {
-			reasons.push('deviation>=5.0');
-		} else if (deviation >= 3.0) {
-			reasons.push('deviation>=3.0');
-		}
-		
-		// If no thresholds met, it's info level by default
-		if (reasons.length === 0) {
-			reasons.push('score<0.7');
-		}
-		
-		return `${severity}: ${reasons.join(' || ')}`;
-	}
-	
-	/**
-	* Calculate confidence (post-fusion certainty)
-	* Adjusts anomalyScore based on baseline quality factors
-	*/
-	private calculateConfidence(
-		anomalyScore: number,
-		baseline: BaselineInfo
-	): number {
-		let confidence = anomalyScore;
-		
-		// Penalize low sample counts (less than 30 samples = less confidence)
-		if (baseline.sampleCount < 30) {
-			const samplePenalty = baseline.sampleCount / 30; // 0.0-1.0 multiplier
-			confidence *= (0.7 + 0.3 * samplePenalty); // Min 70% of original score
-		}
-		
-		// Bonus for database-sourced baselines (more stable than buffer-only)
-		if (baseline.source === 'database') {
-			confidence = Math.min(1.0, confidence * 1.05); // Up to 5% boost
-		}
-		
-		// Penalize very high stdDev (unstable baseline = less confidence)
-		if (baseline.stdDev > baseline.mean * 0.5) { // CV > 50%
-			confidence *= 0.9; // 10% penalty for high variability
-		}
-		
-		return Math.min(1.0, Math.max(0.0, confidence));
-	}
-	
-	/**
 	* Get metric configuration by name.
 	*
 	* Matching priority:
@@ -788,40 +651,7 @@ export class AnomalyDetectionService {
 	*     "temperature" still apply to canonical keys.
 	*/
 	private getMetricConfig(metricName: string): MetricConfig | undefined {
-		// Exact match (system metrics, pre-qualified legacy names)
-		const exact = this.config.metrics.find(m => m.name === metricName);
-		if (exact) {
-			return exact;
-		}
-
-		// Device-scoped match: "{deviceName}_{name}"
-		for (const m of this.config.metrics) {
-			if (m.deviceName && `${m.deviceName}_${m.name}` === metricName) {
-				return m;
-			}
-		}
-
-		// Canonical system metric fallback: "{agentUuid}_system_{metric}" -> "{metric}"
-		const systemPrefixMatch = metricName.match(/^[0-9a-f-]{36}_system_(.+)$/);
-		if (systemPrefixMatch) {
-			const bareName = systemPrefixMatch[1];
-			const bare = this.config.metrics.find(m => m.name === bareName);
-			if (bare) {
-				return bare;
-			}
-		}
-
-		// Canonical endpoint metric fallback: "{agentUuid}_{endpointUuid}_{metric}" -> "{metric}"
-		const endpointPrefixMatch = metricName.match(/^[0-9a-f-]{36}_[0-9a-f-]{36}_(.+)$/);
-		if (endpointPrefixMatch) {
-			const bareName = endpointPrefixMatch[1];
-			const bare = this.config.metrics.find(m => m.name === bareName);
-			if (bare) {
-				return bare;
-			}
-		}
-
-		return undefined;
+		return selectMetricConfig(this.config.metrics, metricName);
 	}
 	
 	/**
@@ -1044,24 +874,25 @@ export class AnomalyDetectionService {
 			});
 			
 			// Generate prediction using linear predictor (standardized lookback)
-			const prediction = this.predictor.predict(buffer, LINEAR_PREDICTOR_LOOKBACK);
+			const predictionResult = this.predictor.predictResult(buffer, LINEAR_PREDICTOR_LOOKBACK);
 			recordForecastResult(cadenceState, null, now); // Track run even if no publish
-			if (!prediction) {
+			if (!predictionResult.success) {
 				this.logger?.debugSync('Forecast generation failed', {
 					component: LogComponents.anomaly,
 					metric: metricName,
-					reason: 'Insufficient data or no trend',
+					reason: predictionResult.reason,
 				});
 				continue;
 			}
+			const prediction = predictionResult.prediction;
 			
 			this.logger?.debugSync('Forecast generated', {
 				component: LogComponents.anomaly,
 				metric: metricName,
 				current: prediction.current?.toFixed(3) ?? 'N/A',
-				predicted_next: prediction.predicted_next?.toFixed(3) ?? 'N/A',
+				predictedNext: prediction.predictedNext?.toFixed(3) ?? 'N/A',
 				trend: prediction.trend,
-				trend_strength: prediction.trend_strength?.toFixed(3) ?? 'N/A',
+				trendStrength: prediction.trendStrength?.toFixed(3) ?? 'N/A',
 				confidence: prediction.confidence?.toFixed(3) ?? 'N/A',
 			});
 			
@@ -1073,16 +904,22 @@ export class AnomalyDetectionService {
 				const threshold = metricConfig.expectedRange[1]; // Upper bound
 				const samplingIntervalMs = 20000; // Default 20s interval (matches METRICS_INTERVAL_MS)
 				
-				const timeToThreshold = this.predictor.estimateTimeToThreshold(
+				const timeToThresholdResult = this.predictor.estimateTimeToThresholdResult(
 					buffer,
 					threshold,
 					samplingIntervalMs
 				);
-				
-				if (timeToThreshold && timeToThreshold.confidence >= 0.3) { // Guard: never attach <0.3
-					prediction.time_to_threshold = {
+
+				if (!timeToThresholdResult.success) {
+					this.logger?.debugSync('Time-to-threshold estimation skipped', {
+						component: LogComponents.anomaly,
+						metric: metricName,
+						reason: timeToThresholdResult.reason,
+					});
+				} else if (timeToThresholdResult.estimate.confidence >= 0.3) { // Guard: never attach <0.3
+					prediction.timeToThreshold = {
 						threshold,
-						...timeToThreshold,
+						...timeToThresholdResult.estimate,
 					};
 				}
 			}
@@ -1100,11 +937,11 @@ export class AnomalyDetectionService {
 			this.logger?.infoSync('Publishing forecast', {
 				component: LogComponents.anomaly,
 				metric: metricName,
-				predicted_next: prediction.predicted_next?.toFixed(3) ?? 'N/A',
+				predictedNext: prediction.predictedNext?.toFixed(3) ?? 'N/A',
 				trend: prediction.trend,
 				confidence: prediction.confidence?.toFixed(3) ?? 'N/A',
-				time_to_threshold: prediction.time_to_threshold?.estimated_seconds
-					? `${(prediction.time_to_threshold.estimated_seconds / 3600).toFixed(1)}h`
+				timeToThreshold: prediction.timeToThreshold?.estimatedSeconds
+					? `${(prediction.timeToThreshold.estimatedSeconds / 3600).toFixed(1)}h`
 					: 'N/A',
 			});
 
@@ -1539,93 +1376,19 @@ export class AnomalyDetectionService {
 	}
 
 	private getBufferKey(metricName: string, deviceState: CanonicalDeviceState, deviceId: string): string {
-		return `${deviceId}::${deviceState}::${metricName}`;
+		return buildBufferKey(metricName, deviceState, deviceId);
 	}
 
 	private parseBufferKey(bufferKey: string): { metricName: string; deviceState: CanonicalDeviceState; deviceId: string } {
-		const lastSeparator = bufferKey.lastIndexOf('::');
-		if (lastSeparator === -1) {
-			return { metricName: bufferKey, deviceState: 'unknown', deviceId: 'unknown' };
-		}
-
-		const secondLastSeparator = bufferKey.lastIndexOf('::', lastSeparator - 1);
-		if (secondLastSeparator === -1) {
-			// Legacy key format: metric::state
-			const metricName = bufferKey.slice(0, lastSeparator);
-			const state = bufferKey.slice(lastSeparator + 2) as CanonicalDeviceState;
-			return {
-				metricName,
-				deviceState: state || 'unknown',
-				deviceId: 'unknown',
-			};
-		}
-
-		const deviceId = bufferKey.slice(0, secondLastSeparator) || 'unknown';
-		const state = bufferKey.slice(secondLastSeparator + 2, lastSeparator) as CanonicalDeviceState;
-		const metricName = bufferKey.slice(lastSeparator + 2);
-		return {
-			metricName,
-			deviceState: state || 'unknown',
-			deviceId,
-		};
+		return decodeBufferKey(bufferKey);
 	}
 
 	private resolveDeviceState(dataPoint: DataPoint): CanonicalDeviceState {
-		const protocol = dataPoint.protocol || this.deviceType || 'system';
-		const candidate = dataPoint.deviceState ?? dataPoint.rawDeviceState ?? dataPoint.tags?.deviceState ?? dataPoint.tags?.state;
-
-		if (candidate === undefined || candidate === null) {
-			if (protocol === 'opcua') {
-				if (dataPoint.quality === 'GOOD') {
-					return 'running';
-				}
-				if (dataPoint.quality === 'BAD' || dataPoint.quality === 'UNCERTAIN') {
-					return 'fault';
-				}
-			}
-		}
-
-		return normalizeDeviceState(protocol, candidate);
+		return resolveDataPointDeviceState(dataPoint, this.deviceType);
 	}
 
 	private resolveEventDeviceType(dataPoint: DataPoint): Protocol {
-		// FIRST: Always prefer explicit protocol if dataPoint sets it
-		if (dataPoint.protocol) {
-			return dataPoint.protocol;
-		}
-
-		// SECOND: Try to infer from metric name if source is 'endpoint'
-		if (dataPoint.source === 'endpoint') {
-			const metric = dataPoint.metric.toLowerCase();
-			if (metric.includes('modbus')) return 'modbus';
-			if (metric.includes('opcua')) return 'opcua';
-			if (metric.includes('bacnet')) return 'bacnet';
-			if (metric.includes('mqtt')) return 'mqtt';
-
-			// Canonical endpoint metric: {agentUuid}_{deviceId}_{metric}
-			// Don't assume protocol - this could be any endpoint protocol
-			// Only use as fallback if no other clues available
-			const canonicalEndpointMetric = /^[0-9a-f-]{36}_[0-9a-f-]{36}_.+$/i.test(dataPoint.metric);
-			if (canonicalEndpointMetric && !dataPoint.protocol) {
-				// Log warning: canonical metric with no explicit protocol
-				this.logger?.warnSync('Canonical endpoint metric without explicit protocol, defaulting to mqtt', {
-					component: LogComponents.anomaly,
-					metric: dataPoint.metric,
-					source: dataPoint.source,
-				});
-				return 'mqtt'; // Fallback for backward compatibility
-			}
-		}
-
-		// THIRD: Fall back to constructor's device type or 'system'
-		this.logger?.debugSync('Resolving device type to fallback', {
-			component: LogComponents.anomaly,
-			metric: dataPoint.metric,
-			source: dataPoint.source,
-			hasProtocol: !!dataPoint.protocol,
-			fallbackDeviceType: this.deviceType || 'system',
-		});
-		return this.deviceType || 'system';
+		return resolveDataPointEventDeviceType(dataPoint, this.deviceType, this.logger);
 	}
 
 	/**
@@ -1636,25 +1399,6 @@ export class AnomalyDetectionService {
 	}
 
 	private resolveDeviceId(dataPoint: DataPoint): string {
-		const candidate =
-			dataPoint.deviceId ??
-			dataPoint.tags?.deviceId ??
-			dataPoint.tags?.endpointId ??
-			dataPoint.tags?.containerId ??
-			dataPoint.tags?.deviceUuid;
-
-		if (typeof candidate === 'string' && candidate.trim().length > 0) {
-			return candidate.trim();
-		}
-
-		if (dataPoint.source === 'system') {
-			return 'system-endpoint';
-		}
-
-		if (dataPoint.source === 'container') {
-			return 'unknown-container';
-		}
-
-		return 'unknown-device';
+		return resolveDataPointDeviceId(dataPoint);
 	}
 }

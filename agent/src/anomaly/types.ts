@@ -414,6 +414,36 @@ export interface DetectionResult {
 }
 
 /**
+ * Domain-level baseline contracts used by detectors.
+ * Keep these camelCase to avoid leaking DB column naming into detection logic.
+ */
+export interface StatisticalBaseline {
+	sampleCount: number;
+}
+
+export interface ZScoreBaseline extends StatisticalBaseline {
+	kind: 'zscore';
+	mean: number;
+	stdDev: number;
+}
+
+export interface MADBaseline extends StatisticalBaseline {
+	kind: 'mad';
+	median: number;
+	mad: number;
+}
+
+export interface CompositeBaseline extends StatisticalBaseline {
+	kind: 'composite';
+	mean?: number;
+	stdDev?: number;
+	median?: number;
+	mad?: number;
+}
+
+export type DetectorBaseline = ZScoreBaseline | MADBaseline | CompositeBaseline;
+
+/**
  * Detector interface - all detectors implement this
  */
 export interface AnomalyDetector {
@@ -422,13 +452,7 @@ export interface AnomalyDetector {
 		value: number,
 		buffer: StatisticalBuffer,
 		config: MetricConfig,
-		dbBaseline?: {
-			mean?: number;
-			median?: number;
-			std_dev?: number;
-			mad?: number;
-			sample_count: number;
-		}
+		dbBaseline?: DetectorBaseline
 	): DetectionResult;
 }
 

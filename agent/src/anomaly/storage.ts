@@ -68,6 +68,33 @@ type AnomalyBaselineRow = Omit<AnomalyBaselineRecord, 'created_at' | 'updated_at
 	updated_at?: string | Date | null;
 };
 
+type SQLiteResult<T> = T;
+type StorageTableName = 'anomaly_alerts' | 'anomaly_baselines';
+
+type AnomalyAlertInsertRecord = Omit<
+	AnomalyAlertRecord,
+	'id' | 'created_at' | 'cooldown_sec' | 'first_seen' | 'consecutive_count'
+> &
+	Partial<Pick<AnomalyAlertRecord, 'cooldown_sec' | 'first_seen' | 'consecutive_count'>>;
+
+type AnomalyBaselineInsertRecord = Omit<
+	AnomalyBaselineRecord,
+	'id' | 'created_at' | 'updated_at' | 'time_slot' | 'device_state' | 'device_id'
+> &
+	Partial<Pick<AnomalyBaselineRecord, 'time_slot' | 'device_state' | 'device_id'>>;
+
+type StorageInsertTableMap = {
+	anomaly_alerts: AnomalyAlertInsertRecord;
+	anomaly_baselines: AnomalyBaselineInsertRecord;
+};
+
+const ALLOWED_TABLES = new Set<StorageTableName>([
+	'anomaly_alerts',
+	'anomaly_baselines',
+]);
+
+const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 export class AnomalyStorageService {
 	private db: Database.Database;
 	private logger?: AgentLogger;
@@ -75,6 +102,12 @@ export class AnomalyStorageService {
 	private cleanupIntervalMs: number = 86400000; // 24 hours
 	private cleanupTimer?: NodeJS.Timeout;
 	private readonly tableColumns = new Map<string, Set<string>>();
+	private readonly seasonalFallbackLogThrottleMs = 5 * 60 * 1000;
+	private readonly seasonalFallbackLastLogAt = new Map<string, number>();
+	private schemaCache?: {
+		alerts: Set<string>;
+		baselines: Set<string>;
+	};
 
 	constructor(db: Database.Database, retention: number, logger?: AgentLogger) {
 		this.db = db;
@@ -82,15 +115,52 @@ export class AnomalyStorageService {
 		this.logger = logger;
 	}
 
+	private queryOne<T>(sql: string, params: readonly unknown[] = []): SQLiteResult<T | undefined> {
+		return this.db.prepare(sql).get(...params) as T | undefined;
+	}
+
+	private queryAll<T>(sql: string, params: readonly unknown[] = []): SQLiteResult<T[]> {
+		return this.db.prepare(sql).all(...params) as T[];
+	}
+
+	private getRetentionCutoff(now: number = Date.now()): number {
+		return now - this.retention * 24 * 60 * 60 * 1000;
+	}
+
+	private shouldLogSeasonalFallback(
+		metric: string,
+		timeSlot: number,
+		deviceState: CanonicalDeviceState,
+		profile: string | null,
+		deviceId: string,
+	): boolean {
+		const now = Date.now();
+		const key = `${metric}|${profile ?? 'null'}|${deviceId}|${deviceState}|${timeSlot}`;
+		const lastLoggedAt = this.seasonalFallbackLastLogAt.get(key);
+
+		if (
+			typeof lastLoggedAt === 'number' &&
+			now - lastLoggedAt < this.seasonalFallbackLogThrottleMs
+		) {
+			return false;
+		}
+
+		this.seasonalFallbackLastLogAt.set(key, now);
+		if (this.seasonalFallbackLastLogAt.size > 1000) {
+			this.seasonalFallbackLastLogAt.clear();
+		}
+
+		return true;
+	}
+
 	private hasTable(tableName: 'anomaly_alerts' | 'anomaly_baselines'): boolean {
-		const row = this.db
-			.prepare(`
-				SELECT name
-				FROM sqlite_master
-				WHERE type = 'table' AND name = ?
-				LIMIT 1
-			`)
-			.get(tableName) as { name?: string } | undefined;
+		const row = this.queryOne<{ name?: string }>(
+			`SELECT name
+			FROM sqlite_master
+			WHERE type = 'table' AND name = ?
+			LIMIT 1`,
+			[tableName],
+		);
 
 		return row?.name === tableName;
 	}
@@ -101,17 +171,28 @@ export class AnomalyStorageService {
 			return cached;
 		}
 
-		const rows = this.db
-			.prepare(`PRAGMA table_info(${tableName})`)
-			.all() as Array<{ name: string }>;
+		const rows = this.queryAll<{ name: string }>(`PRAGMA table_info(${tableName})`);
 
 		const columns = new Set(rows.map((row) => row.name));
 		this.tableColumns.set(tableName, columns);
 		return columns;
 	}
 
+	private getSchemaCache(): { alerts: Set<string>; baselines: Set<string> } {
+		if (!this.schemaCache) {
+			this.schemaCache = {
+				alerts: this.getTableColumns('anomaly_alerts'),
+				baselines: this.getTableColumns('anomaly_baselines'),
+			};
+		}
+
+		return this.schemaCache;
+	}
+
 	private hasColumn(tableName: 'anomaly_alerts' | 'anomaly_baselines', columnName: string): boolean {
-		return this.getTableColumns(tableName).has(columnName);
+		const cache = this.getSchemaCache();
+		const columns = tableName === 'anomaly_alerts' ? cache.alerts : cache.baselines;
+		return columns.has(columnName);
 	}
 
 	private mapAlertRow(row: AnomalyAlertRow): AnomalyAlertRecord {
@@ -130,16 +211,32 @@ export class AnomalyStorageService {
 	}
 
 	private buildInsertStatement(
-		tableName: string,
-		record: Record<string, unknown>,
+		tableName: StorageTableName,
+		record: StorageInsertTableMap[StorageTableName],
 		conflictColumns?: string[],
 	): { sql: string; values: unknown[] } {
+		if (!ALLOWED_TABLES.has(tableName)) {
+			throw new Error(`Invalid table name: ${tableName}`);
+		}
+
 		const columns = Object.keys(record);
+		for (const column of columns) {
+			if (!SAFE_IDENTIFIER_PATTERN.test(column)) {
+				throw new Error(`Invalid column name: ${column}`);
+			}
+		}
+
 		const placeholders = columns.map(() => '?').join(', ');
-		const values = columns.map((column) => record[column]);
+		const values = columns.map((column) => (record as Record<string, unknown>)[column]);
 		let sql = `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
 
 		if (conflictColumns && conflictColumns.length > 0) {
+			for (const conflictColumn of conflictColumns) {
+				if (!SAFE_IDENTIFIER_PATTERN.test(conflictColumn)) {
+					throw new Error(`Invalid conflict column name: ${conflictColumn}`);
+				}
+			}
+
 			const updateColumns = columns.filter((column) => !conflictColumns.includes(column));
 			const updateClause = updateColumns
 				.map((column) => `${column} = excluded.${column}`)
@@ -148,6 +245,14 @@ export class AnomalyStorageService {
 		}
 
 		return { sql, values };
+	}
+
+	private buildInsertStatementForTable<K extends keyof StorageInsertTableMap>(
+		tableName: K,
+		record: StorageInsertTableMap[K],
+		conflictColumns?: Array<keyof StorageInsertTableMap[K] & string>,
+	): { sql: string; values: unknown[] } {
+		return this.buildInsertStatement(tableName, record, conflictColumns);
 	}
 
 	private getBaselineSchema() {
@@ -167,7 +272,7 @@ export class AnomalyStorageService {
 		};
 	}
 
-	private queryBaseline(
+	private buildBaselineWhere(
 		metric: string,
 		options: {
 			timeSlot?: number;
@@ -176,7 +281,7 @@ export class AnomalyStorageService {
 			deviceId?: string;
 			minimumSamples?: number;
 		},
-	): AnomalyBaselineRecord | null {
+	): { sql: string; params: unknown[] } {
 		const whereParts = ['metric = ?'];
 		const params: unknown[] = [metric];
 		const schema = this.getBaselineSchema();
@@ -206,17 +311,37 @@ export class AnomalyStorageService {
 			params.push(options.deviceId);
 		}
 
-		const row = this.db
-			.prepare(`
-				SELECT *
-				FROM anomaly_baselines
-				WHERE ${whereParts.join(' AND ')}
-				ORDER BY calculated_at DESC
-				LIMIT 1
-			`)
-			.get(...params) as AnomalyBaselineRow | undefined;
+		return {
+			sql: whereParts.join(' AND '),
+			params,
+		};
+	}
+
+	private runBaselineQuery(whereSql: string, params: readonly unknown[]): AnomalyBaselineRecord | null {
+		const row = this.queryOne<AnomalyBaselineRow>(
+			`SELECT *
+			FROM anomaly_baselines
+			WHERE ${whereSql}
+			ORDER BY calculated_at DESC
+			LIMIT 1`,
+			params,
+		);
 
 		return row ? this.mapBaselineRow(row) : null;
+	}
+
+	private queryBaseline(
+		metric: string,
+		options: {
+			timeSlot?: number;
+			profile?: string | null;
+			deviceState?: CanonicalDeviceState;
+			deviceId?: string;
+			minimumSamples?: number;
+		},
+	): AnomalyBaselineRecord | null {
+		const { sql, params } = this.buildBaselineWhere(metric, options);
+		return this.runBaselineQuery(sql, params);
 	}
 
 	/**
@@ -232,6 +357,11 @@ export class AnomalyStorageService {
 				'Anomaly detection tables not found. Run database migrations first.'
 			);
 		}
+
+		this.schemaCache = {
+			alerts: this.getTableColumns('anomaly_alerts'),
+			baselines: this.getTableColumns('anomaly_baselines'),
+		};
 
 		this.logger?.infoSync('Anomaly storage service initialized', {
 			component: LogComponents.anomaly,
@@ -278,7 +408,7 @@ export class AnomalyStorageService {
 				this.hasColumn('anomaly_alerts', 'first_seen') &&
 				this.hasColumn('anomaly_alerts', 'consecutive_count');
 
-			const insertRecord = hasSuppressionMetadata
+			const insertRecord: AnomalyAlertInsertRecord = hasSuppressionMetadata
 				? record
 				: (() => {
 					this.logger?.debugSync('Inserting alert without suppression metadata (legacy schema)', {
@@ -295,7 +425,7 @@ export class AnomalyStorageService {
 					return legacyRecord;
 				})();
 
-			const { sql, values } = this.buildInsertStatement('anomaly_alerts', insertRecord as unknown as Record<string, unknown>);
+			const { sql, values } = this.buildInsertStatementForTable('anomaly_alerts', insertRecord);
 			this.db.prepare(sql).run(...values);
 
 			this.logger?.debugSync('Stored anomaly alert', {
@@ -334,7 +464,7 @@ export class AnomalyStorageService {
 			const q3 = sortedValues[q3Index] || null;
 			const iqr = q1 !== null && q3 !== null ? q3 - q1 : null;
 
-			const record: Record<string, unknown> = {
+			const record: AnomalyBaselineInsertRecord = {
 				metric,
 				profile,
 				mean: buffer.mean,
@@ -382,7 +512,7 @@ export class AnomalyStorageService {
 				});
 			}
 
-			const conflictColumns = ['metric', 'profile'];
+			const conflictColumns: Array<keyof AnomalyBaselineInsertRecord & string> = ['metric', 'profile'];
 			if (schema.hasTimeSlot) {
 				conflictColumns.push('time_slot');
 			}
@@ -393,7 +523,7 @@ export class AnomalyStorageService {
 				conflictColumns.push('device_id');
 			}
 
-			const { sql, values } = this.buildInsertStatement('anomaly_baselines', record, conflictColumns);
+			const { sql, values } = this.buildInsertStatementForTable('anomaly_baselines', record, conflictColumns);
 			this.db.prepare(sql).run(...values);
 		} catch (error) {
 			this.logger?.errorSync('Failed to store anomaly baseline', error as Error, {
@@ -416,15 +546,14 @@ export class AnomalyStorageService {
 		limit: number = 100
 	): Promise<AnomalyAlertRecord[]> {
 		try {
-			const alerts = this.db
-				.prepare(`
-					SELECT *
-					FROM anomaly_alerts
-					WHERE metric = ?
-					ORDER BY timestamp DESC
-					LIMIT ?
-				`)
-				.all(metric, limit) as AnomalyAlertRow[];
+			const alerts = this.queryAll<AnomalyAlertRow>(
+				`SELECT *
+				FROM anomaly_alerts
+				WHERE metric = ?
+				ORDER BY timestamp DESC
+				LIMIT ?`,
+				[metric, limit],
+			);
 
 			return alerts.map((alert) => this.mapAlertRow(alert));
 		} catch (error) {
@@ -453,14 +582,13 @@ export class AnomalyStorageService {
 				params.push(metric);
 			}
 
-			const alerts = this.db
-				.prepare(`
-					SELECT *
-					FROM anomaly_alerts
-					WHERE ${whereParts.join(' AND ')}
-					ORDER BY timestamp DESC
-				`)
-				.all(...params) as AnomalyAlertRow[];
+			const alerts = this.queryAll<AnomalyAlertRow>(
+				`SELECT *
+				FROM anomaly_alerts
+				WHERE ${whereParts.join(' AND ')}
+				ORDER BY timestamp DESC`,
+				params,
+			);
 
 			return alerts.map((alert) => this.mapAlertRow(alert));
 		} catch (error) {
@@ -488,14 +616,13 @@ export class AnomalyStorageService {
 			const { clause, params } = this.buildMetricMatchClause(metrics);
 			// Find metrics with ANY baselines (have been collected at least once)
 			// Support both exact matches (e.g., "temperature") and canonical keys (e.g., "8602805f-..._c11224a6-..._temperature")
-			const anyBaselines = this.db
-				.prepare(`
-					SELECT metric
-					FROM anomaly_baselines
-					WHERE ${clause}
-					GROUP BY metric
-				`)
-				.all(...params) as Array<{ metric: string }>;
+			const anyBaselines = this.queryAll<{ metric: string }>(
+				`SELECT metric
+				FROM anomaly_baselines
+				WHERE ${clause}
+				GROUP BY metric`,
+				params,
+			);
 			
 			const collectibleMetrics = anyBaselines.length;
 			
@@ -505,15 +632,14 @@ export class AnomalyStorageService {
 			}
 			
 			// Find metrics with SUFFICIENT baselines (minSamples+)
-			const sufficientBaselines = this.db
-				.prepare(`
-					SELECT metric
-					FROM anomaly_baselines
-					WHERE sample_count >= ?
-					AND ${clause}
-					GROUP BY metric
-				`)
-				.all(minSamples, ...params) as Array<{ metric: string }>;
+			const sufficientBaselines = this.queryAll<{ metric: string }>(
+				`SELECT metric
+				FROM anomaly_baselines
+				WHERE sample_count >= ?
+				AND ${clause}
+				GROUP BY metric`,
+				[minSamples, ...params],
+			);
 
 			const metricsWithBaselines = sufficientBaselines.length;
 			// Coverage = sufficient / collectible (excludes never-collected metrics like cpu_temp on Windows)
@@ -521,10 +647,11 @@ export class AnomalyStorageService {
 			const hasCoverage = coveragePercent >= minCoveragePercent;
 
 			return { hasCoverage, coveragePercent, metricsWithBaselines };
-		} catch (error: any) {
+		} catch (error: unknown) {
+			const err = error instanceof Error ? error : new Error(String(error));
 			this.logger?.warnSync('Failed to check baseline coverage', {
 				component: LogComponents.anomaly,
-				error: error.message,
+				error: err.message,
 			});
 			return { hasCoverage: false, coveragePercent: 0, metricsWithBaselines: 0 };
 		}
@@ -590,14 +717,16 @@ export class AnomalyStorageService {
 				return seasonalBaseline;
 			}
 
-			this.logger?.debugSync('Seasonal baseline insufficient, falling back to overall', {
-				component: LogComponents.anomaly,
-				metric,
-				deviceState,
-				timeSlot,
-				samples: seasonalBaseline?.sample_count || 0,
-				minimumSamples,
-			});
+			if (this.shouldLogSeasonalFallback(metric, timeSlot, deviceState, profile, deviceId)) {
+				this.logger?.debugSync('Seasonal baseline insufficient, falling back to overall', {
+					component: LogComponents.anomaly,
+					metric,
+					deviceState,
+					timeSlot,
+					samples: seasonalBaseline?.sample_count || 0,
+					minimumSamples,
+				});
+			}
 		}
 		
 		// Get overall baseline (time_slot = -1) or legacy baseline (no time_slot)
@@ -641,13 +770,12 @@ export class AnomalyStorageService {
 		try {
 			const cutoffTimestamp = Date.now() - days * 24 * 60 * 60 * 1000;
 
-			const alerts = this.db
-				.prepare(`
-					SELECT severity, detection_method
-					FROM anomaly_alerts
-					WHERE metric = ? AND timestamp >= ?
-				`)
-				.all(metric, cutoffTimestamp) as Array<{ severity: string; detection_method: string }>;
+			const alerts = this.queryAll<{ severity: string; detection_method: string }>(
+				`SELECT severity, detection_method
+				FROM anomaly_alerts
+				WHERE metric = ? AND timestamp >= ?`,
+				[metric, cutoffTimestamp],
+			);
 
 			const stats = {
 				total: alerts.length,
@@ -720,7 +848,7 @@ export class AnomalyStorageService {
 	*/
 	async cleanup(): Promise<void> {
 		try {
-			const cutoffTimestamp = Date.now() - this.retention * 24 * 60 * 60 * 1000;
+			const cutoffTimestamp = this.getRetentionCutoff();
 
 			// Delete old alerts
 			const deletedAlerts = this.db

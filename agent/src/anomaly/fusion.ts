@@ -12,7 +12,7 @@
  * - Handles detector failures gracefully
  */
 
-import type { AnomalyDetector, DetectionResult, MetricConfig, StatisticalBuffer } from './types';
+import type { AnomalyDetector, DetectionResult, DetectorBaseline, MetricConfig, StatisticalBuffer } from './types';
 import { getAllDetectors } from './detectors';
 
 /**
@@ -118,10 +118,10 @@ export interface FusionConfig {
  */
 export class FusionDetector implements AnomalyDetector {
 	readonly method = 'fusion' as const;
-	private detectors: AnomalyDetector[];
+	private detectors: readonly AnomalyDetector[];
 	
 	constructor(detectors?: AnomalyDetector[]) {
-		this.detectors = detectors || getAllDetectors();
+		this.detectors = detectors ?? getAllDetectors();
 	}
 	
 	/**
@@ -131,7 +131,7 @@ export class FusionDetector implements AnomalyDetector {
 		value: number,
 		buffer: StatisticalBuffer,
 		config: MetricConfig,
-		dbBaseline?: { mean?: number; std_dev?: number; median?: number; mad?: number; sample_count: number },
+		dbBaseline?: DetectorBaseline,
 		fusionConfig?: FusionConfig
 	): FusionResult {
 		const threshold = fusionConfig?.threshold ?? 0.6; // Global fusion threshold
@@ -290,7 +290,7 @@ export function detectWithFusion(
 	value: number,
 	buffer: StatisticalBuffer,
 	config: MetricConfig,
-	dbBaseline?: { mean?: number; std_dev?: number; median?: number; mad?: number; sample_count: number },
+	dbBaseline?: DetectorBaseline,
 	fusionConfig?: FusionConfig
 ): FusionResult {
 	const fusion = new FusionDetector();

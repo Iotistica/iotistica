@@ -153,11 +153,18 @@ export class AnomalyEnricher {
 
 		const p = predictions?.[metricName];
 		if (p) {
-			target.predicted_next = p.predicted_next;
+			// Keep outgoing payload fields in snake_case for wire compatibility.
+			target.predicted_next = p.predictedNext;
 			target.trend = p.trend;
-			target.trend_strength = p.trend_strength;
+			target.trend_strength = p.trendStrength;
 			target.forecast_confidence = p.confidence;
-			if (p.time_to_threshold) target.time_to_threshold = p.time_to_threshold;
+			if (p.timeToThreshold) {
+				target.time_to_threshold = {
+					threshold: p.timeToThreshold.threshold,
+					estimated_seconds: p.timeToThreshold.estimatedSeconds,
+					confidence: p.timeToThreshold.confidence,
+				};
+			}
 		}
 	}
 }
