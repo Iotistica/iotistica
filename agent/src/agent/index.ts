@@ -193,7 +193,7 @@ export class AgentManager {
 		// CRITICAL: Absolute path required so encryption key persists across rebuilds
 		const dataDir = process.env.DATA_DIR || '/app/data';
 		
-		AgentModel.initializeEncryption(dataDir);
+		AgentModel.initializeEncryption(dataDir, this.logger);
 
 		// Initialize PoP crypto (generates keys if needed)
 		this.popCrypto = new PopCryptoManager(dataDir, this.logger);

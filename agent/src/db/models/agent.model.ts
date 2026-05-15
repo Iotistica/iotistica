@@ -4,6 +4,7 @@
  */
 
 import type Database from 'better-sqlite3';
+import type { AgentLogger } from '../../logging/agent-logger';
 import { getDatabase } from '../sqlite';
 import { 
 	encryptData, 
@@ -151,9 +152,9 @@ export class AgentModel {
    * Initialize encryption (must be called before first use)
    * @param dataDir - Directory for master key storage (defaults to /app/data for Docker)
    */
-	static initializeEncryption(dataDir?: string): void {
+	static initializeEncryption(dataDir?: string, logger?: AgentLogger): void {
 		try {
-			MasterKeyManager.initialize(dataDir);
+			MasterKeyManager.initialize(dataDir, logger);
 			this.encryptionEnabled = true;
 		} catch (error) {
 			console.error('[DeviceModel] Failed to initialize encryption:', error);

@@ -188,14 +188,14 @@ export class AgentProvisioningService {
 					port: response.mqtt?.brokerConfig?.port
 				});
 
-				this.logger?.infoSync('Phase 1 complete: Agent registered', {
+				this.logger?.infoSync('Agent registration complete', {
 					component: LogComponents.agentManager,
 					operation: 'provision',
 					state: 'registered',
 					uuid: agentInfo.uuid,
 				});
 			} else {
-				this.logger?.infoSync('Phase 1: Skipping registration (already registered)', {
+				this.logger?.infoSync('Skipping registration (already registered)', {
 					component: LogComponents.agentManager,
 					operation: 'provision',
 					state: currentState,

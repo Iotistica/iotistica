@@ -19,6 +19,8 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { AgentLogger } from '../logging/agent-logger';
+import { LogComponents } from '../logging/types';
 
 const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32; // 256 bits
@@ -30,14 +32,24 @@ const IV_LENGTH = 12;  // 96 bits (recommended for GCM)
 export class MasterKeyManager {
 	private static masterKey: Buffer | null = null;
 	private static keyPath: string;
+	private static logger?: AgentLogger;
+
+	private static debug(message: string, context?: Record<string, unknown>): void {
+		this.logger?.debugSync(message, {
+			component: LogComponents.security,
+			operation: 'master-key',
+			...context,
+		});
+	}
 
 	/**
 	* Initialize master key path (defaults to .iotistic directory)
 	*/
-	static initialize(dataDir?: string): void {
+	static initialize(dataDir?: string, logger?: AgentLogger): void {
 		const baseDir = dataDir || path.join(process.env.HOME || process.env.USERPROFILE || '/root', '.iotistic');
 		this.keyPath = path.join(baseDir, '.master.key');
-		console.log(`[MasterKeyManager] Initialized with dataDir: ${dataDir}, keyPath: ${this.keyPath}`);
+		this.logger = logger;
+		this.debug('Master key manager initialized', { dataDir, keyPath: this.keyPath });
 	}
 
 	/**
@@ -66,18 +78,18 @@ export class MasterKeyManager {
 		} else {
 			// Generate new master key
 			this.masterKey = crypto.randomBytes(KEY_LENGTH);
-			console.log(`[MasterKeyManager] Generated new key, saving to ${this.keyPath}`);
+			this.debug('Generated new master key', { keyPath: this.keyPath });
 			
 			// Ensure directory exists
 			const dir = path.dirname(this.keyPath);
 			if (!fs.existsSync(dir)) {
-				console.log(`[MasterKeyManager] Creating directory: ${dir}`);
+				this.debug('Creating master key directory', { dir });
 				fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 			}
 			
 			// Write key with restricted permissions (owner read/write only)
 			fs.writeFileSync(this.keyPath, this.masterKey, { mode: 0o600 });
-			console.log(`[MasterKeyManager] Key saved successfully`);
+			this.debug('Master key saved successfully', { keyPath: this.keyPath });
 		}
 
 		return this.masterKey;
