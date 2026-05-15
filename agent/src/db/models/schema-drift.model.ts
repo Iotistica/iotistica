@@ -75,8 +75,8 @@ type SchemaDriftLogRow = {
 };
 
 export class SchemaDriftModel {
-	private static readonly driftTable = 'schema_drift_log';
-	private static readonly baselineTable = 'schema_baseline';
+	private static readonly driftTable = 'message_schema_drift_log';
+	private static readonly baselineTable = 'message_schema_baseline';
 
 	private static getDb(): Database.Database {
 		return getDatabase();

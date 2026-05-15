@@ -2,10 +2,31 @@ import type Database from 'better-sqlite3';
 import { tableExists } from '../migration-helpers.js';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
+function indexExists(db: Database.Database, indexName: string): boolean {
+	const row = db
+		.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ? LIMIT 1")
+		.get(indexName);
+
+	return Boolean(row);
+}
+
 function up(db: Database.Database): void {
-	if (!tableExists(db, 'schema_drift_log')) {
+	const oldDriftTable = 'schema_drift_log';
+	const newDriftTable = 'message_schema_drift_log';
+	const oldBaselineTable = 'schema_baseline';
+	const newBaselineTable = 'message_schema_baseline';
+
+	if (tableExists(db, oldDriftTable) && !tableExists(db, newDriftTable)) {
+		db.exec(`ALTER TABLE ${oldDriftTable} RENAME TO ${newDriftTable}`);
+	}
+
+	if (tableExists(db, oldBaselineTable) && !tableExists(db, newBaselineTable)) {
+		db.exec(`ALTER TABLE ${oldBaselineTable} RENAME TO ${newBaselineTable}`);
+	}
+
+	if (!tableExists(db, newDriftTable)) {
 		db.exec(`
-			CREATE TABLE schema_drift_log (
+			CREATE TABLE ${newDriftTable} (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				endpoint_name TEXT NOT NULL,
 				drift_type TEXT NOT NULL,
@@ -22,9 +43,9 @@ function up(db: Database.Database): void {
 		`);
 	}
 
-	if (!tableExists(db, 'schema_baseline')) {
+	if (!tableExists(db, newBaselineTable)) {
 		db.exec(`
-			CREATE TABLE schema_baseline (
+			CREATE TABLE ${newBaselineTable} (
 				endpoint_name TEXT PRIMARY KEY,
 				baseline_json TEXT NOT NULL,
 				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -32,9 +53,13 @@ function up(db: Database.Database): void {
 		`);
 	}
 
+	if (indexExists(db, 'idx_drift_log_endpoint_time')) {
+		db.exec('DROP INDEX idx_drift_log_endpoint_time');
+	}
+
 	db.exec(`
-		CREATE INDEX IF NOT EXISTS idx_drift_log_endpoint_time
-		ON schema_drift_log(endpoint_name, detected_at DESC)
+		CREATE INDEX IF NOT EXISTS idx_message_schema_drift_log_endpoint_time
+		ON ${newDriftTable}(endpoint_name, detected_at DESC)
 	`);
 }
 

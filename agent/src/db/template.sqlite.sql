@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS "retry_state" (
 	"updated_at"	varchar(255) NOT NULL,
 	PRIMARY KEY("key")
 );
-CREATE TABLE IF NOT EXISTS "schema_drift_log" (
+CREATE TABLE IF NOT EXISTS "message_schema_drift_log" (
 	"id"	integer NOT NULL,
 	"endpoint_name"	text NOT NULL,
 	"drift_type"	text NOT NULL,
@@ -281,7 +281,7 @@ CREATE TABLE IF NOT EXISTS "schema_drift_log" (
 	"details_json"	text,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
-CREATE TABLE IF NOT EXISTS "schema_baseline" (
+CREATE TABLE IF NOT EXISTS "message_schema_baseline" (
 	"endpoint_name"	text,
 	"baseline_json"	text NOT NULL,
 	"updated_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -377,7 +377,7 @@ CREATE INDEX IF NOT EXISTS "endpoints_uuid_index" ON "endpoints" (
 CREATE UNIQUE INDEX IF NOT EXISTS "endpoints_uuid_unique" ON "endpoints" (
 	"uuid"
 );
-CREATE INDEX IF NOT EXISTS "idx_drift_log_endpoint_time" ON "schema_drift_log" (
+CREATE INDEX IF NOT EXISTS "idx_message_schema_drift_log_endpoint_time" ON "message_schema_drift_log" (
 	"endpoint_name",
 	"detected_at" DESC
 );
