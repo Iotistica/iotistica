@@ -15,7 +15,6 @@ import type {
 	DataPoint,
 	AnomalyConfig,
 	AnomalyAlert,
-	DetectionResult,
 	CompositeBaseline,
 	DetectorBaseline,
 	MetricConfig,
@@ -496,7 +495,7 @@ export class AnomalyDetectionService {
 		
 		// Emit single canonical anomaly event (MQTT-friendly) after fingerprints calculated
 		if (results.length > 0) {
-			this.emitAnomalyEvent(dataPoint, results, methodsToRun, maxConfidence, metricConfig, buffer);
+			this.emitAnomalyEvent(dataPoint, results, maxConfidence, metricConfig, buffer);
 		}
 	}
 	
@@ -506,7 +505,6 @@ export class AnomalyDetectionService {
 	private emitAnomalyEvent(
 		dataPoint: DataPoint,
 		alerts: AnomalyAlert[],
-		methodsRun: DetectionMethod[],
 		anomalyScore: number,
 		metricConfig: MetricConfig,
 		buffer: StatisticalBuffer
