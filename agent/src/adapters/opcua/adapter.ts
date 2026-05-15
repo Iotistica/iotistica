@@ -13,7 +13,7 @@
  * - Automatic reconnection with exponential backoff
  * - Data type conversion and scaling
  * 
- * Example OPC-UA device configuration (stored in SQLite sensors table):
+ * Example OPC-UA device configuration (stored in SQLite devices table):
  * {
  *   "name": "plc-001",
  *   "protocol": "opcua",
@@ -185,8 +185,8 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
 	private async createClientOptions(connection: OPCUAConnection): Promise<Record<string, unknown>> {
 		return {
-			applicationName: 'Iotistic Sensor Agent',
-			applicationUri: 'urn:iotistic:sensor-agent',
+			applicationName: 'Iotistica Agent',
+			applicationUri: 'urn:iotistica:agent',
 			connectionStrategy: {
 				initialDelay: 1000,
 				maxRetry: 3,
@@ -1130,7 +1130,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 			// Resolve human-readable display name for this device.
 			// Only set when explicitly configured via metadata.displayName — do NOT read ns=0;i=2253
 			// (the OPC-UA Server root object) because its DisplayName is always "Server" per the spec
-			// and is unrelated to any sensor or device being polled.
+			// and is unrelated to any device or device being polled.
 			const configDisplayName = device.metadata?.displayName;
 			if (configDisplayName?.trim()) {
 				this.resolvedDeviceNames.set(device.name, configDisplayName.trim());
@@ -1214,7 +1214,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
 			// Read per-node DisplayNames from parent device folder nodes.
 			// Allows OPC-UA servers (e.g. simulator profiles with a "displayName" field) to
-			// advertise human-readable names per sensor group. These override the raw endpoint
+			// advertise human-readable names per device group. These override the raw endpoint
 			// name when building the device_name in readings. Batched in a single read call.
 			if (validDataPoints.length > 0) {
 				const nodeToParent = new Map<string, string>();
@@ -1545,11 +1545,11 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 
 	/**
    * Reads data from an OPC-UA device
-   * Reads all configured data points and converts to SensorDataPoint format
+   * Reads all configured data points and converts to deviceDataPoint format
    * 
    * @param deviceName - Name of device to read
    * @param device - Device configuration
-   * @returns Array of sensor data points
+   * @returns Array of device data points
    */
 	protected async readDeviceData(
 		deviceName: string,
@@ -1596,7 +1596,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter {
 			this.readWithRetry(session, nodesToRead)
 		);
 
-		// Convert to SensorDataPoint format
+		// Convert to deviceDataPoint format
 		const results: DeviceDataPoint[] = [];
 		const timestamp = new Date().toISOString();
 		let goodValueCount = 0;

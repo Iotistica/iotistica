@@ -4,7 +4,7 @@ import * as path from "path";
 import { type DeviceDataPoint, type SocketOutput, type Logger } from "../types.js";
 
 /**
- * IPC Socket Server that receives sensor data and serves it to connected clients
+ * IPC Socket Server that receives device data and serves it to connected clients
  * Supports both Unix Domain Sockets (Linux/macOS) and Named Pipes (Windows)
  */
 export class SocketServer {
@@ -151,7 +151,7 @@ export class SocketServer {
 	}
 
 	/**
-	 * Send sensor data to all connected clients
+	 * Send device data to all connected clients
 	 *
 	 * Backpressure handling: Drops slow consumers instead of buffering
 	 * Rationale: Real-time telemetry data loses value quickly, and slow consumers
@@ -270,7 +270,7 @@ export class SocketServer {
 	}
 
 	/**
-	 * Format sensor data based on configuration
+	 * Format device data based on configuration
 	 *
 	 * TODO (PRODUCTION): Replace delimiter-based framing with robust protocol
 	 *
@@ -283,7 +283,7 @@ export class SocketServer {
 	 * Why it works now (POC-acceptable):
 	 * - JSON.stringify() produces single-line output (no embedded '\n')
 	 * - IPC sockets (Unix/Named Pipe) have low partial-write probability
-	 * - Trusted clients (sensor-publish) with controlled input
+	 * - Trusted clients (device-publish) with controlled input
 	 *
 	 * Production alternatives:
 	 * 1. Length-prefixed framing: 4-byte uint32 length + payload (most robust)
@@ -291,7 +291,7 @@ export class SocketServer {
 	 * 3. MessagePack framing: Aligns with existing compression stack (recommended)
 	 *
 	 * Recommendation: Migrate to MessagePack framing when consolidating serialization.
-	 * This matches the sensor-publish msgpack usage and provides type-safe framing.
+	 * This matches the device-publish msgpack usage and provides type-safe framing.
 	 */
 	private formatData(dataPoints: DeviceDataPoint[]): string {
 		if (this.config.dataFormat === "csv") {

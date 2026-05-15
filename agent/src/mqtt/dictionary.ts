@@ -34,7 +34,7 @@ import { agentTopic } from './topics.js';
  * Topic Structure:
  * - iot/device/{uuid}/meta/dictionary - Full dictionary sync with domains
  * - iot/device/{uuid}/meta/dictionary/delta - Delta updates with domains
- * - iot/device/{uuid}/endpoints/{sensor} - Original sensor topics (unchanged)
+ * - iot/device/{uuid}/endpoints/{device} - Original device topics (unchanged)
  * 
  * Message Format (Compacted):
  * {
@@ -68,7 +68,7 @@ import { agentTopic } from './topics.js';
  *   const original = { temperature: 21.5, timestamp: Date.now(), status: "active" };
  *   const { compacted, compressionRatio } = manager.compact(original);
  *   
- *   // Publish separately (via CloudMqttClient or sensor-publish)
+ *   // Publish separately (via CloudMqttClient or device-publish)
  *   await mqttManager.publish(topic, compacted, options);
  *   
  *   // Check metrics
@@ -489,7 +489,7 @@ export class DictionaryManager {
 
 	/**
    * Extract the final field name without array notation
-   * Examples: "messages[].readings[].quality" → "quality", "sensor" → "sensor"
+   * Examples: "messages[].readings[].quality" → "quality", "device" → "device"
    */
 	private extractBaseName(fieldName: string): string {
 		// Remove everything before the last dot or bracket

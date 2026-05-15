@@ -476,7 +476,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 		if (readableCount === 0) {
 			state = 'unknown';
 		} else if (zeroRatio === 1.0) {
-			state = 'idle';  // All zeros - device idle, startup, or sensors at rest
+			state = 'idle';  // All zeros - device idle, startup, or devices at rest
 		} else if (zeroRatio < 0.2) {
 			state = 'active';  // <20% zeros - device actively running
 		} else {

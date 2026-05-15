@@ -49,7 +49,7 @@ export interface ProtocolConnection {
  * Events emitted:
  * - 'started': Adapter started successfully
  * - 'stopped': Adapter stopped
- * - 'data': SensorDataPoint[] - Sensor data collected
+ * - 'data': deviceDataPoint[] - device data collected
  * - 'device-connected': string - Device name
  * - 'device-disconnected': string - Device name
  * - 'device-error': (string, Error) - Device name + error
@@ -192,7 +192,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 	 * Read data from a device using protocol-specific logic
 	 * @param deviceName Device name
 	 * @param device Device configuration
-	 * @returns Array of sensor data points
+	 * @returns Array of device data points
 	 */
 	protected abstract readDeviceData(
 		deviceName: string,

@@ -72,7 +72,7 @@ export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
 		},
 		ctx.agentLogger,
 		undefined,
-		features.sensors,
+		features.devices,
 		CloudMqttClient.getInstance(),
 		ctx.sharedHttpClient,
 		ctx.updater

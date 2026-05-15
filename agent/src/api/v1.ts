@@ -434,7 +434,7 @@ router.post('/v1/deprovision', async (req: Request, res: Response, next: NextFun
 
 /**
  * POST /v1/factory-reset
- * Factory reset - complete data wipe (WARNING: deletes all apps, services, state, sensors)
+ * Factory reset - complete data wipe (WARNING: deletes all apps, services, state, devices)
  */
 router.post('/v1/factory-reset', async (req: Request, res: Response, next: NextFunction) => {
 	try {
@@ -559,7 +559,7 @@ router.get('/v1/modbus/devices', async (req: Request, res: Response, next: NextF
 	try {
 		const adapterManager = actions.getAdapterManager();
 		if (!adapterManager) {
-			return res.status(503).json({ error: 'Sensors feature not initialized' });
+			return res.status(503).json({ error: 'devices feature not initialized' });
 		}
 
 		const modbusAdapter = adapterManager.getAdapter('modbus');
@@ -584,7 +584,7 @@ router.get('/v1/modbus/devices/:deviceName', async (req: Request, res: Response,
 		const adapterManager = actions.getAdapterManager();
 		
 		if (!adapterManager) {
-			return res.status(503).json({ error: 'Sensors feature not initialized' });
+			return res.status(503).json({ error: 'devices feature not initialized' });
 		}
 
 		const modbusAdapter = adapterManager.getAdapter('modbus');
@@ -613,7 +613,7 @@ router.get('/v1/modbus/devices/:deviceName/metrics', async (req: Request, res: R
 		const adapterManager = actions.getAdapterManager();
 		
 		if (!adapterManager) {
-			return res.status(503).json({ error: 'Sensors feature not initialized' });
+			return res.status(503).json({ error: 'devices feature not initialized' });
 		}
 
 		const modbusAdapter = adapterManager.getAdapter('modbus');
@@ -640,7 +640,7 @@ router.get('/v1/modbus/metrics', async (req: Request, res: Response, next: NextF
 	try {
 		const adapterManager = actions.getAdapterManager();
 		if (!adapterManager) {
-			return res.status(503).json({ error: 'Sensors feature not initialized' });
+			return res.status(503).json({ error: 'devices feature not initialized' });
 		}
 
 		const modbusAdapter = adapterManager.getAdapter('modbus');
@@ -664,7 +664,7 @@ router.get('/v1/modbus/metrics', async (req: Request, res: Response, next: NextF
 
 /**
  * GET /v1/endpoints
- * Get all configured device endpoints/sensors
+ * Get all configured device endpoints/devices
  * Supports filtering by protocol via query parameter: ?protocol=modbus
  */
 router.get('/v1/endpoints', async (req: Request, res: Response, next: NextFunction) => {

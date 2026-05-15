@@ -447,8 +447,8 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 		const preferredBufferContext = this.anomalyService?.getPreferredBufferContext?.(metric);
 		const canonicalMatch = metric.match(CANONICAL_METRIC_REGEX);
 		if (canonicalMatch) {
-			const sensorDeviceId = canonicalMatch[2];
-			const deviceId = preferredBufferContext?.deviceId || sensorDeviceId;
+			const deviceDeviceId = canonicalMatch[2];
+			const deviceId = preferredBufferContext?.deviceId || deviceDeviceId;
 			const fieldName = canonicalMatch[3];
 			return {
 				source: 'endpoint',
@@ -458,7 +458,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 				tags: {
 					deviceId,
 					endpointId: deviceId,
-					deviceUuid: sensorDeviceId,
+					deviceUuid: deviceDeviceId,
 					fieldName,
 				},
 			};
@@ -531,7 +531,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 	*
 	* Applied to patterns that produce independent samples (spike, drift, random,
 	* realistic, recovery, extreme, variance_spike) to add mild autocorrelation
-	* matching real sensor behaviour — consecutive readings are never fully
+	* matching real device behaviour — consecutive readings are never fully
 	* independent.
 	*
 	* Skipped for patterns that already carry temporal memory:
@@ -568,7 +568,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 
 	/**
 	* Snap a value to the nearest multiple of `resolution`.
-	* Models the discrete output steps of real sensors (e.g. 0.1°C, 1% CPU).
+	* Models the discrete output steps of real devices (e.g. 0.1°C, 1% CPU).
 	*/
 	private roundToResolution(value: number, resolution: number): number {
 		if (resolution <= 0) return value;
@@ -593,7 +593,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 			return 1;
 		}
 
-		// 0.1-precision sensors
+		// 0.1-precision devices
 		if (/\b(temp|temperature|humidity|rh|pressure)\b/.test(fieldName)) {
 			return 0.1;
 		}
@@ -720,7 +720,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 				
 			case 'drift':
 			// Logistic (S-curve) drift: slow latent start → rapid acceleration → saturation.
-			// Real sensor degradation (wear, contamination, thermal creep) follows this shape.
+			// Real device degradation (wear, contamination, thermal creep) follows this shape.
 			//
 			//   drift(n) = maxDrift × (σ(n) − σ(0)) / (1 − σ(0))
 			//   σ(n)     = 1 / (1 + e^(−k·(n − x0)))
@@ -800,7 +800,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 				
 			case 'regime_shift': {
 				// Permanent step-change in the operating level — the most common real-world
-				// anomaly class: pump switched, valve repositioned, load shed, sensor recalibrated.
+				// anomaly class: pump switched, valve repositioned, load shed, device recalibrated.
 				//
 				// On first injection the shift is computed and locked into shiftedBaseByMetric.
 				// All subsequent points oscillate around that new level with the same low
@@ -830,7 +830,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 			case 'variance_spike': {
 				// Amplify variance without shifting the mean — the signal stays centred on base
 				// but the noise envelope is blown out by magnitude.  Models an unstable or
-				// degraded sensor: high-frequency noise bursts, EMI pickup, mechanical looseness.
+				// degraded device: high-frequency noise bursts, EMI pickup, mechanical looseness.
 				//
 				// spikeFactor itself carries a small random perturbation so successive points
 				// don't share identical spread, matching the intermittent nature of real events.
@@ -840,7 +840,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 
 			case 'extreme': {
 				// Drive the metric to a physically extreme value, but add Gaussian jitter
-				// so the signal looks like a sensor pushed to its limit rather than a
+				// so the signal looks like a device pushed to its limit rather than a
 				// synthetic constant.  Named metrics use a known practical ceiling;
 				// everything else is pushed magnitude × 3.2 σ above the baseline center.
 				const fieldName = (metric.match(CANONICAL_METRIC_REGEX)?.[3] ?? metric).toLowerCase();
@@ -865,7 +865,7 @@ export class AnomalyInjectionSimulation implements SimulationScenario {
 			case 'realistic':
 			default:
 			// Slightly elevated but still realistic — Gaussian jitter makes it
-			// indistinguishable from a genuine sensor excursion.
+			// indistinguishable from a genuine device excursion.
 			{
 				const signal = this.normalizeDeviation(metric, base, spread, spread * magnitude * 0.9);
 				const noise = this.gaussianNoise() * spread * 0.2;

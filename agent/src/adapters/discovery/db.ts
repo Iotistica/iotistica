@@ -37,7 +37,7 @@ export class DiscoveryStore {
 			});
 		}
 
-		// Fetch existing sensors ONCE before loop (avoid O(N²) performance)
+		// Fetch existing devices ONCE before loop (avoid O(N²) performance)
 		const existingEndpoints = await EndpointModel.getAll();
 
 		const targetEndpoints = this.configManager?.getTargetConfig().endpoints || [];
@@ -59,7 +59,7 @@ export class DiscoveryStore {
 
 		for (const device of discovered) {
 			try {
-				// Check if sensor already exists by fingerprint OR name OR endpointUrl (OPC UA)
+				// Check if device already exists by fingerprint OR name OR endpointUrl (OPC UA)
 				// Fingerprint match: Same device (even if moved)
 				// Name match: Device rediscovered (fingerprint may change due to dynamic register values)
 				// EndpointUrl match (OPC UA): Custom-named device at same endpoint
@@ -94,9 +94,9 @@ export class DiscoveryStore {
 					}
 
 					// Compare only keys the discovery plugin provides (stored connections may have extra defaults)
-					const sensorConnectionKeys = Object.keys(device.connection || {});
+					const deviceConnectionKeys = Object.keys(device.connection || {});
 					const existingConnectionSubset = Object.fromEntries(
-						sensorConnectionKeys.map((k) => [k, (existing.connection as any)?.[k]])
+						deviceConnectionKeys.map((k) => [k, (existing.connection as any)?.[k]])
 					);
 					const configChanged = JSON.stringify(existingConnectionSubset) !== JSON.stringify(device.connection);
 					const fingerprintChanged = existing.metadata?.fingerprint !== device.fingerprint;
@@ -265,7 +265,7 @@ export class DiscoveryStore {
 					endpointEnabled = parentConn?.enabled ?? false;
 				}
 
-				const deviceSensor: Endpoint = {
+				const endpoint: Endpoint = {
 					name: device.name,
 					protocol: device.protocol as 'modbus' | 'can' | 'opcua' | 'mqtt',
 					enabled: endpointEnabled,
@@ -315,7 +315,7 @@ export class DiscoveryStore {
 					});
 				}
 
-				const createdEndpoint = await EndpointModel.create(deviceSensor);
+				const createdEndpoint = await EndpointModel.create(endpoint);
 				await ProtocolDevicesModel.syncFromEndpoint(createdEndpoint);
 				saved++;
 				savedDevices.push({
@@ -324,16 +324,16 @@ export class DiscoveryStore {
 					confidence: device.confidence || 'unknown'
 				});
 
-				if (deviceSensor.enabled) {
+				if (endpoint.enabled) {
 					this.emit('endpoint-enabled', {
 						protocol: device.protocol,
-						endpoint: deviceSensor,
+						endpoint: endpoint,
 						isBatchDiscovery: !!traceId
 					});
 				}
 			} catch (error) {
 				this.logger?.errorSync(
-					`Failed to save sensor "${device.name}"`,
+					`Failed to save device "${device.name}"`,
           error as Error,
           { component: LogComponents.discovery, traceId }
 				);

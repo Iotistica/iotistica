@@ -13,7 +13,7 @@
  *   BACnet/SNMP/MQTT/CAN → 1:1 with endpoint, identifier = null
  *
  * The `uuid` column is the stable identity carried in metric payloads
- * (SensorDataPoint.device_uuid).
+ * (deviceDataPoint.device_uuid).
  */
 
 import { randomUUID } from 'crypto';
@@ -23,7 +23,7 @@ import type { Endpoint } from './endpoint.model';
 
 export interface Device {
   id?: number;
-  /** Stable UUID used in metric payloads (SensorDataPoint.device_uuid) */
+  /** Stable UUID used in metric payloads (deviceDataPoint.device_uuid) */
   uuid: string;
   endpoint_id: number;
   name: string;

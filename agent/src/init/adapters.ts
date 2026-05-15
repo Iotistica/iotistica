@@ -13,7 +13,7 @@ import { AdapterManager, type AdapterConfig } from '../adapters/index.js';
 import type { FeatureContext } from './features.js';
 
 export interface AdapterFeatures {
-  sensors?: AdapterManager;
+	devices?: AdapterManager;
 }
 
 /**
@@ -85,7 +85,7 @@ export class AdapterInitializer {
 			}
 
 			// Always create AdapterManager so health reporting works before any endpoints are enabled.
-			this.features.sensors = new AdapterManager(devicesConfig, logger, deviceInfo.uuid);
+			this.features.devices = new AdapterManager(devicesConfig, logger, deviceInfo.uuid);
 
 			if (enabledProtocols.length === 0) {
 				logger.debugSync('No protocols enabled initially, AdapterManager created but not started', {
@@ -93,11 +93,11 @@ export class AdapterInitializer {
 					note: 'Will be started when endpoints are enabled via discovery or config'
 				});
 			} else {
-				await this.features.sensors.start();
+				await this.features.devices.start();
 			}
 
 			const { setAdapterManager } = await import('../api/actions.js');
-			setAdapterManager(this.features.sensors);
+			setAdapterManager(this.features.devices);
 
 			this._wireRediscoveryListener();
 
@@ -106,7 +106,7 @@ export class AdapterInitializer {
 				component: LogComponents.agent,
 				note: 'Continuing without Protocol Adapters'
 			});
-			this.features.sensors = undefined;
+			this.features.devices = undefined;
 		}
 	}
 
@@ -235,13 +235,13 @@ export class AdapterInitializer {
 
 				try {
 					// Hot-update path: MQTT adapter already connected — diff subscriptions in-place.
-					if (this.features.sensors?.getAdapter('mqtt')) {
+					if (this.features.devices?.getAdapter('mqtt')) {
 						logger.infoSync('Hot-reloading MQTT adapter after endpoint changes (no reconnect)', {
 							component: LogComponents.agent,
 							trigger: 'reconciliation-complete'
 						});
 
-						await this.features.sensors.reloadMQTTAdapter();
+						await this.features.devices.reloadMQTTAdapter();
 						await this.onAdaptersReady();
 						this._updateCloudSync();
 
@@ -283,9 +283,9 @@ export class AdapterInitializer {
 	/** Wire the rediscovery-needed listener on the current AdapterManager instance. */
 	private _wireRediscoveryListener(): void {
 		const { logger } = this.context;
-		if (!this.context.discoveryService || !this.features.sensors) return;
+		if (!this.context.discoveryService || !this.features.devices) return;
 
-		this.features.sensors.on('rediscovery-needed', async (data: { deviceName: string; endpointUrl: string }) => {
+		this.features.devices.on('rediscovery-needed', async (data: { deviceName: string; endpointUrl: string }) => {
 			logger.warnSync('OPC-UA adapter detected stale NodeIDs - triggering targeted rediscovery', {
 				component: LogComponents.agent,
 				deviceName: data.deviceName,
@@ -311,9 +311,9 @@ export class AdapterInitializer {
 
 	/** Stop adapters, reinit, restart DevicePublish, update CloudSync. */
 	private async _fullReload(): Promise<void> {
-		if (this.features.sensors) {
-			await this.features.sensors.stop();
-			this.features.sensors = undefined;
+		if (this.features.devices) {
+			await this.features.devices.stop();
+			this.features.devices = undefined;
 		}
 
 		await this.onAdaptersStopping();
@@ -325,8 +325,8 @@ export class AdapterInitializer {
 	/** Push the current AdapterManager reference into CloudSync. */
 	private _updateCloudSync(): void {
 		const cloudSync = this.getCloudSync();
-		if (cloudSync && this.features.sensors) {
-			cloudSync.setDevices(this.features.sensors);
+		if (cloudSync && this.features.devices) {
+			cloudSync.setDevices(this.features.devices);
 		}
 	}
 }

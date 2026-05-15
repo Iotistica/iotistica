@@ -36,7 +36,7 @@ export type OPCUACertificateTrustMode = z.infer<typeof OPCUACertificateTrustMode
 
 /**
  * OPC-UA Connection Configuration
- * Stored in the 'connection' JSONB field in the sensors table
+ * Stored in the 'connection' JSONB field in the devices table
  */
 export const OPCUAConnectionSchema = z.object({
 	/** OPC-UA endpoint URL (e.g., opc.tcp://10.0.0.60:4840) */
@@ -86,7 +86,7 @@ export type OPCUAConnection = z.infer<typeof OPCUAConnectionSchema>;
 
 /**
  * OPC-UA Data Point Configuration
- * Stored in the 'data_points' JSONB field in the sensors table
+ * Stored in the 'data_points' JSONB field in the devices table
  */
 export const OPCUADataPointSchema = z.object({
 	/** Data point name (e.g., temperature, pressure) */
@@ -112,7 +112,7 @@ export const OPCUADataPointSchema = z.object({
    */
 	semantic: z.enum(['metric', 'metadata']).optional(),
   
-	/** Node classification: 'metric' (sensor data) or 'metadata' (server info, diagnostics) */
+	/** Node classification: 'metric' (device data) or 'metadata' (server info, diagnostics) */
 	nodeType: z.enum(['metric', 'metadata']).default('metric'),
   
 	/** Data type (inferred from OPC-UA, but can be specified) */
@@ -134,7 +134,7 @@ export type OPCUADataPoint = z.infer<typeof OPCUADataPointSchema>;
 
 /**
  * OPC-UA Device Metadata
- * Stored in the 'metadata' JSONB field in the sensors table
+ * Stored in the 'metadata' JSONB field in the devices table
  */
 export const OPCUAMetadataSchema = z.object({
 	/** Device manufacturer */
@@ -162,7 +162,7 @@ export type OPCUAMetadata = z.infer<typeof OPCUAMetadataSchema>;
 
 /**
  * Complete OPC-UA Device Configuration
- * Maps to a row in the sensors table with protocol='opcua'
+ * Maps to a row in the devices table with protocol='opcua'
  */
 export const OPCUADeviceConfigSchema = z.object({
 	/** Device name (unique identifier) */

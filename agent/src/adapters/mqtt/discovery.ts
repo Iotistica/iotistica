@@ -42,7 +42,7 @@ export interface MqttDiscoveryOptions {
 	brokerUrl?: string; // e.g., 'mqtt://mosquitto:1883' or 'mqtts://broker:8883'
 	username?: string;
 	password?: string;
-	topics: string[]; // REQUIRED: Explicit topics to validate (e.g., ['device/sensor01/temperature'])
+	topics: string[]; // REQUIRED: Explicit topics to validate (e.g., ['device/device01/temperature'])
 	samplingDurationMs?: number; // Default: 10000 (10s) - how long to listen for messages
 	qos?: 0 | 1 | 2; // QoS for discovery subscription (default: 0)
 
@@ -116,7 +116,7 @@ export class LocalBrokerMqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 		if (!topics || topics.length === 0) {
 			this.logger?.warnSync("No topics provided for MQTT discovery", {
 				component: (LogComponents.discovery + "] [" + this.protocol) as any,
-				hint: 'Provide explicit topics to validate (e.g., ["device/sensor01/temperature"])',
+				hint: 'Provide explicit topics to validate (e.g., ["device/device01/temperature"])',
 			});
 			return [];
 		}

@@ -2,7 +2,7 @@
  * ANOMALY DETECTION - TYPE DEFINITIONS
  * ======================================
  * 
- * Edge-appropriate anomaly detection for IoT sensor data and system metrics
+ * Edge-appropriate anomaly detection for IoT device data and system metrics
  */
 
 import type { AgentLogger } from '../logging/agent-logger';
@@ -40,7 +40,7 @@ export interface DataPoint {
 	value: number;
 	unit: string;
 	timestamp: number;        // Unix timestamp (ms)
-	deviceId?: string;        // For multi-sensor scenarios
+	deviceId?: string;        // For multi-device scenarios
 	quality?: 'GOOD' | 'BAD' | 'UNCERTAIN';
 	tags?: Record<string, string>;  // Additional metadata
 	simulationMeta?: SimulationMeta; // Present when data was injected by simulation
@@ -78,7 +78,7 @@ export type SimulationPattern =
 	| 'faulty'        // Intermittent failures
 	| 'alert'         // High-impact deviation intended to trigger anomaly detection quickly
 	| 'extreme'       // Edge case values
-	| 'variance_spike' // Increased variance without mean shift (noisy/unstable sensor)
+	| 'variance_spike' // Increased variance without mean shift (noisy/unstable device)
 	| 'regime_shift'  // Permanent step-change in baseline (new operating level)
 	| 'random';       // Completely random
 
@@ -219,7 +219,7 @@ export interface BaselineInfo {
 
 /**
  * Canonical anomaly event (single event per metric, published to MQTT)
- * CRITICAL: Tracks MONITORED DEVICES (e.g., 'COMAP-Main-Controller', 'Temp-Sensor-01'),
+ * CRITICAL: Tracks MONITORED DEVICES (e.g., 'COMAP-Main-Controller', 'Temp-device-01'),
  * not agent/gateway info. The agent UUID is kept for infrastructure tracking.
  */
 export interface AnomalyEvent {

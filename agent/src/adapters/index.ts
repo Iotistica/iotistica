@@ -553,29 +553,29 @@ export class AdapterManager extends EventEmitter {
 			`getAllDeviceStatuses called - adapters.size: ${this.adapters.size}, keys: [${Array.from(this.adapters.keys()).join(", ")}]`,
 		);
 
-		// Get all sensors directly from database (includes discovered devices)
+		// Get all devices directly from database (includes discovered devices)
 		try {
-			const allSensors = await EndpointModel.getAll();
+			const allDevices = await EndpointModel.getAll();
 			const stalenessThresholdMs = 24 * 60 * 60 * 1000; // 24 hours
 
-			this.logger.debug(`Found ${allSensors.length} sensors in database`);
+			this.logger.debug(`Found ${allDevices.length} devices in database`);
 
-			// Build health status for each sensor
-			for (const sensor of allSensors) {
+			// Build health status for each device
+			for (const device of allDevices) {
 				// Determine online/offline based on lastSeenAt timestamp
 				// Use 24-hour threshold for discovered devices (discovery runs periodically)
 				// Adapter overlay will provide real-time status for actively polled devices
-				const lastSeen = sensor.lastSeenAt ? new Date(sensor.lastSeenAt) : null;
+				const lastSeen = device.lastSeenAt ? new Date(device.lastSeenAt) : null;
 				const now = Date.now();
 				const isOnline =
 					lastSeen && now - lastSeen.getTime() < stalenessThresholdMs;
 
 				// Disabled endpoints show as 'disabled' regardless of lastSeen
 				// SQLite stores booleans as 0/1, convert to boolean
-				const isEnabled = Boolean(sensor.enabled);
+				const isEnabled = Boolean(device.enabled);
 
-				health[sensor.name] = {
-					protocol: sensor.protocol,
+				health[device.name] = {
+					protocol: device.protocol,
 					status: !isEnabled ? "disabled" : isOnline ? "online" : "offline",
 					connected: isEnabled && isOnline,
 					lastPoll: null,
@@ -664,7 +664,7 @@ export class AdapterManager extends EventEmitter {
 				}
 			}
 		} catch (error) {
-			this.logger.error(`Failed to get sensors from database: ${error}`);
+			this.logger.error(`Failed to get devices from database: ${error}`);
 		}
 
 		return health;

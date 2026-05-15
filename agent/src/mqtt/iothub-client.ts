@@ -4,7 +4,7 @@
  * Azure IoT Hub D2C (device-to-cloud) MQTT client.
  *
  * Connects via native MQTT over TLS (port 8883) using SAS token authentication.
- * Publishes sensor telemetry to the IoT Hub topic:
+ * Publishes device telemetry to the IoT Hub topic:
  *   devices/{deviceId}/messages/events/
  *
  * Implements the MqttConnection interface from publish/types so it can be

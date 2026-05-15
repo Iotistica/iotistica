@@ -61,7 +61,7 @@ export default class Agent {
 	private firewall?: AgentFirewall; // Network firewall protection
 	private updater?: AgentUpdater; // Agent self-update handler
 	private featureInitializer?: FeatureInitializer;
-	private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and sensors
+	private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and devices
 	private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
 	private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
 	private configManager!: ConfigManager; // Configuration manager (centralized config access)
@@ -640,7 +640,7 @@ export default class Agent {
 		return this.cloudSync;
 	}
 
-	/** Returns true when sensor data is routed to an external cloud (IoT Hub, AWS, GCP) instead of Iotistica. */
+	/** Returns true when device data is routed to an external cloud (IoT Hub, AWS, GCP) instead of Iotistica. */
 	public isExternalPublishTarget(): boolean {
 		const t = (process.env.PUBLISH_TARGET || '').toLowerCase();
 		return t !== '' && t !== 'iotistica';

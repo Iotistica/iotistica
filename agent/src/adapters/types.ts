@@ -15,7 +15,7 @@ export const SocketOutputSchema = z.object({
 export type SocketOutput = z.infer<typeof SocketOutputSchema>;
 
 /**
- * Sensor Data Point interface
+ * device Data Point interface
  * Quality model follows OPC UA standard (GOOD, BAD, UNCERTAIN)
  */
 export interface DeviceDataPoint {

@@ -156,8 +156,8 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 					endpoint.connection?.certificateTrustMode === 'trust-on-first-use';
 
 				const client = OPCUAClient.create({
-					applicationName: 'Iotistic Sensor Agent',
-					applicationUri: 'urn:iotistic:sensor-agent',
+					applicationName: 'Iotistica Agent',
+					applicationUri: 'urn:iotistica:agent',
 					endpointMustExist : false,
 					clientCertificateManager: certificateManager,
 					connectionStrategy: {
@@ -219,12 +219,12 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 								const currentPath = [...pathSegments, nodeName];
 								
 								// Skip standard OPC UA system folders at root level (IEC 62541)
-								// ServerInfo contains metadata like ProfileName, SensorCount which pollute data_points
+								// ServerInfo contains metadata like ProfileName, deviceCount which pollute data_points
 								if (depth === 0 && ['Server', 'ServerInfo', 'Types', 'Views', 'Aliases'].includes(nodeName)) {
 									continue;
 								}
 
-								// Skip the DeviceUUID node itself — it's metadata, not a sensor reading
+								// Skip the DeviceUUID node itself — it's metadata, not a device reading
 								if (nodeName === 'DeviceUUID') {
 									continue;
 								}
@@ -241,7 +241,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 									
 									if (actualNodeClass === 2) {
 										// Extract semantic metric name from browseName prefix (OPC UA standard)
-										// Format: "Temperature_Sensor1" → metric: "temperature"
+										// Format: "Temperature_device1" → metric: "temperature"
 										// If no underscore, use full browseName in lowercase
 										const metricName = nodeName.includes('_') 
 											? nodeName.split('_')[0].toLowerCase()

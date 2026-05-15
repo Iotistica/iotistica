@@ -3,7 +3,7 @@
  * ==============
  *
  * Manages device configuration reconciliation - separate from container orchestration.
- * Handles sensor (protocol adapter devices) registration, updates, and removal.
+ * Handles device (protocol adapter devices) registration, updates, and removal.
  *
  * This is the config counterpart to ContainerManager, allowing the StateReconciler
  * to manage both containers AND configuration in a unified way.
@@ -113,7 +113,6 @@ export interface LoggingConfig {
 }
 
 export interface FeatureToggles {
-	enableSensorPublish: boolean;
 	enableDevicePublish: boolean;
 	enableAnomalyDetection: boolean;
 	enableDeviceJobs: boolean;
@@ -241,7 +240,7 @@ export class ConfigManager extends EventEmitter {
 	 * Augments with all endpoints from database (including discovered ones)
 	 */
 	public async getCurrentConfig(): Promise<DeviceConfig> {
-		// Get all sensors from database (includes discovered devices)
+		// Get all devices from database (includes discovered devices)
 		const allEndpoints = await EndpointModel.getAll();
 		const validEndpoints = allEndpoints.filter((endpoint) => !!endpoint.uuid);
 
@@ -614,12 +613,11 @@ export class ConfigManager extends EventEmitter {
 	 */
 	public getFeatures(): FeatureToggles {
 		const cloud = this.targetConfig.features;
-		const sensorPublishEnabled =
+		const devicePublishEnabled =
 			cloud?.enableDevicePublish ?? cloud?.enableDevicePublish ?? false;
 
 		return {
-			enableSensorPublish: sensorPublishEnabled,
-			enableDevicePublish: sensorPublishEnabled,
+			enableDevicePublish: devicePublishEnabled,
 			enableAnomalyDetection: cloud?.enableAnomalyDetection ?? false,
 			enableDeviceJobs: cloud?.enableDeviceJobs ?? true,
 			enableDeviceRemoteAccess: cloud?.enableDeviceRemoteAccess ?? true,
@@ -802,7 +800,7 @@ export class ConfigManager extends EventEmitter {
 			const dbCurrentConfig = await this.getCurrentConfig();
 			this.currentConfig.endpoints = dbCurrentConfig.endpoints || [];
 
-			// Calculate steps for sensor reconciliation
+			// Calculate steps for device reconciliation
 			const steps = this.calculateSteps();
 
 			if (steps.length === 0) {
@@ -811,7 +809,7 @@ export class ConfigManager extends EventEmitter {
 					operation: "reconcile",
 				});
 
-				// Even if no sensor changes, save current config to persist other field updates
+				// Even if no device changes, save current config to persist other field updates
 				await this.saveCurrentConfigToDB();
 
 				return result;
@@ -1391,9 +1389,9 @@ export class ConfigManager extends EventEmitter {
 			protocol: device.protocol,
 		});
 
-		// Save device to SQLite sensors table
+		// Save device to SQLite devices table
 		try {
-			const { EndpointModel: DeviceSensorModel } = await import(
+			const { EndpointModel: EndpointModel } = await import(
 				"../db/models/endpoint.model.js"
 			);
 
@@ -1413,16 +1411,16 @@ export class ConfigManager extends EventEmitter {
 			};
 
 			// Use upsert to handle devices that may already exist (e.g., discovered devices)
-			await DeviceSensorModel.upsert(normalizedEndpoint as Endpoint);
+			await EndpointModel.upsert(normalizedEndpoint as Endpoint);
 
-			this.logger?.infoSync("Device saved to sensors table", {
+			this.logger?.infoSync("Device saved to devices table", {
 				component: LogComponents.configManager,
 				operation: "registerDevice",
 				deviceName: device.name,
 			});
 		} catch (error) {
 			this.logger?.errorSync(
-				"Failed to save device to sensors table",
+				"Failed to save device to devices table",
 				error instanceof Error ? error : new Error(String(error)),
 				{
 					component: LogComponents.configManager,
@@ -1469,9 +1467,9 @@ export class ConfigManager extends EventEmitter {
 			deviceName: device.name,
 		});
 
-		// Update device in SQLite sensors table (or create if doesn't exist)
+		// Update device in SQLite devices table (or create if doesn't exist)
 		try {
-			const { EndpointModel: DeviceSensorModel } = await import(
+			const { EndpointModel: EndpointModel } = await import(
 				"../db/models/endpoint.model.js"
 			);
 
@@ -1479,7 +1477,7 @@ export class ConfigManager extends EventEmitter {
 			const metadata = this.buildEndpointMetadata(device, connection, false);
 
 			// Get existing device first to check for data_points preservation
-			const existing = await DeviceSensorModel.getByUuid(device.id);
+			const existing = await EndpointModel.getByUuid(device.id);
 
 			// Prepare data_points with preservation logic
 			let dataPoints =
@@ -1516,7 +1514,7 @@ export class ConfigManager extends EventEmitter {
 
 			if (existing) {
 				// Device exists - update it
-				await DeviceSensorModel.updateByUuid(device.id, normalizedDevice);
+				await EndpointModel.updateByUuid(device.id, normalizedDevice);
 
 				this.logger?.infoSync("Device updated in endpoints table", {
 					component: LogComponents.configManager,
@@ -1525,7 +1523,7 @@ export class ConfigManager extends EventEmitter {
 				});
 			} else {
 				// Device doesn't exist - create it (upsert behavior)
-				await DeviceSensorModel.create({
+				await EndpointModel.create({
 					uuid: device.id,
 					name: device.name,
 					...normalizedDevice,
@@ -1630,21 +1628,21 @@ export class ConfigManager extends EventEmitter {
 			);
 		}
 
-		// Remove device from SQLite sensors table
+		// Remove device from SQLite devices table
 		try {
-			const { EndpointModel: DeviceSensorModel } = await import(
+			const { EndpointModel } = await import(
 				"../db/models/endpoint.model.js"
 			);
-			const deleted = await DeviceSensorModel.deleteByUuid(deviceId);
+			const deleted = await EndpointModel.deleteByUuid(deviceId);
 
 			if (!deleted) {
 				throw new Error(`Failed to delete endpoint row by uuid=${deviceId}`);
 			}
 
-			const remainingEndpoint = await DeviceSensorModel.getByUuid(deviceId);
+			const remainingEndpoint = await EndpointModel.getByUuid(deviceId);
 			const verifiedDeleted = !remainingEndpoint;
 
-			this.logger?.infoSync("Device removed from sensors table", {
+			this.logger?.infoSync("Device removed from devices table", {
 				component: LogComponents.configManager,
 				operation: "unregisterDevice",
 				deviceUuid: deviceId,
@@ -1667,7 +1665,7 @@ export class ConfigManager extends EventEmitter {
 			}
 		} catch (error) {
 			this.logger?.errorSync(
-				"Failed to remove device from sensors table",
+				"Failed to remove device from devices table",
 				error instanceof Error ? error : new Error(String(error)),
 				{
 					component: LogComponents.configManager,

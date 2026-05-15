@@ -541,7 +541,7 @@ export class AgentManager {
 	
 	/**
 	* Factory reset - complete cleanup of all agent data
-	* WARNING: This will delete all apps, services, state snapshots, and sensor data
+	* WARNING: This will delete all apps, services, state snapshots, and device data
 	* Only UUID will be preserved for hardware identification
 	*/
 	async factoryReset(): Promise<void> {

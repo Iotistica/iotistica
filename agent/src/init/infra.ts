@@ -16,7 +16,7 @@ export async function initInfrastructure(ctx: AgentInitContext): Promise<void> {
 /**
  * Connect the Iotistica CloudMqttClient (for cloud features: shell, jobs, CloudSync)
  * and — when an external publish target is configured — also connect the appropriate
- * cloud-bridge client and store it as ctx.sensorConnection for sensor data routing.
+ * cloud-bridge client and store it as ctx.deviceConnection for device data routing.
  *
  * Adding a new cloud target (AWS, GCP, …):
  *  1. Add a new client class in agent/src/mqtt/
@@ -29,9 +29,9 @@ export async function initializeConnections(ctx: AgentInitContext): Promise<void
 		await _connectIotisticaMqtt(ctx);
 
 		// If an external publish target is configured, connect it and store as
-		// the sensor data connection.  Iotistica is used as fallback when absent.
+		// the device data connection.  Iotistica is used as fallback when absent.
 		const externalConn = await _connectExternalTarget(ctx);
-		ctx.sensorConnection = externalConn ?? undefined;
+		ctx.deviceConnection = externalConn ?? undefined;
 
 		await initializeDictionaryManager(ctx);
 	} catch (error) {
@@ -109,7 +109,7 @@ async function _connectExternalTarget(ctx: AgentInitContext): Promise<MqttConnec
 		const { IotHubMqttClient } = await import('../mqtt/iothub-client.js');
 		const client = new IotHubMqttClient(connStr, ctx.agentLogger);
 		await client.connect();
-		ctx.agentLogger?.infoSync('IoT Hub MQTT connected (sensor data target)', {
+		ctx.agentLogger?.infoSync('IoT Hub MQTT connected (device data target)', {
 			component: LogComponents.agent,
 		});
 		return client;

@@ -1,5 +1,5 @@
 /**
- * Sensor Output Configuration Model
+ * device Output Configuration Model
  * Manages output configurations for protocol adapters (Modbus, CAN, OPC-UA)
  */
 

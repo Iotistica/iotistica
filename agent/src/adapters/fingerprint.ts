@@ -98,7 +98,7 @@ export function generateSNMPFingerprint(
  * Generate MQTT fingerprint
  * Based on topic path (stable identifier across reconnections)
  * 
- * @param topic - MQTT topic (e.g., "device/sensor01/temperature")
+ * @param topic - MQTT topic (e.g., "device/device01/temperature")
  */
 export function generateMqttFingerprint(topic: string): string {
 	return crypto

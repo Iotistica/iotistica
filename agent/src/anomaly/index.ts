@@ -2,7 +2,7 @@
  * ANOMALY DETECTION SERVICE - MAIN ORCHESTRATOR
  * ===============================================
  * 
- * Edge-appropriate anomaly detection for sensor data and system metrics
+ * Edge-appropriate anomaly detection for device data and system metrics
  */
 
 import type Database from 'better-sqlite3';

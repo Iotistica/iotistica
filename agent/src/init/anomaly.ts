@@ -12,7 +12,6 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 		...managerFeatures,
 		enableAnomalyDetection: targetConfigFeatures?.enableAnomalyDetection ?? managerFeatures.enableAnomalyDetection,
 		enableDevicePublish: targetConfigFeatures?.enableDevicePublish ?? managerFeatures.enableDevicePublish,
-		enableSensorPublish: targetConfigFeatures?.enableDevicePublish ?? targetConfigFeatures?.enableDevicePublish ?? managerFeatures.enableDevicePublish,
 		enableDeviceJobs: targetConfigFeatures?.enableDeviceJobs ?? managerFeatures.enableDeviceJobs,
 		enableDeviceRemoteAccess: targetConfigFeatures?.enableDeviceRemoteAccess ?? managerFeatures.enableDeviceRemoteAccess,
 	};

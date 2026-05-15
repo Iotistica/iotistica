@@ -12,13 +12,13 @@ import { pLimit } from '../../lib/p-limit.js';
  * Main Modbus Adapter class that coordinates Modbus devices
  * 
  * Architecture: This adapter is socket-agnostic. It polls Modbus devices and emits
- * 'data' events with sensor readings. The parent AdapterManager manages SocketServer
+ * 'data' events with device readings. The parent AdapterManager manages SocketServer
  * and routes data to the appropriate socket based on protocol.
  * 
  * Events:
  * - 'started': Adapter started successfully
  * - 'stopped': Adapter stopped
- * - 'data': Emitted with SensorDataPoint[] when data is collected
+ * - 'data': Emitted with deviceDataPoint[] when data is collected
  * - 'device-connected': Emitted when a device connects
  * - 'device-disconnected': Emitted when a device disconnects
  * - 'device-error': Emitted when a device encounters an error
@@ -500,7 +500,7 @@ export class ModbusAdapter extends EventEmitter {
 					metrics.recordPoll(responseTime, true, registersUpdated);
 				}
 
-				// Emit data event with sensor readings
+				// Emit data event with device readings
 				if (dataPoints.length > 0) {
 					this.emit('data', dataPoints);
 					this.emit('data-received', deviceConfig.name, dataPoints);

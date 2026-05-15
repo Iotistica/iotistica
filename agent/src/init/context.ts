@@ -31,5 +31,5 @@ export interface AgentInitContext {
 	simulationOrchestrator?: any;
 	discoveryService?: DiscoveryService;
 	dictionaryManager?: any;
-	sensorConnection?: MqttConnection;
+	deviceConnection?: MqttConnection;
 }

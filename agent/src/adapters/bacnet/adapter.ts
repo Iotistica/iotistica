@@ -9,13 +9,13 @@ import { pLimit } from '../../lib/p-limit.js';
  * Main BACnet Adapter class that coordinates BACnet devices
  * 
  * Architecture: This adapter is socket-agnostic. It polls BACnet devices and emits
- * 'data' events with sensor readings. The parent AdapterManager manages SocketServer
+ * 'data' events with device readings. The parent AdapterManager manages SocketServer
  * and routes data to the appropriate socket based on protocol.
  * 
  * Events:
  * - 'started': Adapter started successfully
  * - 'stopped': Adapter stopped
- * - 'data': Emitted with SensorDataPoint[] when data is collected
+ * - 'data': Emitted with deviceDataPoint[] when data is collected
  * - 'device-connected': Emitted when a device connects
  * - 'device-disconnected': Emitted when a device disconnects
  * - 'device-error': Emitted when a device encounters an error
@@ -331,7 +331,7 @@ export class BACnetAdapter extends EventEmitter {
 			const enabledObjects = deviceConfig.objects.filter(obj => obj.enabled);
 			const results = await client.readObjects(enabledObjects);
 
-			// Convert results to SensorDataPoint[]
+			// Convert results to deviceDataPoint[]
 			const dataPoints: DeviceDataPoint[] = [];
 			let updatedCount = 0;
 

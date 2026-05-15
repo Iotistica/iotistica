@@ -428,17 +428,6 @@ export class ContainerManager extends EventEmitter {
 		try {
 			const stateHash = this.getStateHash(this.targetState);
 			
-			// Log save attempt details
-			this.logger?.debugSync('Target state save attempt', {
-				component: LogComponents.containerManager,
-				operation: 'saveTargetState',
-				newHashPreview: stateHash.substring(0, 8),
-				lastSavedHashPreview: this.lastSavedTargetStateHash?.substring(0, 8) || 'none',
-				appsCount: Object.keys(this.targetState.apps).length,
-				configKeys: Object.keys(this.targetState.config || {}).length,
-				hasSensors: !!this.targetState.config?.sensors
-			});
-			
 			// Skip if state hasn't changed (compare hashes)
 			if (stateHash === this.lastSavedTargetStateHash) {
 				this.logger?.debugSync('Skipping save - state unchanged', {
@@ -455,17 +444,7 @@ export class ContainerManager extends EventEmitter {
 			this.lastSavedTargetStateHash = stateHash;
 		
 			const stateJson = JSON.stringify(this.targetState);
-		
-			// Log JSON details for debugging
-			this.logger?.debugSync('Target state JSON details', {
-				component: LogComponents.containerManager,
-				operation: 'saveTargetState',
-				jsonPreview: stateJson.substring(0, 500),
-				jsonLength: stateJson.length,
-				hasConfigField: stateJson.includes('"config"'),
-				hasSensorsField: stateJson.includes('"sensors"')
-			});
-		
+	
 			// Delete old target snapshots and insert new (with hash)
 			StateSnapshotModel.replace('target', stateJson, stateHash);
 			

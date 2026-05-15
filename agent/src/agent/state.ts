@@ -148,12 +148,6 @@ export class StateManager extends EventEmitter {
 			});
 		}
 
-		this.logger?.infoSync('StateReconciler initialized', {
-			component: LogComponents.stateReconciler,
-			operation: 'init',
-			appsCount: Object.keys(this.targetState.apps).length,
-			devicesCount: this.targetState.config?.sensors?.length || 0,
-		});
 	}
 
 	/**
@@ -236,7 +230,7 @@ export class StateManager extends EventEmitter {
 		// Get current state from container manager (Docker runtime state)
 		const containerState = await this.containerManager.getCurrentState();
 		
-		// Get current config from config manager (reconciled device config + database sensors)
+		// Get current config from config manager (reconciled device config + database devices)
 		const currentConfig = await this.configManager.getCurrentConfig();
 	
 		const state: AgentState = {

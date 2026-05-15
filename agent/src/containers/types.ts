@@ -403,9 +403,6 @@ export interface TargetState {
 			enableAnomalyDetection?: boolean;
 			enableDeviceRemoteAccess?: boolean;
 			enableDevicePublish?: boolean;
-
-			// Legacy aliases (backward compatibility)
-			enableSensorPublish?: boolean;
 			enableJobEngine?: boolean;
 			enableShadow?: boolean;
 			enableLogs?: boolean;

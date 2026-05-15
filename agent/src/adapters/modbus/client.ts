@@ -362,7 +362,7 @@ export class ModbusClient {
 	}
 
 	/**
-   * Read all configured registers and return sensor data points
+   * Read all configured registers and return device data points
    * Optimizes by batching contiguous register reads when possible
    */
 	async readAllRegisters(): Promise<DeviceDataPoint[]> {

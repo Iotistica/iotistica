@@ -586,7 +586,7 @@ export const deprovisionDevice = async () => {
 };
 
 /**
- * Get all configured endpoints/sensors
+ * Get all configured endpoints/devices
  * Used by: GET /v1/endpoints
  */
 export const getEndpoints = async (protocol?: string) => {

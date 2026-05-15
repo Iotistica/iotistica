@@ -43,16 +43,16 @@ export interface FeatureContext {
   pipelineService?: PipelineService; // Node-RED payload transform pipeline (optional)
   liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
   /**
-   * When set, sensor data is routed through this connection (IoT Hub, AWS, GCP, …)
+   * When set, device data is routed through this connection (IoT Hub, AWS, GCP, …)
    * instead of the default Iotistica CloudMqttClient.
    */
-  sensorConnection?: MqttConnection;
+  deviceConnection?: MqttConnection;
 }
 
 export interface InitializedFeatures {
   jobs?: JobsFeature;
   devicePublish?: DevicePublishFeature;
-  sensors?: AdapterManager;
+	devices?: AdapterManager;
   updater?: AgentUpdater;
   firewall?: AgentFirewall;
   shellHandler?: any; // Shell handler for remote terminal access
@@ -63,8 +63,8 @@ export interface InitializedFeatures {
  * FeatureInitializer - Orchestrates optional feature initialization
  * 
  * Responsibilities:
- * - Initialize optional features (jobs, sensor-publish, protocol adapters)
- * - Initialize supporting features (updater, firewall, sensor config handler)
+ * - Initialize optional features (jobs, device-publish, protocol adapters)
+ * - Initialize supporting features (updater, firewall, device config handler)
  * - Handle errors gracefully (feature failures don't crash agent)
  * - Provide unified cleanup interface
  */
@@ -136,7 +136,7 @@ export class FeatureInitializer {
 	getFeatures(): InitializedFeatures {
 		return {
 			...this.features,
-			sensors: this.adapterInitializer.getFeatures().sensors
+			devices: this.adapterInitializer.getFeatures().devices
 		};
 	}
 
@@ -252,8 +252,8 @@ export class FeatureInitializer {
 	}
 
 	/**
-   * Initialize sensor publish feature (lightweight reload)
-   * Reads endpoint configuration from database and starts Sensor Publish
+   * Initialize device publish feature (lightweight reload)
+   * Reads endpoint configuration from database and starts device Publish
    */
 	async initDevicePublish(): Promise<void> {
 		const { logger, deviceInfo, anomalyService } = this.context;
@@ -290,7 +290,7 @@ export class FeatureInitializer {
 
 
 		try {
-			// Load sensor output configurations from database
+			// Load device output configurations from database
 			const { EndpointOutputModel: DeviceOutputModel } = await import('../db/models/endpoint-outputs.model.js');
 			const { EndpointModel: EndpointModel } = await import('../db/models/endpoint.model.js');
       
@@ -329,7 +329,7 @@ export class FeatureInitializer {
 				return;
 			}
 
-			// Build sensor configs only for enabled protocols
+			// Build device configs only for enabled protocols
 			// bufferCapacity is configured per-protocol in endpoint_outputs table:
 			// - OPC UA: 1MB (large discovery messages with many nodes)
 			// - Modbus: 128KB (standard register responses)
@@ -376,7 +376,7 @@ export class FeatureInitializer {
         useKeyCompactionPoc,
         useDeflatePoc,
         anomalyService,
-        this.context.sensorConnection, // Route sensor data to external cloud if configured
+        this.context.deviceConnection, // Route device data to external cloud if configured
 			);
 
 			if (this.context.pipelineService) {
@@ -570,9 +570,9 @@ export class FeatureInitializer {
 		}
 
 		// Stop Protocol Adapters
-		const currentSensors = this.adapterInitializer.getFeatures().sensors;
-		if (currentSensors) {
-			await currentSensors.stop();
+		const currentDevices = this.adapterInitializer.getFeatures().devices;
+		if (currentDevices) {
+			await currentDevices.stop();
 			logger.debugSync('Protocol Adapters stopped', {
 				component: LogComponents.agent,
 			});
@@ -641,7 +641,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 		anomalyService: ctx.anomalyService,
 		dictionaryManager: ctx.dictionaryManager,
 		pipelineService: ctx.pipelineService,
-		sensorConnection: ctx.sensorConnection,
+		deviceConnection: ctx.deviceConnection,
 	};
 
 	const initializer = new FeatureInitializer(featureContext);
@@ -650,7 +650,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 	await initDiscoveryService(ctx);
 	featureContext.discoveryService = ctx.discoveryService;
 
-	// Initialize Node-RED pipeline before sensor publish so it is bound at start
+	// Initialize Node-RED pipeline before device publish so it is bound at start
 	const { initPipeline } = await import('./pipeline.js');
 	await initPipeline(ctx);
 	if (ctx.pipelineService) {
@@ -674,7 +674,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 	agentLogger?.infoSync('Feature initialization complete', {
 		component: LogComponents.agent,
 		jobs: !!initializedFeatures.jobs,
-		sensors: !!initializedFeatures.sensors,
+			devices: !!initializedFeatures.devices,
 		devicePublish: !!initializedFeatures.devicePublish,
 		updater: !!initializedFeatures.updater,
 		firewall: !!initializedFeatures.firewall,

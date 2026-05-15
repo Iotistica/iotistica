@@ -2,7 +2,7 @@
  * Message Buffer Model
  * ====================
  * 
- * Local database queue for sensor/endpoint data when MQTT is unavailable.
+ * Local database queue for device/endpoint data when MQTT is unavailable.
  * Implements offline resilience pattern from AWS IoT Greengrass.
  * 
  * Features:

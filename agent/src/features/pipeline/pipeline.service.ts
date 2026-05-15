@@ -11,8 +11,8 @@
  *
  *   const result = await svc.transform({
  *     payload: { temperature: 22.5 },
- *     topic: 'sensor/temperature',
- *     deviceId: 'sensor-01',
+ *     topic: 'device/temperature',
+ *     deviceId: 'device-01',
  *   });
  *
  *   console.log(result.payload); // transformed payload

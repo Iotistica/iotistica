@@ -337,7 +337,7 @@ export async function getCpuUsage(): Promise<number> {
 
 /**
  * Get CPU temperature in Celsius
- * Returns null if temperature sensor not available
+ * Returns null if temperature device not available
  */
 export async function getCpuTemp(): Promise<number | null> {
 	try {

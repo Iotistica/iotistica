@@ -166,9 +166,9 @@ export function loadConfigFromEnv(): AnomalyConfig {
 }
 
 /**
- * Create a data point from sensor data
+ * Create a data point from device data
  */
-export function createSensorDataPoint(
+export function createDeviceDataPoint(
 	metric: string,
 	value: number,
 	unit: string,

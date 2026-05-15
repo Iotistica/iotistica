@@ -12,7 +12,7 @@ import { EndpointModel } from "../../db/models/endpoint.model.js";
  *
  * Architecture: This adapter is socket-agnostic. It subscribes to MQTT topics
  * from external publishers (ESP32, PLCs, IoT devices) publishing to the local
- * Mosquitto broker and emits 'data' events with sensor readings. The parent
+ * Mosquitto broker and emits 'data' events with device readings. The parent
  * AdapterManager manages SocketServer and routes data to the appropriate socket.
  *
  * Pattern: Mosquitto broker acts as the ENDPOINT (data aggregation point),
@@ -21,7 +21,7 @@ import { EndpointModel } from "../../db/models/endpoint.model.js";
  * Events:
  * - 'started': Adapter started successfully
  * - 'stopped': Adapter stopped
- * - 'data': Emitted with SensorDataPoint[] when data is collected
+ * - 'data': Emitted with deviceDataPoint[] when data is collected
  * - 'device-connected': Emitted when broker connects
  * - 'device-disconnected': Emitted when broker disconnects
  * - 'device-error': Emitted when an error occurs

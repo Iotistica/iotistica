@@ -29,7 +29,7 @@ export function createJsonPayload(data: object, msgIdGenerator?: MessageIdGenera
 
 /**
  * Helper: Create MessagePack payload with msgId injection
- * Use this for high-frequency sensor data (better compression + faster)
+ * Use this for high-frequency device data (better compression + faster)
  */
 export function createMsgpackPayload(data: object, msgIdGenerator?: MessageIdGenerator): MqttPayload {
 	const existingMsgId = (data as { msgId?: string }).msgId;

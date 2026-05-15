@@ -56,7 +56,7 @@ const testMessages = isOpcuaFlow
 		// Normal batch – two good-quality readings, one bad
 		{
 			payload: {
-				sensor: 'plc-001',
+				device: 'plc-001',
 				timestamp: new Date().toISOString(),
 				messages: [
 					{ timestamp: new Date().toISOString(), deviceName: 'plc-001', metric: 'ns2_Temperature', value: 22.5,  unit: '°C',  quality: 'good' },
@@ -70,7 +70,7 @@ const testMessages = isOpcuaFlow
 		// All-bad batch → should be dropped
 		{
 			payload: {
-				sensor: 'plc-002',
+				device: 'plc-002',
 				timestamp: new Date().toISOString(),
 				messages: [
 					{ timestamp: new Date().toISOString(), deviceName: 'plc-002', metric: 'vibration', value: 0, quality: 'bad' },
@@ -81,9 +81,9 @@ const testMessages = isOpcuaFlow
 		},
 	]
 	: [
-		{ payload: { rawAdc: 2048, humidity: 65 }, topic: 'sensor/temperature', deviceId: 'sensor-01' },
-		{ payload: '{"rawAdc":3000,"humidity":42}',  topic: 'sensor/temperature', deviceId: 'sensor-02' },
-		{ payload: { rawAdc: 0, humidity: 88 },    topic: 'sensor/temperature', deviceId: 'sensor-03' },
+		{ payload: { rawAdc: 2048, humidity: 65 }, topic: 'device/temperature', deviceId: 'device-01' },
+		{ payload: '{"rawAdc":3000,"humidity":42}',  topic: 'device/temperature', deviceId: 'device-02' },
+		{ payload: { rawAdc: 0, humidity: 88 },    topic: 'device/temperature', deviceId: 'device-03' },
 	];
 
 async function main() {

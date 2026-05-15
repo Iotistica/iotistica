@@ -450,7 +450,7 @@ export class DiscoveryService extends EventEmitter {
 		// Update metadata
 		this.updateMetadata(trigger, validate);
 
-		// Emit discovery-complete event (triggers sensor publish reload on first boot)
+		// Emit discovery-complete event (triggers device publish reload on first boot)
 		this.emit('discovery-complete', {
 			trigger,
 			validate,
