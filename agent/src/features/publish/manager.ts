@@ -14,6 +14,7 @@ import { DeviceConnection } from './connection.js';
 import { PublishStats } from './stats.js';
 import { HeartbeatManager } from './heartbeat.js';
 import { SchemaDriftDetector } from './schema/drift.js';
+import { SchemaDriftModel } from '../../db/models/schema-drift.model.js';
 
 // Adaptive batch safety limits (calculated once at module load)
 const MAX_BATCH_MESSAGES = 10000;
@@ -103,7 +104,12 @@ export class PublishManager extends EventEmitter {
 		this.stats = new PublishStats();
 		this.feed = new AnomalyFeed(() => this.anomalyService, deviceUuid, protocol, logger);
 		this.enricher = new AnomalyEnricher(() => this.anomalyService, deviceUuid, protocol);
-		this.schemaDriftDetector = new SchemaDriftDetector(config.name || 'unknown', logger);
+		this.schemaDriftDetector = new SchemaDriftDetector(
+			config.name || 'unknown',
+			logger,
+			undefined,
+			SchemaDriftModel,
+		);
 
 		this.batcher.on('flush', () => { this.publishBatch(); });
 		this.batcher.on('message-added', () => { this.stats.data.messagesReceived++; });

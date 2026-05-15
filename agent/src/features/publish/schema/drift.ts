@@ -1,3 +1,11 @@
+import {
+	SchemaDriftModel,
+} from '../../../db/models/schema-drift.model.js';
+import type {
+	PersistedBaselineState,
+	SchemaDriftEvent,
+	SchemaDriftStore,
+} from '../../../db/models/schema-drift.model.js';
 import type { Logger } from "../types.js";
 
 type ValueType = "number" | "string" | "boolean" | "object" | "array" | "null";
@@ -227,6 +235,7 @@ export class SchemaDriftDetector {
 	private readonly options: DriftDetectorOptions;
 	private readonly endpointName: string;
 	private readonly logger?: Logger;
+	private readonly store: SchemaDriftStore;
 
 	private totalBatches = 0;
 	private warmupSeen = 0;
@@ -253,10 +262,125 @@ export class SchemaDriftDetector {
 		endpointName: string,
 		logger?: Logger,
 		options?: Partial<DriftDetectorOptions>,
+		store: SchemaDriftStore = SchemaDriftModel,
 	) {
 		this.endpointName = endpointName;
 		this.logger = logger;
 		this.options = { ...DEFAULT_OPTIONS, ...(options || {}) };
+		this.store = store;
+		this.restorePersistedBaseline();
+	}
+
+	private restorePersistedBaseline(): void {
+		const persisted = this.store.loadBaseline(this.endpointName);
+		if (!persisted) {
+			return;
+		}
+
+		this.baseline = new Set(persisted.baselineFields);
+		this.totalBatches = persisted.totalBatches;
+		this.warmupSeen = persisted.warmupSeen;
+
+		for (const [field, freq] of Object.entries(persisted.baselineTypeFreq)) {
+			this.baselineTypeFreq.set(field, {
+				counts: this.toValueTypeCountMap(freq.counts),
+				total: freq.total,
+			});
+		}
+
+		for (const [field, streak] of Object.entries(persisted.missingStreakByField)) {
+			this.missingStreakByField.set(field, streak);
+		}
+
+		for (const [field, batch] of Object.entries(persisted.tombstones ?? {})) {
+			this.tombstones.set(field, batch);
+		}
+
+		for (const [field, count] of Object.entries(persisted.newFieldCounts ?? {})) {
+			this.newFieldCounts.set(field, count);
+		}
+
+		for (const [field, firstSeen] of Object.entries(persisted.newFieldFirstSeen ?? {})) {
+			this.newFieldFirstSeen.set(field, firstSeen);
+		}
+
+		for (const [field, freq] of Object.entries(persisted.newFieldTypeFreq ?? {})) {
+			this.newFieldTypeFreq.set(field, {
+				counts: this.toValueTypeCountMap(freq.counts),
+				total: freq.total,
+			});
+		}
+	}
+
+	private persistBaselineState(): void {
+		if (!this.baseline) {
+			return;
+		}
+
+		const state: PersistedBaselineState = {
+			endpointName: this.endpointName,
+			baselineFields: Array.from(this.baseline),
+			baselineTypeFreq: this.serializeTypeFrequencies(this.baselineTypeFreq),
+			missingStreakByField: Object.fromEntries(this.missingStreakByField),
+			totalBatches: this.totalBatches,
+			warmupSeen: this.warmupSeen,
+			tombstones: Object.fromEntries(this.tombstones),
+			newFieldCounts: Object.fromEntries(this.newFieldCounts),
+			newFieldFirstSeen: Object.fromEntries(this.newFieldFirstSeen),
+			newFieldTypeFreq: this.serializeTypeFrequencies(this.newFieldTypeFreq),
+		};
+
+		try {
+			this.store.saveBaseline(state);
+		} catch (error) {
+			this.logger?.error(
+				`Failed to persist schema baseline for endpoint '${this.endpointName}'`,
+				{ endpointName: this.endpointName, error },
+			);
+		}
+	}
+
+	private persistDriftEvent(event: SchemaDriftEvent): void {
+		try {
+			this.store.saveDrift(event);
+		} catch (error) {
+			this.logger?.error(
+				`Failed to persist schema drift event for endpoint '${this.endpointName}'`,
+				{ endpointName: this.endpointName, error },
+			);
+		}
+	}
+
+	private serializeTypeFrequencies(
+		freqMap: Map<string, TypeFrequency>,
+	): PersistedBaselineState['baselineTypeFreq'] {
+		const result: PersistedBaselineState['baselineTypeFreq'] = {};
+		for (const [field, freq] of freqMap.entries()) {
+			result[field] = {
+				counts: Object.fromEntries(freq.counts),
+				total: freq.total,
+			};
+		}
+
+		return result;
+	}
+
+	private toValueTypeCountMap(counts: Record<string, number>): Map<ValueType, number> {
+		const result = new Map<ValueType, number>();
+		for (const [type, count] of Object.entries(counts)) {
+			if (
+				type === 'number' ||
+				type === 'string' ||
+				type === 'boolean' ||
+				type === 'object' ||
+				type === 'array' ||
+				type === 'null'
+			) {
+				result.set(type, count);
+			}
+		}
+
+		return result;
 	}
 
 	observe(messages: unknown[]): void {
@@ -345,6 +469,8 @@ export class SchemaDriftDetector {
 				),
 			},
 		);
+
+		this.persistBaselineState();
 	}
 
 	// ---------------------------------------------------------------------------
@@ -432,6 +558,46 @@ export class SchemaDriftDetector {
 				observationMode: "per-batch",
 			},
 		);
+
+		for (const field of reportableNew) {
+			this.persistDriftEvent({
+				endpointName: this.endpointName,
+				driftType: 'new-field',
+				fieldName: field,
+				severity: 'warning',
+			});
+		}
+
+		for (const field of reportableMissing) {
+			this.persistDriftEvent({
+				endpointName: this.endpointName,
+				driftType: 'missing-field',
+				fieldName: field,
+				severity: 'critical',
+			});
+		}
+
+		for (const drift of reportableTypeDrifts) {
+			this.persistDriftEvent({
+				endpointName: this.endpointName,
+				driftType: 'type-drift',
+				fieldName: drift.field,
+				severity: 'critical',
+				expectedType: drift.dominantExpectedType,
+				observedTypes: drift.observedTypes,
+			});
+		}
+
+		if (renameCandidate) {
+			this.persistDriftEvent({
+				endpointName: this.endpointName,
+				driftType: 'rename-candidate',
+				severity: 'warning',
+				renameCandidateFrom: renameCandidate.from,
+				renameCandidateTo: renameCandidate.to,
+				renameSimilarity: renameCandidate.similarity,
+			});
+		}
 	}
 
 	private handleNewField(
@@ -505,6 +671,8 @@ export class SchemaDriftDetector {
 				windowSize,
 			},
 		);
+
+		this.persistBaselineState();
 	}
 
 	private checkTypeDrift(
@@ -584,6 +752,8 @@ export class SchemaDriftDetector {
 					retiredAtBatch: this.totalBatches,
 				},
 			);
+
+			this.persistBaselineState();
 		}
 	}
 

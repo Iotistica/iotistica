@@ -266,6 +266,27 @@ CREATE TABLE IF NOT EXISTS "retry_state" (
 	"updated_at"	varchar(255) NOT NULL,
 	PRIMARY KEY("key")
 );
+CREATE TABLE IF NOT EXISTS "schema_drift_log" (
+	"id"	integer NOT NULL,
+	"endpoint_name"	text NOT NULL,
+	"drift_type"	text NOT NULL,
+	"field_name"	text,
+	"severity"	text NOT NULL,
+	"expected_type"	text,
+	"observed_types"	text,
+	"rename_candidate_from"	text,
+	"rename_candidate_to"	text,
+	"rename_similarity"	real,
+	"detected_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	"details_json"	text,
+	PRIMARY KEY("id" AUTOINCREMENT)
+);
+CREATE TABLE IF NOT EXISTS "schema_baseline" (
+	"endpoint_name"	text,
+	"baseline_json"	text NOT NULL,
+	"updated_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY("endpoint_name")
+);
 CREATE TABLE IF NOT EXISTS "stateSnapshot" (
 	"id"	integer NOT NULL,
 	"type"	varchar(50) NOT NULL,
@@ -355,6 +376,10 @@ CREATE INDEX IF NOT EXISTS "endpoints_uuid_index" ON "endpoints" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "endpoints_uuid_unique" ON "endpoints" (
 	"uuid"
+);
+CREATE INDEX IF NOT EXISTS "idx_drift_log_endpoint_time" ON "schema_drift_log" (
+	"endpoint_name",
+	"detected_at" DESC
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "enum_devices_protocol_device_name_unique" ON "enum_devices" (
 	"protocol",

@@ -6,6 +6,7 @@ import { migration as renameDeviceTableToAgent } from './migrations/202603170000
 import { migration as renameAgentColumns } from './migrations/20260317010000_rename_agent_columns.js';
 import { migration as dropAgentCloudId } from './migrations/20260317020000_drop_agent_cloudid.js';
 import { migration as addDevicesTable } from './migrations/20260318000000_add_devices_table.js';
+import { migration as addSchemaDriftTables } from './migrations/20260515000000_add_schema_drift_tables.js';
 import type { NativeSqliteMigration } from './migration-types.js';
 
 export const nativeMigrations: NativeSqliteMigration[] = [
@@ -17,4 +18,5 @@ export const nativeMigrations: NativeSqliteMigration[] = [
 	renameAgentColumns,
 	dropAgentCloudId,
 	addDevicesTable,
+	addSchemaDriftTables,
 ];

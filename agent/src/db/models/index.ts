@@ -35,6 +35,17 @@ export type { MessageBufferRecord, BufferStats, BufferAdmissionDecision } from '
 export { DictionaryModel } from './dictionary.model';
 export type { DictionaryEntry, DictionaryDelta, DictionaryMetadata } from './dictionary.model';
 
+// Schema drift persistence
+export { SchemaDriftModel } from './schema-drift.model';
+export type {
+	DriftSeverity,
+	DriftType,
+	PersistedBaselineState,
+	PersistedTypeFrequency,
+	SchemaDriftEvent,
+	SchemaDriftStore,
+} from './schema-drift.model';
+
 // Protocol devices (physical/logical devices behind protocol endpoints)
 export { DeviceModel as ProtocolDevicesModel } from './device.model';
 export type { Device as ProtocolDevice } from './device.model';
