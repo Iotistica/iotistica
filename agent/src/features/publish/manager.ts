@@ -297,13 +297,13 @@ export class PublishManager extends EventEmitter {
 	}
 
 	private buildPayload(endpointName: string, messages: any[]): {
-    data: { sensor: string; timestamp: string; protocol: Protocol; messages: any[]; msgId: string };
+    data: { device: string; timestamp: string; protocol: Protocol; messages: any[]; msgId: string };
     baselineSize: number;
   } {
 		const timestampIso = new Date().toISOString();
 		const msgId = this.mqttConnection.getMessageIdGenerator?.()?.generate();
 		const data = {
-			sensor: endpointName,
+			device: endpointName,
 			timestamp: timestampIso,
 			protocol: this.protocol,
 			messages,
@@ -315,7 +315,7 @@ export class PublishManager extends EventEmitter {
 
 	private async persistQueuedBatch(
 		topic: string,
-		data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
+		data: { device: string; timestamp: string; messages: any[]; msgId: string },
 	): Promise<number> {
 		const MessageBufferModel = await this.getMessageBufferModel();
 		const jsonPayload = JSON.stringify(data);
@@ -332,7 +332,7 @@ export class PublishManager extends EventEmitter {
 
 	private async persistClaimedBatch(
 		topic: string,
-		data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
+		data: { device: string; timestamp: string; messages: any[]; msgId: string },
 	): Promise<{ id: number; lockId: string }> {
 		const MessageBufferModel = await this.getMessageBufferModel();
 		const jsonPayload = JSON.stringify(data);
@@ -355,7 +355,7 @@ export class PublishManager extends EventEmitter {
 
 	private async publishOnline(
 		topic: string,
-		data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
+		data: { device: string; timestamp: string; messages: any[]; msgId: string },
 		baselineSize: number,
 		messageCount: number,
 		batchBytes: number,
@@ -423,7 +423,7 @@ export class PublishManager extends EventEmitter {
 
 	private async publishOffline(
 		topic: string,
-		data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
+		data: { device: string; timestamp: string; messages: any[]; msgId: string },
 		messageCount: number,
 	): Promise<void> {
 		if (this.needStop) return;
@@ -432,7 +432,7 @@ export class PublishManager extends EventEmitter {
 
 	private async bufferOfflineMessages(
 		topic: string,
-		data: { sensor: string; timestamp: string; messages: any[]; msgId: string },
+		data: { device: string; timestamp: string; messages: any[]; msgId: string },
 		messageCount: number,
 	): Promise<void> {
 		const name = this.config.name || 'unknown';

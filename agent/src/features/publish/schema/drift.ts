@@ -90,7 +90,7 @@ const RESERVED_GENERIC_KEYS = new Set<string>([
 	"status",
 	"state",
 	"msgid",
-	"sensor",
+	"device",
 	"protocol",
 ]);
 

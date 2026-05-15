@@ -180,9 +180,7 @@ export class AnomalyFeed {
 		const deviceName =
 			typeof tags.deviceName === "string" && tags.deviceName.trim()
 				? tags.deviceName.trim()
-				: typeof tags.sensorName === "string" && tags.sensorName.trim()
-					? tags.sensorName.trim()
-					: undefined;
+				: undefined;
 
 		const fieldName =
 			typeof tags.fieldName === "string" && tags.fieldName.trim()
@@ -228,7 +226,7 @@ export class AnomalyFeed {
 			quality: "GOOD",
 			deviceId: fallbackDeviceId,
 			tags: {
-				sensorName: deviceName,
+				deviceName,
 				endpointId: deviceName,
 				field: fieldName,
 			},
@@ -298,7 +296,6 @@ export class AnomalyFeed {
 			quality: quality === "GOOD" || quality === "Good" ? "GOOD" : "BAD",
 			deviceId: effectiveDeviceId,
 			tags: {
-				sensorName: parentDeviceName,
 				endpointId: parentDeviceName,
 				...(payloadDeviceUuid && { deviceUuid: payloadDeviceUuid }),
 				deviceName: readingDeviceName,
@@ -377,7 +374,6 @@ export class AnomalyFeed {
 				quality: quality === "GOOD" || quality === "Good" ? "GOOD" : "BAD",
 				deviceId: effectiveDeviceId,
 				tags: {
-					sensorName: parentDeviceName,
 					endpointId: parentDeviceName,
 					...(payloadDeviceUuid && { deviceUuid: payloadDeviceUuid }),
 					deviceName: readingDeviceName,
@@ -469,7 +465,7 @@ export class AnomalyFeed {
 					quality: "GOOD",
 					deviceId: effectiveDeviceId,
 					tags: {
-						sensorName: deviceName,
+						deviceName,
 						endpointId: deviceName,
 						...(payloadDeviceUuid && { deviceUuid: payloadDeviceUuid }),
 						field: metricName,

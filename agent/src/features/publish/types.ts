@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Sensor State enumeration
+ * Device State enumeration
  */
 export enum DeviceState {
   DISCONNECTED = 'DISCONNECTED',
@@ -11,7 +11,7 @@ export enum DeviceState {
 }
 
 /**
- * Sensor Configuration Schema
+ * Device Configuration Schema
  */
 export const DeviceConfigSchema = z.object({
 	name: z.string().optional(),
@@ -32,7 +32,7 @@ export const DeviceConfigSchema = z.object({
 export type DeviceConfig = z.infer<typeof DeviceConfigSchema>;
 
 /**
- * Sensor Publish Feature Configuration Schema
+ * Device Publish Feature Configuration Schema
  */
 export const DevicePublishConfigSchema = z.object({
 	enabled: z.boolean().default(true),
@@ -44,7 +44,7 @@ export type DevicePublishConfig = z.infer<typeof DevicePublishConfigSchema> & {
 };
 
 /**
- * MQTT Connection interface for publishing sensor data
+ * MQTT Connection interface for publishing device data
  */
 export type PublishMode = 'direct' | 'buffer-only' | 'recovering';
 
@@ -66,7 +66,7 @@ export interface Logger {
 }
 
 /**
- * Sensor Statistics
+ * Device Statistics
  */
 export interface DeviceStats {
   messagesReceived: number;
@@ -82,7 +82,7 @@ export interface DeviceStats {
 }
 
 /**
- * Sensor Message Batch
+ * Device Message Batch
  * OPTIMIZATION: Stores pre-parsed objects to avoid duplicate JSON.parse() calls
  * - feedMessagesToAnomaly() and enrichMessagesWithAnomalyScores() both need parsed objects
  * - Parsing once at batch entry reduces CPU by ~50% (eliminates 1 of 2 parse operations)
