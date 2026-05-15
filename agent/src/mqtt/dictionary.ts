@@ -1481,7 +1481,7 @@ export class DictionaryManager {
 		const method = useMsgpack ? 'dictionary+msgpack' : 'dictionary';
     
 		this.logger?.debugSync(`Message compacted (${method})`, {
-			component: LogComponents.sensorPublish,
+			component: LogComponents.devicePublish,
 			operation: 'compact',
 			topic,
 			sizes: {

@@ -14,7 +14,7 @@ import type { AdapterManager } from '../adapters';
 import type { ConfigManager } from '../agent/config';
 import type { StateManager } from '../agent/state';
 import { LogComponents } from '../logging/types';
-import type { HealthReport } from '../health/health-arbiter';
+import type { HealthReport } from '../health/arbiter';
 import { MessageBufferModel } from '../db/models/buffer.model';
 import { CloudMqttClient } from '../mqtt/manager';
 import { encodeIfUuid } from '../mqtt/codec';

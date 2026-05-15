@@ -15,7 +15,7 @@ import { mkdirSync } from 'fs';
 import { join } from 'path';
 import Agent from './agent.js';
 import { startWatchdog, notifySystemd, notifyReady } from './system/watchdog';
-import { HealthArbiter } from './health/health-arbiter';
+import { HealthArbiter } from './health/arbiter.js';
 import { healthcheck } from './system/memory';
 import { CloudMqttClient } from './mqtt';
 import { DatabaseModel } from './db/models';

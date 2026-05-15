@@ -595,13 +595,13 @@ jobs:
           curl -fsS "http://localhost:48484/v1/devices" | jq . || true
 
           echo ""
-          echo "=== Agent journal (subscription check) ==="
-          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -i "Subscribed to MQTT topic" || true
+          echo "=== Agent journal (MQTT reconciliation check) ==="
+          sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -iE "MQTT adapter hot-reloaded|MQTT file auth updated|hot-reloaded after reconciliation" || true
 
-          if sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -q "Subscribed to MQTT topic"; then
-            echo "PASS: agent logged MQTT subscription"
+          if sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | grep -qE "MQTT adapter hot-reloaded|MQTT file auth updated|hot-reloaded after reconciliation"; then
+            echo "PASS: agent reconciled MQTT adapter/auth after endpoint change"
           else
-            echo "FAIL: no MQTT subscription log found in agent journal"
+            echo "FAIL: no MQTT reconciliation log found in agent journal"
             sudo journalctl -u iotistica-agent --no-pager --since "10 minutes ago" | tail -50 || true
             exit 1
           fi
@@ -640,12 +640,12 @@ jobs:
           SENSORS_RESP=$(curl -fsS "http://localhost:4002/api/v1/agents/${AGENT_UUID}/devices?protocol=mqtt" \
             -H "Authorization: Bearer $ACCESS_TOKEN")
 
-          DEVICE_NAME=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e_mqtt_"))] | first | .name // empty')
-          DEVICE_UUID=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e_mqtt_"))] | first | .uuid // empty')
-          BASE_TOPIC=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e_mqtt_"))] | first | .connection.topic // empty')
+          DEVICE_NAME=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e-mqtt-"))] | first | .name // empty')
+          DEVICE_UUID=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e-mqtt-"))] | first | .uuid // empty')
+          BASE_TOPIC=$(echo "$SENSORS_RESP" | jq -r '[.devices[]? | select(.name | startswith("e2e-mqtt-"))] | first | .connection.topic // empty')
 
           if [ -z "$DEVICE_NAME" ] || [ -z "$BASE_TOPIC" ]; then
-            echo "FAIL: Could not find e2e_mqtt_ device in agent sensors response"
+            echo "FAIL: Could not find e2e-mqtt- device in agent sensors response"
             echo "$SENSORS_RESP" | jq .
             exit 1
           fi
@@ -659,10 +659,13 @@ jobs:
           # Clean up any leftover container from a previous run
           docker rm -f sim-mqtt-e2e 2>/dev/null || true
 
+          # Authenticate using the bootstrap MQTT user (admin/iotistic42!) which has
+          # 'topic readwrite #' ACL so it can publish to any device topic without requiring
+          # the per-device MQTT credentials generated at endpoint creation time.
           docker run -d --network host --name sim-mqtt-e2e \
             -e MQTT_BROKER_URL=mqtt://localhost:1883 \
-            -e MQTT_USERNAME="${DEVICE_NAME}_user" \
-            -e MQTT_PASSWORD="E2eSecurePass1!" \
+            -e MQTT_USERNAME="admin" \
+            -e MQTT_PASSWORD="iotistic42!" \
             -e MQTT_CLIENT_ID="sim-${DEVICE_NAME: -20}" \
             -e MQTT_DEVICE_UUID="$DEVICE_UUID" \
             -e MQTT_TOPIC="$BASE_TOPIC" \

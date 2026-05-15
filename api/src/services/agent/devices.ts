@@ -14,7 +14,7 @@
 import { query } from '../../db/connection';
 import { EventPublisher } from '../audit/event-sourcing';
 import logger from '../../utils/logger';
-import { randomUUID as uuidv4 } from 'crypto';
+import { randomUUID as uuidv4, randomBytes, pbkdf2Sync } from 'crypto';
 import { AgentTargetStateModel } from './agents';
 import type { ModbusDataPoint, OPCUADataPoint, AnomalyDetectionDataPointConfig, AnomalyMetric } from '../../types/target-state';
 import { mqttDeviceTopic } from '../../mqtt/topics';
@@ -31,9 +31,29 @@ export interface EndpointDeviceConfig {
   enabled: boolean;
   pollInterval?: number;
   connection: any;
+  auth?: any;
   dataPoints: (ModbusDataPoint | OPCUADataPoint | any)[];  // Typed for Modbus/OPC-UA, any for other protocols
   metadata?: any;
   location?: string; // Physical location for Azure Digital Twins
+}
+
+/**
+ * Derive a Mosquitto-safe username from a device name.
+ * Replaces sequences of non-alphanumeric characters with underscores and trims leading/trailing underscores.
+ */
+function deriveMqttUsername(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'd_device';
+}
+
+/**
+ * Generate a mosquitto-compatible PBKDF2-SHA512 password hash.
+ * Matches the format written by mosquitto_passwd -H sha512-pbkdf2.
+ */
+function generateMosquittoPasswordHash(password: string): string {
+  const iterations = 101;
+  const salt = randomBytes(12);
+  const key = pbkdf2Sync(password, salt, iterations, 64, 'sha512');
+  return `$7$${iterations}$${salt.toString('base64')}$${key.toString('base64')}`;
 }
 
 export interface AgentDeviceReport {
@@ -60,8 +80,23 @@ export function prepareEndpointForCreate(
     const topic = mqttDeviceTopic(getTenantId(), deviceUuid, 'd', encodeIfUuid(preparedConfig.uuid!));
     const { pollInterval, ...mqttConfig } = preparedConfig;
 
+    // Auto-generate Mosquitto file-auth credentials if none are provided.
+    // These allow the agent to write a per-device entry to /etc/mosquitto/passwd
+    // and /etc/mosquitto/acl so the physical sensor can authenticate to the broker.
+    const existingAuth = mqttConfig.auth?.mqtt;
+    const auth = (existingAuth?.username && (existingAuth?.passwordFileHash || existingAuth?.passwordPlaintext))
+      ? mqttConfig.auth
+      : {
+          mqtt: {
+            username: deriveMqttUsername(mqttConfig.name),
+            passwordFileHash: generateMosquittoPasswordHash(randomBytes(16).toString('hex')),
+            access: 2, // write — sensors publish data to the broker
+          },
+        };
+
     return {
       ...mqttConfig,
+      auth,
       connection: {
         ...(preparedConfig.connection || {}),
         topic,
