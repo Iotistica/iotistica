@@ -70,6 +70,10 @@ param(
     
     # Run Mode
     [switch]$Run,
+
+    # Include agent-cli service in generated compose output.
+    # This keeps CLI target port aligned with generated agent ports.
+    [bool]$IncludeAgentCli = $true,
     
     # Build Mode - build from source instead of using pre-built image
     [switch]$BuildFromSource,
@@ -1444,6 +1448,40 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     }
 }
 
+if ($IncludeAgentCli) {
+    $agentCliPort = Get-UniquePort $StartIndex
+    $agentCliServiceLines = @(
+        '  agent-cli:',
+        '    build:',
+        '      context: ./agent-cli',
+        '      dockerfile: Dockerfile',
+        '    image: iotistic/agent-cli:dev',
+        '    container_name: iotistic-agent-cli',
+        '    network_mode: host',
+        '    entrypoint: ["/bin/sh", "-c"]',
+        '    command: ["tail -f /dev/null"]',
+        '    tty: true',
+        '    environment:',
+        "      - DEVICE_API_PORT=$agentCliPort",
+        "      - DEVICE_API_URL=http://localhost:$agentCliPort",
+        '      - CONFIG_DIR=/app/data',
+        '      - DEBUG=false',
+        '    volumes:',
+        '      - agent-cli-data:/app/data',
+        '    logging:',
+        '      driver: "json-file"',
+        '      options:',
+        '        max-size: "5m"',
+        '        max-file: "2"'
+    )
+
+    $services += ([string]::Join("`n", $agentCliServiceLines))
+
+    if (-not ($volumes -contains "  agent-cli-data:")) {
+        $volumes += "  agent-cli-data:"
+    }
+}
+
 # Build complete docker-compose file
 $header = @"
 # Auto-generated docker-compose file for $Count agents
@@ -1528,6 +1566,9 @@ if ($Count -eq 1) {
 Write-Host "`n✅ Generated $Count agents in $OutputFile" -ForegroundColor Green
 Write-Host "  Agents: $StartIndex to $($StartIndex + $Count - 1)" -ForegroundColor Gray
 Write-Host "  Ports: $(Get-UniquePort $StartIndex) to $(Get-UniquePort ($StartIndex + $Count - 1))" -ForegroundColor Gray
+if ($IncludeAgentCli) {
+    Write-Host "  Agent CLI target: http://localhost:$(Get-UniquePort $StartIndex)" -ForegroundColor Gray
+}
 
 Write-Host "`n🔑 Provisioning Keys:" -ForegroundColor Magenta
 foreach ($keyEntry in $provisioningKeys) {

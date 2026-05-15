@@ -173,6 +173,13 @@ export class AgentProvisioningService {
 					agentInfo.type = response.type;
 				}
 
+				const redactedBrokerConfig = response.mqtt?.brokerConfig
+					? {
+						...response.mqtt.brokerConfig,
+						password: response.mqtt.brokerConfig.password ? '[REDACTED]' : response.mqtt.brokerConfig.password,
+					}
+					: undefined;
+
 				this.logger?.infoSync('Provisioning response received', {
 					component: LogComponents.agentManager,
 					operation: 'provision',
@@ -180,7 +187,7 @@ export class AgentProvisioningService {
 					tenantId: response.tenantId,
 					mqttKeys: Object.keys(response.mqtt || {}),
 					brokerConfigKeys: Object.keys(response.mqtt?.brokerConfig || {}),
-					brokerConfig: response.mqtt?.brokerConfig,
+					brokerConfig: redactedBrokerConfig,
 					hasUseTls: response.mqtt?.brokerConfig?.useTls,
 					hasVerifyCertificate: response.mqtt?.brokerConfig?.verifyCertificate,
 					protocol: response.mqtt?.brokerConfig?.protocol,

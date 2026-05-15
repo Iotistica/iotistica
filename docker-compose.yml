@@ -743,7 +743,7 @@ services:
         tty: true
         environment:
             - DEVICE_API_PORT=${DEVICE_API_PORT:-48519}
-            - DEVICE_API_URL=${DEVICE_API_URL:-http://localhost:48519}
+            - DEVICE_API_URL=${DEVICE_API_URL:-http://localhost:${DEVICE_API_PORT:-48519}}
             - CONFIG_DIR=/app/data
             - DEBUG=${DEBUG:-false}
         volumes:
