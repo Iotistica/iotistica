@@ -13,8 +13,8 @@ export async function initSync(ctx: AgentInitContext): Promise<void> {
 	}
 
 	deviceActions.initialize(
-		ctx.containerManager,
-		ctx.agentManager,
+		ctx.containerManager!,
+		ctx.agentManager!,
 		ctx.cloudSync,
 		ctx.agentLogger,
 		ctx.anomalyService,
@@ -25,7 +25,7 @@ export async function initSync(ctx: AgentInitContext): Promise<void> {
 	deviceActions.setDiscoveryService(ctx.discoveryService);
 	deviceActions.setUpdater(ctx.updater);
 	deviceActions.setConfigManager(ctx.configManager);
-	deviceActions.setStateManager(ctx.stateReconciler);
+	deviceActions.setStateManager(ctx.stateReconciler!);
 
 	ctx.configManager?.setReactiveHandlers({
 		containerManager: ctx.containerManager,
@@ -62,8 +62,8 @@ export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
 	const features = ctx.featureInitializer?.getFeatures() || {};
 
 	ctx.cloudSync = new CloudSync(
-		ctx.stateReconciler,
-		ctx.agentManager,
+		ctx.stateReconciler!,
+		ctx.agentManager!,
 		{
 			cloudApiEndpoint,
 			pollInterval: intervals.targetStatePollIntervalMs!,

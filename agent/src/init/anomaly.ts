@@ -5,7 +5,7 @@ import { CloudMqttClient } from '../mqtt/manager.js';
 import type { AgentInitContext } from './context.js';
 
 export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void> {
-	const targetConfig = ctx.stateReconciler.getTargetState()?.config;
+	const targetConfig = ctx.stateReconciler!.getTargetState()?.config;
 	const targetConfigFeatures = targetConfig?.features;
 	const managerFeatures = ctx.configManager!.getFeatures();
 	const features = {
@@ -71,12 +71,10 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 			dbInstance,
 			ctx.agentLogger,
 			CloudMqttClient.getInstance(),
-			ctx.agentInfo.uuid,
-			ctx.agentInfo.deviceName,
+			ctx.agentInfo!.uuid,
+			ctx.agentInfo!.name ?? 'device',
 			'system'
 		);
-
-		await configureAnomalyFeed(ctx);
 
 		ctx.agentLogger?.infoSync('Anomaly detection initialized', {
 			component: LogComponents.agent,

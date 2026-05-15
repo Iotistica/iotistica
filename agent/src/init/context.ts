@@ -7,29 +7,38 @@ import type { ConfigManager } from '../runtime/config.js';
 import type { PipelineService } from '../features/pipeline/index.js';
 import type { AnomalyDetectionService } from '../anomaly/index.js';
 import type { MqttConnection } from '../features/publish/types.js';
+import type { StateManager } from '../runtime/state.js';
+import type { AgentManager } from '../runtime/index.js';
+import type { AgentInfo } from '../runtime/types.js';
+import type { ContainerManager } from '../containers/container-manager.js';
+import type { CloudSync } from '../sync/index.js';
+import type { DeviceAPI } from '../api/index.js';
+import type { ContainerLogMonitor } from '../logging/container-monitor.js';
+import type { SimulationOrchestrator } from '../anomaly/simulator.js';
+import type { DictionaryManager } from '../mqtt/dictionary.js';
+import type { HttpClient } from '../lib/http-client.js';
 
 export interface AgentInitContext {
 	agent: {
 		stop: () => Promise<void>;
 	};
-	stateReconciler?: any;
+	stateReconciler?: StateManager;
 	configManager?: ConfigManager;
 	agentLogger?: AgentLogger;
-	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-	sharedHttpClient?: ReturnType<typeof import('../lib/http-client.js').createHttpClient>;
-	agentManager?: any;
-	agentInfo?: any;
-	containerManager?: any;
-	logMonitor?: any;
-	agentAPI?: any;
-	cloudSync?: any;
+	sharedHttpClient?: HttpClient;
+	agentManager?: AgentManager;
+	agentInfo?: AgentInfo;
+	containerManager?: ContainerManager;
+	logMonitor?: ContainerLogMonitor;
+	agentAPI?: DeviceAPI;
+	cloudSync?: CloudSync;
 	firewall?: AgentFirewall;
 	updater?: AgentUpdater;
 	featureInitializer?: FeatureInitializer;
 	anomalyService?: AnomalyDetectionService;
 	pipelineService?: PipelineService;
-	simulationOrchestrator?: any;
+	simulationOrchestrator?: SimulationOrchestrator;
 	discoveryService?: DiscoveryService;
-	dictionaryManager?: any;
+	dictionaryManager?: DictionaryManager;
 	deviceConnection?: MqttConnection;
 }

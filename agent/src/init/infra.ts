@@ -85,18 +85,13 @@ async function _connectIotisticaMqtt(ctx: AgentInitContext): Promise<void> {
  * Returns the connected MqttConnection, or null when using Iotistica.
  */
 async function _connectExternalTarget(ctx: AgentInitContext): Promise<MqttConnection | null> {
-	const targetType = (
-		process.env.PUBLISH_TARGET ||
-		ctx.agentInfo?.publishing?.target ||
-		'iotistica'
-	).toLowerCase();
+	// Determine publish target from environment or config
+	const targetType = (process.env.PUBLISH_TARGET || 'iotistica').toLowerCase();
 
 	if (targetType === 'iotistica' || targetType === '') return null;
 
 	if (targetType === 'iothub') {
-		const connStr =
-			process.env.AZURE_IOTHUB_CONNECTION_STRING ||
-			ctx.agentInfo?.publishing?.connectionString;
+		const connStr = process.env.AZURE_IOTHUB_CONNECTION_STRING;
 
 		if (!connStr) {
 			ctx.agentLogger?.warnSync('PUBLISH_TARGET=iothub but no connection string provided — falling back to Iotistica', {
@@ -144,7 +139,7 @@ export async function initializeDictionaryManager(ctx: AgentInitContext): Promis
 		const { DictionaryManager } = await import('../mqtt/dictionary.js');
 		const mqttManager = CloudMqttClient.getInstance();
 
-		ctx.dictionaryManager = new DictionaryManager(mqttManager, ctx.agentLogger, ctx.agentInfo.uuid);
+		ctx.dictionaryManager = new DictionaryManager(mqttManager, ctx.agentLogger, ctx.agentInfo!.uuid);
 		await ctx.dictionaryManager.initialize();
 
 		ctx.agentLogger?.infoSync('Dictionary manager initialized', {
@@ -165,11 +160,11 @@ export async function initializeDictionaryManager(ctx: AgentInitContext): Promis
 export async function initContainerManager(ctx: AgentInitContext): Promise<void> {
 	ctx.containerManager = ctx.stateReconciler!.getContainerManager();
 
-	const docker = ctx.containerManager.getDocker();
+	const docker = ctx.containerManager!.getDocker();
 	if (docker) {
 		ctx.logMonitor = new (await import('../logging/container-monitor.js')).ContainerLogMonitor(docker, ctx.agentLogger);
-		ctx.containerManager.setLogMonitor(ctx.logMonitor);
-		await ctx.containerManager.attachLogsToAllContainers();
+		ctx.containerManager!.setLogMonitor(ctx.logMonitor);
+		await ctx.containerManager!.attachLogsToAllContainers();
 	}
 
 	ctx.agentLogger?.infoSync('Container manager initialized', {
@@ -189,7 +184,7 @@ export async function initDeviceAPI(ctx: AgentInitContext): Promise<void> {
 	const healthchecks = [
 		async () => {
 			try {
-				ctx.containerManager.getStatus();
+				ctx.containerManager!.getStatus();
 				return true;
 			} catch {
 				return false;

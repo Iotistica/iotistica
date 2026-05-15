@@ -92,8 +92,8 @@ export async function initializeDeviceManager(ctx: AgentInitContext): Promise<vo
 
 			await ctx.agentManager.provision({
 				provisioningApiKey,
-				agentName: process.env.DEVICE_NAME || `agent-${agentInfo.uuid.slice(0, 8)}`,
-				agentType: process.env.DEVICE_TYPE || 'standalone',
+				name: process.env.DEVICE_NAME || `agent-${agentInfo.uuid.slice(0, 8)}`,
+				type: process.env.DEVICE_TYPE || 'standalone',
 				apiEndpoint: cloudEndpoint,
 				macAddress,
 				osVersion,
