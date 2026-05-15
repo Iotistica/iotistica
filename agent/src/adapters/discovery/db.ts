@@ -3,7 +3,7 @@ import { LogComponents } from '../../logging/types.js';
 import { EndpointModel, type Endpoint } from '../../db/models/endpoint.model.js';
 import { ProtocolDevicesModel } from '../../db/models/index.js';
 import type { DiscoveredDevice } from '../types.js';
-import type { ConfigManager } from '../../runtime/config.js';
+import type { ConfigManager } from '../../agent/config.js';
 
 /**
  * Handles persisting discovered devices to SQLite and staleness checks.

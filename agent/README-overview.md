@@ -1,8 +1,7 @@
 # Iotistic Agent: Feature Overview
 
-The Iotistic Agent is an edge runtime for connected devices. It helps teams deploy applications on devices, collect operational and device data, stay connected to the cloud, and keep fleets healthy over time.
+The Iotistica Agent is an edge runtime for connected devices. It helps teams deploy applications on devices, collect operational and device data, stay connected to the cloud, and keep fleets healthy over time.
 
-This overview is intentionally non-technical and focused on what the agent can do.
 
 ## What The Agent Does
 
@@ -31,6 +30,7 @@ This overview is intentionally non-technical and focused on what the agent can d
 
 ## 3) Industrial And IoT Protocol Coverage
 
+- **Supported Protocols**: Modbus (TCP/RTU), OPC UA, BACnet, CAN Bus, MQTT, SNMP.
 - Integrates with common industrial and IoT protocols.
 - Supports discovery and connectivity across heterogeneous environments.
 - Helps unify data from mixed device ecosystems.

@@ -1,4 +1,4 @@
-import type { StateManager } from '../runtime/state.js';
+import type { StateManager } from '../agent/state.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 import { RetryPolicy, CircuitBreaker, AsyncLock } from '../utils/retry-policy.js';

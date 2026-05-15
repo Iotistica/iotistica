@@ -10,7 +10,7 @@ import { createHash } from 'crypto';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, type DiscoveredDevice } from '../types';
 import { generateOPCUAFingerprint } from '../fingerprint';
-import type { ConfigManager } from '../../runtime/config.js';
+import type { ConfigManager } from '../../agent/config.js';
 
 export interface OPCUADiscoveryOptions {
   discoveryUrls?: string[]; // e.g., ['opc.tcp://localhost:4840']

@@ -12,7 +12,7 @@ import { CANDiscoveryPlugin } from '../can/discovery';
 import { SNMPDiscoveryPlugin } from '../snmp/discovery';
 import { LocalBrokerMqttDiscoveryPlugin } from '../mqtt/discovery';
 import { BACnetDiscoveryPlugin } from '../bacnet/discovery';
-import type { ConfigManager } from '../../runtime/config.js';
+import type { ConfigManager } from '../../agent/config.js';
 import { DiscoveryOptionsBuilder } from './options.js';
 import { DiscoveryStore } from './db.js';
 

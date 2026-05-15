@@ -23,7 +23,7 @@ import {
 	type ValidationResult,
 } from "../types";
 import { generateSNMPFingerprint } from "../fingerprint";
-import type { ConfigManager } from "../../runtime/config.js";
+import type { ConfigManager } from "../../agent/config.js";
 import * as dns from "dns";
 import { promisify } from "util";
 import { pLimit } from "../../lib/p-limit.js";
