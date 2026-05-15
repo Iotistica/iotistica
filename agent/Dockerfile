@@ -9,7 +9,7 @@ ENV npm_config_loglevel=warn \
 # Shared build dependencies (used by deps and builder stages)
 # py3-setuptools provides distutils replacement for Python 3.12+
 RUN apk add --no-cache \
-    python3 py3-setuptools make g++ sqlite-dev linux-headers
+    python3 py3-setuptools make g++ sqlite-dev linux-headers binutils
 
 # ---- Dependencies stage ----
 FROM build-base AS deps
@@ -29,6 +29,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm config set fetch-retry-mintimeout 20000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
     PYTHON=python3 npm ci --omit=dev --omit=optional && \
+    npm dedupe --omit=dev --omit=optional && \
     find node_modules -type d \( \
         -name test -o \
         -name tests -o \
@@ -40,7 +41,8 @@ RUN --mount=type=cache,target=/root/.npm \
         -name "*.md" -o \
         -name "README*" -o \
         -name "*.ts" ! -name "*.d.ts" \) \
-        -delete 2>/dev/null || true
+        -delete 2>/dev/null || true && \
+    find node_modules -type f -name "*.node" -exec strip --strip-unneeded {} + 2>/dev/null || true
 
 # ---- Build stage ----
 FROM build-base AS builder
