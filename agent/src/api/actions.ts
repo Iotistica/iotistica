@@ -5,14 +5,14 @@
 
 import { randomUUID } from 'crypto';
 import type ContainerManager from '../containers/container-manager';
-import type { AgentManager } from '../agent/index.js';
+import type { AgentManager } from '../runtime/index.js';
 import type { CloudSync } from '../sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../anomaly';
 import type { SimulationOrchestrator } from '../anomaly/simulator';
 import type { AdapterManager } from '../adapters';
-import type { ConfigManager } from '../agent/config';
-import type { StateManager } from '../agent/state';
+import type { ConfigManager } from '../runtime/config';
+import type { StateManager } from '../runtime/state';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/arbiter';
 import { MessageBufferModel } from '../db/models/buffer.model';
