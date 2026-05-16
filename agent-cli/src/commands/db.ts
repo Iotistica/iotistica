@@ -33,11 +33,12 @@ async function loadDbBackupService(): Promise<DbBackupServiceModule> {
   }
 
   const candidates = [
-    join(__dirname, '..', '..', 'db', 'backup-service.js'),
-    join(__dirname, '..', '..', 'src', 'db', 'backup-service.js'),
-    join(process.cwd(), 'dist', 'db', 'backup-service.js'),
-    join(process.cwd(), 'dist', 'src', 'db', 'backup-service.js'),
-    join(process.cwd(), 'src', 'db', 'backup-service.js'),
+    join(__dirname, '..', '..', '..', 'agent', 'dist', 'db', 'backup.js'),
+    join(__dirname, '..', '..', '..', 'agent', 'src', 'db', 'backup.ts'),
+    join(process.cwd(), 'agent', 'dist', 'db', 'backup.js'),
+    join(process.cwd(), 'agent', 'src', 'db', 'backup.ts'),
+    join(process.cwd(), 'dist', 'db', 'backup.js'),
+    join(process.cwd(), 'src', 'db', 'backup.ts'),
   ];
 
   for (const candidatePath of candidates) {
@@ -61,7 +62,7 @@ async function loadDbBackupService(): Promise<DbBackupServiceModule> {
   }
 
   throw new CLIError('DB backup service module not found', 1, {
-    hint: 'Run npm run build so dist/db/backup-service.js is available',
+    hint: 'Run npm run build in the agent package so dist/db/backup.js is available',
   });
 }
 
