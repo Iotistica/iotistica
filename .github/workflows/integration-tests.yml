@@ -861,7 +861,7 @@ jobs:
           echo "Observed $READING_COUNT MQTT readings across $METRIC_COUNT metrics in raw readings"
 
           echo "Refreshing latest materialized view before API assertion..."
-          docker compose -f "$COMPOSE_FILE" exec -T api node --input-type=module -e "import('./dist/services/agent/metrics.service.js').then(async ({ refreshViews }) => { await refreshViews('latest'); console.log('latest view refreshed'); }).catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });"
+          docker compose -f "$COMPOSE_FILE" exec -T api node --input-type=module -e "import('./dist/services/agent/metrics.js').then(async ({ refreshViews }) => { await refreshViews('latest'); console.log('latest view refreshed'); }).catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });"
 
           API_RESULT=$(curl -fsS "http://localhost:4002/api/v1/metrics/latest?deviceUuid=${DEVICE_UUID}" \
             -H "Authorization: Bearer $ACCESS_TOKEN")
