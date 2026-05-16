@@ -105,6 +105,54 @@ export class StatePoller extends EventEmitter {
 		this.httpClient = httpClient;
 	}
 
+	public async pollNow(forceFullRefresh = false): Promise<{
+		applied: boolean;
+		version: number;
+		skipped?: 'circuit-open' | 'poll-in-progress';
+	}> {
+		if (forceFullRefresh) {
+			this.requireFullRefresh = true;
+		}
+
+		if (this.circuit.isOpen()) {
+			return {
+				applied: false,
+				version: this.currentVersion,
+				skipped: 'circuit-open',
+			};
+		}
+
+		try {
+			this.abortController = new AbortController();
+			const result = await this.lock.tryExecute(async () => {
+				const applied = await this.pollTargetState(this.abortController!.signal);
+				this.errors = 0;
+				this.circuit.recordSuccess();
+				this.emit('poll-success');
+				return applied;
+			});
+
+			if (result === undefined) {
+				return {
+					applied: false,
+					version: this.currentVersion,
+					skipped: 'poll-in-progress',
+				};
+			}
+
+			return {
+				applied: result,
+				version: this.currentVersion,
+			};
+		} catch (error) {
+			this.errors = Math.min(this.errors + 1, 10);
+			this.circuit.recordFailure();
+			const err = error instanceof Error ? error : new Error(String(error));
+			this.emit('poll-error', err);
+			throw err;
+		}
+	}
+
 	private async loop(): Promise<void> {
 		if (!this.isRunning) return;
 
@@ -194,7 +242,7 @@ export class StatePoller extends EventEmitter {
 		}, interval);
 	}
 
-	private async pollTargetState(signal?: AbortSignal): Promise<void> {
+	private async pollTargetState(signal?: AbortSignal): Promise<boolean> {
 		const agentInfo = this.getAgentInfo();
 
 		if (!agentInfo.provisioned) {
@@ -202,7 +250,7 @@ export class StatePoller extends EventEmitter {
 				component: LogComponents.cloudSync,
 				operation: 'poll',
 			});
-			return;
+			return false;
 		}
 
 		const endpoint = buildAgentEndpoint(this.cloudApiEndpoint, agentInfo.uuid, '/state');
@@ -228,7 +276,7 @@ export class StatePoller extends EventEmitter {
 
 		if (response.status === 304) {
 			this.requireFullRefresh = false;
-			return;
+			return false;
 		}
 
 		if (!response.ok) {
@@ -263,7 +311,7 @@ export class StatePoller extends EventEmitter {
 				deviceUuid: agentInfo.uuid,
 				availableUUIDs: Object.keys(targetStateResponse),
 			});
-			return;
+			return false;
 		}
 
 		const rawVersion = Number(deviceState.version);
@@ -313,7 +361,7 @@ export class StatePoller extends EventEmitter {
 			});
 
 			// Guard: don't mutate state if stop() was called while this poll was in-flight
-			if (!this.isRunning) return;
+			if (!this.isRunning) return false;
 
 			await this.stateManager.setTarget(newTargetState);
 
@@ -324,12 +372,14 @@ export class StatePoller extends EventEmitter {
 			});
 
 			this.emit('target-state-changed', newTargetState, deviceState.config?.intervals);
+			return true;
 		} else {
 			this.logger?.debugSync('Target state fetched (no changes)', {
 				component: LogComponents.cloudSync,
 				operation: 'poll',
 				version: this.currentVersion,
 			});
+			return false;
 		}
 	}
 }

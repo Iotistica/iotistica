@@ -11,7 +11,7 @@ import { devicesList, discover, endpointsList, endpointsShow, endpointsAdd, endp
 import { adaptersList, adaptersShow, adaptersAdd, adaptersRemove, adaptersEnable, adaptersDisable, mqttAdd, modbusAdd, opcuaAdd, snmpAdd } from './commands/adapters';
 import { factoryReset, mqttListUsers, provisionStatus, provisionWithKey, deprovision } from './commands/provision';
 import { showLogs, showVersion } from './commands/system';
-import { bufferStatus, memoryDiagnostics, restart, runDiagnostics, showStatusEnhanced, agentUpdate } from './commands/agent';
+import { bufferStatus, memoryDiagnostics, restart, runDiagnostics, showStatusEnhanced, agentUpdate, agentPullTargetState } from './commands/agent';
 
 function buildCommands(args: string[]): CommandMap {
   const commands: CommandMap = {
@@ -97,6 +97,14 @@ function buildCommands(args: string[]): CommandMap {
     },
     diagnostics: {
       _default: runDiagnostics,
+    },
+    agent: {
+      status: showStatusEnhanced,
+      restart,
+      diagnostics: runDiagnostics,
+      pull: agentPullTargetState,
+      update: (version?: string) => agentUpdate(version),
+      _default: showStatusEnhanced,
     },
     db: {
       backups: {

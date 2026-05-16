@@ -349,6 +349,28 @@ export async function restart(): Promise<void> {
 }
 
 /**
+ * iotctl agent pull
+ */
+export async function agentPullTargetState(): Promise<void> {
+  try {
+    const result = await apiRequest(`${DEVICE_API_V1}/sync/pull`, {
+      method: 'POST',
+    });
+
+    logger.info('Target-state pull completed', {
+      applied: result.applied,
+      version: result.version,
+      skipped: result.skipped || 'none',
+    });
+  } catch (error) {
+    if (error instanceof CLIError) throw error;
+    throw new CLIError('Failed to pull target state from cloud', 1, {
+      error: (error as Error).message,
+    });
+  }
+}
+
+/**
  * iotctl diagnostics
  */
 export async function runDiagnostics(): Promise<void> {

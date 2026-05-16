@@ -343,4 +343,12 @@ export class CloudSync extends EventEmitter {
 			metricsIntervalMin: intervals.metricsInterval / 60000,
 		});
 	}
+
+	public async pullTargetStateNow(forceFullRefresh = true): Promise<{
+		applied: boolean;
+		version: number;
+		skipped?: 'circuit-open' | 'poll-in-progress';
+	}> {
+		return this.poller.pollNow(forceFullRefresh);
+	}
 }

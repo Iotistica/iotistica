@@ -133,6 +133,19 @@ router.get('/v1/device', async (req: Request, res: Response, next: NextFunction)
 });
 
 /**
+ * POST /v1/sync/pull
+ * Trigger on-demand target-state pull from cloud API
+ */
+router.post('/v1/sync/pull', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const result = await actions.pullTargetStateNow();
+		return res.status(200).json(result);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
  * POST /v1/purge
  * Purge application data (volumes)
  */

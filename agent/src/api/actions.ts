@@ -513,6 +513,18 @@ export const getConnectionHealth = async () => {
 };
 
 /**
+ * Trigger immediate target-state pull from cloud API
+ * Used by: POST /v1/sync/pull
+ */
+export const pullTargetStateNow = async () => {
+	if (!cloudSync) {
+		throw new Error('Cloud sync not initialized');
+	}
+
+	return cloudSync.pullTargetStateNow(true);
+};
+
+/**
  * Provision agent with provisioning key
  * Used by: POST /v1/provision
  */
