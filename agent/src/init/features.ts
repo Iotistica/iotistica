@@ -674,7 +674,7 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 	agentLogger?.infoSync('Feature initialization complete', {
 		component: LogComponents.agent,
 		jobs: !!initializedFeatures.jobs,
-			devices: !!initializedFeatures.devices,
+		devices: !!initializedFeatures.devices,
 		devicePublish: !!initializedFeatures.devicePublish,
 		updater: !!initializedFeatures.updater,
 		firewall: !!initializedFeatures.firewall,

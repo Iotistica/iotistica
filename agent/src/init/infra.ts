@@ -158,13 +158,13 @@ export async function initializeDictionaryManager(ctx: AgentInitContext): Promis
 }
 
 export async function initContainerManager(ctx: AgentInitContext): Promise<void> {
-	ctx.containerManager = ctx.stateReconciler!.getContainerManager();
+	ctx.containerManager = ctx.stateReconciler?.getContainerManager();
 
-	const docker = ctx.containerManager!.getDocker();
+	const docker = ctx.containerManager?.getDocker();
 	if (docker) {
 		ctx.logMonitor = new (await import('../logging/container-monitor.js')).ContainerLogMonitor(docker, ctx.agentLogger);
-		ctx.containerManager!.setLogMonitor(ctx.logMonitor);
-		await ctx.containerManager!.attachLogsToAllContainers();
+		ctx.containerManager?.setLogMonitor(ctx.logMonitor);
+		await ctx.containerManager?.attachLogsToAllContainers();
 	}
 
 	ctx.agentLogger?.infoSync('Container manager initialized', {

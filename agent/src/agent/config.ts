@@ -629,8 +629,8 @@ export class ConfigManager extends EventEmitter {
 	 */
 	public getIntervalConfig(): IntervalConfig {
 		const cloud = this.targetConfig.intervals;
-		const cloudAgent = (cloud as any)?.agent;
-		const cloudDiscovery = (cloud)?.discovery;
+		const cloudAgent = cloud?.agent;
+		const cloudDiscovery = cloud?.discovery;
 
 		return {
 			discoveryFullIntervalMs:

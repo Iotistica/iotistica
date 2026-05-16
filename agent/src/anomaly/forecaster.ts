@@ -167,7 +167,7 @@ export function predictLinearResult(
 	if (!regression) {
 		return { success: false, reason: 'Linear regression failed (degenerate input)' };
 	}
- const { slope, intercept, rSquared } = regression;
+	const { slope, intercept, rSquared } = regression;
 	const n = recentValues.length;
 
 	const predictedNext = slope * n + intercept;

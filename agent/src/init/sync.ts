@@ -25,7 +25,7 @@ export async function initSync(ctx: AgentInitContext): Promise<void> {
 	deviceActions.setDiscoveryService(ctx.discoveryService);
 	deviceActions.setUpdater(ctx.updater);
 	deviceActions.setConfigManager(ctx.configManager);
-	deviceActions.setStateManager(ctx.stateReconciler!);
+	deviceActions.setStateManager(ctx.stateReconciler);
 
 	ctx.configManager?.setReactiveHandlers({
 		containerManager: ctx.containerManager,
