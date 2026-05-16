@@ -34,11 +34,8 @@ async function loadDbBackupService(): Promise<DbBackupServiceModule> {
 
   const candidates = [
     join(__dirname, '..', '..', '..', 'agent', 'dist', 'db', 'backup.js'),
-    join(__dirname, '..', '..', '..', 'agent', 'src', 'db', 'backup.ts'),
     join(process.cwd(), 'agent', 'dist', 'db', 'backup.js'),
-    join(process.cwd(), 'agent', 'src', 'db', 'backup.ts'),
     join(process.cwd(), 'dist', 'db', 'backup.js'),
-    join(process.cwd(), 'src', 'db', 'backup.ts'),
   ];
 
   for (const candidatePath of candidates) {
@@ -46,7 +43,13 @@ async function loadDbBackupService(): Promise<DbBackupServiceModule> {
       continue;
     }
 
-    const loaded = require(candidatePath);
+    let loaded: any;
+    try {
+      loaded = require(candidatePath);
+    } catch {
+      continue;
+    }
+
     const service = loaded as DbBackupServiceModule;
 
     if (
