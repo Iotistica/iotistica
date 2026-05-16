@@ -1,5 +1,8 @@
 import { DEVICE_API_BASE, DEVICE_API_V1, CLIError, logger, apiCached, apiRequest, clearApiCache, redact, requireConfirmation, validateUrl } from '../core';
 
+/**
+ * iotctl provision <key> --api <endpoint> [--name <device-name>] [--type <device-type>]
+ */
 export async function provisionWithKey(key: string): Promise<void> {
   if (!key) {
     throw new CLIError('Provisioning key is required', 1, {
@@ -65,6 +68,9 @@ export async function provisionWithKey(key: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl provision status
+ */
 export async function provisionStatus(): Promise<void> {
   clearApiCache();
   try {
@@ -89,6 +95,9 @@ export async function provisionStatus(): Promise<void> {
   }
 }
 
+/**
+ * iotctl deprovision
+ */
 export async function deprovision(): Promise<void> {
   try {
     logger.warn('Deprovisioning device - this will remove cloud registration');
@@ -109,6 +118,9 @@ export async function deprovision(): Promise<void> {
   }
 }
 
+/**
+ * iotctl mqtt users
+ */
 export async function mqttListUsers(): Promise<void> {
   clearApiCache();
   try {
@@ -148,6 +160,9 @@ export async function mqttListUsers(): Promise<void> {
   }
 }
 
+/**
+ * iotctl factory-reset
+ */
 export async function factoryReset(): Promise<void> {
   try {
     logger.warn('WARNING: Factory reset will DELETE ALL DATA');

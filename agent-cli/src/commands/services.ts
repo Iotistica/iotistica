@@ -1,6 +1,9 @@
 import { spawn } from 'child_process';
 import { DEVICE_API_V1, CLIError, ENV, logger, apiCached, apiRequest, clearApiCache } from '../core';
 
+/**
+ * iotctl services list [<appId>]
+ */
 export async function servicesList(appId?: string): Promise<void> {
   clearApiCache();
   try {
@@ -53,6 +56,9 @@ export async function servicesList(appId?: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl services start <serviceId>
+ */
 export async function servicesStart(serviceId: string): Promise<void> {
   if (!serviceId) {
     throw new CLIError('Service ID is required', 1, {
@@ -79,6 +85,9 @@ export async function servicesStart(serviceId: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl services stop <serviceId>
+ */
 export async function servicesStop(serviceId: string): Promise<void> {
   if (!serviceId) {
     throw new CLIError('Service ID is required', 1, {
@@ -105,6 +114,9 @@ export async function servicesStop(serviceId: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl services restart <serviceId>
+ */
 export async function servicesRestart(serviceId: string): Promise<void> {
   if (!serviceId) {
     throw new CLIError('Service ID is required', 1, {
@@ -131,6 +143,9 @@ export async function servicesRestart(serviceId: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl services logs <serviceId> [-f]
+ */
 export async function servicesLogs(serviceId: string, follow: boolean = false): Promise<void> {
   clearApiCache();
   if (!serviceId) {
@@ -196,6 +211,9 @@ export async function servicesLogs(serviceId: string, follow: boolean = false): 
   }
 }
 
+/**
+ * iotctl services info <serviceId>
+ */
 export async function servicesInfo(serviceId: string): Promise<void> {
   clearApiCache();
   if (!serviceId) {

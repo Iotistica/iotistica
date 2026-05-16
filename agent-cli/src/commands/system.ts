@@ -3,6 +3,9 @@ import { join } from 'path';
 import { CLIError, logger } from '../core';
 
 
+/**
+ * iotctl logs [-f] [--lines <count>]
+ */
 export function showLogs(follow: boolean = false, lines: number = 50): void {
   throw new CLIError('Agent logs not available from inside container', 1, {
     note: 'Run from host machine instead',
@@ -11,6 +14,9 @@ export function showLogs(follow: boolean = false, lines: number = 50): void {
   });
 }
 
+/**
+ * iotctl version
+ */
 export function showVersion(): void {
   const possiblePaths = [
     join(process.cwd(), 'package.json'),

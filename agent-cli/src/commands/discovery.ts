@@ -24,6 +24,9 @@ function formatConnection(protocol: string, connection: Record<string, any>): st
   }
 }
 
+/**
+ * iotctl discover [<protocol>] [--validate]
+ */
 export async function discover(protocolArg?: string): Promise<void> {
   clearApiCache();
   try {
@@ -98,6 +101,9 @@ export async function discover(protocolArg?: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl devices list [--protocol <protocol>]
+ */
 export async function devicesList(protocolFilter?: string): Promise<void> {
   clearApiCache();
   try {
@@ -144,6 +150,9 @@ export async function devicesList(protocolFilter?: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl endpoints list [--protocol <protocol>]
+ */
 export async function endpointsList(protocolFilter?: string): Promise<void> {
   clearApiCache();
   try {
@@ -209,6 +218,9 @@ export async function endpointsList(protocolFilter?: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl endpoints show [<name>]
+ */
 export async function endpointsShow(endpointName?: string): Promise<void> {
   clearApiCache();
   try {

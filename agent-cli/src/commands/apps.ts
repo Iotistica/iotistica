@@ -1,5 +1,8 @@
 import { DEVICE_API_V1, CLIError, logger, apiCached, apiRequest, clearApiCache, requireConfirmation } from '../core';
 
+/**
+ * iotctl apps list
+ */
 export async function appsList(): Promise<void> {
   clearApiCache();
   try {
@@ -37,6 +40,9 @@ export async function appsList(): Promise<void> {
   }
 }
 
+/**
+ * iotctl apps start <appId>
+ */
 export async function appsStart(appId: string): Promise<void> {
   if (!appId) {
     throw new CLIError('Application ID is required', 1, {
@@ -63,6 +69,9 @@ export async function appsStart(appId: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl apps stop <appId>
+ */
 export async function appsStop(appId: string): Promise<void> {
   if (!appId) {
     throw new CLIError('Application ID is required', 1, {
@@ -89,6 +98,9 @@ export async function appsStop(appId: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl apps restart <appId>
+ */
 export async function appsRestart(appId: string): Promise<void> {
   if (!appId) {
     throw new CLIError('Application ID is required', 1, {
@@ -112,6 +124,9 @@ export async function appsRestart(appId: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl apps info <appId>
+ */
 export async function appsInfo(appId: string): Promise<void> {
   if (!appId) {
     throw new CLIError('Application ID is required', 1, {
@@ -130,6 +145,9 @@ export async function appsInfo(appId: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl apps purge <appId>
+ */
 export async function appsPurge(appId: string): Promise<void> {
   if (!appId) {
     throw new CLIError('Application ID is required', 1, {

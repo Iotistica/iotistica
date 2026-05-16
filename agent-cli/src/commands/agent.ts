@@ -127,6 +127,9 @@ function describeCloudFetchError(error: any): string {
   return error.message || 'Unknown fetch error';
 }
 
+/**
+ * iotctl status
+ */
 export async function showStatusEnhanced(): Promise<void> {
   clearApiCache();
   logger.info('Checking device health...');
@@ -204,6 +207,9 @@ export async function showStatusEnhanced(): Promise<void> {
   }
 }
 
+/**
+ * iotctl buffer-status
+ */
 export async function bufferStatus(): Promise<void> {
   clearApiCache();
   logger.info('Checking offline buffer status...');
@@ -245,6 +251,9 @@ export async function bufferStatus(): Promise<void> {
   }
 }
 
+/**
+ * iotctl memory
+ */
 export async function memoryDiagnostics(): Promise<void> {
   clearApiCache();
   try {
@@ -308,6 +317,9 @@ export async function memoryDiagnostics(): Promise<void> {
   }
 }
 
+/**
+ * iotctl restart
+ */
 export async function restart(): Promise<void> {
   try {
     const readiness = await apiProbe(`${DEVICE_API_V1}/readiness`);
@@ -336,6 +348,9 @@ export async function restart(): Promise<void> {
   }
 }
 
+/**
+ * iotctl diagnostics
+ */
 export async function runDiagnostics(): Promise<void> {
   logger.info('Running system diagnostics...');
 
@@ -619,6 +634,9 @@ export async function runDiagnostics(): Promise<void> {
   }
 }
 
+/**
+ * iotctl agent update [<version>] [--force]
+ */
 export async function agentUpdate(version?: string): Promise<void> {
   const args = process.argv.slice(2);
   const targetVersion = version || args.find((a) => !a.startsWith('-')) || 'latest';

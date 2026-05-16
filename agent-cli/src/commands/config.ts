@@ -9,6 +9,9 @@ import {
   redact,
 } from '../core';
 
+/**
+ * iotctl config set-api <url>
+ */
 export async function configSetApi(url: string): Promise<void> {
   if (!url) {
     throw new CLIError('API URL is required', 1, {
@@ -39,6 +42,9 @@ export async function configSetApi(url: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl config get-api
+ */
 export async function configGetApi(): Promise<void> {
   clearApiCache();
   try {
@@ -54,6 +60,9 @@ export async function configGetApi(): Promise<void> {
   }
 }
 
+/**
+ * iotctl config set <key> <value>
+ */
 export async function configSet(key: string, value: string): Promise<void> {
   if (!key || !value) {
     throw new CLIError('Both key and value are required', 1, {
@@ -83,6 +92,9 @@ export async function configSet(key: string, value: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl config get <key>
+ */
 export async function configGet(key: string): Promise<void> {
   if (!key) {
     throw new CLIError('Key is required', 1, {
@@ -108,6 +120,9 @@ export async function configGet(key: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl config show
+ */
 export async function configShow(): Promise<void> {
   clearApiCache();
   try {
@@ -133,6 +148,9 @@ export async function configShow(): Promise<void> {
   }
 }
 
+/**
+ * iotctl config reset
+ */
 export async function configReset(): Promise<void> {
   try {
     await apiRequest(`${DEVICE_API_V1}/factory-reset`, {

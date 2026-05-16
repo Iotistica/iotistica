@@ -50,6 +50,9 @@ async function postAdapter(body: object): Promise<void> {
 // List / show
 // ---------------------------------------------------------------------------
 
+/**
+ * iotctl adapters list [--protocol <protocol>]
+ */
 export async function adaptersList(): Promise<void> {
   clearApiCache();
   try {
@@ -106,6 +109,9 @@ export async function adaptersList(): Promise<void> {
   }
 }
 
+/**
+ * iotctl adapters show <name>
+ */
 export async function adaptersShow(name?: string): Promise<void> {
   clearApiCache();
   try {
@@ -168,6 +174,9 @@ export async function adaptersShow(name?: string): Promise<void> {
 // Remove / enable / disable
 // ---------------------------------------------------------------------------
 
+/**
+ * iotctl adapters remove <uuid>
+ */
 export async function adaptersRemove(uuid?: string): Promise<void> {
   if (!uuid) {
     throw new CLIError('UUID is required', 1, { usage: 'iotctl adapters remove <uuid>' });
@@ -182,6 +191,9 @@ export async function adaptersRemove(uuid?: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl adapters enable <uuid>
+ */
 export async function adaptersEnable(uuid?: string): Promise<void> {
   if (!uuid) {
     throw new CLIError('UUID is required', 1, { usage: 'iotctl adapters enable <uuid>' });
@@ -199,6 +211,9 @@ export async function adaptersEnable(uuid?: string): Promise<void> {
   }
 }
 
+/**
+ * iotctl adapters disable <uuid>
+ */
 export async function adaptersDisable(uuid?: string): Promise<void> {
   if (!uuid) {
     throw new CLIError('UUID is required', 1, { usage: 'iotctl adapters disable <uuid>' });

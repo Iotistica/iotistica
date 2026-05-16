@@ -94,6 +94,9 @@ function resolveBackupPathFromTarget(
   });
 }
 
+/**
+ * iotctl db backup [<name>]
+ */
 export async function dbBackup(nameArg?: string): Promise<void> {
   const service = await loadDbBackupService();
   const backupDir = service.getDefaultBackupDir(DB_PATH);
@@ -113,6 +116,9 @@ export async function dbBackup(nameArg?: string): Promise<void> {
   });
 }
 
+/**
+ * iotctl db list
+ */
 export async function dbList(): Promise<void> {
   const service = await loadDbBackupService();
   const backupDir = service.getDefaultBackupDir(DB_PATH);
@@ -137,6 +143,9 @@ export async function dbList(): Promise<void> {
   }
 }
 
+/**
+ * iotctl db verify [<target>]
+ */
 export async function dbVerify(targetArg?: string): Promise<void> {
   const service = await loadDbBackupService();
   const backupDir = service.getDefaultBackupDir(DB_PATH);
@@ -166,6 +175,9 @@ export async function dbVerify(targetArg?: string): Promise<void> {
   });
 }
 
+/**
+ * iotctl db restore [<target>]
+ */
 export async function dbRestore(targetArg?: string): Promise<void> {
   requireConfirmation('Database restore will overwrite current SQLite data.');
 
@@ -201,6 +213,9 @@ export async function dbRestore(targetArg?: string): Promise<void> {
   });
 }
 
+/**
+ * iotctl db prune [--keep <count>]
+ */
 export async function dbPrune(keepArg?: string): Promise<void> {
   const service = await loadDbBackupService();
   const backupDir = service.getDefaultBackupDir(DB_PATH);
