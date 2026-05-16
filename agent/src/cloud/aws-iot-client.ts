@@ -16,7 +16,7 @@ interface AwsIotConfig {
 	key?: string;
 }
 
-export class AwsIotMqttClient extends EventEmitter implements MqttConnection {
+export class AwsIotClient extends EventEmitter implements MqttConnection {
 	private client: MqttClient | null = null;
 	private connected = false;
 	private readonly maxPublishRetries = 3;
@@ -28,7 +28,7 @@ export class AwsIotMqttClient extends EventEmitter implements MqttConnection {
 		super();
 	}
 
-	public static fromEnv(logger?: AgentLogger): AwsIotMqttClient {
+	public static fromEnv(logger?: AgentLogger): AwsIotClient {
 		const endpoint = process.env.AWS_IOT_ENDPOINT || '';
 		if (!endpoint) {
 			throw new Error('Missing AWS_IOT_ENDPOINT for AWS publish target');
@@ -50,7 +50,7 @@ export class AwsIotMqttClient extends EventEmitter implements MqttConnection {
 			key: process.env.AWS_IOT_PRIVATE_KEY,
 		};
 
-		return new AwsIotMqttClient(config, logger);
+		return new AwsIotClient(config, logger);
 	}
 
 	public async connect(): Promise<void> {

@@ -62,7 +62,7 @@ function generateSasToken(
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
-export class IotHubMqttClient extends EventEmitter implements MqttConnection {
+export class IotHubClient extends EventEmitter implements MqttConnection {
 	private client: MqttClient | null = null;
 	private connected = false;
 	private renewalTimer: NodeJS.Timeout | null = null;

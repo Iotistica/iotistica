@@ -16,7 +16,7 @@ interface GcpMqttConfig {
 	ca?: string;
 }
 
-export class GcpIotMqttClient extends EventEmitter implements MqttConnection {
+export class GcpIotClient extends EventEmitter implements MqttConnection {
 	private client: MqttClient | null = null;
 	private connected = false;
 	private readonly maxPublishRetries = 3;
@@ -28,7 +28,7 @@ export class GcpIotMqttClient extends EventEmitter implements MqttConnection {
 		super();
 	}
 
-	public static fromEnv(logger?: AgentLogger): GcpIotMqttClient {
+	public static fromEnv(logger?: AgentLogger): GcpIotClient {
 		const endpoint = process.env.GCP_MQTT_ENDPOINT || '';
 		if (!endpoint) {
 			throw new Error('Missing GCP_MQTT_ENDPOINT for GCP publish target');
@@ -49,7 +49,7 @@ export class GcpIotMqttClient extends EventEmitter implements MqttConnection {
 			ca: process.env.GCP_MQTT_CA_CERT,
 		};
 
-		return new GcpIotMqttClient(config, logger);
+		return new GcpIotClient(config, logger);
 	}
 
 	public async connect(): Promise<void> {

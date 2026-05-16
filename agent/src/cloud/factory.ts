@@ -1,6 +1,6 @@
 import type { MqttConnection } from '../publish/types.js';
-import { AwsIotMqttClient } from './aws-iot-client.js';
-import { GcpIotMqttClient } from './gcp-iot-client.js';
+import { AwsIotClient } from './aws-iot-client.js';
+import { GcpIotClient } from './gcp-iot-client.js';
 import { normalizeTarget } from './types.js';
 import type { CloudTargetFactoryInput } from './types.js';
 
@@ -19,20 +19,20 @@ export async function createExternalPublishTarget(
 			throw new Error('PUBLISH_TARGET=iothub requires AZURE_IOTHUB_CONNECTION_STRING');
 		}
 
-		const { IotHubMqttClient } = await import('./azure-iot-client.js');
-		const client = new IotHubMqttClient(connStr, input.logger);
+		const { IotHubClient: IotHubClient } = await import('./azure-iot-client.js');
+		const client = new IotHubClient(connStr, input.logger);
 		await client.connect();
 		return client;
 	}
 
 	if (target === 'aws') {
-		const client = AwsIotMqttClient.fromEnv(input.logger);
+		const client = AwsIotClient.fromEnv(input.logger);
 		await client.connect();
 		return client;
 	}
 
 	if (target === 'gcp') {
-		const client = GcpIotMqttClient.fromEnv(input.logger);
+		const client = GcpIotClient.fromEnv(input.logger);
 		await client.connect();
 		return client;
 	}
