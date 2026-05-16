@@ -8,8 +8,10 @@ import { configGet, configGetApi, configReset, configSet, configSetApi, configSh
 import { appsInfo, appsList, appsPurge, appsRestart, appsStart, appsStop } from './commands/apps';
 import { servicesInfo, servicesList, servicesLogs, servicesRestart, servicesStart, servicesStop } from './commands/services';
 import { devicesList, discover, endpointsList, endpointsShow, endpointsAdd, endpointsRemove, endpointsClean } from './commands/discovery';
+import { adaptersList, adaptersShow, adaptersAdd, adaptersRemove, adaptersEnable, adaptersDisable, mqttAdd, modbusAdd, opcuaAdd, snmpAdd } from './commands/adapters';
 import { factoryReset, mqttListUsers, provisionStatus, provisionWithKey, deprovision } from './commands/provision';
-import { bufferStatus, memoryDiagnostics, restart, runDiagnostics, showLogs, showStatusEnhanced, showVersion, agentUpdate } from './commands/system';
+import { showLogs, showVersion } from './commands/system';
+import { bufferStatus, memoryDiagnostics, restart, runDiagnostics, showStatusEnhanced, agentUpdate } from './commands/agent';
 
 function buildCommands(args: string[]): CommandMap {
   const commands: CommandMap = {
@@ -75,6 +77,19 @@ function buildCommands(args: string[]): CommandMap {
       remove: endpointsRemove,
       clean: endpointsClean,
       _default: endpointsList,
+    },
+    adapters: {
+      list: adaptersList,
+      show: adaptersShow,
+      add: adaptersAdd,
+      remove: adaptersRemove,
+      enable: adaptersEnable,
+      disable: adaptersDisable,
+      'add-mqtt': mqttAdd,
+      'add-modbus': modbusAdd,
+      'add-opcua': opcuaAdd,
+      'add-snmp': snmpAdd,
+      _default: adaptersList,
     },
     mqtt: {
       users: mqttListUsers,
