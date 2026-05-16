@@ -747,13 +747,37 @@ jobs:
             docker compose -f "$COMPOSE_FILE" exec -T postgres \
               psql -U postgres -d iotistic -v ON_ERROR_STOP=1 -t -A -F "|" -c "
                 SELECT
-                  SUM(CASE WHEN agent_uuid = '$AGENT_UUID' THEN 1 ELSE 0 END)::int AS by_agent,
-                  SUM(CASE WHEN COALESCE(NULLIF(extra->>'device_uuid', ''), NULLIF(extra->>'deviceUuid', '')) = '$DEVICE_UUID' THEN 1 ELSE 0 END)::int AS by_device,
-                  SUM(CASE WHEN agent_uuid = '$AGENT_UUID' AND COALESCE(NULLIF(extra->>'device_uuid', ''), NULLIF(extra->>'deviceUuid', '')) = '$DEVICE_UUID' THEN 1 ELSE 0 END)::int AS by_both,
+                  COALESCE(SUM(CASE WHEN agent_uuid = '$AGENT_UUID' THEN 1 ELSE 0 END), 0)::int AS by_agent,
+                  COALESCE(SUM(CASE WHEN COALESCE(NULLIF(extra->>'device_uuid', ''), NULLIF(extra->>'deviceUuid', '')) = '$DEVICE_UUID' THEN 1 ELSE 0 END), 0)::int AS by_device,
+                  COALESCE(SUM(CASE WHEN agent_uuid = '$AGENT_UUID' AND COALESCE(NULLIF(extra->>'device_uuid', ''), NULLIF(extra->>'deviceUuid', '')) = '$DEVICE_UUID' THEN 1 ELSE 0 END), 0)::int AS by_both,
                   COUNT(*)::int AS mqtt_total
                 FROM readings
                 WHERE protocol = 'mqtt'
                   AND time > NOW() - INTERVAL '10 minutes';"
+          }
+
+          dump_redis_ingestion_state() {
+            echo "=== Redis ingestion stream keys ==="
+            docker compose -f "$COMPOSE_FILE" exec -T redis \
+              redis-cli --no-auth-warning -a "$REDIS_PASSWORD" --raw KEYS 'tenant:*:agent:devices:ingestion' || true
+
+            echo "=== Redis stream lengths (tenant:*:agent:devices:ingestion) ==="
+            docker compose -f "$COMPOSE_FILE" exec -T redis bash -lc '
+              set -e
+              KEYS=$(redis-cli --no-auth-warning -a "$REDIS_PASSWORD" --raw KEYS "tenant:*:agent:devices:ingestion")
+              if [ -z "$KEYS" ]; then
+                echo "(no ingestion stream keys found)"
+                exit 0
+              fi
+              while IFS= read -r k; do
+                [ -z "$k" ] && continue
+                len=$(redis-cli --no-auth-warning -a "$REDIS_PASSWORD" XLEN "$k" 2>/dev/null || echo "err")
+                echo "$k|xlen=$len"
+              done <<< "$KEYS"
+            ' || true
+
+            echo "=== Ingestion consumer group env ==="
+            docker compose -f "$COMPOSE_FILE" exec -T ingestion sh -lc 'printenv | grep -E "REDIS_INGESTION_STREAM_KEY|INGESTION_TENANT_ID|DEVELOPMENT_TENANT_ID|NAMESPACE" || true' || true
           }
 
           dump_recent_mqtt_rows() {
@@ -815,6 +839,7 @@ jobs:
             read_scope_counts || true
             echo "=== Recent MQTT readings in DB ==="
             dump_recent_mqtt_rows || true
+            dump_redis_ingestion_state || true
             echo "=== Ingestion logs (tail) ==="
             docker compose -f "$COMPOSE_FILE" logs ingestion --tail=200 || true
             echo "=== API logs (tail) ==="
