@@ -29,7 +29,7 @@ export type { DictionaryMetrics } from './dictionary';
 export { MessageBufferSync } from './buffer';
 export type { BufferSyncConfig } from './buffer';
 export type { MessageBufferSyncOptions } from './buffer';
-export { IotHubClient as IotHubMqttClient } from '../cloud/clients/azure-iot';
+export { AzureIotClient } from '../cloud/clients/azure-iot';
 export { AwsIotClient as AwsIotMqttClient } from '../cloud/clients/aws-iot';
 export { GcpIotClient as GcpIotMqttClient } from '../cloud/clients/gcp-iot';
 export { createExternalPublishTarget } from '../cloud/factory';

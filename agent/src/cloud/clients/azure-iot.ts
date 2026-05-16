@@ -1,6 +1,6 @@
 /**
- * IotHubMqttClient
- * ================
+ * AzureIotClient
+ * ==============
  * Azure IoT Hub D2C (device-to-cloud) MQTT client.
  *
  * Connects via native MQTT over TLS (port 8883) using SAS token authentication.
@@ -62,7 +62,7 @@ function generateSasToken(
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
-export class IotHubClient extends EventEmitter implements MqttConnection {
+export class AzureIotClient extends EventEmitter implements MqttConnection {
 	private client: MqttClient | null = null;
 	private connected = false;
 	private renewalTimer: NodeJS.Timeout | null = null;
@@ -118,7 +118,7 @@ export class IotHubClient extends EventEmitter implements MqttConnection {
 		options?: { qos?: 0 | 1 | 2 },
 	): Promise<void> {
 		if (!this.client || !this.connected) {
-			throw new Error('IotHubMqttClient: not connected');
+			throw new Error('AzureIotClient: not connected');
 		}
 		// Extract the endpoint name from the last segment of the Iotistica topic
 		// (e.g. "iot/uuid/endpoints/modbus" → "modbus") and encode it as an IoT Hub
@@ -314,3 +314,4 @@ export class IotHubClient extends EventEmitter implements MqttConnection {
 		}
 	}
 }
+

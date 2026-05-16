@@ -52,19 +52,6 @@ export const DOCKER_POLICY: RetryPolicy = {
 	],
 };
 
-// Conservative policy for cloud APIs (longer backoff, more attempts)
-export const CLOUD_POLICY: RetryPolicy = {
-	maxRetries: 15,
-	backoffIntervals: [
-		30 * 1000,    // 30s
-		60 * 1000,    // 1m
-		120 * 1000,   // 2m
-		240 * 1000,   // 4m
-		300 * 1000,   // 5m
-		600 * 1000,   // 10m (max backoff)
-	],
-};
-
 /**
  * Classify if an error is retryable based on error message/code
  * Non-retryable errors: auth failures, config errors, invalid parameters

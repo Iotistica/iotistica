@@ -28,7 +28,7 @@ import type {
 	ConfigStep,
 	ConfigReconciliationResult,
 	ProtocolAdapterDevice,
-} from "../containers/types.js";
+} from "./config-types.js";
 
 // ==================== CONFIG TYPES ====================
 

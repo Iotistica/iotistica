@@ -681,7 +681,7 @@ export default class Agent {
 			// Only require the instance to exist (provisioning config was valid + service was wired).
 			// Whether it is currently connected is a runtime/health concern - a cloud outage must not
 			// prevent the agent from sending READY=1 or operating as a standalone agent.
-			// Also skip when the active publish target doesn't use Iotistica (e.g. iothub).
+			// Also skip when the active publish target doesn't use Iotistica (e.g. azure).
 			cloudSync: isCiMode || !this.agentInfo?.provisioned || !!this.cloudSync
         || this.isExternalPublishTarget()
 		};

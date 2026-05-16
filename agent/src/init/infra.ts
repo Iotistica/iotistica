@@ -115,7 +115,7 @@ async function _connectExternalTarget(ctx: AgentInitContext): Promise<MqttConnec
 				component: LogComponents.agent,
 				error: error instanceof Error ? error.message : String(error),
 				hint:
-					targetType === 'iothub'
+					targetType === 'azure'
 						? 'Set AZURE_IOTHUB_CONNECTION_STRING'
 						: targetType === 'aws'
 							? 'Set AWS_IOT_ENDPOINT and AWS_IOT_* auth env vars'

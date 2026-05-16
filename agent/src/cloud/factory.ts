@@ -13,14 +13,14 @@ export async function createExternalPublishTarget(
 		return null;
 	}
 
-	if (target === 'iothub') {
+	if (target === 'azure') {
 		const connStr = process.env.AZURE_IOTHUB_CONNECTION_STRING;
 		if (!connStr) {
-			throw new Error('PUBLISH_TARGET=iothub requires AZURE_IOTHUB_CONNECTION_STRING');
+			throw new Error('PUBLISH_TARGET=azure requires AZURE_IOTHUB_CONNECTION_STRING');
 		}
 
-		const { IotHubClient: IotHubClient } = await import('./clients/azure-iot.js');
-		const client = new IotHubClient(connStr, input.logger);
+		const { AzureIotClient } = await import('./clients/azure-iot.js');
+		const client = new AzureIotClient(connStr, input.logger);
 		await client.connect();
 		return client;
 	}
