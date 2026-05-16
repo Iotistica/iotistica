@@ -1,10 +1,10 @@
-import type { AnomalyDetectionService } from "../../../anomaly/index.js";
-import type { Protocol } from "../../../anomaly/types.js";
-import type { Prediction } from "../../../anomaly/forecaster.js";
+import type { AnomalyDetectionService } from "../../anomaly/index.js";
+import type { Protocol } from "../../anomaly/types.js";
+import type { Prediction } from "../../anomaly/forecaster.js";
 import {
 	extractRawDeviceState,
 	normalizeDeviceState,
-} from "../../../anomaly/device-state.js";
+} from "../../anomaly/device-state.js";
 
 type Reading = {
 	[key: string]: any;

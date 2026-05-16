@@ -1,11 +1,11 @@
 import {
 	SchemaDriftModel,
-} from '../../../db/models/schema-drift.model.js';
+} from '../../db/models/schema-drift.model.js';
 import type {
 	PersistedBaselineState,
 	SchemaDriftEvent,
 	SchemaDriftStore,
-} from '../../../db/models/schema-drift.model.js';
+} from '../../db/models/schema-drift.model.js';
 import type { Logger } from "../types.js";
 
 type ValueType = "number" | "string" | "boolean" | "object" | "array" | "null";

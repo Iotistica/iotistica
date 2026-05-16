@@ -1,11 +1,11 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-05-15 19:43:42
-# Agents: 56 to 56
-# Ports: 48536 to 48536
+# Generated: 2026-05-16 10:07:56
+# Agents: 58 to 58
+# Ports: 48538 to 48538
 
 services:
-  agent-56:
-    container_name: local-agent-56
+  agent-58:
+    container_name: local-agent-58
     build:
       context: .
       dockerfile: agent/Dockerfile
@@ -20,11 +20,11 @@ services:
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agent-56-data:/app/data
+      - agent-58-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
       - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth
     environment:
-      - DEVICE_API_PORT=48536
+      - DEVICE_API_PORT=48538
       - IOTISTICA_API=http://localhost:4002
       - NODE_ENV=development
       - MQTT_AUTH_DIR=/app/data/mosquitto-auth
@@ -33,7 +33,7 @@ services:
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=eadd77739bd66bd0d773a1960e420dff1e66bf28b3215865ab23b871ae366341
+      - PROVISIONING_KEY=2993697941b82688557911022baa780e780d0403d2bd8b1a33550e483013559a
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=true
       - FIREWALL_MODE=auto
@@ -60,8 +60,8 @@ services:
     command: ["tail -f /dev/null"]
     tty: true
     environment:
-      - DEVICE_API_PORT=48536
-      - DEVICE_API_URL=http://localhost:48536
+      - DEVICE_API_PORT=48538
+      - DEVICE_API_URL=http://localhost:48538
       - CONFIG_DIR=/app/data
       - DEBUG=false
     volumes:
@@ -72,7 +72,7 @@ services:
         max-size: "5m"
         max-file: "2"
 volumes:
-  agent-56-data:
+  agent-58-data:
     driver: local
   agent-cli-data:
     driver: local

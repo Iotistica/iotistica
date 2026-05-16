@@ -1,9 +1,9 @@
 import { EventEmitter } from 'events';
 import { getHeapStatistics } from 'v8';
-import { agentTopic } from '../../mqtt/topics.js';
-import type { PipelineService } from '../pipeline/index.js';
-import type { AnomalyDetectionService } from '../../anomaly/index.js';
-import type { Protocol } from '../../anomaly/types.js';
+import { agentTopic } from '../mqtt/topics.js';
+import type { PipelineService } from '../features/pipeline/index.js';
+import type { AnomalyDetectionService } from '../anomaly/index.js';
+import type { Protocol } from '../anomaly/types.js';
 import type { DeviceConfig, MqttConnection, Logger, DeviceStats } from './types.js';
 import { DeviceState } from './types.js';
 import { AnomalyFeed } from './anomaly/feed.js';
@@ -14,7 +14,7 @@ import { DeviceConnection } from './connection.js';
 import { PublishStats } from './stats.js';
 import { HeartbeatManager } from './heartbeat.js';
 import { SchemaDriftDetector } from './schema/drift.js';
-import { SchemaDriftModel } from '../../db/models/schema-drift.model.js';
+import { SchemaDriftModel } from '../db/models/schema-drift.model.js';
 
 // Adaptive batch safety limits (calculated once at module load)
 const MAX_BATCH_MESSAGES = 10000;
@@ -29,9 +29,9 @@ const MAX_BATCH_BYTES = (() => {
 
 export class PublishManager extends EventEmitter {
 	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-	private messageBufferModel?: typeof import('../../db/models/buffer.model.js').MessageBufferModel;
+	private messageBufferModel?: typeof import('../db/models/buffer.model.js').MessageBufferModel;
 	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-	private messageBufferModelPromise?: Promise<typeof import('../../db/models/buffer.model.js').MessageBufferModel>;
+	private messageBufferModelPromise?: Promise<typeof import('../db/models/buffer.model.js').MessageBufferModel>;
 	private readonly batcher: MessageBatcher;
 	private readonly connection: DeviceConnection;
 	private readonly compressor: PayloadCompressor;
@@ -452,13 +452,13 @@ export class PublishManager extends EventEmitter {
 	}
 
 	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-	private async getMessageBufferModel(): Promise<typeof import('../../db/models/buffer.model.js').MessageBufferModel> {
+	private async getMessageBufferModel(): Promise<typeof import('../db/models/buffer.model.js').MessageBufferModel> {
 		if (this.messageBufferModel) {
 			return this.messageBufferModel;
 		}
 
 		if (!this.messageBufferModelPromise) {
-			this.messageBufferModelPromise = import('../../db/models/index.js')
+			this.messageBufferModelPromise = import('../db/models/index.js')
 				.then(({ MessageBufferModel }) => {
 					this.messageBufferModel = MessageBufferModel;
 					return MessageBufferModel;

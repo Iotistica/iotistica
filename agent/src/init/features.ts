@@ -12,7 +12,7 @@ import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/monitor.js';
 import { DiscoveryService } from '../adapters/discovery/service.js';
 
-import { DevicePublishFeature } from '../features/publish/index.js';
+import { DevicePublish } from '../publish/index.js';
 import type { AdapterManager } from '../adapters/index.js';
 import type { PipelineService } from '../features/pipeline/index.js';
 import type { AnomalyDetectionService } from '../anomaly/index.js';
@@ -20,7 +20,7 @@ import { AdapterInitializer } from './adapters.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { type CloudMqttClient } from '../mqtt/manager.js';
-import type { MqttConnection } from '../features/publish/types.js';
+import type { MqttConnection } from '../publish/types.js';
 import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
 import { type StateManager } from '../runtime/state.js';
 
@@ -51,7 +51,7 @@ export interface FeatureContext {
 
 export interface InitializedFeatures {
   jobs?: JobsFeature;
-  devicePublish?: DevicePublishFeature;
+  devicePublish?: DevicePublish;
 	devices?: AdapterManager;
   updater?: AgentUpdater;
   firewall?: AgentFirewall;
@@ -161,9 +161,7 @@ export class FeatureInitializer {
 			return dynamicFeatures.enableDevicePublish;
 		}
 
-		return this.context.configFeatures?.enableDevicePublish
-      ?? this.context.configFeatures?.enableDevicePublish
-      ?? false;
+		return this.context.configFeatures?.enableDevicePublish ?? true;
 	}
 
 	private isDeviceRemoteAccessEnabled(): boolean {
@@ -367,7 +365,7 @@ export class FeatureInitializer {
 			const useKeyCompactionPoc = process.env.USE_KEY_COMPACTION_POC === 'true';
 			const useDeflatePoc = process.env.USE_DEFLATE_COMPRESSION === 'true';
 
-			this.features.devicePublish = new DevicePublishFeature(
+			this.features.devicePublish = new DevicePublish(
         AdapterConfig as any,
         logger,
         deviceInfo.uuid,

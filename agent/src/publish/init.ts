@@ -1,25 +1,36 @@
-import { BaseFeature } from '../index.js';
-import { type AgentLogger } from '../../logging/agent-logger.js';
-import { LogComponents } from '../../logging/types.js';
-import type { Protocol } from '../../anomaly/types.js';
-import type { AnomalyDetectionService } from '../../anomaly/index.js';
-import type { PipelineService } from '../pipeline/index.js';
+import { type AgentLogger } from '../logging/agent-logger.js';
+import { LogComponents } from '../logging/types.js';
+import type { Protocol } from '../anomaly/types.js';
+import type { AnomalyDetectionService } from '../anomaly/index.js';
+import type { PipelineService } from '../features/pipeline/index.js';
 import {
 	type DevicePublishConfig,
 	type DeviceConfig,
 	type MqttConnection,
 } from './types.js';
 import { PublishManager } from './manager.js';
-import { MessageBufferSync } from '../../mqtt/buffer.js';
-import type { IPublishClient } from '../../mqtt/buffer.js';
+import { MessageBufferSync } from '../mqtt/buffer.js';
+import type { IPublishClient } from '../mqtt/buffer.js';
+import { CloudMqttClient } from '../mqtt/manager.js';
+import { EventEmitter } from 'events';
 
 /**
- * DevicePublishFeature - Manages multiple devices and publishes data to MQTT
+ * DevicePublish - Manages multiple devices and publishes data to MQTT
 
  */
-export class DevicePublishFeature extends BaseFeature {
+export class DevicePublish extends EventEmitter {
 	private devices: PublishManager[] = [];
+	private config: DevicePublishConfig & { enabled: boolean };
 	private agentLogger: AgentLogger;
+	private logger: {
+		info: (message: string, context?: Record<string, any>) => void;
+		warn: (message: string, context?: Record<string, any>) => void;
+		error: (message: string, error?: unknown, context?: Record<string, any>) => void;
+		debug: (message: string, context?: Record<string, any>) => void;
+	};
+	private mqttConnection?: MqttConnection;
+	private readonly deviceUuid: string;
+	private isRunning = false;
 	private dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
 	private readonly useMsgpackPoc: boolean;
 	private readonly useKeyCompactionPoc: boolean;
@@ -46,15 +57,37 @@ export class DevicePublishFeature extends BaseFeature {
 		anomalyService?: AnomalyDetectionService,
 		deviceConnection?: MqttConnection, // External cloud target (IoT Hub, AWS, GCP)
 	) {
-		super(
-			config,
-			agentLogger,
-			LogComponents.devicePublish,
-			deviceUuid,
-			true, // Requires MQTT
-			'DEVICE_PUBLISH_DEBUG'
-		);
+		super();
+		this.config = config;
 		this.agentLogger = agentLogger;
+		this.deviceUuid = deviceUuid;
+		this.mqttConnection = CloudMqttClient.getInstance();
+		this.logger = {
+			info: (message: string, context?: Record<string, any>) =>
+				this.agentLogger.infoSync(message, {
+					component: LogComponents.devicePublish,
+					...(context || {}),
+				}),
+			warn: (message: string, context?: Record<string, any>) =>
+				this.agentLogger.warnSync(message, {
+					component: LogComponents.devicePublish,
+					...(context || {}),
+				}),
+			error: (message: string, error?: unknown, context?: Record<string, any>) =>
+				this.agentLogger.errorSync(
+					message,
+					error instanceof Error ? error : undefined,
+					{
+						component: LogComponents.devicePublish,
+						...(context || {}),
+					}
+				),
+			debug: (message: string, context?: Record<string, any>) =>
+				this.agentLogger.debugSync(message, {
+					component: LogComponents.devicePublish,
+					...(context || {}),
+				}),
+		};
 		this.dictionaryManager = dictionaryManager;
 		this.useMsgpackPoc = useMsgpackPoc;
 		this.useKeyCompactionPoc = useKeyCompactionPoc;
@@ -106,27 +139,20 @@ export class DevicePublishFeature extends BaseFeature {
 		return 'DevicePublish';
 	}
 
-	/**
-   * Validate configuration - override from BaseFeature
-   */
-	protected validateConfig(): void {
-		const devieConfig = this.config as DevicePublishConfig;
+	private validateConfig(): void {
+		const deviceConfig = this.config as DevicePublishConfig;
     
-		if (!devieConfig.endpoints || !Array.isArray(devieConfig.endpoints)) {
+		if (!deviceConfig.endpoints || !Array.isArray(deviceConfig.endpoints)) {
 			throw new Error('Device Publish configuration must include endpoints array');
 		}
 
 		// Validate each Device configuration
-		devieConfig.endpoints.forEach((config: DeviceConfig) => {
+		deviceConfig.endpoints.forEach((config: DeviceConfig) => {
 			this.validateDeviceConfig(config);
 		});
-
 	}
 
-	/**
-   * Initialize - called by BaseFeature.start() before onStart()
-   */
-	protected async onInitialize(): Promise<void> {
+	private async onInitialize(): Promise<void> {
 		const deviceConfig = this.config as DevicePublishConfig;
     
 		if (deviceConfig.endpoints.length === 0) {
@@ -137,10 +163,12 @@ export class DevicePublishFeature extends BaseFeature {
 		this.logger.debug(`Starting Device Publish feature with ${deviceConfig.endpoints.length} devices`);
 	}
 
-	/**
-   * Start the Device publish feature
-   */
-	protected async onStart(): Promise<void> {
+	private async onStart(): Promise<void> {
+		if (!this.config.enabled) {
+			this.logger.info('Device Publish disabled by config');
+			return;
+		}
+
 		if (!this.mqttConnection) {
 			throw new Error('MQTT connection required for Device Publish feature');
 		}
@@ -166,10 +194,7 @@ export class DevicePublishFeature extends BaseFeature {
 		}
 	}
 
-	/**
-   * Stop the Device publish feature
-   */
-	protected async onStop(): Promise<void> {
+	private async onStop(): Promise<void> {
 		this.externalBufferSync?.stop();
 		this.externalBufferSync = undefined;
 
@@ -177,6 +202,31 @@ export class DevicePublishFeature extends BaseFeature {
 		await Promise.all(this.devices.map(device => device.stop()));
     
 		this.devices = [];
+	}
+
+	public async start(): Promise<void> {
+		if (this.isRunning) {
+			return;
+		}
+
+		if (!this.config.enabled) {
+			this.logger.info('Device Publish disabled by config');
+			return;
+		}
+
+		this.validateConfig();
+		await this.onInitialize();
+		await this.onStart();
+		this.isRunning = true;
+	}
+
+	public async stop(): Promise<void> {
+		if (!this.isRunning) {
+			return;
+		}
+
+		await this.onStop();
+		this.isRunning = false;
 	}
 
 	private async startExternalBufferSyncIfNeeded(): Promise<void> {

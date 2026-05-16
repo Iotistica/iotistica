@@ -14,7 +14,7 @@
  */
 
 import { createJsonPayload, serializePayload } from './codec';
-import type { PublishMode } from '../features/publish/types.js';
+import type { PublishMode } from '../publish/types.js';
 import { MessageBufferModel } from '../db/models';
 import type { BufferAdmissionDecision } from '../db/models';
 import type { AgentLogger } from '../logging/agent-logger';

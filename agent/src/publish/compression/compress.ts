@@ -1,10 +1,10 @@
 import { deflate as zlibDeflate } from 'zlib';
 import { promisify } from 'util';
 import * as msgpack from 'msgpack-lite';
-import { createJsonPayload, createMsgpackPayload, serializePayload } from '../../../mqtt/manager.js';
-import { getCpuUsage } from '../../../system/metrics.js';
+import { createJsonPayload, createMsgpackPayload, serializePayload } from '../../mqtt/manager.js';
+import { getCpuUsage } from '../../system/metrics.js';
 import type { MqttConnection } from '../types.js';
-import type { Protocol } from '../../../anomaly/types.js';
+import type { Protocol } from '../../anomaly/types.js';
 
 const deflateAsync = promisify(zlibDeflate);
 type Payload = Buffer | string;

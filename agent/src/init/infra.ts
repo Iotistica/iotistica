@@ -1,6 +1,6 @@
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types.js';
-import type { MqttConnection } from '../features/publish/types.js';
+import type { MqttConnection } from '../publish/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 
 

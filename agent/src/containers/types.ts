@@ -407,6 +407,9 @@ export interface TargetState {
 			enableShadow?: boolean;
 			enableLogs?: boolean;
 		};
+		publish?: {
+			enabled?: boolean;
+		};
 		logging?: {
 			level?: string;
 			enableFilePersistence?: boolean;

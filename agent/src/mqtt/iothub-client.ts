@@ -18,7 +18,7 @@ import { EventEmitter } from 'events';
 import * as crypto from 'crypto';
 import mqtt from 'mqtt';
 import type { MqttClient, IClientOptions } from 'mqtt';
-import type { MqttConnection, PublishMode } from '../features/publish/types.js';
+import type { MqttConnection, PublishMode } from '../publish/types.js';
 import { LogComponents } from '../logging/types.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 

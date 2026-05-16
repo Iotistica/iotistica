@@ -119,6 +119,10 @@ export interface FeatureToggles {
 	enableDeviceRemoteAccess: boolean;
 }
 
+export interface PublishConfig {
+	enabled: boolean;
+}
+
 export interface IntervalConfig {
 	discoveryFullIntervalMs?: number;
 	discoveryLightIntervalMs?: number;
@@ -609,15 +613,31 @@ export class ConfigManager extends EventEmitter {
 	}
 
 	/**
+	 * Get publish configuration.
+	 *
+	 * Source priority:
+	 * 1. config.publish.enabled (new canonical location)
+	 * 2. config.features.enableDevicePublish (legacy compatibility)
+	 * 3. default true (publish is core agent behavior)
+	 */
+	public getPublishConfig(): PublishConfig {
+		const publish = this.targetConfig.publish;
+		const features = this.targetConfig.features;
+
+		return {
+			enabled: publish?.enabled ?? features?.enableDevicePublish ?? true,
+		};
+	}
+
+	/**
 	 * Get feature toggles
 	 */
 	public getFeatures(): FeatureToggles {
 		const cloud = this.targetConfig.features;
-		const devicePublishEnabled =
-			cloud?.enableDevicePublish ?? cloud?.enableDevicePublish ?? false;
+		const publish = this.getPublishConfig();
 
 		return {
-			enableDevicePublish: devicePublishEnabled,
+			enableDevicePublish: publish.enabled,
 			enableAnomalyDetection: cloud?.enableAnomalyDetection ?? false,
 			enableDeviceJobs: cloud?.enableDeviceJobs ?? true,
 			enableDeviceRemoteAccess: cloud?.enableDeviceRemoteAccess ?? true,

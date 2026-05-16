@@ -1,6 +1,6 @@
-import type { AnomalyDetectionService } from "../../../anomaly/index.js";
-import type { Protocol } from "../../../anomaly/types.js";
-import { extractRawDeviceState } from "../../../anomaly/device-state.js";
+import type { AnomalyDetectionService } from "../../anomaly/index.js";
+import type { Protocol } from "../../anomaly/types.js";
+import { extractRawDeviceState } from "../../anomaly/device-state.js";
 import type { Logger } from "../types.js";
 
 /**
