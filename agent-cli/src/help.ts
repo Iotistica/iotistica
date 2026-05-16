@@ -53,8 +53,8 @@ export function showHelp(commands: CommandMap): void {
 
   rows.push('');
   rows.push('╔═══════════════════════════════════════════════════════════════════════════╗');
-  rows.push('║                           iotctl - IoT Control                             ║');
-  rows.push('║                        Iotistica Device Management CLI                      ║');
+  rows.push('║                           iotctl - IoT Control                            ║');
+  rows.push('║                        Iotistica Management CLI                           ║');
   rows.push('╚═══════════════════════════════════════════════════════════════════════════╝');
   rows.push('');
   rows.push('AVAILABLE COMMANDS (generated from live dispatcher):');

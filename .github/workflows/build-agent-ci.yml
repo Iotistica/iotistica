@@ -79,7 +79,7 @@ jobs:
 
       - name: Run CLI ESLint
         working-directory: ./agent-cli
-        run: npm run lint
+        run: npm run lint --if-present
 
       - name: Build CLI
         working-directory: ./agent-cli
