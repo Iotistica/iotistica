@@ -1,8 +1,8 @@
 import * as pty from 'node-pty';
-import type { AgentLogger } from '../../logging/agent-logger';
-import { LogComponents } from '../../logging/types';
-import type { CloudMqttClient } from '../../mqtt/manager';
-import { agentTopic } from '../../mqtt/topics.js';
+import type { AgentLogger } from '../logging/agent-logger';
+import { LogComponents } from '../logging/types';
+import type { CloudMqttClient } from '../mqtt/manager';
+import { agentTopic } from '../mqtt/topics.js';
 import * as os from 'os';
 import { createHmac, timingSafeEqual } from 'crypto';
 import * as fs from 'fs';

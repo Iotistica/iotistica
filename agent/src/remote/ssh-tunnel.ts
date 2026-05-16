@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
-import type { AgentLogger } from '../../logging/agent-logger';
-import { LogComponents } from '../../logging/types';
+import type { AgentLogger } from '../logging/agent-logger';
+import { LogComponents } from '../logging/types';
 
 export interface SSHTunnelConfig {
   cloudHost: string;
