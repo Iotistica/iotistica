@@ -745,7 +745,7 @@ jobs:
                   COUNT(DISTINCT metric_name)::int AS metric_count
                 FROM readings
                 WHERE protocol = 'mqtt'
-                  AND COALESCE(extra->>'device_uuid', extra->>'deviceUuid') = '$DEVICE_UUID'
+                  AND agent_uuid = '$DEVICE_UUID'
                   AND time > NOW() - INTERVAL '10 minutes';"
           }
 
