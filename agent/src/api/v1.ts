@@ -296,6 +296,19 @@ router.get('/v1/memory', (req: Request, res: Response, next: NextFunction) => {
 });
 
 /**
+ * GET /v1/db/stats
+ * Get SQLite database stats (path, size, and table inventory)
+ */
+router.get('/v1/db/stats', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const stats = await actions.getDbStats();
+		return res.status(200).json(stats);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
  * GET /v1/simulation/status
  * Get simulation orchestrator status
  */

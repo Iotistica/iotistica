@@ -3,7 +3,7 @@
 import { CLIError, logger } from './core';
 import { showHelp } from './help';
 import { CommandMap } from './command-types';
-import { dbBackup, dbList, dbPrune, dbRestore, dbVerify } from './commands/db';
+import { dbBackup, dbList, dbPrune, dbRestore, dbStats, dbVerify } from './commands/db';
 import { configGet, configGetApi, configReset, configSet, configSetApi, configShow } from './commands/config';
 import { appsInfo, appsList, appsPurge, appsRestart, appsStart, appsStop } from './commands/apps';
 import { servicesInfo, servicesList, servicesLogs, servicesRestart, servicesStart, servicesStop } from './commands/services';
@@ -104,6 +104,8 @@ function buildCommands(args: string[]): CommandMap {
         _default: dbList,
       },
       backup: dbBackup,
+      stats: dbStats,
+      info: dbStats,
       list: dbList,
       verify: dbVerify,
       restore: dbRestore,

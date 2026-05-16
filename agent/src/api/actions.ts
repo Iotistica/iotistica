@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import { existsSync, statSync } from 'fs';
 import type ContainerManager from '../containers/container-manager';
 import type { AgentManager } from '../runtime/index.js';
 import type { CloudSync } from '../sync';
@@ -16,6 +17,8 @@ import type { StateManager } from '../runtime/state';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/arbiter';
 import { MessageBufferModel } from '../db/models/buffer.model';
+import { getDatabasePath } from '../db/db-path';
+import { getDatabase } from '../db/sqlite';
 import { CloudMqttClient } from '../mqtt/manager';
 import { encodeIfUuid } from '../mqtt/codec';
 import type { AgentUpdater } from '../updater';
@@ -765,3 +768,41 @@ export async function runDiscovery(options: {
 	};
 	return discoveryService.runDiscovery(discoveryOptions);
 }
+
+/**
+ * Get SQLite database stats for diagnostics
+ * Used by: GET /v1/db/stats
+ */
+export const getDbStats = async () => {
+	const path = getDatabasePath();
+	const exists = existsSync(path);
+
+	if (!exists) {
+		return {
+			path,
+			exists: false,
+			sizeBytes: 0,
+			sizeMb: 0,
+			tableCount: 0,
+			tables: [] as string[],
+		};
+	}
+
+	const sizeBytes = statSync(path).size;
+	const sizeMb = Number((sizeBytes / 1024 / 1024).toFixed(2));
+
+	const db = getDatabase();
+	const rows = db
+		.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+		.all() as Array<{ name: string }>;
+	const tables = rows.map((row) => row.name);
+
+	return {
+		path,
+		exists: true,
+		sizeBytes,
+		sizeMb,
+		tableCount: tables.length,
+		tables,
+	};
+};

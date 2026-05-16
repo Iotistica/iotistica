@@ -5,6 +5,7 @@ import {
   DEVICE_API_V1,
   CLIError,
   logger,
+  apiRequest,
   apiProbe,
   normalizePositionalArg,
   getFlagValue,
@@ -207,6 +208,35 @@ export async function dbList(): Promise<void> {
       createdAt: backup.createdAt,
       sizeBytes: backup.sizeBytes,
       checksumSha256: backup.checksumSha256 || 'metadata-missing',
+    });
+  }
+}
+
+/**
+ * iotctl db stats
+ */
+export async function dbStats(): Promise<void> {
+  try {
+    const stats = await apiRequest(`${DEVICE_API_V1}/db/stats`);
+
+    logger.info('Database stats', {
+      path: stats.path,
+      exists: stats.exists,
+      sizeBytes: stats.sizeBytes,
+      sizeMb: stats.sizeMb,
+      tableCount: stats.tableCount,
+    });
+
+    if (Array.isArray(stats.tables) && stats.tables.length > 0) {
+      logger.info('Database tables', {
+        tables: stats.tables,
+      });
+    }
+  } catch (error) {
+    if (error instanceof CLIError) throw error;
+    throw new CLIError('Failed to get database stats', 1, {
+      error: (error as Error).message,
+      hint: 'Ensure the agent is running and supports GET /v1/db/stats',
     });
   }
 }
