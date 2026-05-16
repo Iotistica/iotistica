@@ -1,5 +1,5 @@
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { dirname, join } from 'path';
 import {
   DB_PATH,
   DEVICE_API_V1,
@@ -26,6 +26,15 @@ type DbBackupServiceModule = {
 };
 
 let dbBackupServiceCache: DbBackupServiceModule | null = null;
+
+type DbBackupListEntry = {
+  backupPath: string;
+  metadataPath: string;
+  fileName: string;
+  sizeBytes: number;
+  createdAt: string;
+  checksumSha256?: string;
+};
 
 async function loadDbBackupService(): Promise<DbBackupServiceModule> {
   if (dbBackupServiceCache) {
@@ -69,6 +78,55 @@ async function loadDbBackupService(): Promise<DbBackupServiceModule> {
   });
 }
 
+function getFallbackBackupDir(): string {
+  return join(dirname(DB_PATH), 'backups', 'db');
+}
+
+function getMetadataPathForBackup(backupPath: string): string {
+  return `${backupPath}.meta.json`;
+}
+
+function readFallbackBackupMetadata(backupPath: string): { createdAt?: string; checksumSha256?: string } | undefined {
+  const metadataPath = getMetadataPathForBackup(backupPath);
+  if (!existsSync(metadataPath)) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(metadataPath, 'utf-8')) as {
+      createdAt?: string;
+      checksumSha256?: string;
+    };
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+function listDbBackupsFallback(backupDir: string): DbBackupListEntry[] {
+  if (!existsSync(backupDir)) {
+    return [];
+  }
+
+  return readdirSync(backupDir)
+    .filter((name) => name.endsWith('.sqlite'))
+    .map((fileName) => {
+      const backupPath = join(backupDir, fileName);
+      const stat = statSync(backupPath);
+      const metadata = readFallbackBackupMetadata(backupPath);
+
+      return {
+        backupPath,
+        metadataPath: getMetadataPathForBackup(backupPath),
+        fileName,
+        sizeBytes: stat.size,
+        createdAt: metadata?.createdAt || stat.mtime.toISOString(),
+        checksumSha256: metadata?.checksumSha256,
+      };
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 function resolveBackupPathFromTarget(
   backups: Array<{ fileName: string; backupPath: string }>,
   target?: string,
@@ -94,7 +152,7 @@ function resolveBackupPathFromTarget(
 
   throw new CLIError('Backup target not found', 1, {
     target,
-    hint: 'Use iotctl db list to see available backups',
+    hint: 'Use iotctl db backups list to see available backups',
   });
 }
 
@@ -121,19 +179,25 @@ export async function dbBackup(nameArg?: string): Promise<void> {
 }
 
 /**
- * iotctl db list
+ * iotctl db backups list
  */
 export async function dbList(): Promise<void> {
-  const service = await loadDbBackupService();
-  const backupDir = service.getDefaultBackupDir(DB_PATH);
-  const backups = service.listDbBackups({ backupDir });
+  const backupDir = getFallbackBackupDir();
+  let backups: DbBackupListEntry[] = [];
+
+  try {
+    const service = await loadDbBackupService();
+    backups = service.listDbBackups({ backupDir });
+  } catch {
+    backups = listDbBackupsFallback(backupDir);
+  }
 
   if (backups.length === 0) {
-    logger.info('No database backups found', { backupDir });
+    logger.info('No saved database backups found', { backupDir });
     return;
   }
 
-  logger.info('Database backups', {
+  logger.info('Saved database backups', {
     backupDir,
     count: backups.length,
   });

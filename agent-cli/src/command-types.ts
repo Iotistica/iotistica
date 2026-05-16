@@ -1,7 +1,8 @@
 export type CommandHandler = (...args: any[]) => any;
 
-export type CommandGroup = Record<string, CommandHandler> & {
+export interface CommandGroup {
+  [key: string]: CommandHandler | CommandGroup | undefined;
   _default?: CommandHandler;
-};
+}
 
 export type CommandMap = Record<string, CommandGroup>;

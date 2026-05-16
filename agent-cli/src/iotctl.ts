@@ -99,6 +99,10 @@ function buildCommands(args: string[]): CommandMap {
       _default: runDiagnostics,
     },
     db: {
+      backups: {
+        list: dbList,
+        _default: dbList,
+      },
       backup: dbBackup,
       list: dbList,
       verify: dbVerify,
@@ -153,6 +157,28 @@ function buildCommands(args: string[]): CommandMap {
   return commands;
 }
 
+async function executeCommand(node: any, args: string[]): Promise<void> {
+  if (typeof node === 'function') {
+    await node(...args);
+    return;
+  }
+
+  const [subcommand, ...rest] = args;
+  if (subcommand && node[subcommand]) {
+    await executeCommand(node[subcommand], rest);
+    return;
+  }
+
+  if (node._default) {
+    await node._default(...args);
+    return;
+  }
+
+  throw new CLIError('Unknown command', 1, {
+    hint: 'Use "iotctl help" for usage information',
+  });
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const commands = buildCommands(args);
@@ -163,10 +189,6 @@ async function main(): Promise<void> {
   }
 
   const command = args[0];
-  const subcommand = args[1];
-  const arg1 = args[2];
-  const arg2 = args[3];
-
   const commandGroup = commands[command];
   if (!commandGroup) {
     throw new CLIError('Unknown command', 1, {
@@ -175,16 +197,7 @@ async function main(): Promise<void> {
     });
   }
 
-  if (subcommand && commandGroup[subcommand]) {
-    await commandGroup[subcommand](arg1, arg2);
-  } else if (commandGroup._default) {
-    await commandGroup._default(subcommand, arg1, arg2);
-  } else {
-    throw new CLIError(`Unknown ${command} command`, 1, {
-      command: subcommand,
-      hint: 'Use "iotctl help" for usage information',
-    });
-  }
+  await executeCommand(commandGroup, args.slice(1));
 }
 
 function handleError(error: any): void {

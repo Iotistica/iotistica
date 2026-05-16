@@ -14,6 +14,26 @@ function formatSubcommands(command: string, subcommands: string[]): string[] {
     .map((subcommand) => '  ' + command + ' ' + subcommand);
 }
 
+function collectCommands(prefix: string, group: any): string[] {
+  const keys = Object.keys(group).filter((key) => key !== '_default');
+  if (keys.length === 0) {
+    return [prefix];
+  }
+
+  const rows: string[] = [];
+  for (const key of keys) {
+    const value = group[key];
+    const nextPrefix = `${prefix} ${key}`;
+    if (typeof value === 'function') {
+      rows.push(nextPrefix);
+    } else if (value && typeof value === 'object') {
+      rows.push(...collectCommands(nextPrefix, value));
+    }
+  }
+
+  return rows;
+}
+
 export function showHelp(commands: CommandMap): void {
   const topLevel = Object.keys(commands)
     .filter((command) => !isAliasCommand(command))
@@ -36,7 +56,7 @@ export function showHelp(commands: CommandMap): void {
 
   for (const command of topLevel) {
     const commandGroup = commands[command];
-    const subcommands = Object.keys(commandGroup).filter((key) => key !== '_default');
+    const subcommands = collectCommands(command, commandGroup).map((entry) => entry.slice(command.length + 1));
     rows.push(...formatSubcommands(command, subcommands));
   }
 
