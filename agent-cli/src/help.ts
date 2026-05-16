@@ -9,18 +9,24 @@ function formatSubcommands(command: string, subcommands: string[]): string[] {
     return ['  ' + command];
   }
 
-  return subcommands
+  const unique = Array.from(new Set(subcommands));
+  return unique
     .sort((a, b) => a.localeCompare(b))
-    .map((subcommand) => '  ' + command + ' ' + subcommand);
+    .map((subcommand) => (subcommand.length === 0 ? '  ' + command : '  ' + command + ' ' + subcommand));
 }
 
 function collectCommands(prefix: string, group: any): string[] {
-  const keys = Object.keys(group).filter((key) => key !== '_default');
-  if (keys.length === 0) {
-    return [prefix];
+  const rows: string[] = [];
+
+  if (group && typeof group === 'object' && typeof group._default === 'function') {
+    rows.push(prefix);
   }
 
-  const rows: string[] = [];
+  const keys = Object.keys(group).filter((key) => key !== '_default');
+  if (keys.length === 0) {
+    return rows.length > 0 ? rows : [prefix];
+  }
+
   for (const key of keys) {
     const value = group[key];
     const nextPrefix = `${prefix} ${key}`;
@@ -69,7 +75,7 @@ export function showHelp(commands: CommandMap): void {
   }
 
   rows.push('');
-  rows.push('NOTE: Commands with no subcommands accept a direct form, e.g. iotctl status.');
+  rows.push('NOTE: Direct command forms are included when a group has a default handler.');
   rows.push('');
 
   console.log(rows.join('\n'));
