@@ -1,6 +1,8 @@
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types.js';
 import type { MqttConnection } from '../publish/types.js';
+import { createExternalPublishTarget } from '../cloud/factory.js';
+import { normalizeTarget } from '../cloud/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 
 
@@ -18,9 +20,9 @@ export async function initInfrastructure(ctx: AgentInitContext): Promise<void> {
  * and — when an external publish target is configured — also connect the appropriate
  * cloud-bridge client and store it as ctx.deviceConnection for device data routing.
  *
- * Adding a new cloud target (AWS, GCP, …):
- *  1. Add a new client class in agent/src/mqtt/
- *  2. Add a branch in _connectExternalTarget() below
+ * Adding a new cloud target (AWS, GCP, ...):
+ *  1. Add a provider client in agent/src/mqtt/
+ *  2. Register it in agent/src/mqtt/cloud/factory.ts
  */
 export async function initializeConnections(ctx: AgentInitContext): Promise<void> {
 	try {
@@ -85,35 +87,43 @@ async function _connectIotisticaMqtt(ctx: AgentInitContext): Promise<void> {
  * Returns the connected MqttConnection, or null when using Iotistica.
  */
 async function _connectExternalTarget(ctx: AgentInitContext): Promise<MqttConnection | null> {
-	// Determine publish target from environment or config
-	const targetType = (process.env.PUBLISH_TARGET || 'iotistica').toLowerCase();
+	const rawTarget = process.env.PUBLISH_TARGET || 'iotistica';
+	const targetType = normalizeTarget(rawTarget);
 
-	if (targetType === 'iotistica' || targetType === '') return null;
-
-	if (targetType === 'iothub') {
-		const connStr = process.env.AZURE_IOTHUB_CONNECTION_STRING;
-
-		if (!connStr) {
-			ctx.agentLogger?.warnSync('PUBLISH_TARGET=iothub but no connection string provided — falling back to Iotistica', {
-				component: LogComponents.agent,
-				hint: 'Set AZURE_IOTHUB_CONNECTION_STRING',
-			});
-			return null;
-		}
-
-		const { IotHubMqttClient } = await import('../mqtt/iothub-client.js');
-		const client = new IotHubMqttClient(connStr, ctx.agentLogger);
-		await client.connect();
-		ctx.agentLogger?.infoSync('IoT Hub MQTT connected (device data target)', {
-			component: LogComponents.agent,
-		});
-		return client;
+	if (targetType === 'iotistica') {
+		return null;
 	}
 
-	ctx.agentLogger?.warnSync(`Unknown PUBLISH_TARGET="${targetType}" — falling back to Iotistica`, {
-		component: LogComponents.agent,
-	});
-	return null;
+	try {
+		const client = await createExternalPublishTarget({
+			target: rawTarget,
+			logger: ctx.agentLogger,
+		});
+
+		if (client) {
+			ctx.agentLogger?.infoSync('External cloud MQTT target connected (device data target)', {
+				component: LogComponents.agent,
+				target: targetType,
+			});
+		}
+
+		return client;
+	} catch (error) {
+		ctx.agentLogger?.warnSync(
+			`Failed to initialize external publish target "${rawTarget}" — falling back to Iotistica`,
+			{
+				component: LogComponents.agent,
+				error: error instanceof Error ? error.message : String(error),
+				hint:
+					targetType === 'iothub'
+						? 'Set AZURE_IOTHUB_CONNECTION_STRING'
+						: targetType === 'aws'
+							? 'Set AWS_IOT_ENDPOINT and AWS_IOT_* auth env vars'
+							: 'Set GCP_MQTT_ENDPOINT and GCP_MQTT_* auth env vars',
+			},
+		);
+		return null;
+	}
 }
 
 /**
