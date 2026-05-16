@@ -749,65 +749,6 @@ jobs:
           fi
 
           echo "Waiting for MQTT readings from device $DEVICE_NAME ($DEVICE_UUID) to be persisted by ingestion..."
-          echo "Using AGENT_UUID=$AGENT_UUID"
-
-          read_scope_counts() {
-            docker compose -f "$COMPOSE_FILE" exec -T postgres \
-              psql -U postgres -d iotistic -v ON_ERROR_STOP=1 -t -A -F "|" -c "
-                SELECT
-                  COALESCE(SUM(CASE WHEN agent_uuid = '$AGENT_UUID' THEN 1 ELSE 0 END), 0)::int AS by_agent,
-                  COALESCE(SUM(CASE WHEN COALESCE(NULLIF(extra->>'device_uuid', ''), NULLIF(extra->>'deviceUuid', '')) = '$DEVICE_UUID' THEN 1 ELSE 0 END), 0)::int AS by_device,
-                  COALESCE(SUM(CASE WHEN agent_uuid = '$AGENT_UUID' AND COALESCE(NULLIF(extra->>'device_uuid', ''), NULLIF(extra->>'deviceUuid', '')) = '$DEVICE_UUID' THEN 1 ELSE 0 END), 0)::int AS by_both,
-                  COUNT(*)::int AS mqtt_total
-                FROM readings
-                WHERE protocol = 'mqtt'
-                  AND time > NOW() - INTERVAL '10 minutes';"
-          }
-
-          dump_redis_ingestion_state() {
-            REDIS_AUTH="${REDIS_PASSWORD:-local-dev-redis-change-me}"
-
-            echo "=== Redis ingestion stream keys ==="
-            docker compose -f "$COMPOSE_FILE" exec -T redis \
-              redis-cli --no-auth-warning -a "$REDIS_AUTH" --raw KEYS 'tenant:*:agent:devices:ingestion' || true
-
-            echo "=== Redis stream lengths (tenant:*:agent:devices:ingestion) ==="
-            docker compose -f "$COMPOSE_FILE" exec -T redis sh -lc '
-              set -e
-              REDIS_AUTH="${REDIS_PASSWORD:-local-dev-redis-change-me}"
-              KEYS=$(redis-cli --no-auth-warning -a "$REDIS_AUTH" --raw KEYS "tenant:*:agent:devices:ingestion")
-              if [ -z "$KEYS" ]; then
-                echo "(no ingestion stream keys found)"
-                exit 0
-              fi
-              while IFS= read -r k; do
-                [ -z "$k" ] && continue
-                len=$(redis-cli --no-auth-warning -a "$REDIS_AUTH" XLEN "$k" 2>/dev/null || echo "err")
-                echo "$k|xlen=$len"
-              done <<< "$KEYS"
-            ' || true
-
-            echo "=== Ingestion consumer group env ==="
-            docker compose -f "$COMPOSE_FILE" exec -T ingestion sh -lc 'printenv | grep -E "REDIS_INGESTION_STREAM_KEY|INGESTION_TENANT_ID|DEVELOPMENT_TENANT_ID|NAMESPACE" || true' || true
-          }
-
-          dump_recent_mqtt_rows() {
-            docker compose -f "$COMPOSE_FILE" exec -T postgres \
-              psql -U postgres -d iotistic -v ON_ERROR_STOP=1 -c "
-                SELECT
-                  time,
-                  agent_uuid,
-                  metric_name,
-                  protocol,
-                  extra->>'device_uuid' AS extra_device_uuid,
-                  extra->>'deviceUuid' AS extra_deviceUuid,
-                  extra->>'deviceName' AS extra_device_name
-                FROM readings
-                WHERE protocol = 'mqtt'
-                  AND time > NOW() - INTERVAL '10 minutes'
-                ORDER BY time DESC
-                LIMIT 20;"
-          }
 
           read_db_counts() {
             docker compose -f "$COMPOSE_FILE" exec -T postgres \
@@ -823,34 +764,22 @@ jobs:
           }
 
           DEADLINE=$((SECONDS + 120))
-          ATTEMPT=0
           DB_RESULT=$(read_db_counts)
           echo "DB_RESULT=$DB_RESULT"
-          echo "SCOPE_COUNTS=$(read_scope_counts)"
 
           READING_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f1 | tr -d "[:space:]")
           METRIC_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f2 | tr -d "[:space:]")
 
           while { [ "${READING_COUNT:-0}" -lt 2 ] || [ "${METRIC_COUNT:-0}" -lt 2 ]; } && [ "$SECONDS" -lt "$DEADLINE" ]; do
             sleep 4
-            ATTEMPT=$((ATTEMPT + 1))
             DB_RESULT=$(read_db_counts)
             echo "DB_RESULT=$DB_RESULT"
             READING_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f1 | tr -d "[:space:]")
             METRIC_COUNT=$(echo "$DB_RESULT" | tail -n 1 | cut -d"|" -f2 | tr -d "[:space:]")
-
-            if [ $((ATTEMPT % 3)) -eq 0 ]; then
-              echo "SCOPE_COUNTS=$(read_scope_counts)"
-            fi
           done
 
           if [ "${READING_COUNT:-0}" -lt 2 ] || [ "${METRIC_COUNT:-0}" -lt 2 ]; then
             echo "FAIL: timed out waiting for forwarded MQTT readings in raw readings table"
-            echo "=== Scope counts at timeout (by_agent|by_device|by_both|mqtt_total) ==="
-            read_scope_counts || true
-            echo "=== Recent MQTT readings in DB ==="
-            dump_recent_mqtt_rows || true
-            dump_redis_ingestion_state || true
             echo "=== Ingestion logs (tail) ==="
             docker compose -f "$COMPOSE_FILE" logs ingestion --tail=200 || true
             echo "=== API logs (tail) ==="
