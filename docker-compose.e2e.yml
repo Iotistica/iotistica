@@ -126,6 +126,7 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
       - REDIS_USERNAME=${REDIS_USERNAME:-}
+      - REDIS_INGESTION_STREAM_KEY=${REDIS_INGESTION_STREAM_KEY:-tenant:{demo}:agent:devices:ingestion}
       - INTERNAL_AUTH_TOKEN=${INTERNAL_AUTH_TOKEN:-integration-test-internal-auth-token}
       - MQTT_BROKER_HOST=${MQTT_BROKER_HOST:-mosquitto}
       - MQTT_BROKER_PORT=${MQTT_BROKER_PORT:-1883}
@@ -194,6 +195,7 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-local-dev-redis-change-me}
       - REDIS_USERNAME=${REDIS_USERNAME:-}
+      - REDIS_INGESTION_STREAM_KEY=${REDIS_INGESTION_STREAM_KEY:-tenant:{demo}:agent:devices:ingestion}
       - DISK_SPOOL_ENABLED=${DISK_SPOOL_ENABLED:-false}
       - DISK_SPOOL_PATH=${DISK_SPOOL_PATH:-/var/lib/iotistic/spool}
       - DISK_SPOOL_MAX_SIZE_MB=${DISK_SPOOL_MAX_SIZE_MB:-250}

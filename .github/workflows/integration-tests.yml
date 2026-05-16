@@ -44,6 +44,14 @@ jobs:
           IOTISTIC_LICENSE_KEY="${{ secrets.IOTISTIC_LICENSE_KEY }}" \
           .github/scripts/setup-env.sh
 
+          TENANT_ID=$(node -e "const token=process.env.TOKEN||''; const p=token.split('.')[1]||''; const b64=p.replace(/-/g,'+').replace(/_/g,'/'); const pad='='.repeat((4 - (b64.length % 4)) % 4); const payload=JSON.parse(Buffer.from(b64+pad,'base64').toString('utf8')); const raw=(payload.tenantId||payload.customerId||'demo').toString().trim(); process.stdout.write(raw.replace(/^(cust_|tenant_)/,''));" TOKEN='${{ secrets.IOTISTIC_LICENSE_KEY }}')
+          if [ -z "$TENANT_ID" ]; then TENANT_ID="demo"; fi
+
+          echo "Resolved Redis tenant id for integration: $TENANT_ID"
+          echo "REDIS_INGESTION_STREAM_KEY=tenant:{${TENANT_ID}}:agent:devices:ingestion" >> .env
+          echo "INGESTION_TENANT_ID=${TENANT_ID}" >> .env
+          echo "DEVELOPMENT_TENANT_ID=${TENANT_ID}" >> .env
+
       - name: Setup Node.js for dashboard tests
         uses: actions/setup-node@v4
         with:
@@ -757,21 +765,24 @@ jobs:
           }
 
           dump_redis_ingestion_state() {
+            REDIS_AUTH="${REDIS_PASSWORD:-local-dev-redis-change-me}"
+
             echo "=== Redis ingestion stream keys ==="
             docker compose -f "$COMPOSE_FILE" exec -T redis \
-              redis-cli --no-auth-warning -a "$REDIS_PASSWORD" --raw KEYS 'tenant:*:agent:devices:ingestion' || true
+              redis-cli --no-auth-warning -a "$REDIS_AUTH" --raw KEYS 'tenant:*:agent:devices:ingestion' || true
 
             echo "=== Redis stream lengths (tenant:*:agent:devices:ingestion) ==="
-            docker compose -f "$COMPOSE_FILE" exec -T redis bash -lc '
+            docker compose -f "$COMPOSE_FILE" exec -T redis sh -lc '
               set -e
-              KEYS=$(redis-cli --no-auth-warning -a "$REDIS_PASSWORD" --raw KEYS "tenant:*:agent:devices:ingestion")
+              REDIS_AUTH="${REDIS_PASSWORD:-local-dev-redis-change-me}"
+              KEYS=$(redis-cli --no-auth-warning -a "$REDIS_AUTH" --raw KEYS "tenant:*:agent:devices:ingestion")
               if [ -z "$KEYS" ]; then
                 echo "(no ingestion stream keys found)"
                 exit 0
               fi
               while IFS= read -r k; do
                 [ -z "$k" ] && continue
-                len=$(redis-cli --no-auth-warning -a "$REDIS_PASSWORD" XLEN "$k" 2>/dev/null || echo "err")
+                len=$(redis-cli --no-auth-warning -a "$REDIS_AUTH" XLEN "$k" 2>/dev/null || echo "err")
                 echo "$k|xlen=$len"
               done <<< "$KEYS"
             ' || true

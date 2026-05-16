@@ -133,6 +133,10 @@ export class DeviceReadingsPublisher {
   }
 
   private get streamKey(): string {
+    const explicitStreamKey = (process.env.REDIS_INGESTION_STREAM_KEY || '').trim();
+    if (explicitStreamKey) {
+      return explicitStreamKey;
+    }
     return agentDevicesIngestionStreamKey(this.resolveTenantId());
   }
 
