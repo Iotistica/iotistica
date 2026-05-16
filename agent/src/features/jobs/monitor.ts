@@ -19,7 +19,7 @@
  */
 
 import { type HttpClient, FetchHttpClient } from '../../lib/http-client.js';
-import { BaseFeature, type FeatureConfig } from '../base-feature.js';
+import { BaseFeature, type FeatureConfig } from '../base.js';
 import { type AgentLogger } from '../../logging/agent-logger.js';
 import { LogComponents } from '../../logging/types.js';
 import { CloudMqttClient } from '../../mqtt/manager.js';
