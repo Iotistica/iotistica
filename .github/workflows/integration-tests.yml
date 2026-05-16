@@ -44,7 +44,7 @@ jobs:
           IOTISTIC_LICENSE_KEY="${{ secrets.IOTISTIC_LICENSE_KEY }}" \
           .github/scripts/setup-env.sh
 
-          TENANT_ID=$(node -e "const token=process.env.TOKEN||''; const p=token.split('.')[1]||''; const b64=p.replace(/-/g,'+').replace(/_/g,'/'); const pad='='.repeat((4 - (b64.length % 4)) % 4); const payload=JSON.parse(Buffer.from(b64+pad,'base64').toString('utf8')); const raw=(payload.tenantId||payload.customerId||'demo').toString().trim(); process.stdout.write(raw.replace(/^(cust_|tenant_)/,''));" TOKEN='${{ secrets.IOTISTIC_LICENSE_KEY }}')
+          TENANT_ID=$(TOKEN='${{ secrets.IOTISTIC_LICENSE_KEY }}' node -e "try { const token = process.env.TOKEN || ''; const p = token.split('.')[1]; if (!p) { process.stdout.write('demo'); process.exit(0); } const b64 = p.replace(/-/g, '+').replace(/_/g, '/'); const pad = '='.repeat((4 - (b64.length % 4)) % 4); const json = Buffer.from(b64 + pad, 'base64').toString('utf8'); const payload = JSON.parse(json); const raw = String(payload.tenantId || payload.customerId || 'demo').trim(); process.stdout.write(raw.replace(/^(cust_|tenant_)/, '')); } catch { process.stdout.write('demo'); }")
           if [ -z "$TENANT_ID" ]; then TENANT_ID="demo"; fi
 
           echo "Resolved Redis tenant id for integration: $TENANT_ID"
