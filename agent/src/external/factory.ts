@@ -1,41 +1,53 @@
+import type { AgentLogger } from '../logging/agent-logger.js';
 import type { MqttConnection } from '../publish/types.js';
+import { PublishConfigLoader } from './config.js';
+import type { PublishProviderConfig } from './config.js';
 import { AwsIotClient } from './clients/aws-iot.js';
+import { AzureIotClient } from './clients/azure-iot.js';
 import { GcpIotClient } from './clients/gcp-iot.js';
-import { normalizeTarget } from './types.js';
 import type { CloudTargetFactoryInput } from './types.js';
+import { BaseMqttClient } from './base-client.js';
 
+/**
+ * Creates the correct client for a given provider config.
+ * Add new providers here when extending the set of supported targets.
+ */
+export class PublishClientFactory {
+	public static create(
+		config: PublishProviderConfig,
+		logger?: AgentLogger,
+	): BaseMqttClient {
+		switch (config.provider) {
+			case 'azure':
+				return new AzureIotClient(config, logger);
+			case 'aws':
+				return new AwsIotClient(config, logger);
+			case 'gcp':
+				return new GcpIotClient(config, logger);
+			default: {
+				const _exhaustive: never = config;
+				throw new Error(
+					`Unsupported publish provider: ${(_exhaustive as PublishProviderConfig).provider}`,
+				);
+			}
+		}
+	}
+}
+
+/**
+ * Top-level entry point used by init/infra.ts.
+ * Loads config from env, creates and connects the appropriate client.
+ * Returns null when no external target is configured (use Iotistica fallback).
+ */
 export async function createExternalPublishTarget(
 	input: CloudTargetFactoryInput,
 ): Promise<MqttConnection | null> {
-	const target = normalizeTarget(input.target || process.env.PUBLISH_TARGET);
+	const loader = new PublishConfigLoader();
+	const config = loader.loadFromEnv(input.target);
 
-	if (target === 'iotistica') {
-		return null;
-	}
+	if (!config) return null;
 
-	if (target === 'azure') {
-		const connStr = process.env.AZURE_IOTHUB_CONNECTION_STRING;
-		if (!connStr) {
-			throw new Error('PUBLISH_TARGET=azure requires AZURE_IOTHUB_CONNECTION_STRING');
-		}
-
-		const { AzureIotClient } = await import('./clients/azure-iot.js');
-		const client = new AzureIotClient(connStr, input.logger);
-		await client.connect();
-		return client;
-	}
-
-	if (target === 'aws') {
-		const client = AwsIotClient.fromEnv(input.logger);
-		await client.connect();
-		return client;
-	}
-
-	if (target === 'gcp') {
-		const client = GcpIotClient.fromEnv(input.logger);
-		await client.connect();
-		return client;
-	}
-
-	return null;
+	const client: BaseMqttClient = PublishClientFactory.create(config, input.logger);
+	await client.connect();
+	return client;
 }
