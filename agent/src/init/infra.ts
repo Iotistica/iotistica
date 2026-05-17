@@ -1,8 +1,8 @@
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types.js';
 import type { MqttConnection } from '../publish/types.js';
-import { createExternalPublishTarget } from '../cloud/factory.js';
-import { normalizeTarget } from '../cloud/types.js';
+import { createExternalPublishTarget } from '../external/factory.js';
+import { normalizeTarget } from '../external/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 
 
