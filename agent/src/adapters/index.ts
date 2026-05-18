@@ -1,15 +1,5 @@
 /**
- * Protocol Adapter Manager
- *
- * Manages industrial protocol adapters (Modbus, OPC-UA, SNMP, MQTT, BACnet, CAN).
- * Each adapter polls devices and emits 'data' events.
- * AdapterManager creates one SocketServer per protocol and routes adapter data
- * to sockets for consumption by the publish pipeline.
- *
- * Architecture:
- * - Protocol Adapters: Socket-agnostic, emit data events
- * - AdapterManager: Creates SocketServers, routes adapter data to sockets
- * - Publish pipeline: Reads from sockets, publishes to MQTT
+ * Protocol adapter manager.
  */
 
 import { EventEmitter } from "events";
@@ -24,13 +14,11 @@ import { EndpointOutputModel } from "../db/models/endpoint-outputs.model.js";
 import { EndpointModel } from "../db/models/endpoint.model.js";
 import { encodeIfUuid } from "../mqtt/codec.js";
 
-// Type imports only (no runtime loading)
+// Type-only import.
 import type { OPCUAAdapterConfig } from "./opcua/types.js";
 
-// SNMP imports
 import { SNMPAdapter } from "./snmp/adapter.js";
 
-// BACnet imports
 import { BACnetAdapter } from "./bacnet/adapter.js";
 import { type BACnetAdapterConfig } from "./bacnet/types.js";
 
@@ -46,8 +34,7 @@ export interface AdapterConfig {
 export class AdapterManager extends EventEmitter {
 	private adapters: Map<string, any> = new Map();
 	private socketServers: Map<string, SocketServer> = new Map();
-	// Shared endpoint-UUID lookup used by the MQTT data handler; updated in-place on hot-reload
-	// so the event-handler closure always sees the latest device→UUID mappings.
+	// Shared endpoint UUID lookup for MQTT hot-reloads.
 	private mqttEndpointUuidByName: Map<string, string> = new Map();
 	private config: AdapterConfig;
 	private deviceUuid: string;
@@ -73,17 +60,10 @@ export class AdapterManager extends EventEmitter {
 				return point;
 			}
 
-			// Each endpoint in the endpoints table is itself a device with a UUID.
-			// Honour any asset-level device_uuid supplied by the source (e.g. a fleet
-			// simulator that assigns its own UUIDs), otherwise the endpoint UUID is the
-			// device identity for protocol adapters (OPC UA, Modbus, SNMP, MQTT).
+			// Prefer source-provided device_uuid; otherwise use endpoint UUID.
 			const device_uuid = point.device_uuid || endpointUuid;
 
-			// Build a unique device display name: "{displayBase}-{first8ofDeviceUuid}"
-			// - displayBase: protocol-discovered name (OPC-UA DisplayName, SNMP sysName, BACnet
-			//   objectName) or config displayName override; falls back to the raw endpoint config name
-			// - uuid suffix: first 8 hex chars of device_uuid make it globally unique across agents
-			//   e.g. "opcua-4" (raw) → "Siemens S7-1500-eaaeff83" (discovered) or "opcua-4-eaaeff83"
+			// Build a stable display name suffix with device UUID.
 			const displayBase = point.resolvedDisplayName || point.deviceName;
 			const uuidSuffix = device_uuid.replace(/-/g, "").slice(0, 8);
 			const deviceName =
@@ -105,7 +85,7 @@ export class AdapterManager extends EventEmitter {
 		});
 	}
 
-	/** Build a device-name → endpoint-UUID lookup from a list of device configs */
+	/** Build a device-name to endpoint-UUID map. */
 	private buildUuidMap(devices: any[]): Map<string, string> {
 		const map = new Map<string, string>();
 		for (const device of devices) {
@@ -122,7 +102,7 @@ export class AdapterManager extends EventEmitter {
 		return map;
 	}
 
-	/** Load output config from DB, create and start a SocketServer for the given protocol */
+	/** Load output config and start a protocol socket server. */
 	private async createSocketServer(protocol: string): Promise<SocketServer> {
 		const dbOutput = await EndpointOutputModel.getOutput(protocol);
 		if (!dbOutput)
@@ -140,7 +120,7 @@ export class AdapterManager extends EventEmitter {
 		return socket;
 	}
 
-	/** Wire the four standard adapter events (started, data, device-connected, device-disconnected) */
+	/** Wire standard adapter events. */
 	private wireAdapterEvents(
 		protocol: string,
 		adapter: EventEmitter,
@@ -187,7 +167,7 @@ export class AdapterManager extends EventEmitter {
 		};
 	}
 
-	/** Start all enabled protocol adapters */
+	/** Start all enabled protocol adapters. */
 	async start(): Promise<void> {
 		if (this.running) return;
 		if (this.config.modbus?.enabled) await this.startModbusAdapter();
@@ -201,7 +181,7 @@ export class AdapterManager extends EventEmitter {
 		this.emit("started");
 	}
 
-	/** Stop all running protocol adapters and socket servers */
+	/** Stop all running adapters and socket servers. */
 	async stop(): Promise<void> {
 		if (!this.running) return;
 		for (const [, adapter] of this.adapters) {
@@ -218,9 +198,7 @@ export class AdapterManager extends EventEmitter {
 		return this.running;
 	}
 
-	/**
-	 * Start Modbus adapter
-	 */
+	/** Start Modbus adapter. */
 	private async startModbusAdapter(): Promise<void> {
 		try {
 			let modbusConfig: ModbusAdapterConfig;
@@ -286,9 +264,7 @@ export class AdapterManager extends EventEmitter {
 		}
 	}
 
-	/**
-	 * Start OPC-UA adapter
-	 */
+	/** Start OPC UA adapter. */
 	private async startOPCUAAdapter(): Promise<void> {
 		try {
 			let opcuaDevices: any[];
@@ -338,9 +314,7 @@ export class AdapterManager extends EventEmitter {
 		}
 	}
 
-	/**
-	 * Start SNMP adapter
-	 */
+	/** Start SNMP adapter. */
 	private async startSNMPAdapter(): Promise<void> {
 		try {
 			const dbDevices = await EndpointModel.getEnabled("snmp");
@@ -384,9 +358,7 @@ export class AdapterManager extends EventEmitter {
 		}
 	}
 
-	/**
-	 * Start MQTT adapter (or hot-reload devices if already running)
-	 */
+	/** Start MQTT adapter, or hot-reload devices if already running. */
 	private async startMQTTAdapter(): Promise<void> {
 		try {
 			let mqttConfig: MqttAdapterConfig;
@@ -491,12 +463,12 @@ export class AdapterManager extends EventEmitter {
 				};
 			}
 
-			// Rebuild the class-level UUID map (updated in-place; event handler closure always sees latest)
+			// Rebuild class-level UUID map in place for hot-reload event handlers.
 			const newMap = this.buildUuidMap(mqttConfig.devices);
 			this.mqttEndpointUuidByName.clear();
 			newMap.forEach((v, k) => this.mqttEndpointUuidByName.set(k, v));
 
-			// Hot-update path: diff subscriptions in-place without reconnecting to the broker
+			// Hot-update subscriptions without reconnecting.
 			const existingAdapter = this.adapters.get("mqtt") as
 				| LocalBrokerMqttAdapter
 				| undefined;
@@ -515,7 +487,7 @@ export class AdapterManager extends EventEmitter {
 				this.deviceUuid,
 			);
 			this.adapters.set("mqtt", adapter);
-			// Pass this.mqttEndpointUuidByName so the data handler always sees the latest map after hot-reloads
+			// Use class map so handlers always see latest UUID mappings.
 			this.wireAdapterEvents(
 				"mqtt",
 				adapter,
@@ -531,21 +503,14 @@ export class AdapterManager extends EventEmitter {
 		}
 	}
 
-	/**
-	 * Hot-reload MQTT adapter devices without disconnecting from the broker.
-	 * Safe to call from the reconciliation-complete handler instead of stop/reinit.
-	 */
+	/** Hot-reload MQTT adapter devices without disconnecting. */
 	async reloadMQTTAdapter(): Promise<void> {
 		if (this.config.mqtt?.enabled) {
 			await this.startMQTTAdapter();
 		}
 	}
 
-	/**
-	 * Get endpoint health from all enabled protocol adapters
-	 * Returns health data for all configured endpoints (discovered + configured)
-	 * Works for ANY protocol adapter that implements getDeviceStatuses()
-	 */
+	/** Get endpoint health across configured devices and running adapters. */
 	async getAllDeviceStatuses(): Promise<Record<string, any>> {
 		const health: Record<string, any> = {};
 
@@ -553,25 +518,22 @@ export class AdapterManager extends EventEmitter {
 			`getAllDeviceStatuses called - adapters.size: ${this.adapters.size}, keys: [${Array.from(this.adapters.keys()).join(", ")}]`,
 		);
 
-		// Get all devices directly from database (includes discovered devices)
+		// Load all configured and discovered devices from the database.
 		try {
 			const allDevices = await EndpointModel.getAll();
 			const stalenessThresholdMs = 24 * 60 * 60 * 1000; // 24 hours
 
 			this.logger.debug(`Found ${allDevices.length} devices in database`);
 
-			// Build health status for each device
+			// Build baseline health from database state.
 			for (const device of allDevices) {
-				// Determine online/offline based on lastSeenAt timestamp
-				// Use 24-hour threshold for discovered devices (discovery runs periodically)
-				// Adapter overlay will provide real-time status for actively polled devices
+				// Determine online/offline from lastSeenAt.
 				const lastSeen = device.lastSeenAt ? new Date(device.lastSeenAt) : null;
 				const now = Date.now();
 				const isOnline =
 					lastSeen && now - lastSeen.getTime() < stalenessThresholdMs;
 
-				// Disabled endpoints show as 'disabled' regardless of lastSeen
-				// SQLite stores booleans as 0/1, convert to boolean
+				// SQLite stores booleans as 0/1.
 				const isEnabled = Boolean(device.enabled);
 
 				health[device.name] = {
@@ -593,7 +555,7 @@ export class AdapterManager extends EventEmitter {
 				};
 			}
 
-			// Now overlay runtime status from adapters (if available)
+			// Overlay runtime adapter status when available.
 			for (const [protocol, adapter] of this.adapters) {
 				if (adapter && typeof adapter.getDeviceStatuses === "function") {
 					try {
@@ -607,9 +569,7 @@ export class AdapterManager extends EventEmitter {
 						if (Array.isArray(statuses)) {
 							for (const device of statuses) {
 								if (health[device.deviceName]) {
-									// Overlay runtime status and derive effective status from fresh runtime timestamps.
-									// This prevents stale DB status from forcing MQTT endpoints to appear offline
-									// when messages are actively arriving.
+									// Derive effective runtime status from fresh timestamps.
 									const now = Date.now();
 									const runtimeLastSeenMs = device.lastSeen
 										? new Date(device.lastSeen).getTime()
@@ -628,9 +588,7 @@ export class AdapterManager extends EventEmitter {
 										health[device.deviceName].status !== "disabled";
 									const explicitlyOffline =
 										device.communicationQuality === "offline";
-									// Derive connectivity from fresh activity, not adapter connected flag.
-									// Some adapters (e.g., MQTT) intentionally do not toggle `connected`
-									// on every message and rely on staleness/LWT semantics.
+									// Derive connectivity from activity, not adapter connected flag.
 									const runtimeOnline = Boolean(
 										hasFreshRuntimeSignal && !explicitlyOffline,
 									);
@@ -670,9 +628,7 @@ export class AdapterManager extends EventEmitter {
 		return health;
 	}
 
-	/**
-	 * Start BACnet adapter
-	 */
+	/** Start BACnet adapter. */
 	private async startBACnetAdapter(): Promise<void> {
 		try {
 			let bacnetConfig: BACnetAdapterConfig;
@@ -739,19 +695,12 @@ export class AdapterManager extends EventEmitter {
 		}
 	}
 
-	/**
-	 * Get a specific protocol adapter
-	 * @param protocol - Protocol name ('modbus', 'opcua', 'snmp', 'mqtt', 'bacnet')
-	 * @returns The adapter instance or undefined if not running
-	 */
+	/** Get a specific protocol adapter. */
 	getAdapter(protocol: string): any | undefined {
 		return this.adapters.get(protocol);
 	}
 
-	/**
-	 * Get all running adapters
-	 * @returns Map of protocol name to adapter instance
-	 */
+	/** Get all running adapters. */
 	getAllAdapters(): Map<string, any> {
 		return new Map(this.adapters);
 	}
