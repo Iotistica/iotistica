@@ -15,21 +15,11 @@ export interface UuidGenerator {
 }
 
 /**
- * Default UUID generator using crypto.randomUUID (Node 14.17+)
- * Falls back to manual generation for older versions
+ * Default UUID generator using crypto.randomUUID.
  */
 export class DefaultUuidGenerator implements UuidGenerator {
 	generate(): string {
-		// Use crypto.randomUUID if available (Node 14.17+)
-		if (crypto.randomUUID) {
-			return crypto.randomUUID();
-		}
-		// Fallback UUID v4 generator
-		return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-			const r = Math.random() * 16 | 0;
-			const v = c === 'x' ? r : (r & 0x3 | 0x8);
-			return v.toString(16);
-		});
+		return crypto.randomUUID();
 	}
 }
 

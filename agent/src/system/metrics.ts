@@ -1,11 +1,5 @@
 /**
- * SYSTEM METRICS MODULE
- * ======================
- * 
- * Simplified version of balena-supervisor system-info module
- * Collects hardware metrics from the device running container-manager
- * 
- * Adapted from: src/lib/system-info.ts
+ * System metrics collection for the agent.
  */
 
 import systeminformation from 'systeminformation';
@@ -16,11 +10,7 @@ import type { AnomalyDetectionService } from '../anomaly';
 
 const exec = promisify(execCallback);
 
-// ============================================================================
-// GRACEFUL DEGRADATION HELPER
-// ============================================================================
-// Never throw exceptions - always return fallback values
-// Partial data is better than no data on edge devices
+// Return fallback values instead of throwing.
 
 const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
 	try {
@@ -30,57 +20,43 @@ const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
 	}
 };
 
-// ============================================================================
-// STATIC VALUE CACHING (for values that never/rarely change)
-// ============================================================================
-// Cache truly static values (hostname and CPU cores never change during runtime)
+// Cache static or infrequently changing values.
 let cachedHostname: string | null = null;
 let cachedCpuCores: number | null = null;
 
-// Cache network interfaces with 30-second TTL (NICs can change: WiFi SSID, VPN, docker0, etc.)
+// Cache network interfaces with a short TTL because NIC state can change.
 let cachedNetworkInterfaces: { ts: number; data: NetworkInterfaceInfo[] } | null = null;
 
 
 let cachedCpuLoad = 0;
 
-// Background CPU sampler (updates every second)
+// Background CPU sampler.
 async function startCpuSampler() {
 	try {
 		const load = await systeminformation.currentLoad();
-		cachedCpuLoad = load.currentLoad; // Already averaged internally
+		cachedCpuLoad = load.currentLoad;
 	} catch {
 		// ignore errors, keep old value
 	}
 	setTimeout(startCpuSampler, 1000);
 }
 
-// Start sampling once
+// Start sampling once.
 startCpuSampler();
-
-// ============================================================================
-// EDGE AI ANOMALY DETECTION CONFIGURATION
-// ============================================================================
 
 let anomalyService: AnomalyDetectionService | undefined;
 
-/**
- * Configure edge AI anomaly detection for system metrics
- * @param service - AnomalyDetectionService instance or undefined to disable
- */
+/** Configure anomaly feed integration for system metrics. */
 export function configureAnomalyFeed(service: AnomalyDetectionService | undefined): void {
 	anomalyService = service;
 }
-
-// ============================================================================
-// TYPES
-// ============================================================================
 
 export interface ProcessInfo {
 	pid: number;
 	name: string;
 	cpu: number;
 	mem: number;
-	command?: string; // Optional - excluded to reduce data size
+	command?: string;
 }
 
 export interface NetworkInterfaceInfo {
@@ -97,55 +73,39 @@ export interface NetworkInterfaceInfo {
 }
 
 export interface ExtendedMetrics {
-	// Linux-specific
-	load_average?: number[]; // 1, 5, 15 minute load averages
-	disk_io?: { read: number; write: number }; // Bytes/sec
-	cpu_throttling?: { current_freq: number; max_freq: number }; // MHz
-	
-	// Windows-specific
-	gpu_temp?: number; // °C
-	disk_metrics?: { read_ops: number; write_ops: number }; // Operations/sec
+	load_average?: number[];
+	disk_io?: { read: number; write: number };
+	cpu_throttling?: { current_freq: number; max_freq: number };
+	gpu_temp?: number;
+	disk_metrics?: { read_ops: number; write_ops: number };
 }
 
 export interface SystemMetrics {
-	// CPU metrics
 	cpu_usage: number;
 	cpu_temp: number | null;
 	cpu_cores: number;
 
-	// Memory metrics
 	memory_usage: number;
 	memory_total: number;
 	memory_percent: number;
 
-	// Storage metrics
 	storage_usage: number | null;
 	storage_total: number | null;
 	storage_percent: number | null;
 
-	// System info
 	uptime: number;
 	hostname: string;
 
-	// Health checks
 	is_undervolted: boolean;
 
-	// Networking
 	network_interfaces: NetworkInterfaceInfo[];
 
-	// OS-specific extended metrics
 	extended?: ExtendedMetrics;
 
-	// Timestamp
 	timestamp: Date;
 }
-// ============================================================================
-// OS-SPECIFIC EXTENDED METRICS
-// ============================================================================
 
-/**
- * Get Linux load average (1, 5, 15 minutes)
- */
+/** Get Linux load average. */
 async function getLinuxLoadAverage(): Promise<number[] | undefined> {
 	if (process.platform !== 'linux') return undefined;
 	try {
@@ -155,29 +115,24 @@ async function getLinuxLoadAverage(): Promise<number[] | undefined> {
 	}
 }
 
-/**
- * Get Linux disk I/O statistics
- */
+/** Get Linux disk I/O statistics. */
 async function getLinuxDiskIO(): Promise<{ read: number; write: number } | undefined> {
 	if (process.platform !== 'linux') return undefined;
 	try {
 		const io = await systeminformation.disksIO();
 		return {
-			read: io.rIO_sec || 0, // Reads per second
-			write: io.wIO_sec || 0, // Writes per second
+			read: io.rIO_sec || 0,
+			write: io.wIO_sec || 0,
 		};
 	} catch {
 		return undefined;
 	}
 }
 
-/**
- * Get Linux CPU throttling info (current vs max frequency)
- */
+/** Get Linux CPU frequency information. */
 async function getLinuxCpuThrottling(): Promise<{ current_freq: number; max_freq: number } | undefined> {
 	if (process.platform !== 'linux') return undefined;
 	try {
-		// Read current frequency from sysfs
 		const currentCmd = 'cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null';
 		const maxCmd = 'cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq 2>/dev/null';
 		
@@ -213,7 +168,6 @@ async function getWindowsGpuTemp(): Promise<number | undefined> {
 		
 		if (isNaN(tempKelvin)) return undefined;
 		
-		// Convert from decikelvin to Celsius
 		return Math.round((tempKelvin / 10) - 273.15);
 	} catch {
 		return undefined;
@@ -237,20 +191,16 @@ async function getWindowsDiskMetrics(): Promise<{ read_ops: number; write_ops: n
 	}
 }
 
-/**
- * Collect OS-specific extended metrics
- */
+/** Collect OS-specific extended metrics. */
 async function getExtendedMetrics(): Promise<ExtendedMetrics | undefined> {
 	const isLinux = process.platform === 'linux';
 	const isWindows = process.platform === 'win32';
 	
-	// Skip if neither Linux nor Windows
 	if (!isLinux && !isWindows) return undefined;
 	
 	const extended: ExtendedMetrics = {};
 	
 	if (isLinux) {
-		// Linux-specific metrics
 		const [loadAvg, diskIO, cpuThrottle] = await Promise.all([
 			getLinuxLoadAverage(),
 			getLinuxDiskIO(),
@@ -263,7 +213,6 @@ async function getExtendedMetrics(): Promise<ExtendedMetrics | undefined> {
 	}
 	
 	if (isWindows) {
-		// Windows-specific metrics
 		const [gpuTemp, diskMetrics] = await Promise.all([
 			getWindowsGpuTemp(),
 			getWindowsDiskMetrics(),
@@ -273,17 +222,10 @@ async function getExtendedMetrics(): Promise<ExtendedMetrics | undefined> {
 		if (diskMetrics) extended.disk_metrics = diskMetrics;
 	}
 	
-	// Only return extended if we got at least one metric
 	return Object.keys(extended).length > 0 ? extended : undefined;
 }
 
-// ============================================================================
-// NETWORK METRICS
-// ============================================================================
-
-/**
- * Get network interfaces and their details (cached with 30s TTL - interfaces can change)
- */
+/** Get network interfaces and details. */
 export async function getNetworkInterfaces(): Promise<NetworkInterfaceInfo[]> {
 	const now = Date.now();
 	if (cachedNetworkInterfaces && now - cachedNetworkInterfaces.ts < 30_000) {
@@ -306,7 +248,7 @@ export async function getNetworkInterfaces(): Promise<NetworkInterfaceInfo[]> {
 				operstate: iface.operstate || null,
 			};
 
-			// Only add ssid/signalLevel if present (for wifi)
+			// Add Wi-Fi details when present.
 			if ('ssid' in iface && typeof iface.ssid === 'string') {
 				(base as any).ssid = iface.ssid;
 			}
@@ -317,28 +259,21 @@ export async function getNetworkInterfaces(): Promise<NetworkInterfaceInfo[]> {
 			return base;
 		});
 
-		// Cache with timestamp for 30-second TTL
+		// Cache with timestamp for TTL.
 		cachedNetworkInterfaces = { ts: now, data: formatted };
 		return formatted;
 	} catch (_error) {
-		// Don't cache errors - allow retry on next call
+		// Do not cache failures.
 		return [];
 	}
 }
-// ============================================================================
-// CPU METRICS
-// ============================================================================
 
 export async function getCpuUsage(): Promise<number> {
-	// Fast path: just return the latest sampled value
-	// No await needed, no systeminformation call here
+	// Fast path: return sampled value.
 	return Math.round(cachedCpuLoad);
 }
 
-/**
- * Get CPU temperature in Celsius
- * Returns null if temperature device not available
- */
+/** Get CPU temperature in Celsius. */
 export async function getCpuTemp(): Promise<number | null> {
 	try {
 		const tempInfo = await systeminformation.cpuTemperature();
@@ -348,9 +283,7 @@ export async function getCpuTemp(): Promise<number | null> {
 	}
 }
 
-/**
- * Get number of CPU cores (cached after first call - cores don't change)
- */
+/** Get number of CPU cores. */
 export async function getCpuCores(): Promise<number> {
 	if (cachedCpuCores !== null) {
 		return cachedCpuCores;
@@ -366,34 +299,25 @@ export async function getCpuCores(): Promise<number> {
 	}
 }
 
-// ============================================================================
-// MEMORY METRICS
-// ============================================================================
 
-/**
- * Get memory usage information
- */
+/** Get memory usage information. */
 export async function getMemoryInfo(): Promise<{
 	used: number;
 	total: number;
 	percent: number;
 }> {
 	try {
-		// Detect if running in a Docker container
 		const isContainer = await isRunningInContainer();
 		
 		if (isContainer) {
-			// Read container memory stats from cgroup
 			const containerMem = await getContainerMemory();
 			if (containerMem) {
 				return containerMem;
 			}
-			// Fall through to systeminformation if cgroup read fails
 		}
 		
 		const mem = await systeminformation.mem();
-		// Exclude cached and buffers from used memory (like balena does)
-		// Ensure non-negative result (some systems report used differently)
+		// Exclude cache and buffers.
 		const calcUsed = Math.max(0, mem.used - mem.cached - mem.buffers);
 		const usedMb = bytesToMb(calcUsed);
 		const totalMb = bytesToMb(mem.total);
@@ -405,23 +329,19 @@ export async function getMemoryInfo(): Promise<{
 			percent,
 		};
 	} catch (_error) {
-	// Silently return zero values - caller will handle
+		// Return fallback values.
 		return { used: 0, total: 0, percent: 0 };
 	}
 }
 
-/**
- * Check if running inside a Docker container
- */
+/** Check if running inside a container. */
 async function isRunningInContainer(): Promise<boolean> {
 	try {
 		const fs = await import('fs/promises');
-		// Check for .dockerenv file
 		try {
 			await fs.access('/.dockerenv');
 			return true;
 		} catch {
-			// Check cgroup
 			try {
 				const cgroup = await fs.readFile('/proc/1/cgroup', 'utf-8');
 				return cgroup.includes('docker') || cgroup.includes('kubepods');
@@ -434,14 +354,12 @@ async function isRunningInContainer(): Promise<boolean> {
 	}
 }
 
-/**
- * Read container memory usage from cgroup
- */
+/** Read container memory usage from cgroup. */
 async function getContainerMemory(): Promise<{ used: number; total: number; percent: number } | null> {
 	try {
 		const fs = await import('fs/promises');
 		
-		// Try cgroup v2 first (newer Docker versions)
+		// Try cgroup v2 first.
 		try {
 			const memCurrent = await fs.readFile('/sys/fs/cgroup/memory.current', 'utf-8');
 			const memMax = await fs.readFile('/sys/fs/cgroup/memory.max', 'utf-8');
@@ -449,7 +367,7 @@ async function getContainerMemory(): Promise<{ used: number; total: number; perc
 			const used = parseInt(memCurrent.trim());
 			const total = parseInt(memMax.trim());
 			
-			if (!isNaN(used) && !isNaN(total) && total !== 9223372036854771712) { // max value means no limit
+			if (!isNaN(used) && !isNaN(total) && total !== 9223372036854771712) {
 				const usedMb = bytesToMb(used);
 				const totalMb = bytesToMb(total);
 				return {
@@ -459,7 +377,7 @@ async function getContainerMemory(): Promise<{ used: number; total: number; perc
 				};
 			}
 		} catch {
-			// Try cgroup v1 (older Docker versions)
+			// Try cgroup v1.
 			try {
 				const memUsage = await fs.readFile('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf-8');
 				const memLimit = await fs.readFile('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf-8');
@@ -487,14 +405,8 @@ async function getContainerMemory(): Promise<{ used: number; total: number; perc
 	}
 }
 
-// ============================================================================
-// STORAGE METRICS
-// ============================================================================
 
-/**
- * Get storage usage information
- * Looks for /data partition or falls back to root
- */
+/** Get storage usage information. */
 export async function getStorageInfo(): Promise<{
 	used: number | null;
 	total: number | null;
@@ -503,7 +415,7 @@ export async function getStorageInfo(): Promise<{
 	try {
 		const fsInfo = await systeminformation.fsSize();
 		
-		// Look for /data partition first
+		// Prefer /data (or C: on Windows), else first partition.
 		const targetPartition = fsInfo.find(fs => 
 			process.platform === 'win32'
 				? fs.mount.toUpperCase() === 'C:'
@@ -518,20 +430,16 @@ export async function getStorageInfo(): Promise<{
 		return {
 			used: bytesToMb(targetPartition.used),
 			total: bytesToMb(targetPartition.size),
-			// use is already 0-100 from systeminformation, round to integer for display
+			// `use` is already 0-100.
 			percent: Math.round(targetPartition.use),
 		};
 	} catch (_error) {
-	// Silently return null values - caller will handle
+		// Return fallback values.
 		return { used: null, total: null, percent: null };
 	}
-}// ============================================================================
-// SYSTEM INFO
-// ============================================================================
+}
 
-/**
- * Get system uptime in seconds
- */
+/** Get system uptime in seconds. */
 export async function getUptime(): Promise<number> {
 	try {
 		const isContainer = await isRunningInContainer();
@@ -545,9 +453,7 @@ export async function getUptime(): Promise<number> {
 	}
 }
 
-/**
- * Get system hostname (cached after first call - hostname rarely changes)
- */
+/** Get system hostname. */
 export async function getHostname(): Promise<string> {
 	if (cachedHostname !== null) {
 		return cachedHostname;
@@ -563,9 +469,7 @@ export async function getHostname(): Promise<string> {
 	}
 }
 
-/**
- * Get primary MAC address (from default network interface)
- */
+/** Get primary MAC address from the default interface. */
 export async function getMacAddress(): Promise<string | undefined> {
 	try {
 		const defaultIface = await systeminformation.networkInterfaceDefault();
@@ -573,7 +477,7 @@ export async function getMacAddress(): Promise<string | undefined> {
 		const primaryInterface = interfaces.find(i => i.iface === defaultIface);
 		return primaryInterface?.mac || undefined;
 	} catch (_error) {
-		// Silently return undefined - caller will handle
+		// Return fallback value.
 		return undefined;
 	}
 }
@@ -584,22 +488,14 @@ export async function getMacAddress(): Promise<string | undefined> {
 export async function getOsVersion(): Promise<string | undefined> {
 	try {
 		const osInfo = await systeminformation.osInfo();
-		// Format: "Debian GNU/Linux 12 (bookworm)" or similar
 		return `${osInfo.distro} ${osInfo.release}${osInfo.codename ? ` (${osInfo.codename})` : ''}`;
 	} catch (_error) {
-		// Silently return undefined - caller will handle
+		// Return fallback value.
 		return undefined;
 	}
 }
 
-// ============================================================================
-// HEALTH CHECKS
-// ============================================================================
-
-/**
- * Check if system has detected undervoltage (Raspberry Pi)
- * Scans dmesg for undervoltage warnings
- */
+/** Check for undervoltage warnings on Linux systems. */
 export async function isUndervolted(): Promise<boolean> {
 	if (process.platform !== 'linux') return false;
 	try {
@@ -610,16 +506,7 @@ export async function isUndervolted(): Promise<boolean> {
 	}
 }
 
-
-// ============================================================================
-// PROCESS METRICS
-// ============================================================================
-
-/**
- * Get top 10 processes by CPU and memory usage
- * Returns combined list sorted by resource usage
- * Note: CPU readings may be less accurate on Windows (accepts 0 on first call)
- */
+/** Get top 10 processes by resource usage. */
 export async function getTopProcesses(): Promise<ProcessInfo[]> {
 	try {
 
@@ -627,52 +514,48 @@ export async function getTopProcesses(): Promise<ProcessInfo[]> {
 			return getTopProcessesWindows();
 		}
 
-		// Single call for performance - CPU values may be 0 on Windows first collection
-		// This is acceptable trade-off for 1+ second performance gain
+		// Single collection call for performance.
 		const processes = await systeminformation.processes();
 		
-		// If systeminformation returns empty, try fallback method
+		// Fall back when process list is empty.
 		if (processes.list.length === 0) {
-		// Silently fallback - debug logging removed
+			// Use fallback command parser.
 			return await getTopProcessesFallback();
 		}
 	
-		// CRITICAL: CPU percentages on Linux are per-core (e.g., 400% on 4-core system)
-		// We normalize to per-system percentage for consistent comparison
-		// Note: We're already on Linux here (Windows takes early return above)
+		// Normalize per-core CPU values to a per-system percentage.
 		const cpuCoreCount = await getCpuCores();
 	
-		// GARBAGE-OPTIMIZED: Single pass filter+score+sort without intermediate arrays
-		// Pre-allocate result array to avoid resizing
+		// Build top results with minimal allocations.
 		const result: ProcessInfo[] = new Array(10);
 		let resultCount = 0;
 	
-		// Score and collect top 10 in single pass (no intermediate arrays)
+		// Score and collect candidates.
 		const scored: Array<{ proc: any; score: number }> = [];
 	
 		for (let i = 0; i < processes.list.length; i++) {
 			const proc = processes.list[i];
 		
-			// Filter kernel threads and empty names inline
+			// Skip kernel threads and empty process names.
 			if (proc.name.startsWith('[') || proc.name === '') continue;
 		
-			// Normalize CPU percentage from per-core to per-system
+			// Normalize CPU percentage.
 			const normalizedCpu = proc.cpu / cpuCoreCount;
 		
-			// Calculate score (CPU 60%, memory 40%) using normalized CPU
+			// Weighted score: CPU 60%, memory 40%.
 			const score = (normalizedCpu * 0.6) + (proc.mem * 0.4);
 			scored.push({ proc, score });
 		}
 	
-		// Sort scored array in-place (mutates, no new array)
+		// Sort candidates by score.
 		scored.sort((a, b) => b.score - a.score);
 	
-		// Take top 10 and format directly into result array
+		// Take top 10.
 		const limit = Math.min(10, scored.length);
 		for (let i = 0; i < limit; i++) {
 			const proc = scored[i].proc;
 		
-			// Store normalized CPU (per-system, not per-core)
+			// Store normalized CPU.
 			const normalizedCpu = proc.cpu / cpuCoreCount;
 		
 			result[resultCount++] = {
@@ -683,29 +566,29 @@ export async function getTopProcesses(): Promise<ProcessInfo[]> {
 			};
 		}
 	
-		// Trim array to actual count (no extra null entries)
+		// Trim to actual count.
 		result.length = resultCount;
 	
 		return result;
 	} catch (_error) {
-	// Silently try fallback method - debug logging removed
+		// Use fallback command parser.
 		return await getTopProcessesFallback();
 	}
-}/**
- * Fallback method using ps command directly
- * Used when systeminformation fails to get process list
+}
+
+/**
+ * Fallback process list using `ps`.
  */
 async function getTopProcessesFallback(): Promise<ProcessInfo[]> {
 	try {
-		// Use ps command to get process info
-		// Format: PID %CPU %MEM COMMAND
+		// Format: PID %CPU %MEM COMMAND.
 		const { stdout } = await exec('ps aux --sort=-%cpu | head -n 11 | tail -n +2');
 		
 		const lines = stdout.trim().split('\n');
 		const processes: ProcessInfo[] = [];
 		
 		for (const line of lines) {
-			// Parse ps output: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+			// Parse: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND.
 			const parts = line.trim().split(/\s+/);
 			
 			if (parts.length >= 11) {
@@ -725,10 +608,9 @@ async function getTopProcessesFallback(): Promise<ProcessInfo[]> {
 			}
 		}
 	
-		// Debug logging removed - processes collected successfully
 		return processes;
 	} catch (_error) {
-	// Silently return empty array - caller will handle
+		// Return fallback value.
 		return [];
 	}
 }
@@ -744,26 +626,19 @@ async function getTopProcessesWindows(): Promise<ProcessInfo[]> {
 			.map(parts => ({
 				pid: Number(parts[1]),
 				name: parts[0],
-				cpu: 0, // Windows wmic doesn't provide CPU here (systeminformation will)
+				cpu: 0,
 				mem: Math.round((Number(parts[2]) / 1024 / 1024) * 10) / 10,
 			}));
 	} catch {
 		return [];
 	}
 }
-
-
-// ============================================================================
-// MAIN METRICS FUNCTION
-// ============================================================================
-
 /**
- * Get all system metrics in one call
- * This is the main function to use
+ * Get all system metrics.
  */
 
 export async function getSystemMetrics(): Promise<SystemMetrics> {
-	// Gather all metrics in parallel for speed - with timing
+	// Gather all metrics in parallel.
 	const _startTime = Date.now();
 	const timings: Record<string, number> = {};
 	
@@ -774,9 +649,6 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 		return result;
 	};
 	
-	// Collect top processes only if needed (can add 1-5 seconds on slow platforms)
-	// On Windows, default to disabled unless explicitly enabled (it's extremely slow)
-	// On Linux/production, default to enabled (it's fast)
 	const [
 		cpuUsage,
 		cpuTemp,
@@ -801,53 +673,35 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 		safe(() => wrapWithTiming('extendedMetrics', () => getExtendedMetrics()), undefined),
 	]);
 	
-	// const totalMs = Date.now() - startTime;
-	
-	// // Log timing breakdown if collection was slow (> 500ms total)
-	// if (totalMs > 500) {
-	// 	const sortedTimings = Object.entries(timings)
-	// 		.sort((a, b) => b[1] - a[1])
-	// 		.slice(0, 10); // Top 10 to see all operations
-	// 	console.log('[METRICS TIMING]', {
-	// 		totalMs,
-	// 		allTimings: Object.fromEntries(sortedTimings)
-	// 	});
-	// }
+	void _startTime;
+	void timings;
 
 	const metrics: SystemMetrics = {
-		// CPU
 		cpu_usage: cpuUsage,
 		cpu_temp: cpuTemp,
 		cpu_cores: cpuCores,
 
-		// Memory
 		memory_usage: memoryInfo.used,
 		memory_total: memoryInfo.total,
 		memory_percent: memoryInfo.percent,
 
-		// Storage
 		storage_usage: storageInfo.used,
 		storage_total: storageInfo.total,
 		storage_percent: storageInfo.percent,
 
-		// System
 		uptime,
 		hostname,
 
-		// Health
 		is_undervolted: undervolted,
 
-		// Networking
 		network_interfaces: networkInterfaces,
 
-		// OS-specific extended metrics
 		...(extendedMetrics && { extended: extendedMetrics }),
 
-		// Metadata
 		timestamp: new Date(),
 	};
 
-	// Feed edge AI anomaly detection if configured
+	// Feed anomaly detection when configured.
 	if (anomalyService) {
 		const timestamp = Date.now();
 		const deviceUuid = anomalyService.getDeviceUuid?.();
@@ -856,7 +710,7 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 			return metrics;
 		}
 
-		// Feed all numeric metrics to edge AI for local ML processing
+		// Feed numeric metrics.
 		const metricsToFeed = [
 			{ metric: 'cpu_usage', value: cpuUsage, unit: '%' },
 			{ metric: 'cpu_temp', value: cpuTemp, unit: '°C' },
@@ -870,20 +724,20 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 			{ metric: 'uptime', value: uptime, unit: 'seconds' },
 		];
 
-		// Process only metrics that are configured for anomaly detection
+		// Process only configured metrics.
 		for (const item of metricsToFeed) {
 			const canonicalMetricName = `${deviceUuid}_system_${item.metric}`;
 			if (item.value !== null && item.value !== undefined && anomalyService.isMetricConfigured(canonicalMetricName)) {
 				anomalyService.processDataPoint({
 					source: 'system',
-					protocol: 'system', // Agent system metrics
+					protocol: 'system',
 					deviceState: 'running',
 					deviceId: 'system-endpoint',
 					metric: canonicalMetricName,
 					value: item.value,
 					unit: item.unit,
 					timestamp,
-					quality: 'GOOD', // System metrics are always high quality
+					quality: 'GOOD',
 				});
 			}
 		}
@@ -891,22 +745,12 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 
 	return metrics;
 }
-
-
-// ============================================================================
-// UTILITIES
-// ============================================================================
-
-/**
- * Convert bytes to megabytes
- */
+/** Convert bytes to megabytes. */
 function bytesToMb(bytes: number): number {
 	return Math.floor(bytes / 1024 / 1024);
 }
 
-/**
- * Format uptime to human readable string
- */
+/** Format uptime to a short human-readable string. */
 export function formatUptime(seconds: number): string {
 	const days = Math.floor(seconds / 86400);
 	const hours = Math.floor((seconds % 86400) / 3600);
