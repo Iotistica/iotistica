@@ -5,6 +5,7 @@ import { createJsonPayload, createMsgpackPayload, serializePayload } from '../..
 import { getCpuUsage } from '../../system/metrics.js';
 import type { MqttConnection } from '../types.js';
 import type { Protocol } from '../../anomaly/types.js';
+import type { DictionaryManager } from '../../mqtt/dictionary.js';
 
 const deflateAsync = promisify(zlibDeflate);
 type Payload = Buffer | string;
@@ -55,7 +56,7 @@ export class PayloadCompressor {
 	constructor(
     private readonly opts: CompressorOptions,
     private readonly mqttConnection: MqttConnection,
-    private readonly dictionaryManager?: any,
+	private readonly dictionaryManager?: DictionaryManager,
     private readonly protocol?: Protocol,
 	) {}
 
@@ -144,9 +145,13 @@ export class PayloadCompressor {
 	private async applyDictionary(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
 		const t0 = Date.now();
 		const cpu0 = process.cpuUsage();
+		const dictionaryManager = this.dictionaryManager;
+		if (!dictionaryManager) {
+			throw new Error('Dictionary manager not initialized');
+		}
 
 		const dictCpu0 = process.cpuUsage();
-		const { compacted } = await this.dictionaryManager.compact(data, this.protocol);
+		const { compacted } = await dictionaryManager.compact(data, this.protocol);
 		const dictCpu = process.cpuUsage(dictCpu0);
 
 		let msgpackCpu: { user: number; system: number } | undefined;

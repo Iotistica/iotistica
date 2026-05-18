@@ -15,6 +15,7 @@ import { PublishStats } from './stats.js';
 import { HeartbeatManager } from './heartbeat.js';
 import { SchemaDriftDetector } from './schema/drift.js';
 import { SchemaDriftModel } from '../db/models/schema-drift.model.js';
+import type { DictionaryManager } from '../mqtt/dictionary.js';
 
 // Adaptive batch safety limits (calculated once at module load)
 const MAX_BATCH_MESSAGES = 10000;
@@ -86,7 +87,7 @@ export class PublishManager extends EventEmitter {
     private readonly mqttConnection: MqttConnection,
     private readonly logger: Logger | undefined,
     private readonly deviceUuid: string,
-    dictionaryManager?: any,
+	dictionaryManager?: DictionaryManager,
     useMsgpackPoc = false,
     useKeyCompactionPoc = false,
     useDeflatePoc = false,

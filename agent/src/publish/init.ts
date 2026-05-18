@@ -12,6 +12,7 @@ import { PublishManager } from './manager.js';
 import { MessageBufferSync } from '../mqtt/buffer.js';
 import type { IPublishClient } from '../mqtt/buffer.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
+import type { DictionaryManager } from '../mqtt/dictionary.js';
 import { EventEmitter } from 'events';
 
 /**
@@ -31,7 +32,7 @@ export class DevicePublish extends EventEmitter {
 	private mqttConnection?: MqttConnection;
 	private readonly deviceUuid: string;
 	private isRunning = false;
-	private dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
+	private dictionaryManager?: DictionaryManager; // Dictionary manager for MQTT message key compaction
 	private readonly useMsgpackPoc: boolean;
 	private readonly useKeyCompactionPoc: boolean;
 	private readonly useDeflatePoc: boolean;
@@ -50,7 +51,7 @@ export class DevicePublish extends EventEmitter {
 		config: DevicePublishConfig & { enabled: boolean },
 		agentLogger: AgentLogger,
 		deviceUuid: string,
-		dictionaryManager?: any, // Optional dictionary manager
+		dictionaryManager?: DictionaryManager, // Optional dictionary manager
 		useMsgpackPoc: boolean = false, // Enable MessagePack compression POC
 		useKeyCompactionPoc: boolean = false, // Enable dictionary key compaction POC
 		useDeflatePoc: boolean = false, // Enable DEFLATE compression POC
