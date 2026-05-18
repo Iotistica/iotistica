@@ -2,90 +2,13 @@ import { DictionaryModel } from '../db/models/index.js';
 import { agentTopic } from './topics.js';
 
 /**
- * MQTT Message Dictionary Manager
- * =================================
- * 
- * Domain-Partitioned Dynamic Dictionary (Schema-Free) - Pattern B with Metrics
- * 
- * Automatically compacts MQTT message keys into numeric indices, reducing bandwidth
- * by 45-70%. New fields are auto-discovered and added to appropriate semantic domains
- * without code changes. Prevents field collisions and enables type-safe cloud expansion.
- * 
- * Features:
- * - Auto-discovery: New fields automatically indexed on first appearance
- * - Domain partitioning: Logical separation (key, metric, unit, quality, device)
- * - Versioning: Dictionary version in every payload prevents stale data
- * - Nested objects: Recursive compaction with dot-notation keys
- * - Metrics tracking: Compression stats, anomaly detection, domain distribution
- * - Zero maintenance: Adapts to config changes (Modbus, OPC UA) automatically
- * 
- * ⚠️ CRITICAL INVARIANTS (must never be violated):
- * 1. APPEND-ONLY: Dictionary can only grow, never shrink or reorder
- * 2. MONOTONIC VERSIONS: Both workingVersion and dictionaryVersion only increase, never decrease
- * 3. VERSION ORDERING: dictionaryVersion <= workingVersion (always)
- * 4. NO RESET: Dictionary persists for device lifetime (except manual reset())
- * 5. INDEX STABILITY: Once assigned, an index→field mapping never changes
- * 6. DOMAIN IMMUTABILITY: A field's domain never changes once assigned
- * 7. PAYLOAD SAFETY: Payloads only reference dictionaryVersion (known to cloud)
- * 
- * These invariants enable delta sync without full state reconciliation.
- * Violating them will cause silent data corruption in cloud expansion.
- * 
- * Topic Structure:
- * - iot/device/{uuid}/meta/dictionary - Full dictionary sync with domains
- * - iot/device/{uuid}/meta/dictionary/delta - Delta updates with domains
- * - iot/device/{uuid}/endpoints/{device} - Original device topics (unchanged)
- * 
- * Message Format (Compacted):
- * {
- *   v: 5,                    // Dictionary version (dictionaryVersion - known to cloud)
- *   p: [[0, 21.5], [5, "°C"], [3, "GOOD"]]  // Pairs [index, value]
- * }
- * 
- * Version Strategy:
- * - workingVersion: Internal discovery counter, bumps immediately on new field
- * - dictionaryVersion: Bumps only when full sync succeeds (safe for cloud)
- * - Payloads use dictionaryVersion to avoid "unknown schema" crashes
- * - Protects against noisy/malformed payloads exploding version numbers
- * 
- * Wire Format Compatibility:
- * - Remains identical to previous version
- * - No decoding changes needed on cloud API
- * - Domains are internal detail for agent
- * 
- * Domain Reference:
- * - key: Structural JSON paths ("temperature", "alarms[].code")
- * - metric: Semantic metrics ("engine_rpm", "pressure_bar") - default domain
- * - unit: Engineering units ("RPM", "bar", "°C", "mA", "V")
- * - quality: OPC UA quality codes ("GOOD", "UNCERTAIN", "BAD")
- * - device: Device references ("modbus_slave_3", "gateway_main")
- * 
- * Usage:
- *   const manager = new DictionaryManager(mqttManager, logger, deviceUuid);
- *   await manager.initialize();
- *   
- *   // Compact message (decoupled from publishing)
- *   const original = { temperature: 21.5, timestamp: Date.now(), status: "active" };
- *   const { compacted, compressionRatio } = manager.compact(original);
- *   
- *   // Publish separately (via CloudMqttClient or device-publish)
- *   await mqttManager.publish(topic, compacted, options);
- *   
- *   // Check metrics
- *   const stats = manager.getMetrics();
- *   console.log(`Compression: ${stats.avgCompressionRatio}%`);
- *   console.log(`Domain distribution: ${stats.domainStats}`);
- * 
- * Environment Variables:
- * - USE_KEY_COMPACTION_POC=true - Enable dictionary compaction
- * - DICTIONARY_ARRAY_MODE=opaque|indexed - Array indexing mode (default: opaque)
- *   - opaque: Use generic [] for arrays (messages[].timestamp) - keeps dictionary small
- *   - indexed: Use specific indices (messages[0].timestamp, messages[1].timestamp) - legacy mode
- * - DICTIONARY_SYNC_INTERVAL_MS=300000 - Full sync interval (default: 5 minutes)
- * - DICTIONARY_DELTA_THRESHOLD=5 - Trigger delta after N new fields (default: 5)
- * - DICTIONARY_DELTA_DEBOUNCE_MS=200 - Debounce window for batching delta updates (default: 200ms)
- * 
- * See: docs/MQTT-KEY-COMPACTION-STRATEGY.md (Alternative 6)
+ * MQTT dictionary manager.
+ *
+ * Compacts payload keys to numeric indices and syncs dictionary state to cloud.
+ * Key guarantees:
+ * - Append-only index mapping
+ * - Monotonic versions with dictionaryVersion <= workingVersion
+ * - Payloads always reference dictionaryVersion (cloud-safe)
  */
 
 import type { CloudMqttClient } from './manager.js';
@@ -135,8 +58,7 @@ export interface DictionaryMetrics {
 }
 
 /**
- * Dictionary Manager - Pattern B (Advanced)
- * Manages domain-partitioned field-to-index mapping with automatic discovery and metrics
+ * Manages domain-partitioned field-to-index mappings and sync lifecycle.
  */
 export class DictionaryManager {
 	private domains: DomainDictionaries = {
@@ -147,10 +69,9 @@ export class DictionaryManager {
 		device: new Map(),
 	};
 
-	// ✅ OPTIMIZATION: Cache domain inference results (immutable by invariant #6)
+	// Cache domain inference results.
 	private domainCache = new Map<string, DictionaryDomain>();
 
-	// ✅ VALUE ENUM COMPRESSION
 	// Frozen OPC UA quality enum (never changes - hardcoded for safety)
 	private readonly QUALITY_ENUM: Record<string, number> = {
 		'GOOD': 1,
@@ -166,7 +87,7 @@ export class DictionaryManager {
 	// Enum candidate observation (for unit domain only)
 	private unitStats: Map<string, { count: number; firstSeen: number }> = new Map();
 
-	// ✅ PROTOCOL-AWARE METADATA ENUMS (Phase 7: Extended Compression)
+	// Protocol-aware metadata enums.
 	// Namespace metrics/devices by protocol to prevent semantic collisions
 	// Promotion thresholds:
 	// - qualityCode: 20 observations (bounded set, medium frequency)
@@ -188,7 +109,7 @@ export class DictionaryManager {
 	private deviceStats: Map<string, { count: number; firstSeen: number; protocol: string }> = new Map();
 	private readonly DEVICE_THRESHOLD = 10;
 
-	// ✅ OPTIMIZATION: Enum stability tracking (skip observation on mature systems)
+	// Enum stability tracking to reduce observation overhead.
 	private qualityCodeEnumStable = false;
 	private metricEnumStable = false;
 	private deviceEnumStable = false;
@@ -215,7 +136,7 @@ export class DictionaryManager {
 	private lastSyncedVersion = 0; // Track last synced dictionaryVersion to avoid redundant syncs
 	private lastDeltaSync = 0;
 	private fieldAdditionTimes: number[] = [];
-	private hasUnsyncedEnumPromotions = false; // Flag for unsynced enum promotions (Phase 7)
+	private hasUnsyncedEnumPromotions = false;
   
 	// Metrics tracking
 	private metrics: DictionaryMetrics = {
@@ -425,10 +346,9 @@ export class DictionaryManager {
 	/**
    * Infer domain from field name using heuristics
    * Order: Explicit prefixes → Semantic content → Structural markers → Default
-   * ✅ OPTIMIZED: Cached results (domain is immutable per invariant #6)
    */
 	private inferDomain(fieldName: string): DictionaryDomain {
-		// Check cache first (BIG WIN - avoids all string parsing)
+		// Check cache first.
 		const cached = this.domainCache.get(fieldName);
 		if (cached) return cached;
 
@@ -557,7 +477,7 @@ export class DictionaryManager {
 		// Check which domain this field belongs to
 		const domain = this.inferDomain(fieldName);
 
-		// ✅ QUALITY DOMAIN: Use frozen enum (hardcoded OPC UA codes)
+		// Quality domain uses the frozen OPC UA enum.
 		if (domain === 'quality') {
 			const enumIndex = this.QUALITY_ENUM[value];
 			if (enumIndex !== undefined) {
@@ -572,7 +492,7 @@ export class DictionaryManager {
 			return value;
 		}
 
-		// ✅ UNIT DOMAIN: Use promoted enum (if frozen)
+		// Unit domain uses promoted enum values when available.
 		if (domain === 'unit') {
 			// Observe for promotion (if not frozen)
 			if (!this.unitEnumFrozen) {
@@ -643,19 +563,16 @@ export class DictionaryManager {
 		});
 	}
 
-	// ========================================================================
-	// PROTOCOL-AWARE ENUM METHODS (Phase 7)
-	// ========================================================================
+	// Protocol-aware enum methods.
 
 	/**
    * Observe and potentially promote qualityCode value to enum
    * Threshold: 20 observations (bounded set, medium frequency)
-   * ✅ OPTIMIZED: Fast-path skip when enum is stable
    */
 	private async observeQualityCode(value: string | undefined): Promise<void> {
 		if (!value || typeof value !== 'string') return;
     
-		// ✅ FAST PATH: Skip observation if enum is stable
+		// Fast path when enum is stable.
 		if (this.qualityCodeEnumStable) return;
     
 		// Skip if already promoted (no need to continue counting)
@@ -724,12 +641,11 @@ export class DictionaryManager {
 	/**
    * Observe and potentially promote metric value to enum
    * Threshold: 100 observations per protocol namespace
-   * ✅ OPTIMIZED: Fast-path skip when enum is stable
    */
 	private async observeMetric(protocol: string | undefined, metric: string): Promise<void> {
 		if (!protocol) return;  // Skip if no protocol context
     
-		// ✅ FAST PATH: Skip observation if enum is stable
+		// Fast path when enum is stable.
 		if (this.metricEnumStable) return;
     
 		// Skip if already promoted (no need to continue counting)
@@ -816,12 +732,11 @@ export class DictionaryManager {
 	/**
    * Observe and potentially promote device name to enum
    * Threshold: 10 observations per protocol namespace (low threshold - very stable)
-   * ✅ OPTIMIZED: Fast-path skip when enum is stable
    */
 	private async observeDevice(protocol: string | undefined, deviceName: string): Promise<void> {
 		if (!protocol) return;  // Skip if no protocol context
     
-		// ✅ FAST PATH: Skip observation if enum is stable
+		// Fast path when enum is stable.
 		if (this.deviceEnumStable) return;
     
 		// Skip if already promoted (no need to continue counting)
@@ -862,7 +777,7 @@ export class DictionaryManager {
 
 		// Check promotion threshold (use >= to handle race conditions)
 		if (stats.count >= this.DEVICE_THRESHOLD && !this.deviceEnums[protocol]?.[deviceName]) {
-			this.logger?.infoSync('⚠️ Device threshold reached, promoting...', {
+			this.logger?.infoSync('Device threshold reached, promoting', {
 				component: LogComponents.dictionary,
 				protocol,
 				deviceName,
@@ -870,7 +785,7 @@ export class DictionaryManager {
 				threshold: this.DEVICE_THRESHOLD
 			});
 			await this.promoteDevice(protocol, deviceName);
-			this.logger?.infoSync('✅ Device promotion complete', {
+			this.logger?.infoSync('Device promotion complete', {
 				component: LogComponents.dictionary,
 				protocol,
 				deviceName,
@@ -1042,8 +957,6 @@ export class DictionaryManager {
 
 	/**
    * Get or assign index for a field name (auto-discovery with domain inference)
-   * ✅ FIX: Increment version immediately when new field is added
-   * ✅ PERSISTENCE: Save new fields to database immediately with domain
    */
 	private getIndex(fieldName: string): number {
 		// Skip qualityCode fields - they're redundant with quality field
@@ -1061,7 +974,7 @@ export class DictionaryManager {
 			this.updateCount++;
 			this.fieldAdditionTimes.push(Date.now());
       
-			// ✅ FIX (Risk #2): Bump workingVersion (internal), NOT dictionaryVersion
+			// Bump workingVersion (internal), not dictionaryVersion.
 			// dictionaryVersion only bumps on successful cloud sync
 			// This prevents noisy payloads from exploding version numbers on cloud
 			this.workingVersion++;
@@ -1078,7 +991,7 @@ export class DictionaryManager {
 				totalSize: this.getTotalDictionarySize()
 			});
       
-			// ✅ PERSISTENCE: Save to database immediately (async but fire-and-forget)
+			// Save immediately (fire-and-forget).
 			this.persistNewField(fieldName, index, this.workingVersion, domain).catch((err) => {
 				this.logger?.errorSync('Failed to persist dictionary field to database', err, {
 					component: LogComponents.dictionary,
@@ -1093,7 +1006,7 @@ export class DictionaryManager {
 			const oneHourAgo = Date.now() - 3600000;
 			this.fieldAdditionTimes = this.fieldAdditionTimes.filter((t) => t > oneHourAgo);
       
-			// ✅ FIX: Update metrics to prevent drift (use dictionaryVersion for safety)
+			// Keep metrics aligned with current state.
 			const totalSize = this.getTotalDictionarySize();
 			this.metrics.dictionarySize = totalSize;
 			this.metrics.version = this.dictionaryVersion; // Metrics use dictionaryVersion (cloud-safe)
@@ -1209,9 +1122,6 @@ export class DictionaryManager {
 
 	/**
    * Compact message using dictionary (recursive for nested objects and arrays)
-   * ✅ FIX: Use tuple-based encoding [[index, value], ...] for structure preservation
-   * ✅ FIX: Add array framing to preserve boundaries
-   * ✅ OPTIMIZED: Merged metadata observation into compaction (single traversal)
    */
 	private async compactWithDictionary(
 		data: any,
@@ -1225,7 +1135,7 @@ export class DictionaryManager {
 			return [];
 		}
 
-		// ✅ FIX: Explicit root array handling (when prefix is empty)
+		// Explicit root array handling.
 		if (Array.isArray(data)) {
 			if (!prefix) {
 				// Root-level array - handle explicitly without indexing empty key
@@ -1257,7 +1167,7 @@ export class DictionaryManager {
 					}
 				}
         
-				// ✅ FIX: Use special '$root' key for root-level arrays
+				// Use a special key for root-level arrays.
 				// Decoder will unwrap this automatically
 				pairs.push(['a', '$root', arrayPairs] as any);
 				return pairs;
@@ -1272,7 +1182,7 @@ export class DictionaryManager {
 		for (const [key, value] of Object.entries(data)) {
 			const fullKey = prefix ? `${prefix}.${key}` : key;
 
-			// ✅ OPTIMIZATION: Inline metadata observation (merged with compaction)
+			// Inline metadata observation.
 			// Observe metadata fields during compaction to eliminate separate traversal
 			if (key === 'metric' && typeof value === 'string' && protocol) {
 				await this.observeMetric(protocol, value);
@@ -1304,7 +1214,7 @@ export class DictionaryManager {
 			}
 
 			if (Array.isArray(value)) {
-				// ✅ FIX: Handle arrays inline - no dictionary entry for array container
+				// Handle arrays inline; do not index the container key.
 				// Only element fields (e.g., "alarms[].code") get indices
 				const arrayPairs: Array<Array<[number, any]>> = [];
         
@@ -1338,7 +1248,7 @@ export class DictionaryManager {
 					}
 				}
         
-				// ✅ FIX: Include array key explicitly in frame (no inference needed)
+				// Include array key explicitly in the frame.
 				// Format: ["a", "alarms", [[pairs], [pairs]]]
 				pairs.push(['a', key, arrayPairs] as any);
 			} else if (typeof value === 'object' && value !== null) {
@@ -1438,10 +1348,9 @@ export class DictionaryManager {
 			protocol
 		});
 
-		// ✅ OPTIMIZED: Metadata observation merged into compaction (single traversal)
-		// Compact message using tuple-based encoding (with inline metadata observation)
+		// Compact message using tuple-based encoding.
 		const pairs = await this.compactWithDictionary(message, '', protocol);
-		// ✅ SAFETY: Use dictionaryVersion (cloud-safe), not workingVersion
+		// Use dictionaryVersion (cloud-safe), not workingVersion.
 		const compacted = {
 			v: this.dictionaryVersion,  // Cloud safe - cloud has this version
 			p: pairs,  // Use 'p' for pairs instead of separate 'i' and 'd'
@@ -1587,14 +1496,13 @@ export class DictionaryManager {
 		const fields = Object.values(fieldsByDomain)
 			.flatMap((domainFields) => domainFields.map((f) => f.name));
 
-		// ✅ Phase 7: Build protocol-aware enum payload
+		// Build protocol-aware enum payload.
 		const payload = {
 			version: this.dictionaryVersion, // Cloud-safe version
 			fields,
 			fieldsByDomain, // Include domain breakdown for backward compatibility
       
-			// ✅ PHASE 7 EXTENDED FORMAT: Protocol-aware compression
-			// Cloud API will prefer this over fieldsByDomain if present
+			// Cloud API prefers this format when present.
 			format_version: 2,  // Signals new format
 			keys: fieldsByDomain.key,  // Structural keys only
 			enums: {
@@ -1652,8 +1560,8 @@ export class DictionaryManager {
 
 	/**
    * Sync delta dictionary updates (new fields only)
-   * ✅ FIX: Version already bumped in getIndex(), no need to increment here
-   * ✅ PERSISTENCE: Uses database to track unsynced deltas
+	 * Version is bumped in getIndex().
+	 * Uses persisted delta records to determine unsynced changes.
    */
 	private async syncDeltaDictionary(): Promise<void> {
 		if (!this.enabled || this.getTotalDictionarySize() === 0) {
@@ -1696,14 +1604,14 @@ export class DictionaryManager {
 				version: this.dictionaryVersion, // Cloud-safe version
 				newFields,
 				newFieldsWithDomains, // Include domain info for cloud API
-				format_version: 2,  // Phase 7 protocol-aware format
+				format_version: 2,  // Protocol-aware format
 				enums: {
 					quality: this.QUALITY_ENUM,  // Always include frozen quality enum
-					qualityCode: this.qualityCodeEnum,  // Phase 7: Quality code enum
+					qualityCode: this.qualityCodeEnum,  // Quality code enum
 					unit: this.unitEnumFrozen ? this.unitEnum : {},  // Only if frozen, else empty
 				},
-				metrics: this.metricEnums,  // Phase 7: Protocol-namespaced metrics
-				devices: this.deviceEnums,  // Phase 7: Protocol-namespaced devices
+				metrics: this.metricEnums,  // Protocol-namespaced metrics
+				devices: this.deviceEnums,  // Protocol-namespaced devices
 				metadata: {
 					timestamp: Date.now(),
 					deviceUuid: this.deviceUuid,
@@ -1803,7 +1711,7 @@ export class DictionaryManager {
 
 	/**
    * Reset dictionary (for testing or manual reset)
-   * ✅ PERSISTENCE: Clears database tables
+	 * Clears in-memory and persisted dictionary state.
    */
 	public async reset(): Promise<void> {
 		this.domains = {
