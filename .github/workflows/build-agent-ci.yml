@@ -501,31 +501,13 @@ jobs:
           echo "- [install-docker.sh](https://apps.iotistica.com/agent/install-docker.sh) ([checksum](https://apps.iotistica.com/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
           echo "- [install-systemd.sh](https://apps.iotistica.com/agent/install-systemd.sh) ([checksum](https://apps.iotistica.com/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
 
-  # trigger-integration-tests:
-  #   name: Trigger Integration Tests
-  #   needs: [version, report]
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     actions: write
-  #     contents: read
-  #   if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    
-  #   steps:
-  #     - name: Trigger integration tests
-  #       uses: actions/github-script@v7
-  #       with:
-  #         github-token: ${{ secrets.GITHUB_TOKEN }}
-  #         script: |
-  #           await github.rest.actions.createWorkflowDispatch({
-  #             owner: context.repo.owner,
-  #             repo: context.repo.repo,
-  #             workflow_id: 'integration-tests.yml',
-  #             ref: 'master',
-  #             inputs: {
-  #               agent_version: '${{ needs.version.outputs.package_version }}'
-  #             }
-  #           });
-            
-  #           console.log('Integration tests triggered with agent version: ${{ needs.version.outputs.package_version }}');
+  integration-tests:
+    name: Run Integration Tests
+    needs: [build, package, package-cli, docker]
+    if: ${{ needs.build.result == 'success' && needs.package.result == 'success' && needs.package-cli.result == 'success' && needs.docker.result == 'success' }}
+    uses: ./.github/workflows/integration-tests.yml
+    with:
+      agent_version: latest
+    secrets: inherit
 
   # cleanup removed: GitHub-hosted runners are ephemeral and cleaned automatically.

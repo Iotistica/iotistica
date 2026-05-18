@@ -24,6 +24,12 @@ import { encodeIfUuid } from '../mqtt/codec';
 import type { AgentUpdater } from '../updater';
 import type { DiscoveryService } from '../adapters/discovery/service';
 
+type AgentInstance = {
+	getLifecycleState: () => string;
+	isFullyOperational: () => boolean;
+	restartServices: () => Promise<void>;
+};
+
 let containerManager: ContainerManager;
 let agentManager: AgentManager;
 let cloudSync: CloudSync | undefined;
@@ -34,15 +40,15 @@ let adapterManager: AdapterManager | undefined;
 let configManager: ConfigManager | undefined;
 let stateManager: StateManager | undefined;
 let discoveryService: DiscoveryService | undefined;
-let agentInstance: any | undefined;
+let agentInstance: AgentInstance | undefined;
 let healthReporter: (() => HealthReport) | undefined;
 let agentUpdater: AgentUpdater | undefined;
 
-export function setAgent(agent: any): void {
+export function setAgent(agent: AgentInstance): void {
 	agentInstance = agent;
 }
 
-export function getAgent(): any {
+export function getAgent(): AgentInstance {
 	if (!agentInstance) {
 		throw new Error('Agent not initialized');
 	}

@@ -19,10 +19,10 @@ function normalizeOptionalEnvValue(value?: string): string | undefined {
 	return trimmed;
 }
 
-export async function initDevice(ctx: AgentInitContext): Promise<void> {
+export async function initAgent(ctx: AgentInitContext): Promise<void> {
 	ctx.sharedHttpClient = createHttpClient(ctx.configManager!.getCloudApiEndpoint());
 
-	await initializeDeviceManager(ctx);
+	await initializeAgentManager(ctx);
 	await initializeVpnReconnection(ctx);
 	await initializeCloudLogging(ctx);
 }
@@ -70,7 +70,7 @@ export async function initializeCloudLogging(ctx: AgentInitContext): Promise<voi
 	}
 }
 
-export async function initializeDeviceManager(ctx: AgentInitContext): Promise<void> {
+export async function initializeAgentManager(ctx: AgentInitContext): Promise<void> {
 	const cloudApiEndpoint = ctx.configManager!.getCloudApiEndpoint();
 	ctx.agentManager = new (await import('../runtime/index.js')).AgentManager(
 		ctx.agentLogger,

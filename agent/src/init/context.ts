@@ -21,6 +21,9 @@ import type { HttpClient } from '../lib/http-client.js';
 export interface AgentInitContext {
 	agent: {
 		stop: () => Promise<void>;
+		getLifecycleState: () => string;
+		isFullyOperational: () => boolean;
+		restartServices: () => Promise<void>;
 	};
 	stateReconciler?: StateManager;
 	configManager?: ConfigManager;

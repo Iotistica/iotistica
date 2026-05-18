@@ -6,7 +6,7 @@ import { CloudSync } from '../sync/index.js';
 import { initAnomalyDetection } from './anomaly.js';
 
 export async function initSync(ctx: AgentInitContext): Promise<void> {
-	await initDeviceSync(ctx);
+	await initAgentSync(ctx);
 	// Skip if already initialized during features phase.
 	if (!ctx.anomalyService) {
 		await initAnomalyDetection(ctx);
@@ -34,7 +34,7 @@ export async function initSync(ctx: AgentInitContext): Promise<void> {
 	});
 }
 
-export async function initDeviceSync(ctx: AgentInitContext): Promise<void> {
+export async function initAgentSync(ctx: AgentInitContext): Promise<void> {
 	const cloudApiEndpoint = ctx.configManager!.getCloudApiEndpoint();
 
 	if (!cloudApiEndpoint) {
