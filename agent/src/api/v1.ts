@@ -6,7 +6,6 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import * as actions from './actions';
-import * as vpnActions from './vpn-actions';
 import { getMemoryDiagnostics, getRestartPolicyStatus } from '../system/memory.js';
 
 export const router = express.Router();
@@ -497,7 +496,7 @@ router.post('/v1/vpn/tailscale/connect', async (req: Request, res: Response, nex
 			});
 		}
 
-		const result = await vpnActions.connectTailscale({
+		const result = await actions.connectTailscale({
 			authKey,
 			tailnetName,
 			hostname,
@@ -518,7 +517,7 @@ router.post('/v1/vpn/tailscale/connect', async (req: Request, res: Response, nex
  */
 router.post('/v1/vpn/tailscale/disconnect', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const result = await vpnActions.disconnectTailscale();
+		const result = await actions.disconnectTailscale();
 		return res.status(200).json(result);
 	} catch (error) {
 		next(error);
@@ -531,7 +530,7 @@ router.post('/v1/vpn/tailscale/disconnect', async (req: Request, res: Response, 
  */
 router.get('/v1/vpn/tailscale/status', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const status = await vpnActions.getTailscaleStatus();
+		const status = await actions.getTailscaleStatus();
 		return res.status(200).json(status);
 	} catch (error) {
 		next(error);
@@ -544,7 +543,7 @@ router.get('/v1/vpn/tailscale/status', async (req: Request, res: Response, next:
  */
 router.get('/v1/vpn/tailscale/ip', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const ip = await vpnActions.getTailscaleIP();
+		const ip = await actions.getTailscaleIP();
 		return res.status(200).json({ ip });
 	} catch (error) {
 		next(error);
@@ -570,7 +569,7 @@ router.post('/v1/vpn/tailscale/ping', async (req: Request, res: Response, next: 
 			});
 		}
 
-		const success = await vpnActions.pingTailscaleNode(hostname, count);
+		const success = await actions.pingTailscaleNode(hostname, count);
 		return res.status(200).json({ success, hostname });
 	} catch (error) {
 		next(error);

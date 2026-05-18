@@ -23,6 +23,8 @@ import { CloudMqttClient } from '../mqtt/manager';
 import { encodeIfUuid } from '../mqtt/codec';
 import type { AgentUpdater } from '../updater';
 import type { DiscoveryService } from '../adapters/discovery/service';
+import { TailscaleManager } from '../network/vpn/tailscale-manager';
+import type { TailscaleConfig, TailscaleStatus } from '../network/vpn/tailscale-manager';
 
 type AgentInstance = {
 	getLifecycleState: () => string;
@@ -43,6 +45,7 @@ let discoveryService: DiscoveryService | undefined;
 let agentInstance: AgentInstance | undefined;
 let healthReporter: (() => HealthReport) | undefined;
 let agentUpdater: AgentUpdater | undefined;
+let tailscaleManager: TailscaleManager | null = null;
 
 export function setAgent(agent: AgentInstance): void {
 	agentInstance = agent;
@@ -221,6 +224,137 @@ export function initialize(
 	logger = agentLogger;
 	anomalyService = anomaly;
 	simulationOrchestrator = simulation;
+}
+
+/**
+ * Initialize VPN actions with logger.
+ */
+export function initVpnActions(agentLogger?: AgentLogger): void {
+	if (agentLogger) {
+		logger = agentLogger;
+	}
+	tailscaleManager = new TailscaleManager(logger);
+}
+
+/**
+ * Connect to Tailscale VPN.
+ */
+export async function connectTailscale(config: TailscaleConfig): Promise<{ success: boolean; status: TailscaleStatus }> {
+	if (!tailscaleManager) {
+		throw new Error('VPN actions not initialized');
+	}
+
+	logger?.infoSync('Connecting to Tailscale VPN via API...', {
+		component: LogComponents.deviceApi,
+		tailnet: config.tailnetName,
+		hostname: config.hostname,
+	});
+
+	try {
+		await tailscaleManager.configure(config);
+		const status = await tailscaleManager.getStatus();
+
+		logger?.infoSync('Tailscale VPN connected via API', {
+			component: LogComponents.deviceApi,
+			tailnetIP: status.tailnetIP,
+			hostname: status.hostname,
+		});
+
+		return { success: true, status };
+	} catch (error) {
+		const err = error instanceof Error ? error : new Error(String(error));
+		logger?.errorSync('Failed to connect to Tailscale VPN via API', err, {
+			component: LogComponents.deviceApi,
+		});
+		throw err;
+	}
+}
+
+/**
+ * Disconnect from Tailscale VPN.
+ */
+export async function disconnectTailscale(): Promise<{ success: boolean }> {
+	if (!tailscaleManager) {
+		throw new Error('VPN actions not initialized');
+	}
+
+	logger?.infoSync('Disconnecting from Tailscale VPN via API...', {
+		component: LogComponents.deviceApi,
+	});
+
+	try {
+		await tailscaleManager.disconnect();
+
+		logger?.infoSync('Tailscale VPN disconnected via API', {
+			component: LogComponents.deviceApi,
+		});
+
+		return { success: true };
+	} catch (error) {
+		const err = error instanceof Error ? error : new Error(String(error));
+		logger?.errorSync('Failed to disconnect from Tailscale VPN via API', err, {
+			component: LogComponents.deviceApi,
+		});
+		throw err;
+	}
+}
+
+/**
+ * Get Tailscale VPN status.
+ */
+export async function getTailscaleStatus(): Promise<TailscaleStatus> {
+	if (!tailscaleManager) {
+		throw new Error('VPN actions not initialized');
+	}
+
+	try {
+		return await tailscaleManager.getStatus();
+	} catch (error) {
+		const err = error instanceof Error ? error : new Error(String(error));
+		logger?.errorSync('Failed to get Tailscale status via API', err, {
+			component: LogComponents.deviceApi,
+		});
+		throw err;
+	}
+}
+
+/**
+ * Get Tailscale IP address.
+ */
+export async function getTailscaleIP(): Promise<string | null> {
+	if (!tailscaleManager) {
+		throw new Error('VPN actions not initialized');
+	}
+
+	try {
+		return await tailscaleManager.getIP();
+	} catch (error) {
+		const err = error instanceof Error ? error : new Error(String(error));
+		logger?.errorSync('Failed to get Tailscale IP via API', err, {
+			component: LogComponents.deviceApi,
+		});
+		throw err;
+	}
+}
+
+/**
+ * Ping another Tailscale node.
+ */
+export async function pingTailscaleNode(hostname: string, count: number = 3): Promise<boolean> {
+	if (!tailscaleManager) {
+		throw new Error('VPN actions not initialized');
+	}
+
+	try {
+		return await tailscaleManager.ping(hostname, count);
+	} catch (error) {
+		const err = error instanceof Error ? error : new Error(String(error));
+		logger?.errorSync('Failed to ping Tailscale node via API', err, {
+			component: LogComponents.deviceApi,
+			hostname,
+		});
+		throw err;
+	}
 }
 
 /**
