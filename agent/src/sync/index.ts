@@ -156,7 +156,7 @@ export class CloudSync extends EventEmitter {
 			setPublishMode: (mode, reason) => this.setPublishMode(mode, reason ?? ''),
 			requestMqttFlush: (reason) => this.mqttManager?.requestBufferedFlush?.(reason),
 			getEndpoints: () => this.endpointsRef,
-			devicePublish,
+			devicePublish: this.devicePublish,
 			agentUpdater,
 			getDevices: async () => {
 				const now = Date.now();
