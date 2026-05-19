@@ -9,6 +9,7 @@ from bacpypes3.local.analog import AnalogInputObject
 from bacpypes3.local.binary import BinaryInputObject
 from bacpypes3.app import Application
 from bacpypes3.primitivedata import Real, Enumerated
+from bacpypes3.basetypes import EngineeringUnits
 from bacpypes3.debugging import bacpypes_debugging, ModuleLogger
 from bacpypes3.local.networkport import NetworkPortObject
 
@@ -156,21 +157,24 @@ class CondoSimulator:
         self.points['chiller_supply_temp'] = AnalogInputObject(
             objectIdentifier="analog-input,2",
             objectName="Chiller-1 Supply Temp",
-            presentValue=Real(7.0)
+            presentValue=Real(7.0),
+            units=EngineeringUnits("degrees-celsius")
         )
         self.app.add_object(self.points['chiller_supply_temp'])
         
         self.points['chiller_return_temp'] = AnalogInputObject(
             objectIdentifier="analog-input,3",
             objectName="Chiller-1 Return Temp",
-            presentValue=Real(12.0)
+            presentValue=Real(12.0),
+            units=EngineeringUnits("degrees-celsius")
         )
         self.app.add_object(self.points['chiller_return_temp'])
         
         self.points['chiller_power'] = AnalogInputObject(
             objectIdentifier="analog-input,4",
             objectName="Chiller-1 Power",
-            presentValue=Real(85.0)
+            presentValue=Real(85.0),
+            units=EngineeringUnits("kilowatts")
         )
         self.app.add_object(self.points['chiller_power'])
         
@@ -178,28 +182,32 @@ class CondoSimulator:
         self.points['ahu1_supply_temp'] = AnalogInputObject(
             objectIdentifier="analog-input,10",
             objectName="AHU-1 Supply Temp",
-            presentValue=Real(18.0)
+            presentValue=Real(18.0),
+            units=EngineeringUnits("degrees-celsius")
         )
         self.app.add_object(self.points['ahu1_supply_temp'])
         
         self.points['ahu1_return_temp'] = AnalogInputObject(
             objectIdentifier="analog-input,11",
             objectName="AHU-1 Return Temp",
-            presentValue=Real(22.0)
+            presentValue=Real(22.0),
+            units=EngineeringUnits("degrees-celsius")
         )
         self.app.add_object(self.points['ahu1_return_temp'])
         
         self.points['ahu1_airflow'] = AnalogInputObject(
             objectIdentifier="analog-input,12",
             objectName="AHU-1 Airflow",
-            presentValue=Real(5000.0)
+            presentValue=Real(5000.0),
+            units=EngineeringUnits("cubic-feet-per-minute")
         )
         self.app.add_object(self.points['ahu1_airflow'])
         
         self.points['ahu1_cooling_valve'] = AnalogInputObject(
             objectIdentifier="analog-input,13",
             objectName="AHU-1 Cooling Valve",
-            presentValue=Real(45.0)
+            presentValue=Real(45.0),
+            units=EngineeringUnits("percent")
         )
         self.app.add_object(self.points['ahu1_cooling_valve'])
         
@@ -214,28 +222,32 @@ class CondoSimulator:
         self.points['ahu2_supply_temp'] = AnalogInputObject(
             objectIdentifier="analog-input,20",
             objectName="AHU-2 Supply Temp",
-            presentValue=Real(18.0)
+            presentValue=Real(18.0),
+            units=EngineeringUnits("degrees-celsius")
         )
         self.app.add_object(self.points['ahu2_supply_temp'])
         
         self.points['ahu2_return_temp'] = AnalogInputObject(
             objectIdentifier="analog-input,21",
             objectName="AHU-2 Return Temp",
-            presentValue=Real(22.0)
+            presentValue=Real(22.0),
+            units=EngineeringUnits("degrees-celsius")
         )
         self.app.add_object(self.points['ahu2_return_temp'])
         
         self.points['ahu2_airflow'] = AnalogInputObject(
             objectIdentifier="analog-input,22",
             objectName="AHU-2 Airflow",
-            presentValue=Real(5000.0)
+            presentValue=Real(5000.0),
+            units=EngineeringUnits("cubic-feet-per-minute")
         )
         self.app.add_object(self.points['ahu2_airflow'])
         
         self.points['ahu2_cooling_valve'] = AnalogInputObject(
             objectIdentifier="analog-input,23",
             objectName="AHU-2 Cooling Valve",
-            presentValue=Real(45.0)
+            presentValue=Real(45.0),
+            units=EngineeringUnits("percent")
         )
         self.app.add_object(self.points['ahu2_cooling_valve'])
         
