@@ -370,6 +370,14 @@ function getAdaptiveSurvivorThreshold(): number {
 const MIN_SURVIVOR_RETAINED_MB = 5; // Must retain at least 5MB above floor
 const MIN_SURVIVOR_UPTIME_SECONDS = 15 * 60; // 15 minutes
 
+// Minimum uptime before the heap growth rate alone can trigger a healthcheck failure.
+// V8 JIT-compiles hot paths and lazy-loads modules in the first ~5 minutes, which
+// creates a transient heap slope that looks identical to a real leak over the narrow
+// 5-minute regression window.  10 minutes gives the runtime enough time to reach a
+// stable allocation rate before we start treating growth as a problem.
+// The survivor-leak check (15 min) will still catch real leaks after its window opens.
+const MIN_HEAP_RATE_UPTIME_SECONDS = 10 * 60; // 10 minutes
+
 /**
  * Calculate adaptive survivor monotonic tolerance
  * Small heaps: 3% (stricter - less noise)
@@ -1110,8 +1118,16 @@ export async function healthcheck(
 		return false;
 	}
 	
-	// Fail if sustained heap growth detected (compared to sliding baseline)
-	if (heapGrowthRate !== null && heapGrowthRate > heapThreshold) {
+	// Fail if sustained heap growth detected (compared to sliding baseline).
+	// Guard with minimum uptime: heap rate regression spans only 5 minutes, so it
+	// can fire during V8 JIT warmup (first ~6-8 minutes) when heap transiently grows
+	// faster than 1 MB/min without being a real leak.  Wait 10 minutes before trusting
+	// the rate signal.  The survivor-leak check above has its own 15-minute guard.
+	if (
+		heapGrowthRate !== null &&
+		heapGrowthRate > heapThreshold &&
+		processUptime() >= MIN_HEAP_RATE_UPTIME_SECONDS
+	) {
 		// Don't log here - caller decides whether to alert
 		// (prevents log spam from repeated healthcheck calls)
 		return false;

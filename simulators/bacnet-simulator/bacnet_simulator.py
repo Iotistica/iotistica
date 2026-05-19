@@ -294,13 +294,30 @@ class CondoSimulator:
             self.points['ahu2_cooling_valve'].presentValue = Real(max(0, min(100, 45 + (self.outdoor_temp - 25.0) * 2 + random.uniform(-5, 5))))
             self.points['ahu2_fan_status'].presentValue = Enumerated(1 if random.random() > 0.1 else 0)
             
-            # Log every 30 seconds
+            # Log all 14 points every 30 seconds
             elapsed = (datetime.now() - self.start_time).total_seconds()
             if int(elapsed) % 30 == 0:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                      f"Outdoor Temp: {self.outdoor_temp:.1f}°C | "
-                      f"Chiller Power: {self.points['chiller_power'].presentValue:.1f}kW | "
-                      f"AHU-1 Valve: {self.points['ahu1_cooling_valve'].presentValue:.0f}%")
+                chiller_on = bool(self.points['chiller_status'].presentValue)
+                ahu1_on    = bool(self.points['ahu1_fan_status'].presentValue)
+                ahu2_on    = bool(self.points['ahu2_fan_status'].presentValue)
+                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print(
+                    f"[{ts}] Outdoor: {self.outdoor_temp:.1f}°C\n"
+                    f"  Chiller : {'ON ' if chiller_on else 'OFF'}"
+                    f" | Supply {self.points['chiller_supply_temp'].presentValue:.1f}°C"
+                    f" | Return {self.points['chiller_return_temp'].presentValue:.1f}°C"
+                    f" | Power {self.points['chiller_power'].presentValue:.1f}kW\n"
+                    f"  AHU-1   : {'ON ' if ahu1_on else 'OFF'}"
+                    f" | Supply {self.points['ahu1_supply_temp'].presentValue:.1f}°C"
+                    f" | Return {self.points['ahu1_return_temp'].presentValue:.1f}°C"
+                    f" | Airflow {self.points['ahu1_airflow'].presentValue:.0f}cfm"
+                    f" | Valve {self.points['ahu1_cooling_valve'].presentValue:.0f}%\n"
+                    f"  AHU-2   : {'ON ' if ahu2_on else 'OFF'}"
+                    f" | Supply {self.points['ahu2_supply_temp'].presentValue:.1f}°C"
+                    f" | Return {self.points['ahu2_return_temp'].presentValue:.1f}°C"
+                    f" | Airflow {self.points['ahu2_airflow'].presentValue:.0f}cfm"
+                    f" | Valve {self.points['ahu2_cooling_valve'].presentValue:.0f}%"
+                )
     
     async def run(self):
         """Main entry point"""

@@ -7,7 +7,7 @@ import { dbBackup, dbList, dbPrune, dbRestore, dbStats, dbVerify } from './comma
 import { configGet, configGetApi, configReset, configSet, configSetApi, configShow } from './commands/config';
 import { appsInfo, appsList, appsPurge, appsRestart, appsStart, appsStop } from './commands/apps';
 import { servicesInfo, servicesList, servicesLogs, servicesRestart, servicesStart, servicesStop } from './commands/services';
-import { devicesList, discover, endpointsList, endpointsShow, endpointsAdd, endpointsRemove, endpointsClean } from './commands/discovery';
+import { discover, endpointsClean } from './commands/discovery';
 import { adaptersList, adaptersShow, adaptersAdd, adaptersRemove, adaptersEnable, adaptersDisable, mqttAdd, modbusAdd, opcuaAdd, snmpAdd } from './commands/adapters';
 import { factoryReset, mqttListUsers, provisionStatus, provisionWithKey, deprovision } from './commands/provision';
 import { showLogs, showVersion } from './commands/system';
@@ -66,25 +66,13 @@ function buildCommands(args: string[]): CommandMap {
       _default: discover,
     },
     devices: {
-      list: devicesList,
-      show: endpointsShow,
-      _default: devicesList,
-    },
-    endpoints: {
-      list: endpointsList,
-      show: endpointsShow,
-      add: endpointsAdd,
-      remove: endpointsRemove,
-      clean: endpointsClean,
-      _default: endpointsList,
-    },
-    adapters: {
       list: adaptersList,
       show: adaptersShow,
-      add: adaptersAdd,
-      remove: adaptersRemove,
       enable: adaptersEnable,
       disable: adaptersDisable,
+      add: adaptersAdd,
+      remove: adaptersRemove,
+      clean: endpointsClean,
       'add-mqtt': mqttAdd,
       'add-modbus': modbusAdd,
       'add-opcua': opcuaAdd,
