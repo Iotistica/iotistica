@@ -661,12 +661,12 @@ export class AdapterManager extends EventEmitter {
 						connectionTimeoutMs: d.connection.connectionTimeoutMs || 5000,
 						retryAttempts: d.connection.retryAttempts || 3,
 						retryDelayMs: d.connection.retryDelayMs || 1000,
-						objects: (d.connection.objects || []).map((obj: any) => ({
+						objects: (d.data_points || []).map((obj: any) => ({
 							name: obj.name,
 							objectType: obj.objectType,
 							objectInstance: obj.objectInstance,
 							propertyId: obj.propertyId || 85,
-							unit: obj.unit || "",
+							unit: obj.unit || obj.units || "",
 							pollIntervalMs: obj.pollIntervalMs || 5000,
 							enabled: obj.enabled !== false,
 						})),

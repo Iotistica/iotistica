@@ -137,6 +137,7 @@ export async function devicesList(protocolFilter?: string): Promise<void> {
 
         logger.info(`${enabledIcon} ${device.name}${identifierStr}`, {
           uuid: device.uuid.slice(0, 8) + '...',
+          enabled: device.enabled,
           lastSeen,
         });
       }

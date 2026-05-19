@@ -58,7 +58,7 @@ export class AdapterInitializer {
 			const { EndpointModel } = await import('../db/models/endpoint.model.js');
 			const enabledProtocols: string[] = [];
 
-			for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'mqtt']) {
+			for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'mqtt', 'bacnet']) {
 				const devices = await EndpointModel.getEnabled(protocol);
 				const validDevices = devices.filter((d: any) => !!d.uuid);
 
