@@ -39,7 +39,7 @@ async function postAdapter(body: object): Promise<void> {
   });
 
   const ep = result.endpoint;
-  logger.info(`Adapter added: ${ep.name}`, {
+  logger.info(`Device added: ${ep.name}`, {
     uuid: ep.uuid,
     protocol: ep.protocol,
     enabled: ep.enabled,
@@ -51,7 +51,7 @@ async function postAdapter(body: object): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * iotctl adapters list [--protocol <protocol>]
+ * iotctl devices list [--protocol <protocol>]
  */
 export async function adaptersList(): Promise<void> {
   clearApiCache();
@@ -62,11 +62,11 @@ export async function adaptersList(): Promise<void> {
     const adapters = result.endpoints || [];
 
     if (adapters.length === 0) {
-      logger.info('No adapters configured');
+      logger.info('No devices configured');
       return;
     }
 
-    logger.info(`Found ${adapters.length} adapter${adapters.length === 1 ? '' : 's'}${protocolFilter ? ` (${protocolFilter})` : ''}`);
+    logger.info(`Found ${adapters.length} device${adapters.length === 1 ? '' : 's'}${protocolFilter ? ` (${protocolFilter})` : ''}`);
     console.log('');
 
     const byProtocol = adapters.reduce((acc: Record<string, any[]>, a: any) => {
@@ -77,7 +77,7 @@ export async function adaptersList(): Promise<void> {
     }, {} as Record<string, any[]>);
 
     for (const [protocol, items] of Object.entries(byProtocol)) {
-      console.log(`\n${protocol.toUpperCase()} Adapters:`);
+      console.log(`\n${protocol.toUpperCase()} Devices:`);
       console.log('━'.repeat(60));
 
       for (const adapter of items as any[]) {
@@ -105,12 +105,12 @@ export async function adaptersList(): Promise<void> {
 
     console.log('');
   } catch (error) {
-    throw new CLIError('Failed to list adapters', 1, { error: (error as Error).message });
+    throw new CLIError('Failed to list devices', 1, { error: (error as Error).message });
   }
 }
 
 /**
- * iotctl adapters show <name>
+ * iotctl devices show <name>
  */
 export async function adaptersShow(name?: string): Promise<void> {
   clearApiCache();
@@ -119,21 +119,21 @@ export async function adaptersShow(name?: string): Promise<void> {
     const adapters: any[] = result.endpoints || [];
 
     if (!name) {
-      logger.info('Usage: iotctl adapters show <name>', {
-        hint: 'Run "iotctl adapters list" to see all adapter names',
+      logger.info('Usage: iotctl devices show <name>', {
+        hint: 'Run "iotctl devices list" to see all device names',
       });
       return;
     }
 
     const adapter = adapters.find((a) => a.name === name);
     if (!adapter) {
-      throw new CLIError(`Adapter not found: ${name}`, 1, {
-        hint: 'Run "iotctl adapters list" to see all adapter names',
+      throw new CLIError(`Device not found: ${name}`, 1, {
+        hint: 'Run "iotctl devices list" to see all device names',
       });
     }
 
     console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
-    console.log('║                    ADAPTER DETAILS                                ║');
+    console.log('║                    DEVICE DETAILS                                 ║');
     console.log('╚═══════════════════════════════════════════════════════════════════╝\n');
 
     logger.info('Name', { value: adapter.name });
@@ -166,7 +166,7 @@ export async function adaptersShow(name?: string): Promise<void> {
     console.log('');
   } catch (error) {
     if (error instanceof CLIError) throw error;
-    throw new CLIError('Failed to show adapter details', 1, { error: (error as Error).message });
+    throw new CLIError('Failed to show device details', 1, { error: (error as Error).message });
   }
 }
 
@@ -175,28 +175,28 @@ export async function adaptersShow(name?: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * iotctl adapters remove <uuid>
+ * iotctl devices remove <uuid>
  */
 export async function adaptersRemove(uuid?: string): Promise<void> {
   if (!uuid) {
-    throw new CLIError('UUID is required', 1, { usage: 'iotctl adapters remove <uuid>' });
+    throw new CLIError('UUID is required', 1, { usage: 'iotctl devices remove <uuid>' });
   }
 
   try {
     await apiRequest(`${DEVICE_API_V1}/endpoints/${encodeURIComponent(uuid)}`, { method: 'DELETE' });
-    logger.info(`Adapter removed: ${uuid}`);
+    logger.info(`Device removed: ${uuid}`);
   } catch (error) {
     if (error instanceof CLIError) throw error;
-    throw new CLIError('Failed to remove adapter', 1, { error: (error as Error).message });
+    throw new CLIError('Failed to remove device', 1, { error: (error as Error).message });
   }
 }
 
 /**
- * iotctl adapters enable <uuid>
+ * iotctl devices enable <uuid>
  */
 export async function adaptersEnable(uuid?: string): Promise<void> {
   if (!uuid) {
-    throw new CLIError('UUID is required', 1, { usage: 'iotctl adapters enable <uuid>' });
+    throw new CLIError('UUID is required', 1, { usage: 'iotctl devices enable <uuid>' });
   }
 
   try {
@@ -204,19 +204,19 @@ export async function adaptersEnable(uuid?: string): Promise<void> {
       method: 'PATCH',
       body: JSON.stringify({ enabled: true }),
     });
-    logger.info(`Adapter enabled: ${uuid}`);
+    logger.info(`Device enabled: ${uuid}`);
   } catch (error) {
     if (error instanceof CLIError) throw error;
-    throw new CLIError('Failed to enable adapter', 1, { error: (error as Error).message });
+    throw new CLIError('Failed to enable device', 1, { error: (error as Error).message });
   }
 }
 
 /**
- * iotctl adapters disable <uuid>
+ * iotctl devices disable <uuid>
  */
 export async function adaptersDisable(uuid?: string): Promise<void> {
   if (!uuid) {
-    throw new CLIError('UUID is required', 1, { usage: 'iotctl adapters disable <uuid>' });
+    throw new CLIError('UUID is required', 1, { usage: 'iotctl devices disable <uuid>' });
   }
 
   try {
@@ -224,10 +224,10 @@ export async function adaptersDisable(uuid?: string): Promise<void> {
       method: 'PATCH',
       body: JSON.stringify({ enabled: false }),
     });
-    logger.info(`Adapter disabled: ${uuid}`);
+    logger.info(`Device disabled: ${uuid}`);
   } catch (error) {
     if (error instanceof CLIError) throw error;
-    throw new CLIError('Failed to disable adapter', 1, { error: (error as Error).message });
+    throw new CLIError('Failed to disable device', 1, { error: (error as Error).message });
   }
 }
 
@@ -236,7 +236,7 @@ export async function adaptersDisable(uuid?: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * iotctl adapters add-mqtt --name <name> --broker <url>
+ * iotctl devices add-mqtt --name <name> --broker <url>
  *   [--username <user>] [--password <pass>] [--topics <t1,t2>]
  *   [--interval <ms>] [--disabled]
  */
@@ -251,12 +251,12 @@ export async function mqttAdd(): Promise<void> {
 
   if (!name) {
     throw new CLIError('--name is required', 1, {
-      usage: 'iotctl adapters add-mqtt --name <name> --broker mqtt://host:1883 [--topics t1,t2] [--username u] [--password p] [--interval ms] [--disabled]',
+      usage: 'iotctl devices add-mqtt --name <name> --broker mqtt://host:1883 [--topics t1,t2] [--username u] [--password p] [--interval ms] [--disabled]',
     });
   }
   if (!broker) {
     throw new CLIError('--broker is required', 1, {
-      usage: 'iotctl adapters add-mqtt --name <name> --broker mqtt://host:1883',
+      usage: 'iotctl devices add-mqtt --name <name> --broker mqtt://host:1883',
     });
   }
 
@@ -278,12 +278,12 @@ export async function mqttAdd(): Promise<void> {
     });
   } catch (error) {
     if (error instanceof CLIError) throw error;
-    throw new CLIError('Failed to add MQTT adapter', 1, { error: (error as Error).message });
+    throw new CLIError('Failed to add MQTT device', 1, { error: (error as Error).message });
   }
 }
 
 /**
- * iotctl adapters add-modbus --name <name> --host <ip>
+ * iotctl devices add-modbus --name <name> --host <ip>
  *   [--port <port>] [--slave <id>] [--interval <ms>] [--disabled]
  */
 export async function modbusAdd(): Promise<void> {
@@ -296,12 +296,12 @@ export async function modbusAdd(): Promise<void> {
 
   if (!name) {
     throw new CLIError('--name is required', 1, {
-      usage: 'iotctl adapters add-modbus --name <name> --host <ip> [--port 502] [--slave 1] [--interval ms] [--disabled]',
+      usage: 'iotctl devices add-modbus --name <name> --host <ip> [--port 502] [--slave 1] [--interval ms] [--disabled]',
     });
   }
   if (!host) {
     throw new CLIError('--host is required', 1, {
-      usage: 'iotctl adapters add-modbus --name <name> --host 192.168.1.10 --port 502 --slave 1',
+      usage: 'iotctl devices add-modbus --name <name> --host 192.168.1.10 --port 502 --slave 1',
     });
   }
 
@@ -316,12 +316,12 @@ export async function modbusAdd(): Promise<void> {
     });
   } catch (error) {
     if (error instanceof CLIError) throw error;
-    throw new CLIError('Failed to add Modbus adapter', 1, { error: (error as Error).message });
+    throw new CLIError('Failed to add Modbus device', 1, { error: (error as Error).message });
   }
 }
 
 /**
- * iotctl adapters add-opcua --name <name> --endpoint opc.tcp://host:4840
+ * iotctl devices add-opcua --name <name> --endpoint opc.tcp://host:4840
  *   [--interval <ms>] [--disabled]
  */
 export async function opcuaAdd(): Promise<void> {
@@ -332,12 +332,12 @@ export async function opcuaAdd(): Promise<void> {
 
   if (!name) {
     throw new CLIError('--name is required', 1, {
-      usage: 'iotctl adapters add-opcua --name <name> --endpoint opc.tcp://host:4840 [--interval ms] [--disabled]',
+      usage: 'iotctl devices add-opcua --name <name> --endpoint opc.tcp://host:4840 [--interval ms] [--disabled]',
     });
   }
   if (!endpointUrl) {
     throw new CLIError('--endpoint is required', 1, {
-      usage: 'iotctl adapters add-opcua --name <name> --endpoint opc.tcp://host:4840',
+      usage: 'iotctl devices add-opcua --name <name> --endpoint opc.tcp://host:4840',
     });
   }
 
@@ -352,12 +352,12 @@ export async function opcuaAdd(): Promise<void> {
     });
   } catch (error) {
     if (error instanceof CLIError) throw error;
-    throw new CLIError('Failed to add OPC-UA adapter', 1, { error: (error as Error).message });
+    throw new CLIError('Failed to add OPC-UA device', 1, { error: (error as Error).message });
   }
 }
 
 /**
- * iotctl adapters add-snmp --name <name> --host <ip>
+ * iotctl devices add-snmp --name <name> --host <ip>
  *   [--port <port>] [--community <community>] [--interval <ms>] [--disabled]
  */
 export async function snmpAdd(): Promise<void> {
@@ -370,12 +370,12 @@ export async function snmpAdd(): Promise<void> {
 
   if (!name) {
     throw new CLIError('--name is required', 1, {
-      usage: 'iotctl adapters add-snmp --name <name> --host <ip> [--port 161] [--community public] [--interval ms] [--disabled]',
+      usage: 'iotctl devices add-snmp --name <name> --host <ip> [--port 161] [--community public] [--interval ms] [--disabled]',
     });
   }
   if (!host) {
     throw new CLIError('--host is required', 1, {
-      usage: 'iotctl adapters add-snmp --name <name> --host 192.168.1.1 --community public',
+      usage: 'iotctl devices add-snmp --name <name> --host 192.168.1.1 --community public',
     });
   }
 
@@ -390,12 +390,12 @@ export async function snmpAdd(): Promise<void> {
     });
   } catch (error) {
     if (error instanceof CLIError) throw error;
-    throw new CLIError('Failed to add SNMP adapter', 1, { error: (error as Error).message });
+    throw new CLIError('Failed to add SNMP device', 1, { error: (error as Error).message });
   }
 }
 
 /**
- * iotctl adapters add --protocol <protocol> ...
+ * iotctl devices add --protocol <protocol> ...
  * Generic dispatcher: routes to the protocol-specific add command.
  */
 export async function adaptersAdd(): Promise<void> {
@@ -413,13 +413,12 @@ export async function adaptersAdd(): Promise<void> {
       return snmpAdd();
     case '':
       throw new CLIError('--protocol is required', 1, {
-        usage: 'iotctl adapters add --protocol <mqtt|modbus|opcua|snmp> [options]',
+        usage: 'iotctl devices add --protocol <mqtt|modbus|opcua|snmp> [options]',
         protocols: 'mqtt, modbus, opcua, snmp',
       });
     default:
       throw new CLIError(`Unsupported protocol: ${protocol}`, 1, {
         supported: 'mqtt, modbus, opcua, snmp',
-        hint: 'For other protocols use: iotctl endpoints add --protocol <protocol> --connection <json>',
       });
   }
 }
