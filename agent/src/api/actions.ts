@@ -836,6 +836,29 @@ export const addEndpoint = async (body: {
 };
 
 /**
+ * Update an endpoint (e.g. enable/disable) by UUID or name
+ * Used by: PATCH /v1/endpoints/:uuid
+ */
+export const updateEndpoint = async (uuidOrName: string, patch: { enabled?: boolean; poll_interval?: number }) => {
+	const { EndpointModel } = await import('../db/models/endpoint.model.js');
+
+	// Try to find by name first, then by uuid
+	const all = await EndpointModel.getAll();
+	const ep = all.find((e: any) => e.name === uuidOrName || e.uuid === uuidOrName);
+
+	if (!ep) {
+		throw Object.assign(new Error(`Endpoint not found: ${uuidOrName}`), { statusCode: 404 });
+	}
+
+	const updates: Record<string, any> = {};
+	if (patch.enabled !== undefined) updates.enabled = patch.enabled;
+	if (patch.poll_interval !== undefined) updates.poll_interval = patch.poll_interval;
+
+	const result = await EndpointModel.update(ep.name, updates);
+	return { uuid: ep.uuid, name: ep.name, enabled: result?.enabled };
+};
+
+/**
  * Remove an endpoint by UUID via target state
  * Used by: DELETE /v1/endpoints/:uuid
  */

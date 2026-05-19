@@ -717,6 +717,21 @@ router.post('/v1/endpoints', async (req: Request, res: Response, next: NextFunct
 });
 
 /**
+ * PATCH /v1/endpoints/:uuid
+ * Update an endpoint (enable/disable, poll interval) by UUID or name
+ * Body: { enabled?: boolean, poll_interval?: number }
+ */
+router.patch('/v1/endpoints/:uuid', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const result = await actions.updateEndpoint(req.params.uuid, req.body);
+		return res.status(200).json({ endpoint: result });
+	} catch (error: any) {
+		if (error?.statusCode === 404) return res.status(404).json({ error: error.message });
+		next(error);
+	}
+});
+
+/**
  * DELETE /v1/endpoints/:uuid
  * Remove an endpoint from the agent configuration by UUID
  */
