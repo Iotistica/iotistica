@@ -258,65 +258,64 @@ class CondoSimulator:
         )
         self.app.add_object(self.points['ahu2_fan_status'])
         
-        print(f"✓ Created device 'Condo-Building-1' (device ID: 1001)")
         print(f"✓ Registered {len(self.points)} BACnet points")
-        print(f"✓ BACnet listener ready on port 47808/udp\n")
         
     async def update_simulation(self):
         """Continuous simulation loop"""
+        last_log_time: datetime | None = None
         while True:
             await asyncio.sleep(5)
-            
+
             # Simple day/night cycle
             self.time_of_day = (self.time_of_day + 0.2) % 24
             hour_offset = (self.time_of_day - 15) / 24 * 2 * math.pi
             self.outdoor_temp = 25.0 + 8.0 * math.sin(hour_offset)
-            
-            # Update chiller points
+
+            # Chiller load factor drives status and power
+            load_factor = 0.6 + 0.3 * (self.outdoor_temp - 25.0) / 8.0
+            chiller_running = load_factor > 0.3 and random.random() > 0.02
+            self.points['chiller_status'].presentValue = Enumerated(1 if chiller_running else 0)
             self.points['chiller_supply_temp'].presentValue = Real(7.0 + random.uniform(-0.3, 0.3))
             self.points['chiller_return_temp'].presentValue = Real(12.0 + random.uniform(-0.3, 0.3))
-            
-            load_factor = 0.6 + 0.3 * (self.outdoor_temp - 25.0) / 8.0
             power = 85.0 * max(0.3, min(1.0, load_factor)) + random.uniform(-3, 3)
             self.points['chiller_power'].presentValue = Real(power)
-            
-            # Update AHU-1 points
+
+            # AHU-1
+            self.points['ahu1_fan_status'].presentValue = Enumerated(1 if random.random() > 0.05 else 0)
             self.points['ahu1_supply_temp'].presentValue = Real(18.0 + random.uniform(-1.0, 1.0))
             self.points['ahu1_return_temp'].presentValue = Real(22.0 + (self.outdoor_temp - 25.0) * 0.2 + random.uniform(-0.5, 0.5))
             self.points['ahu1_airflow'].presentValue = Real(5000.0 + random.uniform(-200, 200))
             self.points['ahu1_cooling_valve'].presentValue = Real(max(0, min(100, 45 + (self.outdoor_temp - 25.0) * 2 + random.uniform(-5, 5))))
-            self.points['ahu1_fan_status'].presentValue = Enumerated(1 if random.random() > 0.1 else 0)
-            
-            # Update AHU-2 points
+
+            # AHU-2
+            self.points['ahu2_fan_status'].presentValue = Enumerated(1 if random.random() > 0.05 else 0)
             self.points['ahu2_supply_temp'].presentValue = Real(18.0 + random.uniform(-1.0, 1.0))
             self.points['ahu2_return_temp'].presentValue = Real(22.0 + (self.outdoor_temp - 25.0) * 0.2 + random.uniform(-0.5, 0.5))
             self.points['ahu2_airflow'].presentValue = Real(5000.0 + random.uniform(-200, 200))
             self.points['ahu2_cooling_valve'].presentValue = Real(max(0, min(100, 45 + (self.outdoor_temp - 25.0) * 2 + random.uniform(-5, 5))))
-            self.points['ahu2_fan_status'].presentValue = Enumerated(1 if random.random() > 0.1 else 0)
-            
-            # Log all 14 points every 30 seconds
-            elapsed = (datetime.now() - self.start_time).total_seconds()
-            if int(elapsed) % 30 == 0:
-                chiller_on = bool(self.points['chiller_status'].presentValue)
-                ahu1_on    = bool(self.points['ahu1_fan_status'].presentValue)
-                ahu2_on    = bool(self.points['ahu2_fan_status'].presentValue)
-                ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            # Log all 14 BACnet points every 30 seconds (time-based, not modulo)
+            now = datetime.now()
+            if last_log_time is None or (now - last_log_time).total_seconds() >= 30:
+                last_log_time = now
+                ts = now.strftime('%Y-%m-%d %H:%M:%S')
+                W = 26  # label column width
                 print(
-                    f"[{ts}] Outdoor: {self.outdoor_temp:.1f}°C\n"
-                    f"  Chiller : {'ON ' if chiller_on else 'OFF'}"
-                    f" | Supply {self.points['chiller_supply_temp'].presentValue:.1f}°C"
-                    f" | Return {self.points['chiller_return_temp'].presentValue:.1f}°C"
-                    f" | Power {self.points['chiller_power'].presentValue:.1f}kW\n"
-                    f"  AHU-1   : {'ON ' if ahu1_on else 'OFF'}"
-                    f" | Supply {self.points['ahu1_supply_temp'].presentValue:.1f}°C"
-                    f" | Return {self.points['ahu1_return_temp'].presentValue:.1f}°C"
-                    f" | Airflow {self.points['ahu1_airflow'].presentValue:.0f}cfm"
-                    f" | Valve {self.points['ahu1_cooling_valve'].presentValue:.0f}%\n"
-                    f"  AHU-2   : {'ON ' if ahu2_on else 'OFF'}"
-                    f" | Supply {self.points['ahu2_supply_temp'].presentValue:.1f}°C"
-                    f" | Return {self.points['ahu2_return_temp'].presentValue:.1f}°C"
-                    f" | Airflow {self.points['ahu2_airflow'].presentValue:.0f}cfm"
-                    f" | Valve {self.points['ahu2_cooling_valve'].presentValue:.0f}%"
+                    f"[{ts}] Outdoor: {self.outdoor_temp:.1f}°C | {len(self.points)} points\n"
+                    f"  {'Chiller-1 Status':<{W}}: {'ON' if bool(self.points['chiller_status'].presentValue) else 'OFF'}\n"
+                    f"  {'Chiller-1 Supply Temp':<{W}}: {self.points['chiller_supply_temp'].presentValue:.1f}°C\n"
+                    f"  {'Chiller-1 Return Temp':<{W}}: {self.points['chiller_return_temp'].presentValue:.1f}°C\n"
+                    f"  {'Chiller-1 Power':<{W}}: {self.points['chiller_power'].presentValue:.1f}kW\n"
+                    f"  {'AHU-1 Fan Status':<{W}}: {'ON' if bool(self.points['ahu1_fan_status'].presentValue) else 'OFF'}\n"
+                    f"  {'AHU-1 Supply Temp':<{W}}: {self.points['ahu1_supply_temp'].presentValue:.1f}°C\n"
+                    f"  {'AHU-1 Return Temp':<{W}}: {self.points['ahu1_return_temp'].presentValue:.1f}°C\n"
+                    f"  {'AHU-1 Airflow':<{W}}: {self.points['ahu1_airflow'].presentValue:.0f}cfm\n"
+                    f"  {'AHU-1 Cooling Valve':<{W}}: {self.points['ahu1_cooling_valve'].presentValue:.0f}%\n"
+                    f"  {'AHU-2 Fan Status':<{W}}: {'ON' if bool(self.points['ahu2_fan_status'].presentValue) else 'OFF'}\n"
+                    f"  {'AHU-2 Supply Temp':<{W}}: {self.points['ahu2_supply_temp'].presentValue:.1f}°C\n"
+                    f"  {'AHU-2 Return Temp':<{W}}: {self.points['ahu2_return_temp'].presentValue:.1f}°C\n"
+                    f"  {'AHU-2 Airflow':<{W}}: {self.points['ahu2_airflow'].presentValue:.0f}cfm\n"
+                    f"  {'AHU-2 Cooling Valve':<{W}}: {self.points['ahu2_cooling_valve'].presentValue:.0f}%"
                 )
     
     async def run(self):
