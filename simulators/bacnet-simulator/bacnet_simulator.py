@@ -9,8 +9,8 @@ from bacpypes3.local.analog import AnalogInputObject
 from bacpypes3.local.binary import BinaryInputObject
 from bacpypes3.app import Application
 from bacpypes3.primitivedata import Real, Enumerated
-from bacpypes3.pdu import Address
 from bacpypes3.debugging import bacpypes_debugging, ModuleLogger
+from bacpypes3.local.networkport import NetworkPortObject
 
 # Enable debug logging
 _debug = 1
@@ -20,16 +20,8 @@ _log = ModuleLogger(globals())
 @bacpypes_debugging
 class ResponsiveApplication(Application):
     """BACnet application that explicitly handles Who-Is requests"""
-    
-    def indication(self, apdu):
-        """Log all incoming packets for debugging"""
-        if _debug:
-            _log.debug(f"[BACnet] Received packet: {apdu.__class__.__name__} from {apdu.pduSource}")
-        
-        # Call parent to handle normally
-        super().indication(apdu)
-    
-    def do_WhoIsRequest(self, apdu):
+
+    async def do_WhoIsRequest(self, apdu) -> None:
         """Handle incoming Who-Is request and respond with I-Am.
 
         Unicast vs broadcast I-Am strategy (mirrors Ignition Scenario 2):
@@ -117,21 +109,32 @@ class CondoSimulator:
         
         print(f"✓ Binding to: {bind_addr}")
         
-        # Create device object first
+        # Create device object
         self.device = DeviceObject(
             objectIdentifier="device,1001",
             objectName="Condo-Building-1",
             vendorIdentifier=999,
         )
         
-        # Create custom application that handles Who-Is requests
-        self.app = ResponsiveApplication(
-            self.device,
-            Address(bind_addr)
+        # Create NetworkPortObject — this is what actually binds the UDP socket.
+        # In bacpypes3, Application.__init__ does NOT set up any transport;
+        # the transport is created by add_object(NetworkPortObject) inside
+        # Application.from_object_list().
+        # Use bacpypes3.local.networkport.NetworkPortObject (not the base class)
+        # since it accepts an address string in its constructor.
+        network_port = NetworkPortObject(
+            bind_addr,
+            objectIdentifier=("network-port", 1),
+            objectName="NetworkPort-1",
         )
         
-        # Wait for async initialization
-        await asyncio.sleep(0.1)
+        # Create application using from_object_list which wires the full BACnet
+        # stack: Application → ASAP → NSAP → NSE → NormalLinkLayer_ipv4 →
+        # IPv4DatagramServer (the actual UDP socket on port 47808).
+        self.app = ResponsiveApplication.from_object_list([self.device, network_port])
+        
+        # Give the event loop time to complete the async datagram endpoint creation
+        await asyncio.sleep(0.5)
         
         print(f"✓ BACnet listener ready on {bind_addr}/udp")
         print(f"✓ Created device 'Condo-Building-1' (device ID: 1001)")

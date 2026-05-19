@@ -104,16 +104,18 @@ export class DiscoveryStore {
 					const newProfile = device.metadata?.profile || 'Generic';
 					const profileChanged = existingProfile !== newProfile;
 					const dataPointsChanged = JSON.stringify(existing.data_points) !== JSON.stringify(device.dataPoints);
+					const validationChanged = device.validated && !existing.metadata?.validated;
 
 					this.logger?.debugSync(`Configuration comparison for "${device.name}"`, {
 						component: LogComponents.discovery,
 						traceId,
-						configChanged: profileChanged || dataPointsChanged,
+						configChanged: profileChanged || dataPointsChanged || validationChanged,
 						dataPointsCount: device.dataPoints?.length || 0,
-						dataPointsChanged
+						dataPointsChanged,
+						validationChanged
 					});
 
-					if (profileChanged || dataPointsChanged) {
+					if (profileChanged || dataPointsChanged || validationChanged) {
 						const reason = profileChanged ? 'Profile changed' : 'Data points changed (same profile)';
 						this.logger?.warnSync(`${reason} for "${existing.name}" - updating configuration`, {
 							component: LogComponents.discovery,
@@ -144,6 +146,9 @@ export class DiscoveryStore {
 							data_points: device.dataPoints || [],
 							metadata: {
 								...existing.metadata,
+								...device.metadata,
+								confidence: device.confidence,
+								validated: device.validated,
 								dataPointValidation: undefined  // Clear - will be revalidated
 							},
 							lastSeenAt: new Date()

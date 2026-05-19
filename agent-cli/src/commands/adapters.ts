@@ -24,7 +24,7 @@ function formatConnection(protocol: string, connection: Record<string, any>): st
     case 'snmp':
       return `${connection.host}:${connection.port || 161}`;
     case 'bacnet':
-      return `Device ID: ${connection.deviceId}`;
+      return `Device ID: ${connection.deviceInstance}`;  
     case 'can':
       return `${connection.interface} (${connection.protocol || 'CAN'})`;
     default:

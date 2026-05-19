@@ -221,6 +221,23 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 			vendorId: 999  // Generic vendor ID
 		});
 
+		// bacstack uses this._settings.port as BOTH the local bind port AND the
+		// UDP destination port in transport.send().  With AGENT_PORT=47809 every
+		// Who-Is would go to port 47809, but BACnet devices listen on port 47808.
+		// Patch transport.send so we listen on 47809 but send to 47808.
+		const remotePort = 47808;
+		const xport = (this.client as any)._transport;
+		if (xport && typeof xport._server?.send === 'function') {
+			xport.send = (buffer: Buffer, offset: number, receiver: string) => {
+				xport._server.send(buffer, 0, offset, remotePort, receiver);
+			};
+			this.logger?.debugSync('BACnet transport patched: sending to port 47808', {
+				component: LogComponents.discovery + "] [" + this.protocol as any,
+				localPort: this.AGENT_PORT,
+				remotePort
+			});
+		}
+
 		this.logger?.debugSync('BACnet client created successfully', {
 			component: LogComponents.discovery + "] [" + this.protocol as any,
 			clientType: typeof this.client,
@@ -486,8 +503,8 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 			// Read device properties for each discovered device
 			for (const [deviceInstance, deviceInfo] of devices.entries()) {
 				try {
-					// Construct full address with port for unicast reads
-					const fullAddress = `${deviceInfo.ipAddress}:${deviceInfo.port}`;
+					// Use plain IP — port is handled by the patched transport (sends to 47808)
+					const fullAddress = deviceInfo.ipAddress;
           
 					// Read device object properties (property ID 77 = Object-Name)
 					const objectName = await this.readProperty(
@@ -623,7 +640,8 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 			const deviceInstance = device.connection.deviceInstance;
 			const ipAddress = device.connection.host;
 			const devicePort = device.connection.port;
-			const fullAddress = `${ipAddress}:${devicePort}`;
+			// Use plain IP — port is handled by the patched transport (sends to 47808)
+			const fullAddress = ipAddress;
 			const objects: BACnetObject[] = [];
 
 			// Read object list (property ID 76 = Object-List)

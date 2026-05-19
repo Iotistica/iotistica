@@ -49,6 +49,9 @@ services:
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
+      # BACnet protocol settings
+      - BACNET_ENABLED=true
+      - BACNET_DISCOVERY_TARGETS=127.0.0.1
   agent-cli:
     build:
       context: ./agent-cli
