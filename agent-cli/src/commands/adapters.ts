@@ -32,6 +32,22 @@ function formatConnection(protocol: string, connection: Record<string, any>): st
   }
 }
 
+function deriveState(adapter: any): string {
+  const health = adapter.health || {};
+  if (health.status) return health.status;
+
+  if (!adapter.enabled) return 'disabled';
+
+  const lastSeenRaw = health.lastSeen || adapter.lastSeenAt;
+  if (!lastSeenRaw) return 'offline';
+
+  const lastSeenMs = new Date(lastSeenRaw).getTime();
+  if (Number.isNaN(lastSeenMs)) return 'offline';
+
+  const stalenessThresholdMs = 24 * 60 * 60 * 1000;
+  return (Date.now() - lastSeenMs) < stalenessThresholdMs ? 'online' : 'offline';
+}
+
 async function postAdapter(body: object): Promise<void> {
   const result = await apiRequest(`${DEVICE_API_V1}/endpoints`, {
     method: 'POST',
@@ -85,7 +101,7 @@ export async function adaptersList(): Promise<void> {
         const connectionStr = formatConnection(adapter.protocol, adapter.connection);
         const dataPoints: any[] = adapter.data_points || [];
         const health = adapter.health || {};
-        const state = health.status || (adapter.enabled ? 'unknown' : 'disabled');
+        const state = deriveState(adapter);
 
         const extra: Record<string, any> = {
           uuid: adapter.uuid || '(none)',
@@ -94,8 +110,9 @@ export async function adaptersList(): Promise<void> {
           interval: `${adapter.poll_interval}ms`,
         };
 
-        if (health.lastSeen) {
-          extra.lastSeen = new Date(health.lastSeen).toLocaleString();
+        const lastSeen = health.lastSeen || adapter.lastSeenAt;
+        if (lastSeen) {
+          extra.lastSeen = new Date(lastSeen).toLocaleString();
         }
 
         if (protocol === 'mqtt') {
@@ -149,11 +166,12 @@ export async function adaptersShow(name?: string): Promise<void> {
     logger.info('Protocol', { value: adapter.protocol });
     logger.info('UUID', { value: adapter.uuid });
     logger.info('Enabled', { value: adapter.enabled ? 'Yes' : 'No' });
-    logger.info('State', { value: health.status || (adapter.enabled ? 'unknown' : 'disabled') });
+    logger.info('State', { value: deriveState(adapter) });
     logger.info('Poll Interval', { value: `${adapter.poll_interval}ms` });
     logger.info('Connection', { value: formatConnection(adapter.protocol, adapter.connection) });
-    if (health.lastSeen) {
-      logger.info('Last Seen', { value: new Date(health.lastSeen).toLocaleString() });
+    const lastSeen = health.lastSeen || adapter.lastSeenAt;
+    if (lastSeen) {
+      logger.info('Last Seen', { value: new Date(lastSeen).toLocaleString() });
     }
     if (health.lastError) {
       logger.info('Last Error', { value: health.lastError });

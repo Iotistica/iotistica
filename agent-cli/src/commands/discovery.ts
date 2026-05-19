@@ -68,6 +68,8 @@ export async function discover(protocolArg?: string): Promise<void> {
     });
 
     const devices = result.devices || [];
+    const endpointsResult = await apiRequest(`${DEVICE_API_V1}/endpoints${protocol ? `?protocol=${protocol}` : ''}`);
+    const endpoints = endpointsResult.endpoints || [];
 
     if (devices.length === 0) {
       logger.info('No devices discovered');
@@ -81,7 +83,37 @@ export async function discover(protocolArg?: string): Promise<void> {
       const connectionStr = formatConnection(device.protocol, device.connection);
       const confidenceIcon = device.confidence === 'high' ? '●' : device.confidence === 'medium' ? '◐' : '○';
       const validatedIcon = device.validated ? ' [V]' : '';
-      const statusEnabled = device.enabled === true ? 'enabled' : 'disabled';
+      const matchedEndpoint = endpoints.find((ep: any) => {
+        if (ep.protocol !== device.protocol) return false;
+
+        if (device.protocol === 'bacnet') {
+          return ep.connection?.deviceInstance === device.connection?.deviceInstance;
+        }
+
+        if (device.protocol === 'modbus') {
+          return ep.connection?.host === device.connection?.host
+            && ep.connection?.port === device.connection?.port
+            && ep.connection?.slaveId === device.connection?.slaveId;
+        }
+
+        if (device.protocol === 'opcua') {
+          return ep.connection?.endpointUrl === device.connection?.endpointUrl;
+        }
+
+        if (device.protocol === 'mqtt') {
+          return ep.connection?.brokerUrl === device.connection?.brokerUrl
+            || ep.connection?.url === device.connection?.url;
+        }
+
+        if (device.protocol === 'snmp') {
+          return ep.connection?.host === device.connection?.host
+            && (ep.connection?.port || 161) === (device.connection?.port || 161);
+        }
+
+        return ep.name === device.name;
+      });
+
+      const statusEnabled = matchedEndpoint?.enabled === true ? 'enabled' : 'disabled';
 
       logger.info(device.name, {
         protocol: device.protocol,

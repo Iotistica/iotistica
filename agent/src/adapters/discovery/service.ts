@@ -257,6 +257,13 @@ export class DiscoveryService extends EventEmitter {
 	private async _runDiscovery(options: DiscoveryOptions, traceId: string): Promise<DiscoveredDevice[]> {
 		const { trigger, validate = false, forceRun = false, protocols } = options;
 
+		// BACnet discovery without validation yields empty pollable points and no publish.
+		// For manual workflows, auto-enable validation whenever BACnet is included.
+		const selectedProtocols = protocols || Array.from(this.plugins.keys());
+		const autoValidateBacnet =
+			trigger === 'manual' && !validate && selectedProtocols.includes('bacnet');
+		const effectiveValidate = validate || autoValidateBacnet;
+
 		// Check rate limiting
 		if (!forceRun && !this.shouldRunDiscovery(trigger)) {
 			this.logger?.debugSync('Discovery skipped due to rate limiting', {
@@ -273,7 +280,7 @@ export class DiscoveryService extends EventEmitter {
 			this.logger?.infoSync('Running device discovery scan with full validation', {
 				component: LogComponents.discovery,
 				traceId,
-				validate,
+				validate: effectiveValidate,
 				protocols: protocols || 'all'
 			});
 		} else {
@@ -281,7 +288,8 @@ export class DiscoveryService extends EventEmitter {
 				component: LogComponents.discovery,
 				traceId,
 				trigger,
-				validate,
+				validate: effectiveValidate,
+				autoValidateBacnet,
 				forceRun,
 				protocols: protocols || 'all'
 			});
@@ -290,7 +298,6 @@ export class DiscoveryService extends EventEmitter {
 		const startTime = Date.now();
 
 		// Filter plugins by requested protocols
-		const selectedProtocols = protocols || Array.from(this.plugins.keys());
 		const allDiscovered: DiscoveredDevice[] = [];
 
 		// Run discovery on each plugin
@@ -342,7 +349,7 @@ export class DiscoveryService extends EventEmitter {
 				}
 
 				// Phase 2: Validation (optional)
-				if (validate && discovered.length > 0) {
+				if (effectiveValidate && discovered.length > 0) {
 					this.logger?.debugSync(`Validating ${discovered.length} ${protocol} devices`, {
 						component: LogComponents.discovery,
 						traceId,
@@ -426,7 +433,8 @@ export class DiscoveryService extends EventEmitter {
 		this.logger?.infoSync(`Discovery complete: ${allDiscovered.length} devices found in ${duration}ms`, {
 			component: LogComponents.discovery,
 			traceId,
-			validated: validate,
+			validated: effectiveValidate,
+			autoValidateBacnet,
 			protocols: selectedProtocols
 		});
 
@@ -458,12 +466,12 @@ export class DiscoveryService extends EventEmitter {
 		}
 
 		// Update metadata
-		this.updateMetadata(trigger, validate);
+		this.updateMetadata(trigger, effectiveValidate);
 
 		// Emit discovery-complete event (triggers device publish reload on first boot)
 		this.emit('discovery-complete', {
 			trigger,
-			validate,
+			validate: effectiveValidate,
 			deviceCount: allDiscovered.length,
 			savedCount: saveResults.saved,
 			skippedCount: saveResults.skipped,
