@@ -297,7 +297,7 @@ class CondoSimulator:
             # Log every 30 seconds
             elapsed = (datetime.now() - self.start_time).total_seconds()
             if int(elapsed) % 30 == 0:
-                print(f"[{int(self.time_of_day):02d}:{int((self.time_of_day % 1) * 60):02d}] "
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
                       f"Outdoor Temp: {self.outdoor_temp:.1f}°C | "
                       f"Chiller Power: {self.points['chiller_power'].presentValue:.1f}kW | "
                       f"AHU-1 Valve: {self.points['ahu1_cooling_valve'].presentValue:.0f}%")
@@ -305,6 +305,24 @@ class CondoSimulator:
     async def run(self):
         """Main entry point"""
         print("\nStarting Condo BACnet Simulator...")
+
+        # Suppress bacpypes3 "no broadcast" errors that occur when the host
+        # network interface has no broadcast address (e.g. Docker Desktop
+        # loopback / host-network mode on Windows/Mac).  These are raised
+        # inside internal bacpypes3 tasks and do not affect unicast operation.
+        loop = asyncio.get_running_loop()
+        _orig_handler = loop.get_exception_handler()
+
+        def _exception_handler(loop: asyncio.AbstractEventLoop, context: dict) -> None:
+            exc = context.get('exception')
+            if isinstance(exc, RuntimeError) and str(exc) == 'no broadcast':
+                return  # benign — no broadcast route, unicast still works fine
+            if _orig_handler:
+                _orig_handler(loop, context)
+            else:
+                loop.default_exception_handler(context)
+
+        loop.set_exception_handler(_exception_handler)
         
         await self.initialize()
         

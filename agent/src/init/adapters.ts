@@ -311,6 +311,10 @@ export class AdapterInitializer {
 
 	/** Stop adapters, reinit, restart DevicePublish, update CloudSync. */
 	private async _fullReload(): Promise<void> {
+		// Release the BACnet discovery plugin's socket so the adapter can bind
+		// to the same port without conflict (both use port 47809 by default).
+		this.context.discoveryService?.releasePluginClient('bacnet');
+
 		if (this.features.devices) {
 			await this.features.devices.stop();
 			this.features.devices = undefined;

@@ -661,15 +661,21 @@ export class AdapterManager extends EventEmitter {
 						connectionTimeoutMs: d.connection.connectionTimeoutMs || 5000,
 						retryAttempts: d.connection.retryAttempts || 3,
 						retryDelayMs: d.connection.retryDelayMs || 1000,
-						objects: (d.data_points || []).map((obj: any) => ({
-							name: obj.name,
-							objectType: obj.objectType,
-							objectInstance: obj.objectInstance,
-							propertyId: obj.propertyId || 85,
-							unit: obj.unit || obj.units || "",
-							pollIntervalMs: obj.pollIntervalMs || 5000,
-							enabled: obj.enabled !== false,
-						})),
+						objects: (d.data_points || [])
+							.filter((obj: any) => [
+								'analog-input', 'analog-output', 'analog-value',
+								'binary-input', 'binary-output', 'binary-value',
+								'multi-state-input', 'multi-state-output', 'multi-state-value',
+							].includes(obj.objectType))
+							.map((obj: any) => ({
+								name: obj.name,
+								objectType: obj.objectType,
+								objectInstance: obj.objectInstance,
+								propertyId: obj.propertyId || 85,
+								unit: obj.unit || obj.units || "",
+								pollIntervalMs: obj.pollIntervalMs || 5000,
+								enabled: obj.enabled !== false,
+							})),
 					})),
 					globalPollIntervalMs:
 						(this.config.bacnet as any)?.globalPollIntervalMs || 5000,

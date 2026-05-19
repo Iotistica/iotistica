@@ -95,6 +95,18 @@ export class DiscoveryService extends EventEmitter {
 	}
 
 	/**
+   * Release the persistent socket held by a protocol's discovery plugin.
+   * Call before starting an adapter that binds to the same port (e.g. BACnet
+   * discovery and the BACnet polling adapter both use port 47809).
+   */
+	public releasePluginClient(protocol: string): void {
+		const plugin = this.plugins.get(protocol) as any;
+		if (plugin && typeof plugin.close === 'function') {
+			plugin.close();
+		}
+	}
+
+	/**
    * Initialize all discovery plugins
    */
 	private initializePlugins(): Map<string, BaseDiscoveryPlugin> {

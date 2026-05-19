@@ -29,15 +29,50 @@ export class BACnetClient {
 		this.config = config;
 		this.logger = logger;
 
-		// Initialize bacstack client
+		// Initialize bacstack client.
+		// Use port 0 so the OS assigns an ephemeral local port.  This prevents
+		// conflicts with the discovery plugin (port 47809) and with sockets from
+		// a previous adapter instance that may still be in the process of closing
+		// (bacstack's dgram.close() is async — the old socket and a new socket
+		// bound to the same explicit port can temporarily coexist, causing the
+		// kernel to route responses to the wrong socket).  The transport patch
+		// below still forces all outgoing packets to destination port 47808,
+		// so the ephemeral local port has no effect on BACnet behaviour.
 		this.client = new BACnet({
 			apduTimeout: config.connectionTimeoutMs,
-			port: bacnetPort,
+			port: 0,
 			broadcastAddress: '255.255.255.255', // Not used for unicast
 			deviceId: 4190000 + Math.floor(Math.random() * 1000), // Unique device ID per client
 		});
 
+		// bacstack uses this._settings.port as the UDP destination port even for
+		// unicast ReadProperty calls.  With bacnetPort=47809 every packet would
+		// go to port 47809, but BACnet devices listen on port 47808.  Patch
+		// transport.send so we listen on bacnetPort but always send to 47808.
+		// The patch is also applied (re-applied) in connect() after the socket
+		// has had time to bind, in case _transport._server is not yet ready here.
+		this._applyTransportPatch();
+
 		this.logger.debug(`BACnet client initialized for ${config.name} (${config.ipAddress}:${config.port})`);
+	}
+
+	/**
+   * Patch the bacstack transport so all outgoing packets are sent to the
+   * standard BACnet port (47808) regardless of which port this client is
+   * bound to locally.  Safe to call multiple times; subsequent calls are
+   * no-ops if the patch is already in place.
+   */
+	private _applyTransportPatch(): void {
+		const xport = (this.client as any)?._transport;
+		if (!xport) return;
+		const server = xport._server;
+		if (!server || typeof server.send !== 'function') return;
+		// Guard: don't double-patch
+		if ((xport as any)._portPatched) return;
+		xport.send = (buffer: Buffer, offset: number, receiver: string) => {
+			server.send(buffer, 0, offset, 47808, receiver);
+		};
+		(xport as any)._portPatched = true;
 	}
 
 	/**
@@ -47,6 +82,16 @@ export class BACnetClient {
 		try {
 			// bacstack doesn't have explicit connect - it uses UDP
 			// Just verify device is reachable with a Who-Is
+			// Re-apply the transport patch here after the UDP socket has had time
+			// to bind (bacstack binds asynchronously in its constructor).
+			await new Promise(resolve => setTimeout(resolve, 100));
+			this._applyTransportPatch();
+
+			const xport = (this.client as any)?._transport;
+			const patched = !!(xport as any)?._portPatched;
+			const serverExists = !!xport?._server;
+			this.logger.debug(`BACnet transport state: xport=${!!xport} server=${serverExists} patched=${patched}`);
+
 			this.connected = true;
 			this.lastError = null;
 			this.logger.debug(`BACnet client connected to ${this.config.name}`);
