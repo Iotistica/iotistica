@@ -6,7 +6,7 @@ import { AwsIotClient } from './clients/aws-iot.js';
 import { AzureIotClient } from './clients/azure-iot.js';
 import { GcpIotClient } from './clients/gcp-iot.js';
 import type { CloudTargetFactoryInput } from './types.js';
-import { BaseMqttClient } from './base-client.js';
+import type { BaseMqttClient } from './base-client.js';
 
 /**
  * Creates the correct client for a given provider config.
