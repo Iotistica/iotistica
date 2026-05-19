@@ -391,10 +391,16 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 			});
 
 			// Send Who-Is (unicast or broadcast mode)
+			// bacstack v0.0.1-beta.14 whoIs() API:
+			//   options.address — destination IP string (unicast or broadcast)
+			//   If address === broadcastAddress, BVLC type = ORIGINAL_BROADCAST_NPDU
+			//   Otherwise, BVLC type = ORIGINAL_UNICAST_NPDU
+			// Both modes use the SAME main client socket so I-Am responses arrive
+			// on the single listening port (AGENT_PORT) and fire the iAm event.
 			if (useUnicast) {
-				// Unicast mode: Send Who-Is to each discovery target
-				// NOTE: bacstack v0.0.1-beta.14 ignores receiver parameter, so we create
-				// a separate client for each target with that IP as broadcastAddress
+				// Unicast mode: send Who-Is directly to each target IP via the main client.
+				// The simulator (bacpypes3) must respond with unicast I-Am back to the
+				// agent's port so the response crosses Docker network boundaries.
 				this.logger?.debugSync('Sending BACnet Who-Is via unicast', {
 					component: LogComponents.discovery + "] [" + this.protocol as any,
 					targets: discoveryTargets,
@@ -403,9 +409,8 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 
 				for (const target of discoveryTargets) {
 					try {
-						// Expand CIDR ranges or IP ranges to individual IPs
 						const targetIPs = this.expandDiscoveryTarget(target);
-            
+
 						for (const targetIP of targetIPs) {
 							this.logger?.debugSync('Sending Who-Is to unicast target', {
 								component: LogComponents.discovery + "] [" + this.protocol as any,
@@ -413,38 +418,20 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 								port
 							});
 
-							// Create temporary client with target IP as broadcast address
-							// Use random port (undefined) to avoid conflict with main client
-							const unicastClient = new BACnet({
-								apduTimeout: timeout,
-								// port: undefined,  // Let OS assign random port
-								broadcastAddress: targetIP,  // Use target as "broadcast" to force unicast
-								deviceId: this.AGENT_DEVICE_ID + 1  // Different device ID
-							});
-
-							// Attach I-Am listener to this client to receive responses
-							unicastClient.on('iAm', (device: any) => {
-								client.emit('iAm', device);  // Forward to main client's listener
-							});
-
-							unicastClient.whoIs({
+							// Use the main client with 'address' param — bacstack sends
+							// ORIGINAL_UNICAST_NPDU when address != broadcastAddress.
+							// I-Am responses arrive on the main client's socket (port 47809)
+							// and trigger the iAm listener registered above.
+							client.whoIs({
 								lowLimit: deviceIdRange[0],
-								highLimit: deviceIdRange[1]
+								highLimit: deviceIdRange[1],
+								address: targetIP
 							});
-              
-							this.logger?.debugSync('Created unicast client and sent Who-Is', {
+
+							this.logger?.debugSync('Unicast Who-Is sent', {
 								component: LogComponents.discovery + "] [" + this.protocol as any,
 								target: targetIP
 							});
-              
-							// Clean up temporary client after timeout
-							setTimeout(() => {
-								try {
-									unicastClient.close();
-								} catch (_err) {
-									// Ignore cleanup errors
-								}
-							}, timeout + 1000);
 						}
 					} catch (err) {
 						this.logger?.errorSync('Failed to send Who-Is to target', err instanceof Error ? err : new Error(String(err)), {
@@ -459,7 +446,9 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 					targetCount: discoveryTargets.length
 				});
 			} else {
-				// Broadcast mode: Send Who-Is to broadcast address (legacy)
+				// Broadcast mode: send Who-Is to the broadcast address.
+				// bacstack uses 'address' (not 'receiver') as the destination.
+				// When address === broadcastAddress the BVLC type is ORIGINAL_BROADCAST_NPDU.
 				this.logger?.debugSync('Sending BACnet Who-Is broadcast', {
 					component: LogComponents.discovery + "] [" + this.protocol as any,
 					broadcastAddress,
@@ -471,7 +460,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 					client.whoIs({
 						lowLimit: deviceIdRange[0],
 						highLimit: deviceIdRange[1],
-						receiver: { address: broadcastAddress!, port: 47808 }  // Explicit broadcast target
+						address: broadcastAddress  // correct bacstack API key (not 'receiver')
 					});
 					this.logger?.debugSync('Who-Is broadcast sent successfully', {
 						component: LogComponents.discovery + "] [" + this.protocol as any,
@@ -588,7 +577,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 						vendorId: deviceInfo.vendorId,
 						modelName: deviceInfo.modelName,
 						description: deviceInfo.description,
-						discoveryMethod: 'who_is_broadcast'
+						discoveryMethod: useUnicast ? 'who_is_unicast' : 'who_is_broadcast'
 					}
 				});
 			}

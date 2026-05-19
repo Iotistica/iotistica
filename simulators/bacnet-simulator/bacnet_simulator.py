@@ -30,30 +30,50 @@ class ResponsiveApplication(Application):
         super().indication(apdu)
     
     def do_WhoIsRequest(self, apdu):
-        """Handle incoming Who-Is request and respond with I-Am"""
+        """Handle incoming Who-Is request and respond with I-Am.
+
+        Unicast vs broadcast I-Am strategy (mirrors Ignition Scenario 2):
+          - If Who-Is arrived from a specific unicast address, respond unicast
+            directly back to the requester so the response crosses subnet/network
+            boundaries (e.g. Docker bridge → host network_mode agent).
+          - If Who-Is arrived via broadcast (pduSource is None or a broadcast
+            address), respond with a normal broadcast I-Am so any listener on
+            the local subnet can hear it (Scenario 1 / same broadcast domain).
+        """
         if _debug:
             _log.debug(f"[BACnet] Processing Who-Is from {apdu.pduSource}")
-        
+
         print(f"[BACnet] Received Who-Is request from {apdu.pduSource}")
-        
-        # Check if request is for our device ID or broadcast
+
         device_id = self.device_object.objectIdentifier[1]
         low_limit = apdu.deviceInstanceRangeLowLimit
         high_limit = apdu.deviceInstanceRangeHighLimit
-        
-        # Respond if:
-        # 1. No range specified (broadcast Who-Is)
-        # 2. Our device ID is within the specified range
+
         should_respond = (
             (low_limit is None and high_limit is None) or
             (low_limit is not None and high_limit is not None and low_limit <= device_id <= high_limit)
         )
-        
-        if should_respond:
-            print(f"[BACnet] Sending I-Am response (device {device_id})")
-            self.i_am()
-        else:
+
+        if not should_respond:
             print(f"[BACnet] Device {device_id} not in range {low_limit}-{high_limit}, ignoring")
+            return
+
+        # Determine whether to respond unicast or broadcast.
+        # A unicast source address looks like "192.168.x.y:47808".
+        # A broadcast source is None or ends with ".255:47808".
+        source = apdu.pduSource
+        is_unicast_source = (
+            source is not None and
+            not str(source).endswith('.255:47808') and
+            str(source) not in ('*:47808', '<broadcast>:47808')
+        )
+
+        if is_unicast_source:
+            print(f"[BACnet] Sending unicast I-Am to {source} (device {device_id})")
+            self.i_am(address=source)
+        else:
+            print(f"[BACnet] Sending broadcast I-Am (device {device_id})")
+            self.i_am()
 
 # Single BACnet device with all building points
 class CondoSimulator:
@@ -74,6 +94,13 @@ class CondoSimulator:
         bind_addr = os.environ.get('BACPYPES_IFACE', None)
         
         if bind_addr:
+            # bacpypes3 Address() accepts "ip", "ip/prefix", or "ip:port" — but NOT "ip:port/prefix".
+            # Strip /prefix from the combined form (legacy bacpypes2 convention).
+            if ':' in bind_addr and '/' in bind_addr:
+                bind_addr = bind_addr.split('/')[0]  # "0.0.0.0:47808/24" → "0.0.0.0:47808"
+            elif bind_addr.startswith('0.0.0.0/') or bind_addr == '0.0.0.0':
+                # "0.0.0.0/24" doesn't make sense for broadcast calculation; use plain form
+                bind_addr = '0.0.0.0:47808'
             print(f"✓ Using BACPYPES_IFACE from environment: {bind_addr}")
         else:
             # Auto-detect: try to get host IP
