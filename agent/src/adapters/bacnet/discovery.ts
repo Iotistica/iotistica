@@ -740,8 +740,11 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 				});
 			}
 
-			// Update device with discovered data points
-			device.dataPoints = objects.map(obj => ({
+			// Persist only pollable BACnet points. Device/network-port objects are
+			// useful for validation metadata but should not become adapter datapoints.
+			device.dataPoints = objects
+				.filter(obj => obj.presentValue !== undefined)
+				.map(obj => ({
 				name: obj.objectName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
 				objectType: obj.objectType,
 				objectInstance: obj.objectInstance,

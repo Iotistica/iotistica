@@ -747,7 +747,29 @@ export const deprovisionDevice = async () => {
 export const getEndpoints = async (protocol?: string) => {
 	const { EndpointModel: EndpointModel } = await import('../db/models/endpoint.model.js');
 	const endpoints = await EndpointModel.getAll(protocol);
-	return endpoints;
+	const deviceHealth = adapterManager
+		? await adapterManager.getAllDeviceStatuses().catch(() => ({} as Record<string, any>))
+		: {};
+
+	return endpoints.map((endpoint: any) => {
+		const health = deviceHealth[endpoint.name];
+		if (!health) {
+			return endpoint;
+		}
+
+		return {
+			...endpoint,
+			health: {
+				status: health.status,
+				connected: health.connected,
+				communicationQuality: health.communicationQuality,
+				lastSeen: health.lastSeen,
+				lastPoll: health.lastPoll,
+				lastError: health.lastError,
+				responseTimeMs: health.responseTimeMs,
+			},
+		};
+	});
 };
 
 /**

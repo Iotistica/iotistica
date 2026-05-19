@@ -84,12 +84,19 @@ export async function adaptersList(): Promise<void> {
         const icon = adapter.enabled ? '✓' : '✗';
         const connectionStr = formatConnection(adapter.protocol, adapter.connection);
         const dataPoints: any[] = adapter.data_points || [];
+        const health = adapter.health || {};
+        const state = health.status || (adapter.enabled ? 'unknown' : 'disabled');
 
         const extra: Record<string, any> = {
           uuid: adapter.uuid || '(none)',
           connection: connectionStr,
+          state,
           interval: `${adapter.poll_interval}ms`,
         };
+
+        if (health.lastSeen) {
+          extra.lastSeen = new Date(health.lastSeen).toLocaleString();
+        }
 
         if (protocol === 'mqtt') {
           const topics = dataPoints.map((dp: any) => dp.topic || dp.name).filter(Boolean);
@@ -136,12 +143,21 @@ export async function adaptersShow(name?: string): Promise<void> {
     console.log('║                    DEVICE DETAILS                                 ║');
     console.log('╚═══════════════════════════════════════════════════════════════════╝\n');
 
+    const health = adapter.health || {};
+
     logger.info('Name', { value: adapter.name });
     logger.info('Protocol', { value: adapter.protocol });
     logger.info('UUID', { value: adapter.uuid });
     logger.info('Enabled', { value: adapter.enabled ? 'Yes' : 'No' });
+    logger.info('State', { value: health.status || (adapter.enabled ? 'unknown' : 'disabled') });
     logger.info('Poll Interval', { value: `${adapter.poll_interval}ms` });
     logger.info('Connection', { value: formatConnection(adapter.protocol, adapter.connection) });
+    if (health.lastSeen) {
+      logger.info('Last Seen', { value: new Date(health.lastSeen).toLocaleString() });
+    }
+    if (health.lastError) {
+      logger.info('Last Error', { value: health.lastError });
+    }
 
     const dataPoints: any[] = adapter.data_points || [];
     if (dataPoints.length > 0) {
