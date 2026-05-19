@@ -8,8 +8,8 @@ from bacpypes3.local.device import DeviceObject
 from bacpypes3.local.analog import AnalogInputObject
 from bacpypes3.local.binary import BinaryInputObject
 from bacpypes3.app import Application
-from bacpypes3.primitivedata import Real, Enumerated
-from bacpypes3.basetypes import EngineeringUnits
+from bacpypes3.primitivedata import Real
+from bacpypes3.basetypes import EngineeringUnits, BinaryPV
 from bacpypes3.debugging import bacpypes_debugging, ModuleLogger
 from bacpypes3.local.networkport import NetworkPortObject
 
@@ -52,14 +52,8 @@ class ResponsiveApplication(Application):
             return
 
         # Determine whether to respond unicast or broadcast.
-        # A unicast source address looks like "192.168.x.y:47808".
-        # A broadcast source is None or ends with ".255:47808".
         source = apdu.pduSource
-        is_unicast_source = (
-            source is not None and
-            not str(source).endswith('.255:47808') and
-            str(source) not in ('*:47808', '<broadcast>:47808')
-        )
+        is_unicast_source = not _is_broadcast_address(source)
 
         if is_unicast_source:
             print(f"[BACnet] Sending unicast I-Am to {source} (device {device_id})")
@@ -67,6 +61,59 @@ class ResponsiveApplication(Application):
         else:
             print(f"[BACnet] Sending broadcast I-Am (device {device_id})")
             self.i_am()
+
+def _is_broadcast_address(source) -> bool:
+    """Return True if the BACnet source address is a broadcast or unspecified address.
+
+    Isolating this heuristic here means future improvements (BBMD, IPv6, etc.)
+    only need to be made in one place.
+    """
+    if source is None:
+        return True
+    s = str(source)
+    return (
+        s.endswith('.255:47808') or
+        s in ('*:47808', '<broadcast>:47808')
+    )
+
+
+def _add_ai(
+    app,
+    points: dict,
+    key: str,
+    instance: int,
+    name: str,
+    value: float,
+    units: str,
+) -> None:
+    """Register an AnalogInputObject and store it in the points dict."""
+    obj = AnalogInputObject(
+        objectIdentifier=f"analog-input,{instance}",
+        objectName=name,
+        presentValue=Real(value),
+        units=EngineeringUnits(units),
+    )
+    app.add_object(obj)
+    points[key] = obj
+
+
+def _add_bi(
+    app,
+    points: dict,
+    key: str,
+    instance: int,
+    name: str,
+    active: bool = True,
+) -> None:
+    """Register a BinaryInputObject and store it in the points dict."""
+    obj = BinaryInputObject(
+        objectIdentifier=f"binary-input,{instance}",
+        objectName=name,
+        presentValue=BinaryPV("active" if active else "inactive"),
+    )
+    app.add_object(obj)
+    points[key] = obj
+
 
 # Single BACnet device with all building points
 class CondoSimulator:
@@ -115,6 +162,11 @@ class CondoSimulator:
             objectIdentifier="device,1001",
             objectName="Condo-Building-1",
             vendorIdentifier=999,
+            description="Condo HVAC Simulator",
+            modelName="Iotistica BACnet Simulator",
+            vendorName="Iotistica",
+            applicationSoftwareVersion="1.0",
+            location="Condo-Building-1",
         )
         
         # Create NetworkPortObject — this is what actually binds the UDP socket.
@@ -147,116 +199,24 @@ class CondoSimulator:
 
         
         # Chiller points
-        self.points['chiller_status'] = BinaryInputObject(
-            objectIdentifier="binary-input,1",
-            objectName="Chiller-1 Status",
-            presentValue=Enumerated(1)
-        )
-        self.app.add_object(self.points['chiller_status'])
-        
-        self.points['chiller_supply_temp'] = AnalogInputObject(
-            objectIdentifier="analog-input,2",
-            objectName="Chiller-1 Supply Temp",
-            presentValue=Real(7.0),
-            units=EngineeringUnits("degrees-celsius")
-        )
-        self.app.add_object(self.points['chiller_supply_temp'])
-        
-        self.points['chiller_return_temp'] = AnalogInputObject(
-            objectIdentifier="analog-input,3",
-            objectName="Chiller-1 Return Temp",
-            presentValue=Real(12.0),
-            units=EngineeringUnits("degrees-celsius")
-        )
-        self.app.add_object(self.points['chiller_return_temp'])
-        
-        self.points['chiller_power'] = AnalogInputObject(
-            objectIdentifier="analog-input,4",
-            objectName="Chiller-1 Power",
-            presentValue=Real(85.0),
-            units=EngineeringUnits("kilowatts")
-        )
-        self.app.add_object(self.points['chiller_power'])
-        
+        _add_bi(self.app, self.points, 'chiller_status', 1, 'Chiller-1 Status', active=True)
+        _add_ai(self.app, self.points, 'chiller_supply_temp', 2, 'Chiller-1 Supply Temp', 7.0, 'degrees-celsius')
+        _add_ai(self.app, self.points, 'chiller_return_temp', 3, 'Chiller-1 Return Temp', 12.0, 'degrees-celsius')
+        _add_ai(self.app, self.points, 'chiller_power', 4, 'Chiller-1 Power', 85.0, 'kilowatts')
+
         # AHU-1 points
-        self.points['ahu1_supply_temp'] = AnalogInputObject(
-            objectIdentifier="analog-input,10",
-            objectName="AHU-1 Supply Temp",
-            presentValue=Real(18.0),
-            units=EngineeringUnits("degrees-celsius")
-        )
-        self.app.add_object(self.points['ahu1_supply_temp'])
-        
-        self.points['ahu1_return_temp'] = AnalogInputObject(
-            objectIdentifier="analog-input,11",
-            objectName="AHU-1 Return Temp",
-            presentValue=Real(22.0),
-            units=EngineeringUnits("degrees-celsius")
-        )
-        self.app.add_object(self.points['ahu1_return_temp'])
-        
-        self.points['ahu1_airflow'] = AnalogInputObject(
-            objectIdentifier="analog-input,12",
-            objectName="AHU-1 Airflow",
-            presentValue=Real(5000.0),
-            units=EngineeringUnits("cubic-feet-per-minute")
-        )
-        self.app.add_object(self.points['ahu1_airflow'])
-        
-        self.points['ahu1_cooling_valve'] = AnalogInputObject(
-            objectIdentifier="analog-input,13",
-            objectName="AHU-1 Cooling Valve",
-            presentValue=Real(45.0),
-            units=EngineeringUnits("percent")
-        )
-        self.app.add_object(self.points['ahu1_cooling_valve'])
-        
-        self.points['ahu1_fan_status'] = BinaryInputObject(
-            objectIdentifier="binary-input,14",
-            objectName="AHU-1 Fan Status",
-            presentValue=Enumerated(1)
-        )
-        self.app.add_object(self.points['ahu1_fan_status'])
-        
+        _add_ai(self.app, self.points, 'ahu1_supply_temp', 10, 'AHU-1 Supply Temp', 18.0, 'degrees-celsius')
+        _add_ai(self.app, self.points, 'ahu1_return_temp', 11, 'AHU-1 Return Temp', 22.0, 'degrees-celsius')
+        _add_ai(self.app, self.points, 'ahu1_airflow', 12, 'AHU-1 Airflow', 5000.0, 'cubic-feet-per-minute')
+        _add_ai(self.app, self.points, 'ahu1_cooling_valve', 13, 'AHU-1 Cooling Valve', 45.0, 'percent')
+        _add_bi(self.app, self.points, 'ahu1_fan_status', 14, 'AHU-1 Fan Status', active=True)
+
         # AHU-2 points
-        self.points['ahu2_supply_temp'] = AnalogInputObject(
-            objectIdentifier="analog-input,20",
-            objectName="AHU-2 Supply Temp",
-            presentValue=Real(18.0),
-            units=EngineeringUnits("degrees-celsius")
-        )
-        self.app.add_object(self.points['ahu2_supply_temp'])
-        
-        self.points['ahu2_return_temp'] = AnalogInputObject(
-            objectIdentifier="analog-input,21",
-            objectName="AHU-2 Return Temp",
-            presentValue=Real(22.0),
-            units=EngineeringUnits("degrees-celsius")
-        )
-        self.app.add_object(self.points['ahu2_return_temp'])
-        
-        self.points['ahu2_airflow'] = AnalogInputObject(
-            objectIdentifier="analog-input,22",
-            objectName="AHU-2 Airflow",
-            presentValue=Real(5000.0),
-            units=EngineeringUnits("cubic-feet-per-minute")
-        )
-        self.app.add_object(self.points['ahu2_airflow'])
-        
-        self.points['ahu2_cooling_valve'] = AnalogInputObject(
-            objectIdentifier="analog-input,23",
-            objectName="AHU-2 Cooling Valve",
-            presentValue=Real(45.0),
-            units=EngineeringUnits("percent")
-        )
-        self.app.add_object(self.points['ahu2_cooling_valve'])
-        
-        self.points['ahu2_fan_status'] = BinaryInputObject(
-            objectIdentifier="binary-input,24",
-            objectName="AHU-2 Fan Status",
-            presentValue=Enumerated(1)
-        )
-        self.app.add_object(self.points['ahu2_fan_status'])
+        _add_ai(self.app, self.points, 'ahu2_supply_temp', 20, 'AHU-2 Supply Temp', 18.0, 'degrees-celsius')
+        _add_ai(self.app, self.points, 'ahu2_return_temp', 21, 'AHU-2 Return Temp', 22.0, 'degrees-celsius')
+        _add_ai(self.app, self.points, 'ahu2_airflow', 22, 'AHU-2 Airflow', 5000.0, 'cubic-feet-per-minute')
+        _add_ai(self.app, self.points, 'ahu2_cooling_valve', 23, 'AHU-2 Cooling Valve', 45.0, 'percent')
+        _add_bi(self.app, self.points, 'ahu2_fan_status', 24, 'AHU-2 Fan Status', active=True)
         
         print(f"✓ Registered {len(self.points)} BACnet points")
         
@@ -274,21 +234,21 @@ class CondoSimulator:
             # Chiller load factor drives status and power
             load_factor = 0.6 + 0.3 * (self.outdoor_temp - 25.0) / 8.0
             chiller_running = load_factor > 0.3 and random.random() > 0.02
-            self.points['chiller_status'].presentValue = Enumerated(1 if chiller_running else 0)
+            self.points['chiller_status'].presentValue = BinaryPV('active' if chiller_running else 'inactive')
             self.points['chiller_supply_temp'].presentValue = Real(7.0 + random.uniform(-0.3, 0.3))
             self.points['chiller_return_temp'].presentValue = Real(12.0 + random.uniform(-0.3, 0.3))
             power = 85.0 * max(0.3, min(1.0, load_factor)) + random.uniform(-3, 3)
             self.points['chiller_power'].presentValue = Real(power)
 
             # AHU-1
-            self.points['ahu1_fan_status'].presentValue = Enumerated(1 if random.random() > 0.05 else 0)
+            self.points['ahu1_fan_status'].presentValue = BinaryPV('active' if random.random() > 0.05 else 'inactive')
             self.points['ahu1_supply_temp'].presentValue = Real(18.0 + random.uniform(-1.0, 1.0))
             self.points['ahu1_return_temp'].presentValue = Real(22.0 + (self.outdoor_temp - 25.0) * 0.2 + random.uniform(-0.5, 0.5))
             self.points['ahu1_airflow'].presentValue = Real(5000.0 + random.uniform(-200, 200))
             self.points['ahu1_cooling_valve'].presentValue = Real(max(0, min(100, 45 + (self.outdoor_temp - 25.0) * 2 + random.uniform(-5, 5))))
 
             # AHU-2
-            self.points['ahu2_fan_status'].presentValue = Enumerated(1 if random.random() > 0.05 else 0)
+            self.points['ahu2_fan_status'].presentValue = BinaryPV('active' if random.random() > 0.05 else 'inactive')
             self.points['ahu2_supply_temp'].presentValue = Real(18.0 + random.uniform(-1.0, 1.0))
             self.points['ahu2_return_temp'].presentValue = Real(22.0 + (self.outdoor_temp - 25.0) * 0.2 + random.uniform(-0.5, 0.5))
             self.points['ahu2_airflow'].presentValue = Real(5000.0 + random.uniform(-200, 200))
@@ -302,16 +262,16 @@ class CondoSimulator:
                 W = 26  # label column width
                 print(
                     f"[{ts}] Outdoor: {self.outdoor_temp:.1f}°C | {len(self.points)} points\n"
-                    f"  {'Chiller-1 Status':<{W}}: {'ON' if bool(self.points['chiller_status'].presentValue) else 'OFF'}\n"
+                    f"  {'Chiller-1 Status':<{W}}: {'ON' if self.points['chiller_status'].presentValue == BinaryPV('active') else 'OFF'}\n"
                     f"  {'Chiller-1 Supply Temp':<{W}}: {self.points['chiller_supply_temp'].presentValue:.1f}°C\n"
                     f"  {'Chiller-1 Return Temp':<{W}}: {self.points['chiller_return_temp'].presentValue:.1f}°C\n"
                     f"  {'Chiller-1 Power':<{W}}: {self.points['chiller_power'].presentValue:.1f}kW\n"
-                    f"  {'AHU-1 Fan Status':<{W}}: {'ON' if bool(self.points['ahu1_fan_status'].presentValue) else 'OFF'}\n"
+                    f"  {'AHU-1 Fan Status':<{W}}: {'ON' if self.points['ahu1_fan_status'].presentValue == BinaryPV('active') else 'OFF'}\n"
                     f"  {'AHU-1 Supply Temp':<{W}}: {self.points['ahu1_supply_temp'].presentValue:.1f}°C\n"
                     f"  {'AHU-1 Return Temp':<{W}}: {self.points['ahu1_return_temp'].presentValue:.1f}°C\n"
                     f"  {'AHU-1 Airflow':<{W}}: {self.points['ahu1_airflow'].presentValue:.0f}cfm\n"
                     f"  {'AHU-1 Cooling Valve':<{W}}: {self.points['ahu1_cooling_valve'].presentValue:.0f}%\n"
-                    f"  {'AHU-2 Fan Status':<{W}}: {'ON' if bool(self.points['ahu2_fan_status'].presentValue) else 'OFF'}\n"
+                    f"  {'AHU-2 Fan Status':<{W}}: {'ON' if self.points['ahu2_fan_status'].presentValue == BinaryPV('active') else 'OFF'}\n"
                     f"  {'AHU-2 Supply Temp':<{W}}: {self.points['ahu2_supply_temp'].presentValue:.1f}°C\n"
                     f"  {'AHU-2 Return Temp':<{W}}: {self.points['ahu2_return_temp'].presentValue:.1f}°C\n"
                     f"  {'AHU-2 Airflow':<{W}}: {self.points['ahu2_airflow'].presentValue:.0f}cfm\n"
