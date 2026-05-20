@@ -17,7 +17,6 @@ export class DiscoveryOptionsBuilder {
 		switch (protocol) {
 			case 'modbus': return this.modbus();
 			case 'opcua':  return this.opcua();
-			case 'can':    return this.can();
 			case 'mqtt':   return this.mqtt();
 			case 'bacnet': return this.bacnet();
 			default:       return undefined;
@@ -43,16 +42,6 @@ export class DiscoveryOptionsBuilder {
 		};
 	}
 
-	private can(): any {
-		const canInterface = process.env.CAN_INTERFACE;
-		if (!canInterface) return undefined;
-		return {
-			interface: canInterface,
-			listenDuration: process.env.CAN_LISTEN_DURATION
-				? parseInt(process.env.CAN_LISTEN_DURATION, 10)
-				: undefined
-		};
-	}
 
 	private mqtt(): MqttDiscoveryOptions | undefined {
 		if (this.configManager) {

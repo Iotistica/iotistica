@@ -1,3 +1,4 @@
+/** Discovery persistence store for endpoints and staleness checks. */
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 import { EndpointModel, type Endpoint } from '../db/models/endpoint.model.js';
@@ -5,9 +6,6 @@ import { ProtocolDevicesModel } from '../db/models/index.js';
 import type { DiscoveredDevice } from '../adapters/types.js';
 import type { ConfigManager } from '../runtime/config.js';
 
-/**
- * Handles persisting discovered devices to SQLite and staleness checks.
- */
 export class DiscoveryStore {
 	constructor(
     private logger?: AgentLogger,
@@ -37,7 +35,6 @@ export class DiscoveryStore {
 			});
 		}
 
-		// Fetch existing devices ONCE before loop (avoid O(N²) performance)
 		const existingEndpoints = await EndpointModel.getAll();
 
 		const targetEndpoints = this.configManager?.getTargetConfig().endpoints || [];
@@ -59,10 +56,7 @@ export class DiscoveryStore {
 
 		for (const device of discovered) {
 			try {
-				// Check if device already exists by fingerprint OR name OR endpointUrl (OPC UA)
-				// Fingerprint match: Same device (even if moved)
-				// Name match: Device rediscovered (fingerprint may change due to dynamic register values)
-				// EndpointUrl match (OPC UA): Custom-named device at same endpoint
+
 				const existingByFingerprint = existingEndpoints.find(s =>
 					s.metadata?.fingerprint === device.fingerprint
 				);
@@ -93,7 +87,6 @@ export class DiscoveryStore {
 						});
 					}
 
-					// Compare only keys the discovery plugin provides (stored connections may have extra defaults)
 					const deviceConnectionKeys = Object.keys(device.connection || {});
 					const existingConnectionSubset = Object.fromEntries(
 						deviceConnectionKeys.map((k) => [k, (existing.connection as any)?.[k]])
@@ -149,7 +142,7 @@ export class DiscoveryStore {
 								...device.metadata,
 								confidence: device.confidence,
 								validated: device.validated,
-								dataPointValidation: undefined  // Clear - will be revalidated
+								dataPointValidation: undefined
 							},
 							lastSeenAt: new Date()
 						});
@@ -239,7 +232,6 @@ export class DiscoveryStore {
 					}
 				}
 
-				// When updateOnly, skip creating new records (reconcile is responsible for creation)
 				if (updateOnly) {
 					this.logger?.debugSync('Skipping new device creation (update-only mode)', {
 						component: LogComponents.discovery,
@@ -254,7 +246,6 @@ export class DiscoveryStore {
 					continue;
 				}
 
-				// New device: determine enabled state from parent connection
 				let endpointEnabled = false;
 				const targetEndpoint = device.metadata?.connectionName
 					? targetEndpointByName.get(device.metadata.connectionName)
@@ -355,16 +346,11 @@ export class DiscoveryStore {
 			}
 		);
 
-		// Check for stale devices (not seen in 7+ days)
 		await this.checkStale(traceId);
 
 		return { saved, skipped };
 	}
 
-	/**
-   * Warn about devices not seen recently.
-   * Industry best practice: NEVER auto-delete, only warn.
-   */
 	async checkStale(traceId: string, daysThreshold = 7): Promise<void> {
 		try {
 			const staleDevices = await EndpointModel.getStaleDevices(daysThreshold);
