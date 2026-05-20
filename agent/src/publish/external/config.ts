@@ -17,10 +17,25 @@ export type GcpIotAuth = {
 };
 
 export interface BaseProviderConfig {
-	provider: 'aws' | 'azure' | 'gcp';
+	provider: 'aws' | 'azure' | 'gcp' | 'mqtt';
 	enabled: boolean;
 	qos?: 0 | 1 | 2;
 	topicTemplate?: string;
+}
+
+export interface ExternalMqttProviderConfig extends BaseProviderConfig {
+	provider: 'mqtt';
+	host: string;
+	port: number;
+	protocol: 'mqtt' | 'mqtts' | 'ws' | 'wss';
+	path?: string;
+	clientId: string;
+	username?: string;
+	password?: string;
+	ca?: string;
+	cert?: string;
+	key?: string;
+	rejectUnauthorized?: boolean;
 }
 
 export interface AwsIotProviderConfig extends BaseProviderConfig {
@@ -51,7 +66,8 @@ export interface GcpIotProviderConfig extends BaseProviderConfig {
 export type PublishProviderConfig =
 	| AwsIotProviderConfig
 	| AzureIotProviderConfig
-	| GcpIotProviderConfig;
+	| GcpIotProviderConfig
+	| ExternalMqttProviderConfig;
 
 interface ParsedAzureConnStr {
 	hostName: string;
@@ -78,8 +94,62 @@ export class PublishConfigLoader {
 		if (raw === 'azure') return this._loadAzure();
 		if (raw === 'aws' || raw === 'awsiot' || raw === 'aws-iot') return this._loadAws();
 		if (raw === 'gcp' || raw === 'google' || raw === 'google-cloud') return this._loadGcp();
+		if (raw === 'mqtt' || raw === 'external-mqtt' || raw === 'generic-mqtt') return this._loadMqtt();
 
 		return null;
+	}
+
+	private _loadMqtt(): ExternalMqttProviderConfig {
+		const rawUrl = process.env.EXTERNAL_MQTT_BROKER_URL || process.env.MQTT_EXTERNAL_BROKER_URL || '';
+		if (!rawUrl) {
+			throw new Error('PUBLISH_TARGET=mqtt requires EXTERNAL_MQTT_BROKER_URL');
+		}
+
+		let parsedUrl: URL;
+		try {
+			parsedUrl = new URL(rawUrl);
+		} catch {
+			throw new Error(
+				'Invalid EXTERNAL_MQTT_BROKER_URL. Expected absolute URL like mqtt://host:1883 or mqtts://host:8883',
+			);
+		}
+
+		const scheme = parsedUrl.protocol.replace(':', '').toLowerCase();
+		if (scheme !== 'mqtt' && scheme !== 'mqtts' && scheme !== 'ws' && scheme !== 'wss') {
+			throw new Error('EXTERNAL_MQTT_BROKER_URL must use mqtt, mqtts, ws, or wss scheme');
+		}
+
+		const protocol = scheme as ExternalMqttProviderConfig['protocol'];
+		const defaultPort = protocol === 'mqtts' ? 8883 : protocol === 'mqtt' ? 1883 : protocol === 'wss' ? 443 : 80;
+		const envReject = process.env.EXTERNAL_MQTT_REJECT_UNAUTHORIZED;
+		const rejectUnauthorized =
+			envReject === undefined
+				? true
+				: !['0', 'false', 'no', 'off'].includes(envReject.trim().toLowerCase());
+
+		return {
+			provider: 'mqtt',
+			enabled: true,
+			host: parsedUrl.hostname,
+			port: parsedUrl.port ? Number(parsedUrl.port) : defaultPort,
+			protocol,
+			path: parsedUrl.pathname && parsedUrl.pathname !== '/' ? parsedUrl.pathname : undefined,
+			clientId:
+				process.env.EXTERNAL_MQTT_CLIENT_ID ||
+				process.env.DEVICE_UUID ||
+				process.env.DEVICE_ID ||
+				'device',
+			username: process.env.EXTERNAL_MQTT_USERNAME || parsedUrl.username || undefined,
+			password: process.env.EXTERNAL_MQTT_PASSWORD || parsedUrl.password || undefined,
+			topicTemplate:
+				process.env.EXTERNAL_MQTT_TOPIC_TEMPLATE ||
+				process.env.MQTT_EXTERNAL_PUBLISH_TOPIC_TEMPLATE ||
+				'{topic}',
+			ca: process.env.EXTERNAL_MQTT_CA_CERT,
+			cert: process.env.EXTERNAL_MQTT_CLIENT_CERT,
+			key: process.env.EXTERNAL_MQTT_CLIENT_KEY,
+			rejectUnauthorized,
+		};
 	}
 
 	private _loadAzure(): AzureIotProviderConfig {

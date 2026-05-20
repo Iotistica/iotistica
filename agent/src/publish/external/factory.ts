@@ -6,6 +6,7 @@ import type { PublishProviderConfig } from './config.js';
 import { AwsIotClient } from './clients/aws-iot.js';
 import { AzureIotClient } from './clients/azure-iot.js';
 import { GcpIotClient } from './clients/gcp-iot.js';
+import { ExternalMqttClient } from './clients/mqtt.js';
 import type { CloudTargetFactoryInput } from './types.js';
 import type { BaseMqttClient } from './base-client.js';
 
@@ -21,6 +22,8 @@ export class PublishClientFactory {
 				return new AwsIotClient(config, logger);
 			case 'gcp':
 				return new GcpIotClient(config, logger);
+				case 'mqtt':
+					return new ExternalMqttClient(config, logger);
 			default: {
 				const _exhaustive: never = config;
 				throw new Error(

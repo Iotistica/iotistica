@@ -14,5 +14,6 @@ export function applyTopicTemplate(
 	return template
 		.replaceAll('{deviceId}', encodeURIComponent(params.deviceId))
 		.replaceAll('{endpoint}', encodeURIComponent(params.endpoint))
-		.replaceAll('{topic}', encodeURIComponent(params.topic));
+		// Keep full MQTT topic path intact when users opt into {topic} templates.
+		.replaceAll('{topic}', params.topic);
 }

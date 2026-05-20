@@ -24,13 +24,9 @@ const MAX_BATCH_BYTES = (() => {
 	return Math.min(10 * 1024 * 1024, Math.floor(heapLimit * 0.05));
 })();
 
-type ExternalPayloadFormat = 'custom' | 'tags';
+type ExternalPayloadFormat = 'custom' | 'tags' | 'ecp';
 
 type PublishPayload = Record<string, unknown>;
-
-// ============================================================================
-// PUBLISH MANAGER
-// ============================================================================
 
 export class PublishManager extends EventEmitter {
 	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -322,29 +318,66 @@ export class PublishManager extends EventEmitter {
 		const msgId = this.mqttConnection.getMessageIdGenerator?.()?.generate()
 			?? `${this.deviceUuid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-		if (this.externalPayloadFormat === 'tags') {
+		if (this.externalPayloadFormat === 'tags' || this.externalPayloadFormat === 'ecp') {
+			const tagRecords: Record<string, unknown>[] = [];
+			for (const message of messages as Array<Record<string, unknown>>) {
+				if (Array.isArray(message?.readings)) {
+					for (const reading of message.readings as Array<Record<string, unknown>>) {
+						tagRecords.push(reading);
+					}
+				} else {
+					tagRecords.push(message);
+				}
+			}
+
 			const timestampMs = Date.now();
-			const tags = messages.map((message: Record<string, unknown>, index: number) => {
+			const tags = tagRecords
+				.map((message: Record<string, unknown>, index: number) => {
 				const name = String(
-					message.metric ?? message.name ?? message.tag ?? message.id ?? `tag_${index}`,
+					message.metric
+					?? message.metric_name
+					?? message.nodeName
+					?? message.name
+					?? message.tag
+					?? message.id
+					?? `tag_${index}`,
 				);
+				const quality = typeof message.quality === 'string' ? message.quality.toUpperCase() : undefined;
 				const hasError = message.error !== undefined
 					|| message.errorCode !== undefined
-					|| message.quality === 'BAD'
+					|| quality === 'BAD'
 					|| message.qualityCode !== undefined;
 
 				if (hasError) {
+					// ECP format does not include/report tag error codes.
+					if (this.externalPayloadFormat === 'ecp') {
+						return null;
+					}
+
 					return {
 						name,
 						error: message.error ?? message.errorCode ?? message.qualityCode ?? 'READ_ERROR',
 					};
 				}
 
+				const value = message.value ?? message.rawValue ?? null;
+				if (this.externalPayloadFormat === 'ecp') {
+					if (value === null || value === undefined) {
+						return null;
+					}
+					return {
+						name,
+						value,
+						type: this.inferEcpType(value),
+					};
+				}
+
 				return {
 					name,
-					value: message.value,
+					value,
 				};
-			});
+			})
+				.filter((tag) => tag !== null);
 
 			const data = {
 				timestamp: timestampMs,
@@ -359,7 +392,6 @@ export class PublishManager extends EventEmitter {
 
 		const timestampIso = new Date().toISOString();
 		const data = {
-			device: endpointName,
 			timestamp: timestampIso,
 			protocol: this.protocol,
 			messages,
@@ -367,6 +399,21 @@ export class PublishManager extends EventEmitter {
 		};
 		const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
 		return { data, msgId, baselineSize };
+	}
+
+	private inferEcpType(value: unknown): 1 | 2 | 3 | 4 {
+		if (typeof value === 'boolean') {
+			return 1;
+		}
+
+		if (typeof value === 'number') {
+			if (Number.isInteger(value)) {
+				return 2;
+			}
+			return 3;
+		}
+
+		return 4;
 	}
 
 	private async persistQueuedBatch(

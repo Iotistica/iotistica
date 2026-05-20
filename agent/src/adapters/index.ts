@@ -43,6 +43,10 @@ export class AdapterManager extends EventEmitter {
 		debug(m: string, ...a: any[]): void;
 	};
 
+	private normalizeDisplayBaseName(value: string): string {
+		return value.replace(/^(?:iotistica_){2,}/i, "iotistica_");
+	}
+
 	private enrichWithEndpointUuid(
 		dataPoints: DeviceDataPoint[],
 		endpointUuidByName: Map<string, string>,
@@ -61,7 +65,7 @@ export class AdapterManager extends EventEmitter {
 			const device_uuid = point.device_uuid || endpointUuid;
 
 			// Build a stable display name suffix with device UUID.
-			const displayBase = point.resolvedDisplayName || point.deviceName;
+			const displayBase = this.normalizeDisplayBaseName(point.resolvedDisplayName || point.deviceName);
 			const uuidSuffix = device_uuid.replace(/-/g, "").slice(0, 8);
 			const deviceName =
 				uuidSuffix.length === 8 ? `${displayBase}-${uuidSuffix}` : displayBase;

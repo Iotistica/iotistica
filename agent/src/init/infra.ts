@@ -119,7 +119,9 @@ async function _connectExternalTarget(ctx: AgentInitContext): Promise<MqttConnec
 						? 'Set AZURE_IOTHUB_CONNECTION_STRING'
 						: targetType === 'aws'
 							? 'Set AWS_IOT_ENDPOINT and AWS_IOT_* auth env vars'
-							: 'Set GCP_MQTT_ENDPOINT and GCP_MQTT_* auth env vars',
+							: targetType === 'mqtt'
+								? 'Set EXTERNAL_MQTT_BROKER_URL and optional EXTERNAL_MQTT_* env vars'
+								: 'Set GCP_MQTT_ENDPOINT and GCP_MQTT_* auth env vars',
 			},
 		);
 		return null;

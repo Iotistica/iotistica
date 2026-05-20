@@ -1211,7 +1211,11 @@ export class MqttManager extends EventEmitter {
   private handleEndpointsData(deviceUuid: string, subTopic: string | undefined, data: any, rest: string[] = []): void {
     let actualData = data.data || data;
     const timestamp = data.timestamp || new Date().toISOString();
-    const resolvedDeviceName = data.deviceName || data.device_name || 'unknown';
+    const resolvedDeviceName =
+      (typeof data.deviceName === 'string' && data.deviceName.trim())
+      || (typeof data.device_name === 'string' && data.device_name.trim())
+      || (typeof data.protocol === 'string' && data.protocol.trim())
+      || 'unknown';
 
     const endpointData: DeviceDataMessage = {
       deviceUuid,

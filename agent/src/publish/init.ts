@@ -15,7 +15,7 @@ import { CloudMqttClient } from '../mqtt/manager.js';
 import type { DictionaryManager } from '../mqtt/dictionary.js';
 import { EventEmitter } from 'events';
 
-type ExternalPayloadFormat = 'custom' | 'tags';
+type ExternalPayloadFormat = 'custom' | 'tags' | 'ecp';
 
 function resolveExternalPayloadFormat(): ExternalPayloadFormat {
 	const raw = (process.env.PUBLISH_EXTERNAL_FORMAT || 'custom')
@@ -24,6 +24,10 @@ function resolveExternalPayloadFormat(): ExternalPayloadFormat {
 
 	if (raw === 'tags' || raw === 'tag') {
 		return 'tags';
+	}
+
+	if (raw === 'ecp' || raw === 'esp') {
+		return 'ecp';
 	}
 
 	return 'custom';

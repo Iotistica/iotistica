@@ -65,7 +65,11 @@ export async function stopJobsHandler(): Promise<void> {
 export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
   try {
     const startTime = Date.now();
-    const resolvedDeviceName = data.deviceName.trim() || 'unknown';
+    const batchData = data.data as any;
+    const resolvedDeviceName =
+      (typeof data.deviceName === 'string' && data.deviceName.trim())
+      || (typeof batchData?.protocol === 'string' && batchData.protocol.trim())
+      || 'unknown';
     
     // Check if this is a batch (from Device Publish feature)
     const isBatch = data.data && Array.isArray((data.data as any).messages);
@@ -95,7 +99,10 @@ export async function handleDeviceData(data: DeviceDataMessage): Promise<void> {
 
           return {
             deviceUuid: data.deviceUuid,
-            deviceName: message.deviceName?.trim?.() || resolvedDeviceName,
+            deviceName:
+              message.deviceName?.trim?.()
+              || message.protocol?.trim?.()
+              || resolvedDeviceName,
             data: message,
             timestamp: message.timestamp || batch.timestamp || new Date().toISOString(),
             metadata: {

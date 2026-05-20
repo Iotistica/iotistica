@@ -55,9 +55,14 @@ export async function decompressAndParseDevices(
 
       for (let i = 0; i < readings.length; i++) {
         const reading = readings[i] as Record<string, unknown>;
+        const resolvedDeviceName =
+          (typeof reading.deviceName === 'string' && reading.deviceName)
+          || (typeof reading.device_name === 'string' && reading.device_name)
+          || (typeof reading.protocol === 'string' && reading.protocol)
+          || deviceName;
         entries[i] = {
           deviceUuid: (reading.deviceUuid as string) || deviceUuid,
-          deviceName: (reading.deviceName as string) || deviceName,
+          deviceName: resolvedDeviceName,
           timestamp: (reading.timestamp as string) || fallbackTimestamp,
           data: reading.data ?? reading,
           metadata: reading.metadata as Record<string, unknown> | undefined,
