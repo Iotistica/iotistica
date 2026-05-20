@@ -234,24 +234,43 @@ export class AdapterInitializer {
 				}
 
 				try {
-					// Hot-update path: MQTT adapter already connected — diff subscriptions in-place.
+					// Hot-update path: MQTT adapter already connected — diff subscriptions in-place,
+					// but only if no new non-MQTT protocol was added that needs a socket server.
 					if (this.features.devices?.getAdapter('mqtt')) {
-						logger.infoSync('Hot-reloading MQTT adapter after endpoint changes (no reconnect)', {
-							component: LogComponents.agent,
-							trigger: 'reconciliation-complete'
-						});
+						const { EndpointModel } = await import('../db/models/endpoint.model.js');
+						let hasNewProtocol = false;
+						for (const protocol of ['modbus', 'opcua', 'snmp', 'can', 'bacnet']) {
+							const devices = await EndpointModel.getEnabled(protocol);
+							const valid = devices.filter((d: any) => !!d.uuid);
+							if (valid.length > 0 && !this.features.devices.getAdapter(protocol)) {
+								hasNewProtocol = true;
+								logger.infoSync('New protocol requires socket server — falling back to full reload', {
+									component: LogComponents.agent,
+									protocol,
+									trigger: 'reconciliation-complete'
+								});
+								break;
+							}
+						}
 
-						await this.features.devices.reloadMQTTAdapter();
-						await this.onAdaptersReady();
-						this._updateCloudSync();
+						if (!hasNewProtocol) {
+							logger.infoSync('Hot-reloading MQTT adapter after endpoint changes (no reconnect)', {
+								component: LogComponents.agent,
+								trigger: 'reconciliation-complete'
+							});
 
-						logger.infoSync('MQTT adapter hot-reloaded after reconciliation', {
-							component: LogComponents.agent
-						});
-						return;
+							await this.features.devices.reloadMQTTAdapter();
+							await this.onAdaptersReady();
+							this._updateCloudSync();
+
+							logger.infoSync('MQTT adapter hot-reloaded after reconciliation', {
+								component: LogComponents.agent
+							});
+							return;
+						}
 					}
 
-					// Full reinit path: no adapter running, or non-MQTT adapter changes.
+					// Full reinit path: no adapter running, or non-MQTT protocol changes.
 					logger.infoSync('Reloading protocol adapters after reconciliation complete', {
 						component: LogComponents.agent,
 						trigger: 'reconciliation-complete'

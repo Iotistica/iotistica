@@ -547,7 +547,8 @@ export class ConfigManager extends EventEmitter {
 		const discoveryTargets = cloudProtocol?.discoveryTargets || envTargets;
 
 		return {
-			enabled: cloudProtocol?.enabled ?? (process.env.BACNET_ENABLED === 'true'),
+			// Default enabled to reduce setup friction; explicit cloud/env false still disables it.
+			enabled: cloudProtocol?.enabled ?? (process.env.BACNET_ENABLED !== 'false'),
 			port: cloudProtocol?.port ?? 47808,
 			...(discoveryTargets &&
 				discoveryTargets.length > 0 && { discoveryTargets }),

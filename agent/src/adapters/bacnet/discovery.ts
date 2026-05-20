@@ -604,11 +604,15 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 					deviceInstance
 				);
 
-				const deviceName = deviceInfo.objectName || 
-                          `bacnet_device_${deviceInstance}`;
+				const deviceName = deviceInfo.objectName || `bacnet_device_${deviceInstance}`;
+				const normalizedBaseName = deviceName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+				const instanceSuffix = `_${deviceInstance}`;
+				const uniqueEndpointName = normalizedBaseName.endsWith(instanceSuffix)
+					? normalizedBaseName
+					: `${normalizedBaseName}${instanceSuffix}`;
 
 				discovered.push({
-					name: deviceName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+					name: uniqueEndpointName,
 					protocol: 'bacnet',
 					fingerprint,
 					connection: {

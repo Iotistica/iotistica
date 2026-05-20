@@ -110,11 +110,32 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 	/**
    * Phase 1: Fast endpoint enumeration
    */
-	async discover(_options?: OPCUADiscoveryOptions): Promise<DiscoveredDevice[]> {
+	async discover(options?: OPCUADiscoveryOptions): Promise<DiscoveredDevice[]> {
 		const discovered: DiscoveredDevice[] = [];
 
 		// Get discovery targets from endpoints (those with endpointUrl but no dataPoints)
-		const discoveryTargets = this.configManager?.getDiscoveryTargets?.('opcua') || [];
+		let discoveryTargets = this.configManager?.getDiscoveryTargets?.('opcua') || [];
+
+		// Fallback: allow explicit URL probing when no DB targets exist yet.
+		if (discoveryTargets.length === 0) {
+			const fallbackUrls = options?.discoveryUrls && options.discoveryUrls.length > 0
+				? options.discoveryUrls
+				: ['opc.tcp://localhost:4840'];
+
+			discoveryTargets = fallbackUrls.map((endpointUrl) => ({
+				uuid: undefined,
+				name: `opcua_${endpointUrl.replace(/[^a-zA-Z0-9]/g, '_')}`,
+				protocol: 'opcua',
+				connection: { endpointUrl },
+				dataPoints: []
+			}));
+
+			this.logger?.debugSync('Using OPC-UA fallback discovery URLs', {
+				component: LogComponents.discovery + "] [" + this.protocol as any,
+				protocol: this.protocol,
+				urls: fallbackUrls
+			});
+		}
     
 		this.logger?.debugSync('OPC-UA discovery targets received', {
 			component: LogComponents.discovery + "] [" + this.protocol as any,

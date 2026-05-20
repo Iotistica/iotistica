@@ -33,8 +33,15 @@ export class DiscoveryOptionsBuilder {
 
 	private opcua(): any {
 		if (!this.configManager) return undefined;
-		// Return empty object - plugin queries getDiscoveryTargets() for dynamic targets
-		return {};
+		// Plugin primarily queries getDiscoveryTargets() from DB/state.
+		// Also pass optional discovery URLs from env for no-endpoint bootstrap flows.
+		const discoveryUrls = process.env.OPCUA_DISCOVERY_URLS?.split(',')
+			.map((url) => url.trim())
+			.filter(Boolean);
+
+		return {
+			...(discoveryUrls && discoveryUrls.length > 0 && { discoveryUrls })
+		};
 	}
 
 	private can(): any {

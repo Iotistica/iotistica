@@ -1,11 +1,11 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-05-16 10:07:56
-# Agents: 58 to 58
-# Ports: 48538 to 48538
+# Generated: 2026-05-19 22:37:49
+# Agents: 61 to 61
+# Ports: 48541 to 48541
 
 services:
-  agent-58:
-    container_name: local-agent-58
+  agent-61:
+    container_name: local-agent-61
     build:
       context: .
       dockerfile: agent/Dockerfile
@@ -20,11 +20,11 @@ services:
     network_mode: host
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agent-58-data:/app/data
+      - agent-61-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
       - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth
     environment:
-      - DEVICE_API_PORT=48538
+      - DEVICE_API_PORT=48541
       - IOTISTICA_API=http://localhost:4002
       - NODE_ENV=development
       - MQTT_AUTH_DIR=/app/data/mosquitto-auth
@@ -33,7 +33,7 @@ services:
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=2993697941b82688557911022baa780e780d0403d2bd8b1a33550e483013559a
+      - PROVISIONING_KEY=b9b023ecf2cc395f9e5b07c9dd089d4076c3cde9fcd0fc99213be57dedc44b6b
       - API_SECURITY_MODE=LOCALHOST_ONLY
       - FIREWALL_ENABLED=true
       - FIREWALL_MODE=auto
@@ -49,9 +49,6 @@ services:
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
-      # BACnet protocol settings
-      - BACNET_ENABLED=true
-      - BACNET_DISCOVERY_TARGETS=127.0.0.1
   agent-cli:
     build:
       context: ./agent-cli
@@ -63,8 +60,8 @@ services:
     command: ["tail -f /dev/null"]
     tty: true
     environment:
-      - DEVICE_API_PORT=48538
-      - DEVICE_API_URL=http://localhost:48538
+      - DEVICE_API_PORT=48541
+      - DEVICE_API_URL=http://localhost:48541
       - CONFIG_DIR=/app/data
       - DEBUG=false
     volumes:
@@ -75,7 +72,7 @@ services:
         max-size: "5m"
         max-file: "2"
 volumes:
-  agent-58-data:
+  agent-61-data:
     driver: local
   agent-cli-data:
     driver: local

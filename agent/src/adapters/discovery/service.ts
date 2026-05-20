@@ -368,7 +368,18 @@ export class DiscoveryService extends EventEmitter {
 
 								// Update name if manufacturer/model detected
 								if (validationData.manufacturer || validationData.modelNumber) {
-									device.name = `${validationData.manufacturer || protocol}_${validationData.modelNumber || device.name}`.toLowerCase().replace(/\s+/g, '_');
+									const baseName = `${validationData.manufacturer || protocol}_${validationData.modelNumber || device.name}`
+										.toLowerCase()
+										.replace(/\s+/g, '_');
+
+									if (protocol === 'bacnet') {
+										const deviceInstance = device.connection?.deviceInstance;
+										device.name = typeof deviceInstance === 'number'
+											? `${baseName}_${deviceInstance}`
+											: baseName;
+									} else {
+										device.name = baseName;
+									}
 								}
 
 								// Check data point validation results (Modbus-specific)
