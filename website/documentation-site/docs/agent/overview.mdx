@@ -1,0 +1,36 @@
+---
+sidebar_position: 1
+---
+
+# Agent Overview
+
+The Iotistica agent is a lightweight orchestrator for edge workloads.
+
+## Core Responsibilities
+
+- Reconcile desired and current service state
+- Manage Docker and K3s workloads
+- Synchronize state with cloud APIs
+- Collect and ship telemetry and logs
+
+## State Model
+
+Service state is declarative and supports:
+
+- `running`
+- `paused`
+- `stopped`
+
+Use `paused` for temporary suspension when container identity must be preserved.
+
+## Main Components
+
+- State reconciler
+- Container manager
+- Cloud sync service
+- Connection monitor
+
+## Related Docs
+
+- [Quickstart](../getting-started/quickstart.mdx)
+- [Kubernetes Deployment](../deployment/kubernetes.mdx)

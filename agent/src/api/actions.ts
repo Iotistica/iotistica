@@ -11,7 +11,7 @@ import type { CloudSync } from '../sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { AnomalyDetectionService } from '../anomaly';
 import type { SimulationOrchestrator } from '../anomaly/simulator';
-import type { AdapterManager } from '../adapters';
+import type { AdapterManager } from '../plugins';
 import type { ConfigManager } from '../core/config';
 import type { StateManager } from '../core/state';
 import { LogComponents } from '../logging/types';

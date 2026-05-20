@@ -5,11 +5,11 @@ import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { EndpointModel } from '../db/models/endpoint.model';
 import { MetadataModel } from '../db/models';
-import type { BaseDiscoveryPlugin, DiscoveredDevice } from '../adapters/types';
-import { ModbusDiscoveryPlugin } from '../adapters/modbus/discovery';
-import { OPCUADiscoveryPlugin } from '../adapters/opcua/discovery';
-import { LocalBrokerMqttDiscoveryPlugin } from '../adapters/mqtt/discovery';
-import { BACnetDiscoveryPlugin } from '../adapters/bacnet/discovery';
+import type { BaseDiscoveryPlugin, DiscoveredDevice } from '../plugins/types';
+import { ModbusDiscoveryPlugin } from '../plugins/modbus/discovery';
+import { OPCUADiscoveryPlugin } from '../plugins/opcua/discovery';
+import { LocalBrokerMqttDiscoveryPlugin } from '../plugins/mqtt/discovery';
+import { BACnetDiscoveryPlugin } from '../plugins/bacnet/discovery';
 import type { ConfigManager } from '../core/config.js';
 import { DiscoveryOptionsBuilder } from './options.js';
 import { DiscoveryStore } from './db.js';
@@ -25,7 +25,7 @@ export interface DiscoveryOptions {
 	skipDbWrites?: boolean;
 }
 
-export type { DiscoveredDevice } from '../adapters/types';
+export type { DiscoveredDevice } from '../plugins/types';
 
 export interface DiscoveryMetadata {
   lastDiscoveryAt?: Date;

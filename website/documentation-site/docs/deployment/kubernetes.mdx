@@ -1,0 +1,39 @@
+---
+sidebar_position: 1
+---
+
+# Kubernetes Deployment
+
+Use Kubernetes for multi-tenant SaaS deployments where each customer receives isolated runtime resources.
+
+## Deployment Model
+
+- Global services for billing and VPN
+- Per-customer namespaces with API, Dashboard, PostgreSQL, MQTT broker, and Redis
+- Helm chart-driven provisioning and upgrades
+
+## Namespace Pattern
+
+```text
+customer-{12-char-hash}
+```
+
+The namespace hash is deterministic from customer identity and avoids naming collisions.
+
+## Helm Validation
+
+```bash
+helm lint charts/iotistica
+helm template client-demo charts/iotistica -f charts/iotistica/values/demo/values.yaml --debug
+```
+
+## Operational Checks
+
+```bash
+kubectl get namespaces | grep customer-
+kubectl get pods -n customer-<id>
+```
+
+## Recommended Follow-up
+
+Document your cluster prerequisites (Ingress, cert-manager, ServiceMonitor CRDs) for a complete production runbook.

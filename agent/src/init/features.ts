@@ -13,7 +13,7 @@ import { JobsFeature } from '../features/jobs/monitor.js';
 import { DiscoveryService } from '../discovery/service.js';
 
 import { DevicePublish } from '../publish/index.js';
-import type { AdapterManager } from '../adapters/index.js';
+import type { AdapterManager } from '../plugins/index.js';
 import type { PipelineService } from '../features/pipeline/index.js';
 import type { AnomalyDetectionService } from '../anomaly/index.js';
 import { AdapterInitializer } from './adapters.js';

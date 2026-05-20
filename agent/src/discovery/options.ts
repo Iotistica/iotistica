@@ -1,6 +1,6 @@
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
-import type { MqttDiscoveryOptions } from '../adapters/mqtt/discovery.js';
+import type { MqttDiscoveryOptions } from '../plugins/mqtt/discovery.js';
 import type { ConfigManager } from '../core/config.js';
 
 /**

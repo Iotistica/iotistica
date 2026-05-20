@@ -9,7 +9,7 @@
  */
 
 import { LogComponents } from '../logging/types.js';
-import { AdapterManager, type AdapterConfig } from '../adapters/index.js';
+import { AdapterManager, type AdapterConfig } from '../plugins/index.js';
 import type { FeatureContext } from './features.js';
 
 export interface AdapterFeatures {

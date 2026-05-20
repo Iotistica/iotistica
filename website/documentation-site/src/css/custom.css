@@ -1,0 +1,96 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  --ifm-color-primary: #006a67;
+  --ifm-color-primary-dark: #005f5d;
+  --ifm-color-primary-darker: #005a57;
+  --ifm-color-primary-darkest: #004a48;
+  --ifm-color-primary-light: #007572;
+  --ifm-color-primary-lighter: #007a77;
+  --ifm-color-primary-lightest: #008b87;
+  --ifm-background-color: #f8faf9;
+  --ifm-navbar-background-color: #ffffff;
+  --ifm-footer-background-color: #f1f6f4;
+  --ifm-font-family-base: 'IBM Plex Sans', 'Segoe UI', Tahoma, sans-serif;
+  --ifm-heading-font-family: 'IBM Plex Sans', 'Segoe UI', Tahoma, sans-serif;
+  --ifm-code-font-size: 92%;
+  --ifm-navbar-height: 4rem;
+  --ifm-global-radius: 8px;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 106, 103, 0.08);
+}
+
+.navbar {
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
+.menu__link {
+  border-radius: 6px;
+}
+
+.menu__link--active {
+  font-weight: 600;
+}
+
+.theme-doc-sidebar-container {
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.theme-doc-markdown {
+  max-width: 860px;
+}
+
+.theme-doc-markdown h1 {
+  letter-spacing: -0.02em;
+}
+
+.theme-doc-markdown h2 {
+  margin-top: 2rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding-bottom: 0.35rem;
+}
+
+.theme-code-block {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+}
+
+.pagination-nav__link {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #1fc9b7;
+  --ifm-color-primary-dark: #13b8a7;
+  --ifm-color-primary-darker: #12af9f;
+  --ifm-color-primary-darkest: #0e9083;
+  --ifm-color-primary-light: #35d1c0;
+  --ifm-color-primary-lighter: #45d5c5;
+  --ifm-color-primary-lightest: #70dfd2;
+  --ifm-background-color: #0f1418;
+  --ifm-navbar-background-color: #131a20;
+  --ifm-footer-background-color: #131a20;
+  --ifm-font-color-base: #d7e0e5;
+  --ifm-heading-color: #f2f7f9;
+  --ifm-link-color: #76e8dc;
+  --docusaurus-highlighted-code-line-bg: rgba(31, 201, 183, 0.18);
+}
+
+[data-theme='dark'] .navbar {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme='dark'] .theme-doc-sidebar-container {
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+[data-theme='dark'] .theme-doc-markdown h2 {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+[data-theme='dark'] .theme-code-block {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+[data-theme='dark'] .pagination-nav__link {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}

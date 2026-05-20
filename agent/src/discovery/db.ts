@@ -3,7 +3,7 @@ import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
 import { EndpointModel, type Endpoint } from '../db/models/endpoint.model.js';
 import { ProtocolDevicesModel } from '../db/models/index.js';
-import type { DiscoveredDevice } from '../adapters/types.js';
+import type { DiscoveredDevice } from '../plugins/types.js';
 import type { ConfigManager } from '../core/config.js';
 
 export class DiscoveryStore {
