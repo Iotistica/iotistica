@@ -73,7 +73,7 @@ import {
 } from 'node-opcua-client';
 import { BaseProtocolAdapter, type GenericDeviceConfig } from '../base.js';
 import { type DeviceDataPoint, type Logger } from '../types.js';
-import { ConsoleLogger } from '../common/logger.js';
+import { ConsoleLogger } from '../logger.js';
 import {
 	type OPCUADeviceConfig,
 	type OPCUAConnection,

@@ -8,7 +8,7 @@ import { ModbusAdapter } from "./modbus/adapter.js";
 import { type ModbusAdapterConfig } from "./modbus/types.js";
 import { LocalBrokerMqttAdapter } from "./mqtt/adapter.js";
 import { type MqttAdapterConfig } from "./mqtt/types.js";
-import { SocketServer } from "./common/socket-server.js";
+import { SocketServer } from "./socket-server.js";
 import { type DeviceDataPoint, type SocketOutput } from "./types.js";
 import { EndpointOutputModel } from "../db/models/endpoint-outputs.model.js";
 import { EndpointModel } from "../db/models/endpoint.model.js";
@@ -16,9 +16,6 @@ import { encodeIfUuid } from "../mqtt/codec.js";
 
 // Type-only import.
 import type { OPCUAAdapterConfig } from "./opcua/types.js";
-
-import { SNMPAdapter } from "./snmp/adapter.js";
-
 import { BACnetAdapter } from "./bacnet/adapter.js";
 import { type BACnetAdapterConfig } from "./bacnet/types.js";
 
@@ -172,7 +169,6 @@ export class AdapterManager extends EventEmitter {
 		if (this.running) return;
 		if (this.config.modbus?.enabled) await this.startModbusAdapter();
 		if (this.config.opcua?.enabled) await this.startOPCUAAdapter();
-		if (this.config.snmp?.enabled) await this.startSNMPAdapter();
 		if (this.config.mqtt?.enabled) await this.startMQTTAdapter();
 		if (this.config.bacnet?.enabled) await this.startBACnetAdapter();
 		if (this.config.can?.enabled)
@@ -314,49 +310,6 @@ export class AdapterManager extends EventEmitter {
 		}
 	}
 
-	/** Start SNMP adapter. */
-	private async startSNMPAdapter(): Promise<void> {
-		try {
-			const dbDevices = await EndpointModel.getEnabled("snmp");
-			if (dbDevices.length === 0) {
-				this.logger.info("No enabled SNMP devices found");
-				return;
-			}
-
-			const snmpDevices = dbDevices.map((d) => ({
-				uuid: d.uuid,
-				name: d.name,
-				protocol: "snmp" as const,
-				enabled: d.enabled,
-				connection: d.connection,
-				pollInterval: d.poll_interval,
-				dataPoints: (d.data_points || []).map((dp: any) => ({
-					name: dp.name,
-					oid: dp.oid,
-					unit: dp.unit || "",
-					dataType: dp.dataType || "integer",
-					scalingFactor: dp.scalingFactor || dp.scale,
-					offset: dp.offset,
-				})),
-				metadata: d.metadata || {},
-			}));
-
-			const uuidMap = this.buildUuidMap(snmpDevices);
-			const socket = await this.createSocketServer("snmp");
-			const adapter = new SNMPAdapter(snmpDevices, this.logger);
-			this.adapters.set("snmp", adapter);
-			this.wireAdapterEvents("snmp", adapter, socket, uuidMap);
-			await adapter.start();
-			this.logger.info(
-				`SNMP adapter started with ${dbDevices.length} device(s)`,
-			);
-		} catch (error) {
-			const errorMessage =
-				error instanceof Error ? error.message : String(error);
-			this.logger.error(`Failed to start SNMP adapter: ${errorMessage}`);
-			throw error;
-		}
-	}
 
 	/** Start MQTT adapter, or hot-reload devices if already running. */
 	private async startMQTTAdapter(): Promise<void> {
