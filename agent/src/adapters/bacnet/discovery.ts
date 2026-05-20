@@ -21,6 +21,7 @@ import BACnet from 'bacstack';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, type DiscoveredDevice, type ValidationResult } from '../types';
 import { generateBACnetFingerprint } from '../fingerprint';
+import { pLimit } from '../../lib/p-limit.js';
 
 export interface BACnetDiscoveryOptions {
   /**
@@ -65,9 +66,64 @@ interface BACnetObject {
   objectType: string;
   objectInstance: number;
   objectName: string;
-  presentValue?: any;
+	presentValue?: unknown;
   units?: string;
   description?: string;
+}
+
+interface BACnetValidatedObject {
+	objectType: string;
+	objectInstance: number;
+	objectName: string;
+	presentValue: unknown;
+	units?: string;
+}
+
+interface BACnetArrayElement {
+	value: unknown;
+}
+
+interface BACnetReadPropertyValue {
+	values?: BACnetArrayElement[];
+}
+
+interface BACnetObjectReference {
+	type: number;
+	instance: number;
+}
+
+interface BACnetIAmDevice {
+	deviceId: number;
+	address: string;
+	vendorId?: number;
+	maxSegments?: number;
+	maxApdu?: number;
+}
+
+interface BACnetTransportServerLike {
+	send(buffer: Buffer, offset: number, length: number, port: number, receiver: string): void;
+}
+
+interface BACnetTransportLike {
+	_server?: BACnetTransportServerLike;
+	address?: { port?: number; family?: string };
+	send?: (buffer: Buffer, offset: number, receiver: string) => void;
+}
+
+interface BACnetClientLike {
+	_transport?: BACnetTransportLike;
+	whoIs(options: { lowLimit: number; highLimit: number; address: string }): void;
+	readProperty(
+		address: string,
+		objectId: { type: number; instance: number },
+		propertyId: number,
+		callback: (err: Error | null, value: BACnetReadPropertyValue) => void,
+	): void;
+	on(event: 'iAm', listener: (device: BACnetIAmDevice) => void): void;
+	on(event: 'listening', listener: () => void): void;
+	on(event: 'error', listener: (err: Error) => void): void;
+	removeAllListeners(event: string): void;
+	close(): void;
 }
 
 // BACnet object type enumeration (subset of most common types)
@@ -84,13 +140,48 @@ const BACNET_OBJECT_TYPES: Record<number, string> = {
 	19: 'multi-state-value',
 };
 
+enum BacnetPropertyId {
+	DESCRIPTION = 28,
+	MODEL_NAME = 70,
+	OBJECT_LIST = 76,
+	OBJECT_NAME = 77,
+	PRESENT_VALUE = 85,
+	UNITS = 117,
+	VENDOR_NAME = 121,
+}
+
 export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
-	private client?: any;  // Reuse same BACnet client across discovery and validation
+	private client?: BACnetClientLike;  // Reuse same BACnet client across discovery and validation
 	private readonly AGENT_PORT = 47809;  // Agent uses different port than devices (47808)
 	private readonly AGENT_DEVICE_ID = 4190000;  // Gateway-style device ID
+	private readonly logContext = {
+		component: LogComponents.discovery,
+		protocol: 'bacnet'
+	} as const;
+	private readonly validationConcurrency = 4;
 
 	constructor(logger?: AgentLogger) {
 		super('bacnet', logger);
+	}
+
+	private asString(value: unknown): string | undefined {
+		return typeof value === 'string' ? value : undefined;
+	}
+
+	private async wait(ms: number): Promise<void> {
+		await new Promise(resolve => setTimeout(resolve, ms));
+	}
+
+	private asObjectReferences(value: unknown): BACnetObjectReference[] {
+		if (!Array.isArray(value)) {
+			return [];
+		}
+
+		return value.filter((item): item is BACnetObjectReference => {
+			return typeof item === 'object' && item !== null
+				&& typeof (item as { type?: unknown }).type === 'number'
+				&& typeof (item as { instance?: unknown }).instance === 'number';
+		});
 	}
 
 	/**
@@ -148,12 +239,12 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 		// Find first non-loopback IPv4 interface that's NOT a /32 (point-to-point)
 		for (const [name, addrs] of Object.entries(ifaces)) {
 			if (!addrs) continue;
-			for (const addr of addrs as any[]) {
+			for (const addr of addrs) {
 				if (addr.family === 'IPv4' && !addr.internal && addr.address !== '127.0.0.1') {
 					// Skip /32 netmasks (Docker internal point-to-point interfaces)
 					if (addr.netmask === '255.255.255.255') {
 						this.logger?.debugSync('Skipping /32 interface (Docker internal)', {
-							component: LogComponents.discovery + "] [" + this.protocol as any,
+							...this.logContext,
 							interface: name,
 							ip: addr.address,
 							netmask: addr.netmask
@@ -169,7 +260,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 					).join('.');
           
 					this.logger?.debugSync('Derived subnet broadcast from interface', {
-						component: LogComponents.discovery + "] [" + this.protocol as any,
+						...this.logContext,
 						interface: name,
 						ip: addr.address,
 						netmask: addr.netmask,
@@ -183,7 +274,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
     
 		// Final fallback (but log warning - this rarely works in Docker)
 		this.logger?.warnSync('Using global broadcast (may not work in Docker)', {
-			component: LogComponents.discovery + "] [" + this.protocol as any,
+			...this.logContext,
 			broadcast: '255.255.255.255'
 		});
 		return '255.255.255.255';
@@ -192,11 +283,11 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 	/**
    * Get or create BACnet client with pre-derived broadcast address
    */
-	private async getClient(options?: BACnetDiscoveryOptions): Promise<any> {
+	private async getClient(options?: BACnetDiscoveryOptions): Promise<BACnetClientLike> {
 		// Reuse existing client
 		if (this.client) {
 			this.logger?.debugSync('Reusing existing BACnet client', {
-				component: LogComponents.discovery + "] [" + this.protocol as any
+				...this.logContext
 			});
 			return this.client;
 		}
@@ -206,7 +297,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 		const timeout = options?.timeout || 5000;
 
 		this.logger?.debugSync('Creating new BACnet client', {
-			component: LogComponents.discovery + "] [" + this.protocol as any,
+			...this.logContext,
 			port: this.AGENT_PORT,
 			broadcastAddress,
 			timeout,
@@ -221,58 +312,64 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 			vendorId: 999  // Generic vendor ID
 		});
 
-		// bacstack uses this._settings.port as BOTH the local bind port AND the
-		// UDP destination port in transport.send().  With AGENT_PORT=47809 every
-		// Who-Is would go to port 47809, but BACnet devices listen on port 47808.
-		// Patch transport.send so we listen on 47809 but send to 47808.
-		const remotePort = 47808;
-		const xport = (this.client as any)._transport;
-		if (xport && typeof xport._server?.send === 'function') {
-			xport.send = (buffer: Buffer, offset: number, receiver: string) => {
-				xport._server.send(buffer, 0, offset, remotePort, receiver);
-			};
-			this.logger?.debugSync('BACnet transport patched: sending to port 47808', {
-				component: LogComponents.discovery + "] [" + this.protocol as any,
-				localPort: this.AGENT_PORT,
-				remotePort
-			});
+		const client = this.client;
+		if (!client) {
+			throw new Error('Failed to initialize BACnet client');
 		}
 
+		this.patchTransportSendToDevicePort(client);
+
 		this.logger?.debugSync('BACnet client created successfully', {
-			component: LogComponents.discovery + "] [" + this.protocol as any,
-			clientType: typeof this.client,
-			hasWhoIs: typeof this.client?.whoIs,
-			hasOn: typeof this.client?.on
+			...this.logContext,
+			clientType: typeof client,
+			hasWhoIs: typeof client.whoIs,
+			hasOn: typeof client.on
 		});
 
-		// Add listening event (debug actual bound port)
-		this.client.on('listening', () => {
-			const addr = this.client._transport?.address;
+		client.on('listening', () => {
+			const addr = client._transport?.address;
 			this.logger?.infoSync('BACnet socket listening', {
-				component: LogComponents.discovery + "] [" + this.protocol as any,
+				...this.logContext,
 				address: addr,
 				port: addr?.port,
 				family: addr?.family
 			});
 		});
 
-		// Add error listener
-		this.client.on('error', (err: Error) => {
+		client.on('error', (err: Error) => {
 			this.logger?.errorSync('BACnet client error', err, {
-				component: LogComponents.discovery + "] [" + this.protocol as any
+				...this.logContext
 			});
 		});
 
-		// Give socket time to bind (bacstack binds asynchronously)
 		await new Promise(resolve => setTimeout(resolve, 100));
 
 		this.logger?.debugSync('BACnet client initialization complete', {
-			component: LogComponents.discovery + "] [" + this.protocol as any,
-			transportReady: !!this.client._transport,
-			socketAddress: this.client._transport?.address
+			...this.logContext,
+			transportReady: !!client._transport,
+			socketAddress: client._transport?.address
 		});
 
-		return this.client;
+		return client;
+	}
+
+	private patchTransportSendToDevicePort(client: BACnetClientLike): void {
+		const remotePort = 47808;
+		const transport = client?._transport;
+		if (transport && typeof transport._server?.send === 'function') {
+			const server = transport._server;
+			if (!server) {
+				return;
+			}
+			transport.send = (buffer: Buffer, offset: number, receiver: string) => {
+				server.send(buffer, 0, offset, remotePort, receiver);
+			};
+			this.logger?.debugSync('BACnet transport patched', {
+				...this.logContext,
+				localPort: this.AGENT_PORT,
+				remotePort
+			});
+		}
 	}
 
 	/**
@@ -306,32 +403,27 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 		const discovered: DiscoveredDevice[] = [];
 
 		this.logger?.debugSync('Starting BACnet discovery', {
-			component: LogComponents.discovery + "] [" + this.protocol as any,
-			protocol: this.protocol,
+			...this.logContext,
 			phase: 'discovery'
 		});
 
-		// Smart mode selection based on configuration
 		const discoveryTargets = options?.discoveryTargets || [];
 		const hasTargets = discoveryTargets.length > 0;
 		const hasBroadcast = !!options?.broadcastAddress;
 		const useUnicast = hasTargets;  // Prefer unicast if targets provided
 
-		// Determine broadcast address
 		let broadcastAddress = options?.broadcastAddress;
 		if (!useUnicast && !broadcastAddress) {
-			// Auto-detect broadcast if neither unicast nor explicit broadcast configured
 			broadcastAddress = this.deriveBroadcastAddress();
 		}
 
-		// Default options
 		const port = options?.port || 47808;
 		const timeout = options?.timeout || 5000;
 		const maxDevices = options?.maxDevices || 100;
 		const deviceIdRange = options?.deviceIdRange || [0, 4194303]; // Full BACnet range
 
 		this.logger?.debugSync('BACnet discovery configuration', {
-			component: LogComponents.discovery + "] [" + this.protocol as any,
+			...this.logContext,
 			mode: useUnicast ? 'unicast' : 'broadcast',
 			modeReason: useUnicast 
 				? 'discoveryTargets provided' 
@@ -343,83 +435,50 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 		});
 
 		try {
-			// Get reusable BACnet client (waits for socket to bind)
 			const client = await this.getClient({ ...options, broadcastAddress, timeout });
 			const devices = new Map<number, BACnetDeviceInfo>();
+			let iAmReceivedCount = 0;
+			let iAmIgnoredCount = 0;
+			let devicePropertyReadFailures = 0;
 
 			this.logger?.debugSync('Attaching I-Am event listener', {
-				component: LogComponents.discovery + "] [" + this.protocol as any,
+				...this.logContext,
 				agentDeviceId: this.AGENT_DEVICE_ID,
 				filterSelfIAm: true
 			});
 
-			// Remove existing listeners to prevent duplicates (memory leak prevention)
 			client.removeAllListeners('iAm');
 
-			// Listen for I-Am responses
-			client.on('iAm', (device: any) => {
-				this.logger?.debugSync('Received I-Am response (raw)', {
-					component: LogComponents.discovery + "] [" + this.protocol as any,
-					device: JSON.stringify(device),
-					deviceId: device?.deviceId,
-					address: device?.address,
-					currentDeviceCount: devices.size
-				});
+			client.on('iAm', (device: BACnetIAmDevice) => {
+				iAmReceivedCount++;
 
 				if (devices.size >= maxDevices) {
-					this.logger?.debugSync('Max devices reached, ignoring I-Am', {
-						component: LogComponents.discovery + "] [" + this.protocol as any,
-						maxDevices
-					});
+					iAmIgnoredCount++;
 					return; // Stop accepting new devices
 				}
 
 				const deviceInstance = device.deviceId;
         
-				// Filter self I-Am (agent's own device ID)
 				if (deviceInstance === this.AGENT_DEVICE_ID) {
-					this.logger?.debugSync('Filtering self I-Am response', {
-						component: LogComponents.discovery + "] [" + this.protocol as any,
-						deviceInstance: this.AGENT_DEVICE_ID
-					});
+					iAmIgnoredCount++;
 					return;
 				}
 
-				// Parse IP:port from address (bacstack returns "IP:PORT")
 				const addressParts = device.address.split(':');
 				const ipAddress = addressParts[0];
 				const devicePort = addressParts.length > 1 ? Number(addressParts[1]) : port;
 
-				this.logger?.debugSync(`Discovered BACnet device via I-Am`, {
-					component: LogComponents.discovery + "] [" + this.protocol as any,
-					deviceInstance,
-					ipAddress,
-					port: devicePort,
-					maxSegments: device.maxSegments,
-					maxApdu: device.maxApdu
-				});
-
 				devices.set(deviceInstance, {
 					deviceInstance,
 					ipAddress,
-					port: devicePort,  // Store actual port from I-Am response
+					port: devicePort,
 					vendorId: device.vendorId
 				});
 			});
 
-			// Send Who-Is (unicast or broadcast mode)
-			// bacstack v0.0.1-beta.14 whoIs() API:
-			//   options.address — destination IP string (unicast or broadcast)
-			//   If address === broadcastAddress, BVLC type = ORIGINAL_BROADCAST_NPDU
-			//   Otherwise, BVLC type = ORIGINAL_UNICAST_NPDU
-			// Both modes use the SAME main client socket so I-Am responses arrive
-			// on the single listening port (AGENT_PORT) and fire the iAm event.
 			if (useUnicast) {
-				// Unicast mode: send Who-Is directly to each target IP via the main client.
-				// The simulator (bacpypes3) must respond with unicast I-Am back to the
-				// agent's port so the response crosses Docker network boundaries.
 				this.logger?.debugSync('Sending BACnet Who-Is via unicast', {
-					component: LogComponents.discovery + "] [" + this.protocol as any,
+					...this.logContext,
 					targets: discoveryTargets,
 					count: discoveryTargets.length
 				});
@@ -430,15 +489,11 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 
 						for (const targetIP of targetIPs) {
 							this.logger?.debugSync('Sending Who-Is to unicast target', {
-								component: LogComponents.discovery + "] [" + this.protocol as any,
+								...this.logContext,
 								target: targetIP,
 								port
 							});
 
-							// Use the main client with 'address' param — bacstack sends
-							// ORIGINAL_UNICAST_NPDU when address != broadcastAddress.
-							// I-Am responses arrive on the main client's socket (port 47809)
-							// and trigger the iAm listener registered above.
 							client.whoIs({
 								lowLimit: deviceIdRange[0],
 								highLimit: deviceIdRange[1],
@@ -446,28 +501,25 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 							});
 
 							this.logger?.debugSync('Unicast Who-Is sent', {
-								component: LogComponents.discovery + "] [" + this.protocol as any,
+								...this.logContext,
 								target: targetIP
 							});
 						}
 					} catch (err) {
 						this.logger?.errorSync('Failed to send Who-Is to target', err instanceof Error ? err : new Error(String(err)), {
-							component: LogComponents.discovery + "] [" + this.protocol as any,
+							...this.logContext,
 							target
 						});
 					}
 				}
 
 				this.logger?.debugSync('Unicast Who-Is packets sent', {
-					component: LogComponents.discovery + "] [" + this.protocol as any,
+					...this.logContext,
 					targetCount: discoveryTargets.length
 				});
 			} else {
-				// Broadcast mode: send Who-Is to the broadcast address.
-				// bacstack uses 'address' (not 'receiver') as the destination.
-				// When address === broadcastAddress the BVLC type is ORIGINAL_BROADCAST_NPDU.
 				this.logger?.debugSync('Sending BACnet Who-Is broadcast', {
-					component: LogComponents.discovery + "] [" + this.protocol as any,
+					...this.logContext,
 					broadcastAddress,
 					port,
 					method: 'whoIs'
@@ -477,93 +529,76 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 					client.whoIs({
 						lowLimit: deviceIdRange[0],
 						highLimit: deviceIdRange[1],
-						address: broadcastAddress  // correct bacstack API key (not 'receiver')
+						address: broadcastAddress ?? '255.255.255.255'
 					});
 					this.logger?.debugSync('Who-Is broadcast sent successfully', {
-						component: LogComponents.discovery + "] [" + this.protocol as any,
+						...this.logContext,
 						lowLimit: deviceIdRange[0],
 						highLimit: deviceIdRange[1],
 						broadcast: broadcastAddress
 					});
 				} catch (whoIsError) {
 					this.logger?.errorSync('Failed to send Who-Is broadcast', whoIsError instanceof Error ? whoIsError : new Error(String(whoIsError)), {
-						component: LogComponents.discovery + "] [" + this.protocol as any
+						...this.logContext
 					});
 				}
 			}
 
-			// Wait for responses
 			await new Promise(resolve => setTimeout(resolve, timeout));
 
 			this.logger?.debugSync(`Received ${devices.size} I-Am responses`, {
-				component: LogComponents.discovery + "] [" + this.protocol as any,
+				...this.logContext,
 				deviceCount: devices.size
 			});
 
-			// Read device properties for each discovered device
 			for (const [deviceInstance, deviceInfo] of devices.entries()) {
 				try {
-					// Use plain IP — port is handled by the patched transport (sends to 47808)
 					const fullAddress = deviceInfo.ipAddress;
-          
-					// Read device object properties (property ID 77 = Object-Name)
 					const objectName = await this.readProperty(
 						client,
 						fullAddress,
-						{ type: 8, instance: deviceInstance }, // Device object
-						77 // Object-Name
+						{ type: 8, instance: deviceInstance },
+						BacnetPropertyId.OBJECT_NAME
 					);
 
-					// Read vendor name (property ID 121 = Vendor-Name)
 					const vendorName = await this.readProperty(
 						client,
 						fullAddress,
 						{ type: 8, instance: deviceInstance },
-						121
+							BacnetPropertyId.VENDOR_NAME
 					);
 
-					// Read model name (property ID 70 = Model-Name)
 					const modelName = await this.readProperty(
 						client,
 						fullAddress,
 						{ type: 8, instance: deviceInstance },
-						70
+							BacnetPropertyId.MODEL_NAME
 					);
 
-					// Read description (property ID 28 = Description)
 					const description = await this.readProperty(
 						client,
 						fullAddress,
 						{ type: 8, instance: deviceInstance },
-						28
+							BacnetPropertyId.DESCRIPTION
 					);
 
 					// Update device info
-					deviceInfo.objectName = objectName;
-					deviceInfo.vendorName = vendorName;
-					deviceInfo.modelName = modelName;
-					deviceInfo.description = description;
-
-					this.logger?.debugSync(`Read device properties`, {
-						component: LogComponents.discovery + "] [" + this.protocol as any,
-						deviceInstance,
-						objectName,
-						vendorName,
-						modelName
-					});
+					deviceInfo.objectName = this.asString(objectName);
+					deviceInfo.vendorName = this.asString(vendorName);
+					deviceInfo.modelName = this.asString(modelName);
+					deviceInfo.description = this.asString(description);
 
 				} catch (error) {
-					this.logger?.debugSync(`Failed to read device properties`, {
-						component: LogComponents.discovery + "] [" + this.protocol as any,
+					devicePropertyReadFailures++;
+					this.logger?.debugSync(`Failed to read BACnet device properties`, {
+						...this.logContext,
 						deviceInstance,
 						error: error instanceof Error ? error.message : String(error)
 					});
 				}
 			}
 
-			// Convert discovered devices to DiscoveredDevice format
 			for (const [deviceInstance, deviceInfo] of devices.entries()) {
-				// Generate cryptographic fingerprint
 				const fingerprint = generateBACnetFingerprint(
 					deviceInfo.ipAddress,
 					deviceInstance
@@ -574,7 +609,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 
 				discovered.push({
 					name: deviceName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
-					protocol: 'bacnet' as any,
+					protocol: 'bacnet',
 					fingerprint,
 					connection: {
 						host: deviceInfo.ipAddress,
@@ -599,17 +634,27 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 				});
 			}
 
-			// Don't close client - reuse for validation phase
+			// Reuse the client for validation.
+
+			if (iAmReceivedCount > 0 || iAmIgnoredCount > 0 || devicePropertyReadFailures > 0) {
+				this.logger?.debugSync('BACnet discovery summary', {
+					...this.logContext,
+					iAmReceivedCount,
+					iAmIgnoredCount,
+					devicePropertyReadFailures,
+					discoveredCount: discovered.length
+				});
+			}
 
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error(String(error));
 			this.logger?.errorSync('BACnet discovery failed', err, {
-				component: LogComponents.discovery + "] [" + this.protocol as any
+				...this.logContext
 			});
 		}
 
 		this.logger?.debugSync(`BACnet discovery complete - found ${discovered.length} devices`, {
-			component: LogComponents.discovery + "] [" + this.protocol as any,
+			...this.logContext,
 			deviceCount: discovered.length
 		});
 
@@ -621,7 +666,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
    */
 	async validate(device: DiscoveredDevice, timeout = 10000): Promise<ValidationResult> {
 		this.logger?.debugSync('Validating BACnet device', {
-			component: LogComponents.discovery + "] [" + this.protocol as any,
+			...this.logContext,
 			deviceInstance: device.connection.deviceInstance,
 			phase: 'validation'
 		});
@@ -634,153 +679,147 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 		};
 
 		try {
-			// Reuse existing BACnet client (same port, avoids state issues)
 			const client = await this.getClient({ timeout });
 
 			const deviceInstance = device.connection.deviceInstance;
 			const ipAddress = device.connection.host;
-			const devicePort = device.connection.port;
-			// Use plain IP — port is handled by the patched transport (sends to 47808)
 			const fullAddress = ipAddress;
-			const objects: BACnetObject[] = [];
+			let objects: BACnetValidatedObject[] = [];
+			let readableObjects = 0;
+			let objectReadFailures = 0;
 
-			// Read object list (property ID 76 = Object-List)
 			try {
 				const objectList = await this.readProperty(
 					client,
 					fullAddress,
 					{ type: 8, instance: deviceInstance },
-					76,
+					BacnetPropertyId.OBJECT_LIST,
 					timeout
 				);
+				const objectsToRead = this.asObjectReferences(objectList).slice(0, 50);
+				const concurrency = Math.min(this.validationConcurrency, Math.max(1, objectsToRead.length));
+				const limit = pLimit(concurrency);
 
-				this.logger?.debugSync(`Device has ${objectList?.length || 0} objects`, {
-					component: LogComponents.discovery + "] [" + this.protocol as any,
+				this.logger?.debugSync(`Device has ${objectsToRead.length} objects`, {
+						...this.logContext,
 					deviceInstance,
-					objectCount: objectList?.length || 0
+					objectCount: objectsToRead.length,
+					validationConcurrency: concurrency
 				});
 
-				// Read properties for each object (limit to first 50 to avoid timeout)
-				const objectsToRead = objectList?.slice(0, 50) || [];
-        
-				for (const obj of objectsToRead) {
-					try {
-						// Throttle requests to prevent flooding device (20-50ms delay)
-						await new Promise(r => setTimeout(r, 20));
-            
-						const objectType = obj.type;
-						const objectInstance = obj.instance;
-						const objectTypeName = BACNET_OBJECT_TYPES[objectType] || `type-${objectType}`;
+				const objectResults: Array<BACnetValidatedObject | null> = await Promise.all(
+					objectsToRead.map((obj, index) =>
+						limit(async () => {
+							await this.wait((index % concurrency) * 20);
 
-						// Read object name (property ID 77)
-						const objectName = await this.readProperty(
-							client,
-							fullAddress,
-							{ type: objectType, instance: objectInstance },
-							77,
-							timeout
-						);
+							try {
+								const objectType = obj.type;
+								const objectInstance = obj.instance;
+								const objectTypeName = BACNET_OBJECT_TYPES[objectType] || `type-${objectType}`;
 
-						// Read present value (property ID 85) for I/O objects
-						let presentValue: any;
-						if ([0, 1, 2, 3, 4, 5, 13, 14, 19].includes(objectType)) {
-							presentValue = await this.readProperty(
-								client,
-								fullAddress,
-								{ type: objectType, instance: objectInstance },
-								85,
-								timeout
-							);
-						}
+								const objectName = await this.readProperty(
+									client,
+									fullAddress,
+									{ type: objectType, instance: objectInstance },
+									BacnetPropertyId.OBJECT_NAME,
+									timeout
+								);
 
-						// Read units (property ID 117) for analog objects
-						let units: string | undefined;
-						if ([0, 1, 2].includes(objectType)) {
-							units = await this.readProperty(
-								client,
-								fullAddress,
-								{ type: objectType, instance: objectInstance },
-								117,
-								timeout
-							);
-						}
+								let presentValue: unknown;
+								if ([0, 1, 2, 3, 4, 5, 13, 14, 19].includes(objectType)) {
+									presentValue = await this.readProperty(
+										client,
+										fullAddress,
+										{ type: objectType, instance: objectInstance },
+										BacnetPropertyId.PRESENT_VALUE,
+										timeout
+									);
+								}
 
-						objects.push({
-							objectType: objectTypeName,
-							objectInstance,
-							objectName: objectName || `${objectTypeName}_${objectInstance}`,
-							presentValue,
-							units
-						});
+								let units: string | undefined;
+								if ([0, 1, 2].includes(objectType)) {
+									units = this.asString(await this.readProperty(
+										client,
+										fullAddress,
+										{ type: objectType, instance: objectInstance },
+										BacnetPropertyId.UNITS,
+										timeout
+									));
+								}
 
-						this.logger?.debugSync(`Read object properties`, {
-							component: LogComponents.discovery + "] [" + this.protocol as any,
-							objectType: objectTypeName,
-							objectInstance,
-							objectName,
-							presentValue
-						});
+								return {
+									objectType: objectTypeName,
+									objectInstance,
+									objectName: this.asString(objectName) || `${objectTypeName}_${objectInstance}`,
+									presentValue,
+									units
+								};
+							} catch (error) {
+								this.logger?.debugSync('Failed to read BACnet object properties', {
+									...this.logContext,
+									objectType: obj.type,
+									objectInstance: obj.instance,
+									error: error instanceof Error ? error.message : String(error)
+								});
+								return null;
+							}
+						})
+					)
+				);
 
-					} catch (error) {
-						// Skip objects that fail to read
-						this.logger?.debugSync(`Failed to read object properties`, {
-							component: LogComponents.discovery + "] [" + this.protocol as any,
-							objectType: obj.type,
-							objectInstance: obj.instance,
-							error: error instanceof Error ? error.message : String(error)
-						});
-					}
-				}
+				objects = objectResults.filter((obj): obj is BACnetValidatedObject => obj !== null);
+				readableObjects = objects.length;
+				objectReadFailures = objectResults.length - objects.length;
 
 			} catch (error) {
 				this.logger?.warnSync('Failed to read object list', {
-					component: LogComponents.discovery + "] [" + this.protocol as any,
+					...this.logContext,
 					deviceInstance,
 					error: error instanceof Error ? error.message : String(error)
 				});
 			}
 
-			// Persist only pollable BACnet points. Device/network-port objects are
-			// useful for validation metadata but should not become adapter datapoints.
 			device.dataPoints = objects
-				.filter(obj => obj.presentValue !== undefined)
-				.map(obj => ({
+				.filter((obj: BACnetValidatedObject) => obj.presentValue !== undefined)
+				.map((obj: BACnetValidatedObject) => ({
 				name: obj.objectName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
 				objectType: obj.objectType,
 				objectInstance: obj.objectInstance,
 				presentValue: obj.presentValue,
 				units: obj.units,
-				propertyId: 85 // Present-Value
+						propertyId: BacnetPropertyId.PRESENT_VALUE
 			}));
 
 			device.validated = true;
 			device.validationData = validationResult;
 
 			validationResult.capabilities = Array.from(
-				new Set(objects.map(o => o.objectType))
+				new Set(objects.map((o: BACnetValidatedObject) => o.objectType))
 			);
 
 			validationResult.deviceInfo = {
 				totalObjects: objects.length,
-				analogInputs: objects.filter(o => o.objectType === 'analog-input').length,
-				analogOutputs: objects.filter(o => o.objectType === 'analog-output').length,
-				binaryInputs: objects.filter(o => o.objectType === 'binary-input').length,
-				binaryOutputs: objects.filter(o => o.objectType === 'binary-output').length
+				analogInputs: objects.filter((o: BACnetValidatedObject) => o.objectType === 'analog-input').length,
+				analogOutputs: objects.filter((o: BACnetValidatedObject) => o.objectType === 'analog-output').length,
+				binaryInputs: objects.filter((o: BACnetValidatedObject) => o.objectType === 'binary-input').length,
+				binaryOutputs: objects.filter((o: BACnetValidatedObject) => o.objectType === 'binary-output').length
 			};
 
-			// Don't close client - keep it alive for future operations
+			// Keep the client alive for future operations.
 
 			this.logger?.debugSync('BACnet device validation complete', {
-				component: LogComponents.discovery + "] [" + this.protocol as any,
+				...this.logContext,
 				deviceInstance,
 				objectCount: objects.length,
-				capabilities: validationResult.capabilities
+				capabilities: validationResult.capabilities,
+				readableObjects,
+				objectReadFailures
 			});
 
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error(String(error));
 			this.logger?.errorSync(`BACnet validation failed for device ${device.connection.deviceInstance}`, err, {
-				component: LogComponents.discovery + "] [" + this.protocol as any
+				...this.logContext
 			});
 		}
 
@@ -797,7 +836,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 			return true;
 		} catch {
 			this.logger?.warnSync('BACnet client (bacstack) not available', {
-				component: LogComponents.discovery + "] [" + this.protocol as any,
+				...this.logContext,
 				note: 'Install with: npm install bacstack'
 			});
 			return false;
@@ -808,12 +847,12 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
    * Helper: Read BACnet property with timeout
    */
 	private async readProperty(
-		client: any,
+		client: BACnetClientLike,
 		address: string,
 		objectId: { type: number; instance: number },
 		propertyId: number,
 		timeout = 5000
-	): Promise<any> {
+	): Promise<unknown> {
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				reject(new Error('Property read timeout'));
@@ -823,13 +862,12 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 				address,
 				objectId,
 				propertyId,
-				(err: Error, value: any) => {
+				(err: Error | null, value: BACnetReadPropertyValue) => {
 					clearTimeout(timer);
 					if (err) {
 						reject(err);
 					} else {
-						// Handle multi-value properties (arrays, enumerations, etc.)
-						const values = value?.values?.map((v: any) => v.value);
+						const values = value?.values?.map((v: BACnetArrayElement) => v.value);
 						resolve(values?.length === 1 ? values[0] : values);
 					}
 				}
