@@ -13,8 +13,8 @@
 
 import * as crypto from 'crypto';
 import type { IClientOptions } from 'mqtt';
-import { LogComponents } from '../../logging/types.js';
-import type { AgentLogger } from '../../logging/agent-logger.js';
+import { LogComponents } from '../../../logging/types.js';
+import type { AgentLogger } from '../../../logging/agent-logger.js';
 import { BaseMqttClient } from '../base-client.js';
 import type { AzureIotProviderConfig } from '../config.js';
 

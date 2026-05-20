@@ -3,9 +3,9 @@
 import { EventEmitter } from 'events';
 import mqtt from 'mqtt';
 import type { IClientOptions, MqttClient } from 'mqtt';
-import type { AgentLogger } from '../logging/agent-logger.js';
-import { LogComponents } from '../logging/types.js';
-import type { MqttConnection, PublishMode } from '../publish/types.js';
+import type { AgentLogger } from '../../logging/agent-logger.js';
+import { LogComponents } from '../../logging/types.js';
+import type { MqttConnection, PublishMode } from '../types.js';
 
 export abstract class BaseMqttClient extends EventEmitter implements MqttConnection {
 	protected client: MqttClient | null = null;

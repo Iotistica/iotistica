@@ -1,5 +1,5 @@
 import type { IClientOptions } from 'mqtt';
-import type { AgentLogger } from '../../logging/agent-logger.js';
+import type { AgentLogger } from '../../../logging/agent-logger.js';
 import { BaseMqttClient } from '../base-client.js';
 import type { AwsIotProviderConfig } from '../config.js';
 import { applyTopicTemplate, parseSourceTopic } from '../topic-mapper.js';

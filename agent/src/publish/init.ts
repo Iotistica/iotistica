@@ -15,6 +15,20 @@ import { CloudMqttClient } from '../mqtt/manager.js';
 import type { DictionaryManager } from '../mqtt/dictionary.js';
 import { EventEmitter } from 'events';
 
+type ExternalPayloadFormat = 'custom' | 'tags';
+
+function resolveExternalPayloadFormat(): ExternalPayloadFormat {
+	const raw = (process.env.PUBLISH_EXTERNAL_FORMAT || 'custom')
+		.trim()
+		.toLowerCase();
+
+	if (raw === 'tags' || raw === 'tag') {
+		return 'tags';
+	}
+
+	return 'custom';
+}
+
 /**
  * DevicePublish - Manages multiple devices and publishes data to MQTT
 
@@ -39,6 +53,7 @@ export class DevicePublish extends EventEmitter {
 	private anomalyService?: AnomalyDetectionService;
 	private pipelineService?: PipelineService;
 	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
+	private readonly externalPayloadFormat: ExternalPayloadFormat;
 	/** External cloud connection; overrides CloudMqttClient for device telemetry routing. */
 	private deviceConnection?: MqttConnection;
 	/**
@@ -95,6 +110,16 @@ export class DevicePublish extends EventEmitter {
 		this.useDeflatePoc = useDeflatePoc;
 		this.anomalyService = anomalyService;
 		this.deviceConnection = deviceConnection;
+		this.externalPayloadFormat = deviceConnection
+			? resolveExternalPayloadFormat()
+			: 'custom';
+
+		if (deviceConnection) {
+			this.logger.info('External publish payload format selected', {
+				format: this.externalPayloadFormat,
+				setting: process.env.PUBLISH_EXTERNAL_FORMAT || 'custom',
+			});
+		}
 	}
 
 	public setAnomalyService(anomalyService?: AnomalyDetectionService): void {
@@ -338,6 +363,7 @@ export class DevicePublish extends EventEmitter {
 			this.useDeflatePoc,
 			protocol,
 			this.anomalyService,
+			this.externalPayloadFormat,
 		);
 	}
 

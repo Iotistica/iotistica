@@ -24,6 +24,10 @@ const MAX_BATCH_BYTES = (() => {
 	return Math.min(10 * 1024 * 1024, Math.floor(heapLimit * 0.05));
 })();
 
+type ExternalPayloadFormat = 'custom' | 'tags';
+
+type PublishPayload = Record<string, unknown>;
+
 // ============================================================================
 // PUBLISH MANAGER
 // ============================================================================
@@ -93,6 +97,7 @@ export class PublishManager extends EventEmitter {
     private useDeflatePoc = false,
     private readonly protocol: Protocol = 'mqtt',
     private anomalyService?: AnomalyDetectionService,
+		private readonly externalPayloadFormat: ExternalPayloadFormat = 'custom',
 	) {
 		super();
 
@@ -249,7 +254,7 @@ export class PublishManager extends EventEmitter {
 			const enriched = this.processAnomaly(messages, name);
 			if (this.needStop) return;
 
-			let { data, baselineSize } = this.buildPayload(name, enriched);
+			let { data, baselineSize, msgId } = this.buildPayload(name, enriched);
 			if (this.needStop) return;
 
 			// Run payload through the Node-RED pipeline (if configured)
@@ -266,21 +271,27 @@ export class PublishManager extends EventEmitter {
 						this.batcher.reset();
 						return;
 					}
-					const transformed = result.payload as typeof data;
+					const transformed = result.payload as PublishPayload;
 					baselineSize = Buffer.byteLength(JSON.stringify(transformed), 'utf8');
 					data = transformed;
-					this.logger?.debug(`Pipeline transform applied for '${name}': ${transformed.messages?.length ?? 0} messages, ${baselineSize} bytes in ${Date.now() - pipelineStart}ms`);
+					if (typeof (transformed as { msgId?: unknown }).msgId === 'string') {
+						msgId = (transformed as { msgId: string }).msgId;
+					}
+					const transformedMessageCount = Array.isArray((transformed as { messages?: unknown }).messages)
+						? ((transformed as { messages: unknown[] }).messages).length
+						: 0;
+					this.logger?.debug(`Pipeline transform applied for '${name}': ${transformedMessageCount} messages, ${baselineSize} bytes in ${Date.now() - pipelineStart}ms`);
 				} catch (err) {
 					this.logger?.warn(`Pipeline transform failed for '${name}', publishing original payload`, err);
 				}
 			}
 
 			if (!this.mqttConnection.isConnected()) {
-				await this.publishOffline(topic, data, messageCount);
+				await this.publishOffline(topic, data, msgId, messageCount);
 				return;
 			}
 
-			await this.publishOnline(topic, data, baselineSize, messageCount, batchBytes, enriched, name);
+			await this.publishOnline(topic, data, msgId, baselineSize, messageCount, batchBytes, enriched, name);
 		} finally {
 			this.publishing = false;
 		}
@@ -304,25 +315,64 @@ export class PublishManager extends EventEmitter {
 	}
 
 	private buildPayload(endpointName: string, messages: any[]): {
-    data: { device: string; timestamp: string; protocol: Protocol; messages: any[]; msgId: string };
+    data: PublishPayload;
+    msgId: string;
     baselineSize: number;
   } {
+		const msgId = this.mqttConnection.getMessageIdGenerator?.()?.generate()
+			?? `${this.deviceUuid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+		if (this.externalPayloadFormat === 'tags') {
+			const timestampMs = Date.now();
+			const tags = messages.map((message: Record<string, unknown>, index: number) => {
+				const name = String(
+					message.metric ?? message.name ?? message.tag ?? message.id ?? `tag_${index}`,
+				);
+				const hasError = message.error !== undefined
+					|| message.errorCode !== undefined
+					|| message.quality === 'BAD'
+					|| message.qualityCode !== undefined;
+
+				if (hasError) {
+					return {
+						name,
+						error: message.error ?? message.errorCode ?? message.qualityCode ?? 'READ_ERROR',
+					};
+				}
+
+				return {
+					name,
+					value: message.value,
+				};
+			});
+
+			const data = {
+				timestamp: timestampMs,
+				node: this.protocol,
+				group: endpointName,
+				tags,
+			};
+
+			const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
+			return { data, msgId, baselineSize };
+		}
+
 		const timestampIso = new Date().toISOString();
-		const msgId = this.mqttConnection.getMessageIdGenerator?.()?.generate();
 		const data = {
 			device: endpointName,
 			timestamp: timestampIso,
 			protocol: this.protocol,
 			messages,
-			msgId: msgId ?? `${this.deviceUuid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+			msgId,
 		};
 		const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
-		return { data, baselineSize };
+		return { data, msgId, baselineSize };
 	}
 
 	private async persistQueuedBatch(
 		topic: string,
-		data: { device: string; timestamp: string; messages: any[]; msgId: string },
+		data: PublishPayload,
+		msgId: string,
 	): Promise<number> {
 		const MessageBufferModel = await this.getMessageBufferModel();
 		const jsonPayload = JSON.stringify(data);
@@ -332,14 +382,15 @@ export class PublishManager extends EventEmitter {
 			topic,
 			qos: 1,
 			payload: jsonPayload,
-			msg_id: data.msgId,
+			msg_id: msgId,
 			payload_bytes: Buffer.byteLength(jsonPayload, 'utf8'),
 		});
 	}
 
 	private async persistClaimedBatch(
 		topic: string,
-		data: { device: string; timestamp: string; messages: any[]; msgId: string },
+		data: PublishPayload,
+		msgId: string,
 	): Promise<{ id: number; lockId: string }> {
 		const MessageBufferModel = await this.getMessageBufferModel();
 		const jsonPayload = JSON.stringify(data);
@@ -351,7 +402,7 @@ export class PublishManager extends EventEmitter {
 				topic,
 				qos: 1,
 				payload: jsonPayload,
-				msg_id: data.msgId,
+				msg_id: msgId,
 				payload_bytes: Buffer.byteLength(jsonPayload, 'utf8'),
 			},
 			lockId,
@@ -362,7 +413,8 @@ export class PublishManager extends EventEmitter {
 
 	private async publishOnline(
 		topic: string,
-		data: { device: string; timestamp: string; messages: any[]; msgId: string },
+		data: PublishPayload,
+		msgId: string,
 		baselineSize: number,
 		messageCount: number,
 		batchBytes: number,
@@ -374,7 +426,7 @@ export class PublishManager extends EventEmitter {
 		let publishConfirmed = false;
 
 		try {
-			const claimed = await this.persistClaimedBatch(topic, data);
+			const claimed = await this.persistClaimedBatch(topic, data, msgId);
 			bufferedRecordId = claimed.id;
 			if (this.needStop) {
 				const MessageBufferModel = await this.getMessageBufferModel();
@@ -419,7 +471,7 @@ export class PublishManager extends EventEmitter {
 					this.batcher.reset();
 					this.logger?.warn(`Queued failed publish for endpoint '${endpointName}' for durable retry`);
 				} else {
-					await this.publishOffline(topic, data, messageCount);
+					await this.publishOffline(topic, data, msgId, messageCount);
 					this.logger?.warn(`Buffered failed publish for endpoint '${endpointName}' to durable storage`);
 				}
 			} catch (bufferError) {
@@ -430,22 +482,24 @@ export class PublishManager extends EventEmitter {
 
 	private async publishOffline(
 		topic: string,
-		data: { device: string; timestamp: string; messages: any[]; msgId: string },
+		data: PublishPayload,
+		msgId: string,
 		messageCount: number,
 	): Promise<void> {
 		if (this.needStop) return;
-		await this.bufferOfflineMessages(topic, data, messageCount);
+		await this.bufferOfflineMessages(topic, data, msgId, messageCount);
 	}
 
 	private async bufferOfflineMessages(
 		topic: string,
-		data: { device: string; timestamp: string; messages: any[]; msgId: string },
+		data: PublishPayload,
+		msgId: string,
 		messageCount: number,
 	): Promise<void> {
 		const name = this.config.name || 'unknown';
 		this.logger?.warn(`MQTT not connected  buffering ${messageCount} messages from '${name}'`);
 		try {
-			await this.persistQueuedBatch(topic, data);
+			await this.persistQueuedBatch(topic, data, msgId);
 			this.batcher.reset();
 		} catch (err) {
 			this.logger?.error(`Failed to buffer messages from device '${name}'`, err);

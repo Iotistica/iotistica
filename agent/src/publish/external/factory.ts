@@ -1,6 +1,6 @@
 /** Factory and entry point for external publish MQTT clients. */
-import type { AgentLogger } from '../logging/agent-logger.js';
-import type { MqttConnection } from '../publish/types.js';
+import type { AgentLogger } from '../../logging/agent-logger.js';
+import type { MqttConnection } from '../types.js';
 import { PublishConfigLoader } from './config.js';
 import type { PublishProviderConfig } from './config.js';
 import { AwsIotClient } from './clients/aws-iot.js';

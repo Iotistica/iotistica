@@ -1,4 +1,4 @@
-import type { AgentLogger } from '../logging/agent-logger.js';
+import type { AgentLogger } from '../../logging/agent-logger.js';
 
 export type CloudPublishTarget = 'iotistica' | 'azure' | 'aws' | 'gcp';
 
