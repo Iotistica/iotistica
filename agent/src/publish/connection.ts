@@ -67,7 +67,28 @@ export class DeviceConnection extends EventEmitter {
 		this._state = DeviceState.CONNECTED;
 		this._attempts = 0;
 		this.currentDelay = this.INITIAL_DELAY_MS;
-		this.emit('connected');
+
+		// Send subscription message to socket server
+		// Server expects: {"subscribe": ["topic1", "topic2"]} or {"subscribe": []} for wildcard
+		if (this.socket) {
+			const protocol = this.config.protocol || 'unknown';
+			const subscriptionMessage = JSON.stringify({ subscribe: [protocol] });
+			this.socket.write(subscriptionMessage + '\n', (err) => {
+				if (err) {
+					this.logger?.error(
+						`Failed to send subscription message for '${this.config.name || 'unknown'}': ${err.message}`,
+					);
+					this.onSocketError(err);
+					return;
+				}
+				this.logger?.debug(
+					`Sent subscription for protocol '${protocol}' on device '${this.config.name || 'unknown'}'`,
+				);
+				this.emit('connected');
+			});
+		} else {
+			this.emit('connected');
+		}
 	}
 
 	private onSocketError(err: Error): void {

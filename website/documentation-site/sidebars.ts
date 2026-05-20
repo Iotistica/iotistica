@@ -23,7 +23,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Agent',
-      items: ['agent/overview'],
+      items: ['agent/overview', 'agent/architecture'],
     },
     {
       type: 'category',

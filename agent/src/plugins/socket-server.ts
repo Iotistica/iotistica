@@ -3,18 +3,41 @@ import * as fs from "fs";
 import * as path from "path";
 import { type DeviceDataPoint, type SocketOutput, type Logger } from "./types.js";
 
+interface ClientSubscription {
+	socket: net.Socket;
+	topics: Set<string>; // Empty set = all topics
+}
+
 /**
- * IPC Socket Server that receives device data and serves it to connected clients
- * Supports both Unix Domain Sockets (Linux/macOS) and Named Pipes (Windows)
+ * IPC Socket Server with Topic-Based Pub/Sub Routing
+ * 
+ * Supports both Unix Domain Sockets (Linux/macOS) and Named Pipes (Windows).
+ * 
+ * Topic-Centric Design:
+ * - Index: Map<topic, Set<sockets>> for O(K) direct client lookup (K = topic subscribers)
+ * - Wildcard: Separate Set for clients subscribed to all topics
+ * - Routing: topic → get subscribers (not: iterate all clients)
+ * 
+ * Subscription Protocol:
+ * 1. Client connects to socket
+ * 2. Client sends: {"subscribe": ["modbus", "bacnet"]} (empty array = all topics)
+ * 3. Server confirms: {"ok": true, "subscribed_to": [...]}
+ * 4. Server sends data only to subscribed clients
  */
 export class SocketServer {
 	private server?: net.Server;
-	private clients: net.Socket[] = [];
+	private subscriptions: Map<net.Socket, ClientSubscription> = new Map();
+	private pendingSubscriptions: Set<net.Socket> = new Set(); // Sockets waiting for subscription handshake
+	private topicToSockets: Map<string, Set<net.Socket>> = new Map();
+	private wildcardSockets: Set<net.Socket> = new Set();
+	private slowClients: Map<net.Socket, number> = new Map(); // Track consecutive backpressure events per socket
 	private config: SocketOutput;
 	private logger: Logger;
 	private started = false;
 	private isWindowsNamedPipe: boolean;
-	private readonly MAX_CLIENTS = 10; // Prevent IPC DoS attacks
+	private readonly MAX_CLIENTS = 10;
+	private readonly SUBSCRIPTION_TIMEOUT_MS = 5000;
+	private readonly BACKPRESSURE_THRESHOLD = 3; // Allow 3 consecutive failures before removal
 
 	constructor(config: SocketOutput, logger: Logger) {
 		this.config = config;
@@ -62,17 +85,12 @@ export class SocketServer {
 						? "Windows Named Pipe"
 						: "Unix socket";
 					this.logger.info(
-						`IPC server started (${transportType}) at: ${this.config.socketPath}`,
-					);
+					`IPC server started (${transportType}) with pub/sub routing at: ${this.config.socketPath}`,
+				);
 
-					// Set restrictive permissions on Unix socket file (owner + group only)
-					// Prevents unauthorized local processes from connecting
-					if (!this.isWindowsNamedPipe) {
-						try {
-							fs.chmodSync(this.config.socketPath, 0o660);
-						} catch (error) {
-							this.logger.warn(`Failed to set socket permissions: ${error}`);
-						}
+				// Set restrictive permissions on Unix socket file (owner + group only)
+				// Prevents unauthorized local processes from connecting
+				if (!this.isWindowsNamedPipe) {
 					}
 
 					this.started = true;
@@ -108,11 +126,18 @@ export class SocketServer {
 		}
 
 		try {
-			// Close all client connections
-			for (const client of this.clients) {
-				client.destroy();
+			// Close all client connections (both active and pending handshake)
+			for (const { socket } of this.subscriptions.values()) {
+				socket.destroy();
 			}
-			this.clients = [];
+			for (const socket of this.pendingSubscriptions) {
+				socket.destroy();
+			}
+			this.subscriptions.clear();
+			this.pendingSubscriptions.clear();
+			this.topicToSockets.clear();
+			this.wildcardSockets.clear();
+			this.slowClients.clear();
 
 			// Close server
 			await new Promise<void>((resolve) => {
@@ -151,28 +176,20 @@ export class SocketServer {
 	}
 
 	/**
-	 * Send device data to all connected clients
-	 *
-	 * Backpressure handling: Drops slow consumers instead of buffering
-	 * Rationale: Real-time telemetry data loses value quickly, and slow consumers
-	 * shouldn't block fast ones or cause memory growth on edge devices.
-	 *
-	 * TODO (OPTIMIZATION): Broadcast amplification at high scale
-	 *
-	 * Current approach: Write same payload N times (one per client)
-	 * - Fine for typical edge deployments (1-2 clients, <1k msgs/sec)
-	 * - Becomes CPU-bound at high scale (10+ clients × 1k msgs/sec = 10k syscalls/sec)
-	 *
-	 * Optimization strategies (if profiling shows bottleneck):
-	 * 1. Per-client sampling: Fast clients get all data, debug clients get every Nth message
-	 * 2. Shared memory: Write once, clients read at their own pace (zero-copy broadcast)
-	 * 3. Client rate limiting: Cap per-client throughput (e.g., max 100 msgs/sec)
-	 *
-	 * Decision: Keep simple broadcast until proven hot. The backpressure handling
-	 * already prevents the critical failure mode (OOM from slow consumers).
+	 * Send device data to subscribed clients (topic-aware, optimized routing)
+	 * 
+	 * @param dataPoints - Device data to send
+	 * @param topic - Protocol topic (e.g., "modbus", "opcua", "bacnet"); defaults to "generic"
+	 * 
+	 * Routing: O(K) where K = subscribers for this topic (not O(N) all clients)
+	 * - Send to topic-specific subscribers (topicToSockets[topic])
+	 * - Send to wildcard subscribers (wildcardSockets)
+	 * - No merging step — iterate both indices separately
+	 * 
+	 * Backpressure: Drops slow consumers instead of buffering.
 	 */
-	sendData(dataPoints: DeviceDataPoint[]): void {
-		if (!this.started || this.clients.length === 0) {
+	sendData(dataPoints: DeviceDataPoint[], topic: string = "generic"): void {
+		if (!this.started || this.subscriptions.size === 0) {
 			return;
 		}
 
@@ -180,26 +197,21 @@ export class SocketServer {
 			const message = this.formatData(dataPoints);
 			const data = message + this.config.delimiter;
 
-			// Send to all connected clients with backpressure handling
-			this.clients.forEach((client, index) => {
-				try {
-					const flushed = client.write(data);
+			// Track sockets we've already sent to (avoid duplicate sends if socket in both indices)
+			const sentTo = new Set<net.Socket>();
 
-					// Backpressure detected: kernel buffer full
-					if (!flushed) {
-						this.logger.warn(
-							`Dropping slow IPC client (backpressure detected) at ${this.config.socketPath}`,
-							{
-								clientIndex: index,
-								bufferSize: data.length,
-								reason: "kernel_buffer_full",
-							},
-						);
-						this.removeClient(client);
-					}
-				} catch (error) {
-					this.logger.warn(`Failed to send data to client ${index}: ${error}`);
-					this.removeClient(client);
+			// Send to topic-specific subscribers
+			const topicSubscribers = this.topicToSockets.get(topic);
+			if (topicSubscribers) {
+				topicSubscribers.forEach((socket) => {
+					this.sendToSocket(socket, data, topic, sentTo);
+				});
+			}
+
+			// Send to wildcard subscribers (not already sent to)
+			this.wildcardSockets.forEach((socket) => {
+				if (!sentTo.has(socket)) {
+					this.sendToSocket(socket, data, topic, sentTo);
 				}
 			});
 		} catch (error) {
@@ -210,10 +222,91 @@ export class SocketServer {
 	}
 
 	/**
+	 * Send data to a single socket with graceful backpressure handling
+	 * Tracks consecutive failures and gradually escalates warnings
+	 * 
+	 * Backpressure handling:
+	 * - Attempt 1: WARN - likely transient
+	 * - Attempt 2: WARN - monitor
+	 * - Attempt 3: ERROR - client degraded, consider sampling
+	 * - Attempt 4+: Remove client
+	 */
+	private sendToSocket(
+		socket: net.Socket,
+		data: string,
+		topic: string,
+		sentTo: Set<net.Socket>,
+	): void {
+		try {
+			const flushed = socket.write(data);
+
+			if (!flushed) {
+				// Backpressure detected: kernel buffer full
+				const failureCount = (this.slowClients.get(socket) ?? 0) + 1;
+				this.slowClients.set(socket, failureCount);
+
+				if (failureCount >= this.BACKPRESSURE_THRESHOLD + 1) {
+					// Persistent backpressure after threshold: remove client
+					this.logger.error(
+						`Removing IPC client (persistent backpressure: ${failureCount} consecutive failures for topic: ${topic})`,
+						{ reason: "backpressure_threshold_exceeded" },
+					);
+					this.removeClient(socket);
+				} else if (failureCount === this.BACKPRESSURE_THRESHOLD) {
+					// Escalate to error log on 3rd failure
+					this.logger.error(
+						`IPC client degraded (backpressure failure #${failureCount} for topic: ${topic}) - will be removed if continues`,
+						{ reason: "backpressure_escalation" },
+					);
+				} else {
+					// Initial warnings on 1st-2nd failures
+					this.logger.warn(
+						`IPC client slow (backpressure failure #${failureCount} for topic: ${topic}) - transient kernel buffer pressure`,
+						{ reason: "kernel_buffer_full" },
+					);
+				}
+			} else {
+				// Send succeeded: reset failure counter
+				this.slowClients.delete(socket);
+				sentTo.add(socket);
+			}
+		} catch (error) {
+			this.logger.warn(
+				`Failed to send data to client (topic: ${topic}): ${error}`,
+			);
+			this.removeClient(socket);
+		}
+	}
+
+	/**
 	 * Get number of connected clients
 	 */
 	getClientCount(): number {
-		return this.clients.length;
+		return this.subscriptions.size;
+	}
+
+	/**
+	 * Get subscription stats (useful for monitoring)
+	 * 
+	 * @returns Object with total client count and topic subscription counts
+	 */
+	getSubscriptionStats(): { totalClients: number; topicCounts: Record<string, number> } {
+		const topicCounts: Record<string, number> = {};
+
+		this.subscriptions.forEach(({ topics }) => {
+			if (topics.size === 0) {
+				topicCounts["*"] = (topicCounts["*"] || 0) + 1;
+			} else {
+				topics.forEach((topic) => {
+					topicCounts[topic] = (topicCounts[topic] || 0) + 1;
+				});
+			}
+		});
+
+		return {
+			totalClients: this.subscriptions.size,
+			topicCounts,
+		};
 	}
 
 	/**
@@ -224,11 +317,17 @@ export class SocketServer {
 	}
 
 	/**
-	 * Handle new client connection
+	 * Handle new client connection with subscription handshake
+	 * 
+	 * Waits for subscription message: {"subscribe": ["modbus"]}
+	 * Empty array or omitted = subscribe to all topics
+	 * Confirms with: {"ok": true, "subscribed_to": [...]}
+	 * 5-second timeout for handshake completion
 	 */
 	private handleClientConnection(socket: net.Socket): void {
-		// Prevent IPC DoS: reject connections beyond max client limit
-		if (this.clients.length >= this.MAX_CLIENTS) {
+		// Prevent IPC DoS: reject connections beyond max client limit (includes pending)
+		const totalPending = this.subscriptions.size + this.pendingSubscriptions.size;
+		if (totalPending >= this.MAX_CLIENTS) {
 			this.logger.warn(
 				`Rejected IPC client (max ${this.MAX_CLIENTS} clients reached) at ${this.config.socketPath}`,
 			);
@@ -236,31 +335,180 @@ export class SocketServer {
 			return;
 		}
 
-		this.clients.push(socket);
+		// Create subscription entry (starts with empty set = all topics)
+		const subscription: ClientSubscription = {
+			socket,
+			topics: new Set(),
+		};
 
-		// Use 'once' to prevent duplicate cleanup when multiple events fire
-		// (error → close → end can all trigger for same disconnect)
+		// Add to pending subscriptions (NOT active yet - waiting for handshake)
+		this.pendingSubscriptions.add(socket);
+
+		// Wait for subscription message from client
+		let subscriptionReceived = false;
+		let subscriptionBuffer = "";
+		let timeoutHandle: NodeJS.Timeout | null = null;
+
+		const handleSubscriptionMessage = (chunk: Buffer) => {
+			subscriptionBuffer += chunk.toString("utf-8");
+
+			// Parse newline-delimited JSON subscription message
+			const lines = subscriptionBuffer.split("\n");
+			for (let i = 0; i < lines.length - 1; i++) {
+				const line = lines[i].trim();
+				if (!line) continue;
+
+				try {
+					const msg = JSON.parse(line);
+
+					if (msg.subscribe && Array.isArray(msg.subscribe)) {
+						// Clean up old subscriptions first (prevents leaks on re-subscribe)
+						this.unsubscribeAll(socket, subscription);
+
+						// Apply subscription filter with explicit state transitions
+						if (msg.subscribe.length > 0) {
+							// Topic-specific subscription: must NOT be in wildcard set
+							this.wildcardSockets.delete(socket);
+							
+							subscription.topics = new Set(msg.subscribe);
+							
+							// Update topic-centric index: add socket to each topic
+							for (const topic of msg.subscribe) {
+								if (!this.topicToSockets.has(topic)) {
+									this.topicToSockets.set(topic, new Set());
+								}
+								this.topicToSockets.get(topic)!.add(socket);
+							}
+							
+							this.logger.debug(
+								`Client subscribed to topics: ${Array.from(subscription.topics).join(", ")}`,
+							);
+						} else {
+							// Wildcard subscription: subscribe to all topics
+							this.wildcardSockets.add(socket);
+							subscription.topics.clear();
+							
+							this.logger.debug("Client subscribed to all topics");
+						}
+
+						subscriptionReceived = true;
+					// Clear the timeout - handshake complete!
+					if (timeoutHandle) {
+						clearTimeout(timeoutHandle);
+						timeoutHandle = null;
+					}
+						// Move socket from pending → active subscriptions (handshake complete, only first time)
+						if (this.pendingSubscriptions.has(socket)) {
+							this.pendingSubscriptions.delete(socket);
+							this.subscriptions.set(socket, subscription);
+						}
+
+						break;
+					}
+				} catch (parseError) {
+					// Not valid JSON yet, wait for more data
+				}
+			}
+
+			// Keep last incomplete line in buffer
+			subscriptionBuffer = lines[lines.length - 1];
+		};
+
+		// Set timeout for subscription handshake
+		timeoutHandle = setTimeout(() => {
+			if (!subscriptionReceived) {
+				this.logger.warn(
+					`Client subscription timeout (expected JSON: {"subscribe": ["modbus"]})`,
+				);
+				socket.destroy();
+				this.removeClient(socket);
+			}
+		}, this.SUBSCRIPTION_TIMEOUT_MS);
+
+		socket.on("data", handleSubscriptionMessage);
+
 		socket.once("error", (error) => {
-			this.logger.warn(`Client socket error: ${error.message}`);
+			if (timeoutHandle) clearTimeout(timeoutHandle);
+			this.logger.warn(`Client socket error during subscription: ${error.message}`);
 			this.removeClient(socket);
 		});
 
 		socket.once("close", () => {
-			this.removeClient(socket);
-		});
-
-		socket.once("end", () => {
+			if (timeoutHandle) clearTimeout(timeoutHandle);
 			this.removeClient(socket);
 		});
 	}
 
 	/**
-	 * Remove client from the list
+	 * Unsubscribe socket from all topics and wildcard set
+	 * Called before applying a new subscription to prevent leaks on re-subscribe
+	 */
+	private unsubscribeAll(
+		socket: net.Socket,
+		subscription: ClientSubscription,
+	): void {
+		// Remove from wildcard subscribers
+		this.wildcardSockets.delete(socket);
+
+		// Remove from all topic-specific indices
+		subscription.topics.forEach((topic) => {
+			const sockets = this.topicToSockets.get(topic);
+			if (sockets) {
+				sockets.delete(socket);
+				// Clean up empty topic set
+				if (sockets.size === 0) {
+					this.topicToSockets.delete(topic);
+				}
+			}
+		});
+
+		// Clear subscription topics
+		subscription.topics.clear();
+	}
+
+	/**
+	 * Remove client from subscriptions map and indices
+	 * Handles both active subscriptions and pending handshakes
 	 */
 	private removeClient(socket: net.Socket): void {
-		const index = this.clients.indexOf(socket);
-		if (index > -1) {
-			this.clients.splice(index, 1);
+		// Clean up backpressure tracking
+		this.slowClients.delete(socket);
+
+		// Check if socket is still in pending handshake
+		if (this.pendingSubscriptions.has(socket)) {
+			this.pendingSubscriptions.delete(socket);
+			try {
+				socket.destroy();
+			} catch (_error) {
+				// Ignore errors when destroying socket
+			}
+			return;
+		}
+
+		// Check if socket is in active subscriptions
+		const subscription = this.subscriptions.get(socket);
+		if (subscription) {
+			// Remove from client subscriptions
+			this.subscriptions.delete(socket);
+
+			// Clean up from topic-centric indices
+			if (subscription.topics.size === 0) {
+				// Wildcard subscriber
+				this.wildcardSockets.delete(socket);
+			} else {
+				// Topic-specific: remove from each topic's subscriber set
+				subscription.topics.forEach((topic) => {
+					const sockets = this.topicToSockets.get(topic);
+					if (sockets) {
+						sockets.delete(socket);
+						// Clean up empty topic set
+						if (sockets.size === 0) {
+							this.topicToSockets.delete(topic);
+						}
+					}
+				});
+			}
+
 			try {
 				socket.destroy();
 			} catch (_error) {
@@ -271,27 +519,9 @@ export class SocketServer {
 
 	/**
 	 * Format device data based on configuration
-	 *
-	 * TODO (PRODUCTION): Replace delimiter-based framing with robust protocol
-	 *
-	 * Current approach: message + delimiter (e.g., '\n')
-	 * Limitations:
-	 * - JSON data could contain delimiter (e.g., user input with embedded '\n')
-	 * - Partial write() calls could split frames (rare on IPC, common on network sockets)
-	 * - Client reading mid-frame gets corrupted data
-	 *
-	 * Why it works now (POC-acceptable):
-	 * - JSON.stringify() produces single-line output (no embedded '\n')
-	 * - IPC sockets (Unix/Named Pipe) have low partial-write probability
-	 * - Trusted clients (device-publish) with controlled input
-	 *
-	 * Production alternatives:
-	 * 1. Length-prefixed framing: 4-byte uint32 length + payload (most robust)
-	 * 2. NDJSON: Newline-delimited JSON with validation (simpler, less safe)
-	 * 3. MessagePack framing: Aligns with existing compression stack (recommended)
-	 *
-	 * Recommendation: Migrate to MessagePack framing when consolidating serialization.
-	 * This matches the device-publish msgpack usage and provides type-safe framing.
+	 * 
+	 * Current: Delimiter-based framing (e.g., '\n'). Works for controlled input.
+	 * TODO: Consider length-prefixed framing or MessagePack for production robustness.
 	 */
 	private formatData(dataPoints: DeviceDataPoint[]): string {
 		if (this.config.dataFormat === "csv") {

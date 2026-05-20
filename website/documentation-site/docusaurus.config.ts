@@ -83,8 +83,9 @@ const config: Config = {
         },
         {
           href: 'https://github.com/iotistica/iotistica',
-          label: 'GitHub',
           position: 'right',
+          className: 'header-github-link',
+          'aria-label': 'GitHub repository',
         },
       ],
     },
