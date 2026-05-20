@@ -22,7 +22,7 @@ import type { AgentLogger } from "../logging/agent-logger.js";
 import { LogComponents, type LogLevel } from "../logging/types.js";
 import type { ContainerManager } from "../containers/container-manager.js";
 import type { CloudSync } from "../sync/index.js";
-import type { DiscoveryService } from "../adapters/discovery/service.js";
+import type { DiscoveryService } from "../discovery/service.js";
 import type {
 	DeviceConfig,
 	ConfigStep,

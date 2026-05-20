@@ -30,7 +30,7 @@ import {
 } from "./system/memory.js";
 import { type AnomalyDetectionService } from "./anomaly/index.js";
 import { type SimulationOrchestrator } from "./anomaly/simulator.js";
-import { type DiscoveryService } from "./adapters/discovery/service.js";
+import { type DiscoveryService } from "./discovery/service.js";
 import { type FeatureInitializer } from "./init/features.js";
 import type { ConfigManager } from "./runtime/config.js";import type { DictionaryManager } from './mqtt/dictionary.js';
 import type { HttpClient } from './lib/http-client.js';import {

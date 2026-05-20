@@ -22,7 +22,7 @@ import { getDatabase } from '../db/sqlite';
 import { CloudMqttClient } from '../mqtt/manager';
 import { encodeIfUuid } from '../mqtt/codec';
 import type { AgentUpdater } from '../updater';
-import type { DiscoveryService } from '../adapters/discovery/service';
+import type { DiscoveryService } from '../discovery/service';
 import { TailscaleManager } from '../network/vpn/tailscale-manager';
 import type { TailscaleConfig, TailscaleStatus } from '../network/vpn/tailscale-manager';
 

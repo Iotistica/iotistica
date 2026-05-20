@@ -10,7 +10,7 @@ import type { AgentInfo } from '../runtime/types.js';
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/monitor.js';
-import { DiscoveryService } from '../adapters/discovery/service.js';
+import { DiscoveryService } from '../discovery/service.js';
 
 import { DevicePublish } from '../publish/index.js';
 import type { AdapterManager } from '../adapters/index.js';
