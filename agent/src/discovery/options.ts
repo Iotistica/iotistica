@@ -18,7 +18,6 @@ export class DiscoveryOptionsBuilder {
 			case 'modbus': return this.modbus();
 			case 'opcua':  return this.opcua();
 			case 'can':    return this.can();
-			case 'snmp':   return this.snmp();
 			case 'mqtt':   return this.mqtt();
 			case 'bacnet': return this.bacnet();
 			default:       return undefined;
@@ -53,12 +52,6 @@ export class DiscoveryOptionsBuilder {
 				? parseInt(process.env.CAN_LISTEN_DURATION, 10)
 				: undefined
 		};
-	}
-
-	private snmp(): any {
-		if (!this.configManager) return undefined;
-		// Return empty object - plugin queries getDiscoveryTargets() for dynamic targets
-		return {};
 	}
 
 	private mqtt(): MqttDiscoveryOptions | undefined {

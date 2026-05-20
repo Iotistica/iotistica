@@ -1,27 +1,4 @@
-/**
- * external/base-client.ts
- * =======================
- * Abstract base class shared by all external cloud MQTT publish clients.
- *
- * Handles:
- *  - MQTT connect / disconnect lifecycle
- *  - Event wiring (error, disconnect, offline, reconnect)
- *  - Publish with retry (with transient-error hook + retry-log hook)
- *  - State management (connected flag)
- *  - MqttConnection interface boilerplate
- *
- * Subclasses implement:
- *  - buildMqttOptions()   – provider-specific auth + options
- *  - buildPublishTopic()  – provider-specific topic format
- *  - getLogContext()      – fields added to every log entry
- *  - providerName         – display label used in logs / error messages
- *
- * Optional overrides:
- *  - onConnected()           – hook called after successful connect (Azure uses for SAS renewal)
- *  - onPreDisconnect()       – hook called before disconnect (Azure uses for timer cleanup)
- *  - isTransientPublishError – classify whether an error warrants a retry
- *  - onPublishRetry()        – hook called before each retry (Azure uses for warn logging)
- */
+/** Shared base MQTT client for external cloud publish providers. */
 
 import { EventEmitter } from 'events';
 import mqtt from 'mqtt';
@@ -39,36 +16,20 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 		super();
 	}
 
-	// ── Abstract interface ────────────────────────────────────────────────────
-
 	protected abstract get providerName(): string;
 	protected abstract buildMqttOptions(): IClientOptions;
 	protected abstract buildPublishTopic(sourceTopic: string): string;
 	protected abstract getLogContext(): Record<string, unknown>;
 
-	// ── Optional hooks ────────────────────────────────────────────────────────
-
-	/** Called immediately after a successful connect. */
 	protected onConnected(): void {}
 
-	/** Called at the start of disconnect, before the socket is closed. */
 	protected onPreDisconnect(): void {}
 
-	/**
-	 * Returns true if the publish error is transient and should be retried.
-	 * Default: always retry (plain MQTT write failures are transient).
-	 */
 	protected isTransientPublishError(_error: Error): boolean {
 		return true;
 	}
 
-	/**
-	 * Called before each retry attempt.
-	 * Override to add provider-specific warn logging.
-	 */
 	protected onPublishRetry(_attempt: number, _error: Error, _nextDelayMs: number): void {}
-
-	// ── MqttConnection ────────────────────────────────────────────────────────
 
 	public async connect(): Promise<void> {
 		const options = this.buildMqttOptions();
@@ -185,8 +146,6 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 	public getMessageIdGenerator(): undefined {
 		return undefined;
 	}
-
-	// ── Helpers ───────────────────────────────────────────────────────────────
 
 	protected _retryDelayMs(attempt: number): number {
 		return Math.min(250 * 2 ** attempt, 1000);

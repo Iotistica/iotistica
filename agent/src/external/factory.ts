@@ -1,3 +1,4 @@
+/** Factory and entry point for external publish MQTT clients. */
 import type { AgentLogger } from '../logging/agent-logger.js';
 import type { MqttConnection } from '../publish/types.js';
 import { PublishConfigLoader } from './config.js';
@@ -8,10 +9,6 @@ import { GcpIotClient } from './clients/gcp-iot.js';
 import type { CloudTargetFactoryInput } from './types.js';
 import type { BaseMqttClient } from './base-client.js';
 
-/**
- * Creates the correct client for a given provider config.
- * Add new providers here when extending the set of supported targets.
- */
 export class PublishClientFactory {
 	public static create(
 		config: PublishProviderConfig,
@@ -34,11 +31,6 @@ export class PublishClientFactory {
 	}
 }
 
-/**
- * Top-level entry point used by init/infra.ts.
- * Loads config from env, creates and connects the appropriate client.
- * Returns null when no external target is configured (use Iotistica fallback).
- */
 export async function createExternalPublishTarget(
 	input: CloudTargetFactoryInput,
 ): Promise<MqttConnection | null> {

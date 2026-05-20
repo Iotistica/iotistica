@@ -1,14 +1,4 @@
-/**
- * external/config.ts
- * ==================
- * Discriminated union config types for each external cloud publish provider,
- * plus a loader that reads from environment variables and normalises
- * connection strings into typed runtime objects.
- *
- * Clients receive typed config objects; they never read process.env directly.
- */
-
-// ─── Auth types ───────────────────────────────────────────────────────────────
+/** Typed external publish provider config and environment-based loader. */
 
 export type AwsIotAuth =
 	| { type: 'mtls'; ca?: string; cert: string; key: string }
@@ -22,13 +12,9 @@ export type AzureIotAuth = {
 
 export type GcpIotAuth = {
 	type: 'jwt';
-	/** GCP JWT token (takes priority over password) */
 	jwt?: string;
-	/** Plain MQTT password fallback */
 	password?: string;
 };
-
-// ─── Base config ──────────────────────────────────────────────────────────────
 
 export interface BaseProviderConfig {
 	provider: 'aws' | 'azure' | 'gcp';
@@ -36,8 +22,6 @@ export interface BaseProviderConfig {
 	qos?: 0 | 1 | 2;
 	topicTemplate?: string;
 }
-
-// ─── Provider configs ─────────────────────────────────────────────────────────
 
 export interface AwsIotProviderConfig extends BaseProviderConfig {
 	provider: 'aws';
@@ -69,8 +53,6 @@ export type PublishProviderConfig =
 	| AzureIotProviderConfig
 	| GcpIotProviderConfig;
 
-// ─── Azure connection string helper ──────────────────────────────────────────
-
 interface ParsedAzureConnStr {
 	hostName: string;
 	deviceId: string;
@@ -89,14 +71,6 @@ function parseAzureConnectionString(connStr: string): ParsedAzureConnStr | null 
 	return { hostName, deviceId, sharedAccessKey };
 }
 
-// ─── Config loader ────────────────────────────────────────────────────────────
-
-/**
- * Reads environment variables and returns a typed, normalised provider config.
- * Accepts an optional target override so callers can pass runtime values.
- *
- * Returns null when no external target is configured (use Iotistica instead).
- */
 export class PublishConfigLoader {
 	public loadFromEnv(targetOverride?: string): PublishProviderConfig | null {
 		const raw = (targetOverride || process.env.PUBLISH_TARGET || '').trim().toLowerCase();
@@ -105,10 +79,8 @@ export class PublishConfigLoader {
 		if (raw === 'aws' || raw === 'awsiot' || raw === 'aws-iot') return this._loadAws();
 		if (raw === 'gcp' || raw === 'google' || raw === 'google-cloud') return this._loadGcp();
 
-		return null; // 'iotistica' or empty → use Iotistica default
+		return null;
 	}
-
-	// ── Azure ──────────────────────────────────────────────────────────────────
 
 	private _loadAzure(): AzureIotProviderConfig {
 		const connStr = process.env.AZURE_IOTHUB_CONNECTION_STRING || '';
@@ -138,8 +110,6 @@ export class PublishConfigLoader {
 			},
 		};
 	}
-
-	// ── AWS ────────────────────────────────────────────────────────────────────
 
 	private _loadAws(): AwsIotProviderConfig {
 		const endpoint = process.env.AWS_IOT_ENDPOINT || '';
@@ -174,8 +144,6 @@ export class PublishConfigLoader {
 			},
 		};
 	}
-
-	// ── GCP ────────────────────────────────────────────────────────────────────
 
 	private _loadGcp(): GcpIotProviderConfig {
 		const endpoint = process.env.GCP_MQTT_ENDPOINT || '';
