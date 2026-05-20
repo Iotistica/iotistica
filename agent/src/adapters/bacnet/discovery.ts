@@ -20,7 +20,7 @@ import os from 'os';
 import BACnet from 'bacstack';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, type DiscoveredDevice, type ValidationResult } from '../types';
-import { generateBACnetFingerprint } from '../fingerprint';
+import { generateFingerprint } from '../fingerprint';
 import { pLimit } from '../../lib/p-limit.js';
 
 export interface BACnetDiscoveryOptions {
@@ -599,7 +599,8 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 			}
 
 			for (const [deviceInstance, deviceInfo] of devices.entries()) {
-				const fingerprint = generateBACnetFingerprint(
+				const fingerprint = generateFingerprint(
+					'bacnet',
 					deviceInfo.ipAddress,
 					deviceInstance
 				);

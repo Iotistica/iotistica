@@ -166,10 +166,6 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 		return this.running;
 	}
 
-	// ============================================================================
-	// ABSTRACT METHODS - Implement in protocol-specific adapters
-	// ============================================================================
-
 	/**
 	 * Get protocol name (e.g., "Modbus", "CAN", "OPC-UA")
 	 */
@@ -205,10 +201,6 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 	 * @throws Error if configuration is invalid
 	 */
 	protected abstract validateDeviceConfig(device: GenericDeviceConfig): void;
-
-	// ============================================================================
-	// COMMON IMPLEMENTATION - Shared across all protocols
-	// ============================================================================
 
 	/**
 	 * Initialize a device (connect and start polling)

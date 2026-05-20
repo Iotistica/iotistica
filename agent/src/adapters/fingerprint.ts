@@ -4,81 +4,51 @@
 
 import crypto from 'crypto';
 
-/** Generate Modbus fingerprint from bus identity and slave details. */
-export function generateModbusFingerprint(
+// Overload signatures for type safety
+export function generateFingerprint(
+	protocol: 'modbus',
 	busId: string,
 	slaveId: number,
 	deviceIdValue?: string
-): string {
-	const identity = deviceIdValue 
-		? `${busId}:${slaveId}:${deviceIdValue}`
-		: `${busId}:${slaveId}`;
-  
-	return crypto
-		.createHash('sha256')
-		.update(`modbus:${identity}`)
-		.digest('hex')
-		.substring(0, 32);
-}
+): string;
+export function generateFingerprint(protocol: 'opcua', applicationUri: string): string;
+export function generateFingerprint(protocol: 'can', canIdPattern: string, manufacturerHint?: string): string;
+export function generateFingerprint(protocol: 'mqtt', topic: string): string;
+export function generateFingerprint(protocol: 'bacnet', ipAddress: string, deviceInstance: number): string;
 
-/** Generate OPC UA fingerprint from application URI. */
-export function generateOPCUAFingerprint(applicationUri: string): string {
-	return crypto
-		.createHash('sha256')
-		.update(`opcua:${applicationUri}`)
-		.digest('hex')
-		.substring(0, 32);
-}
+/** Generate fingerprint for a discovered device protocol. */
+export function generateFingerprint(protocol: string, ...args: any[]): string {
+	let identity: string;
 
-/** Generate CAN fingerprint from CAN ID pattern and optional manufacturer hint. */
-export function generateCANFingerprint(
-	canIdPattern: string,
-	manufacturerHint?: string
-): string {
-	const identity = manufacturerHint
-		? `${canIdPattern}:${manufacturerHint}`
-		: canIdPattern;
-  
-	return crypto
-		.createHash('sha256')
-		.update(`can:${identity}`)
-		.digest('hex')
-		.substring(0, 32);
-}
+	switch (protocol) {
+		case 'modbus': {
+			const [busId, slaveId, deviceIdValue] = args;
+			identity = deviceIdValue ? `${busId}:${slaveId}:${deviceIdValue}` : `${busId}:${slaveId}`;
+			break;
+		}
+		case 'opcua':
+			identity = args[0];
+			break;
+		case 'can': {
+			const [canIdPattern, manufacturerHint] = args;
+			identity = manufacturerHint ? `${canIdPattern}:${manufacturerHint}` : canIdPattern;
+			break;
+		}
+		case 'mqtt':
+			identity = args[0];
+			break;
+		case 'bacnet': {
+			const [ipAddress, deviceInstance] = args;
+			identity = `${ipAddress}:${deviceInstance}`;
+			break;
+		}
+		default:
+			throw new Error(`Unknown protocol: ${protocol}`);
+	}
 
-/** Generate SNMP fingerprint from IP address and object identifier. */
-export function generateSNMPFingerprint(
-	ipAddress: string,
-	sysObjectID: string
-): string {
-	const identity = `${ipAddress}:${sysObjectID}`;
-  
 	return crypto
 		.createHash('sha256')
-		.update(`snmp:${identity}`)
-		.digest('hex')
-		.substring(0, 32);
-}
-
-/** Generate MQTT fingerprint from topic path. */
-export function generateMqttFingerprint(topic: string): string {
-	return crypto
-		.createHash('sha256')
-		.update(`mqtt:${topic}`)
-		.digest('hex')
-		.substring(0, 32);
-}
-
-/** Generate BACnet fingerprint from IP address and device instance. */
-export function generateBACnetFingerprint(
-	ipAddress: string,
-	deviceInstance: number
-): string {
-	const identity = `${ipAddress}:${deviceInstance}`;
-  
-	return crypto
-		.createHash('sha256')
-		.update(`bacnet:${identity}`)
+		.update(`${protocol}:${identity}`)
 		.digest('hex')
 		.substring(0, 32);
 }

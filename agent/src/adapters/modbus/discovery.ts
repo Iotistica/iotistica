@@ -14,7 +14,7 @@
 import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, type DiscoveredDevice, type ValidationResult } from '../types';
-import { generateModbusFingerprint } from '../fingerprint';
+import { generateFingerprint } from '../fingerprint';
 import type { ConfigManager } from '../../runtime/config.js';
 
 export interface ModbusDiscoveryOptions {
@@ -266,7 +266,7 @@ export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
 						// Generate cryptographic fingerprint (unique per bus + slave ID)
 						// CRITICAL: Don't include deviceInfo.deviceId - it's unreliable (MEI timeouts)
 						// Fingerprint must be stable across discovery runs regardless of MEI success
-						const fingerprint = generateModbusFingerprint(busId, slaveId);
+						const fingerprint = generateFingerprint('modbus', busId, slaveId);
 
 						// Device naming: Use connection name if provided (multi-connection mode)
 						const deviceName = connectionName 

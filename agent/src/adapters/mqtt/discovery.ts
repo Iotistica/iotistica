@@ -35,8 +35,8 @@ import {
 	type DiscoveredDevice,
 	type ValidationResult,
 } from "../types";
+import { generateFingerprint } from '../fingerprint';
 import * as mqtt from "mqtt";
-import crypto from "crypto";
 
 export interface MqttDiscoveryOptions {
 	brokerUrl?: string; // e.g., 'mqtt://mosquitto:1883' or 'mqtts://broker:8883'
@@ -62,18 +62,6 @@ interface TopicValidation {
 	lastSeen?: Date;
 	hasRetained?: boolean; // Did we receive a retained message?
 	hasLive?: boolean; // Did we receive a live (non-retained) message?
-}
-
-/**
- * Generate MQTT fingerprint
- * Based on topic path (stable identifier)
- */
-function generateMqttFingerprint(topic: string): string {
-	return crypto
-		.createHash("sha256")
-		.update(`mqtt:${topic}`)
-		.digest("hex")
-		.substring(0, 32);
 }
 
 export class LocalBrokerMqttDiscoveryPlugin extends BaseDiscoveryPlugin {
@@ -417,7 +405,7 @@ export class LocalBrokerMqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 		const devices: DiscoveredDevice[] = [];
 
 		for (const validation of validatedTopics) {
-			const fingerprint = generateMqttFingerprint(validation.topic);
+			const fingerprint = generateFingerprint('mqtt', validation.topic);
 
 			// Generate name from topic with length limit to avoid excessively long names
 			let topicName = validation.topic.replace(/\//g, "_");
