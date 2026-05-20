@@ -319,8 +319,10 @@ export class PublishManager extends EventEmitter {
 			?? `${this.deviceUuid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 		if (this.externalPayloadFormat === 'tags' || this.externalPayloadFormat === 'ecp') {
+			const externalGroupName = this.normalizeExternalGroupName(endpointName);
+			const parsedMessages = messages as Array<Record<string, unknown>>;
 			const tagRecords: Record<string, unknown>[] = [];
-			for (const message of messages as Array<Record<string, unknown>>) {
+			for (const message of parsedMessages) {
 				if (Array.isArray(message?.readings)) {
 					for (const reading of message.readings as Array<Record<string, unknown>>) {
 						tagRecords.push(reading);
@@ -329,6 +331,7 @@ export class PublishManager extends EventEmitter {
 					tagRecords.push(message);
 				}
 			}
+			const externalNodeName = this.resolveExternalNodeName(externalGroupName, parsedMessages, tagRecords);
 
 			const timestampMs = Date.now();
 			const tags = tagRecords
@@ -381,8 +384,8 @@ export class PublishManager extends EventEmitter {
 
 			const data = {
 				timestamp: timestampMs,
-				node: this.protocol,
-				group: endpointName,
+				node: externalNodeName,
+				group: externalGroupName,
 				tags,
 			};
 
@@ -399,6 +402,47 @@ export class PublishManager extends EventEmitter {
 		};
 		const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
 		return { data, msgId, baselineSize };
+	}
+
+	private normalizeExternalGroupName(endpointName: string): string {
+		return endpointName.replace(/(?:^|[-_\s])pipe$/i, '').replace(/[-_\s]+$/g, '');
+	}
+
+	private resolveExternalNodeName(
+		externalGroupName: string,
+		messages: Array<Record<string, unknown>>,
+		tagRecords: Array<Record<string, unknown>>,
+	): string {
+		const candidates = [
+			...messages,
+			...tagRecords,
+		];
+
+		for (const candidate of candidates) {
+			const resolved = this.readExternalNodeCandidate(candidate);
+			if (resolved) {
+				return this.normalizeExternalGroupName(resolved);
+			}
+		}
+
+		return externalGroupName;
+	}
+
+	private readExternalNodeCandidate(message: Record<string, unknown>): string | null {
+		const value = message.deviceName
+			?? message.device_name
+			?? message.resolvedDisplayName
+			?? message.resolved_display_name
+			?? message.sourceDeviceName
+			?? message.source_device_name
+			?? null;
+
+		if (typeof value !== 'string') {
+			return null;
+		}
+
+		const trimmed = value.trim();
+		return trimmed.length > 0 ? trimmed : null;
 	}
 
 	private inferEcpType(value: unknown): 1 | 2 | 3 | 4 {
