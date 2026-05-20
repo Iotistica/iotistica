@@ -10,7 +10,7 @@ import { ModbusDiscoveryPlugin } from '../adapters/modbus/discovery';
 import { OPCUADiscoveryPlugin } from '../adapters/opcua/discovery';
 import { LocalBrokerMqttDiscoveryPlugin } from '../adapters/mqtt/discovery';
 import { BACnetDiscoveryPlugin } from '../adapters/bacnet/discovery';
-import type { ConfigManager } from '../runtime/config.js';
+import type { ConfigManager } from '../core/config.js';
 import { DiscoveryOptionsBuilder } from './options.js';
 import { DiscoveryStore } from './db.js';
 

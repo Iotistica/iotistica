@@ -9,10 +9,10 @@
  * - Logging
  */
 
-import { type StateManager } from "./runtime/state.js";
+import { type StateManager } from "./core/state.js";
 import type ContainerManager from "./containers/container-manager.js";
-import { type AgentManager } from "./runtime/index.js";
-import type { AgentInfo } from "./runtime/types.js";
+import { type AgentManager } from "./core/index.js";
+import type { AgentInfo } from "./core/types.js";
 import { type DeviceAPI } from "./api/index.js";
 import { type CloudSync } from "./sync/index.js";
 
@@ -32,7 +32,7 @@ import { type AnomalyDetectionService } from "./anomaly/index.js";
 import { type SimulationOrchestrator } from "./anomaly/simulator.js";
 import { type DiscoveryService } from "./discovery/service.js";
 import { type FeatureInitializer } from "./init/features.js";
-import type { ConfigManager } from "./runtime/config.js";import type { DictionaryManager } from './mqtt/dictionary.js';
+import type { ConfigManager } from "./core/config.js";import type { DictionaryManager } from './mqtt/dictionary.js';
 import type { HttpClient } from './lib/http-client.js';import {
 	initCore as runInitCore,
 } from './init/core.js';

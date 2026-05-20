@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
-import type { StateManager } from '../runtime/state.js';
-import type { AgentManager } from '../runtime/index.js';
+import type { StateManager } from '../core/state.js';
+import type { AgentManager } from '../core/index.js';
 import type { HttpClient } from '../lib/http-client.js';
 import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';

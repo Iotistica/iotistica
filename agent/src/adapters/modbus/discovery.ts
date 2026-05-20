@@ -15,7 +15,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, type DiscoveredDevice, type ValidationResult } from '../types';
 import { generateFingerprint } from '../fingerprint';
-import type { ConfigManager } from '../../runtime/config.js';
+import type { ConfigManager } from '../../core/config.js';
 
 export interface ModbusDiscoveryOptions {
   serialPort?: string; // e.g., '/dev/ttyUSB0' or 'COM3'
