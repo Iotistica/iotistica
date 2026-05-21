@@ -8,6 +8,9 @@ exports.servicesLogs = servicesLogs;
 exports.servicesInfo = servicesInfo;
 const child_process_1 = require("child_process");
 const core_1 = require("../core");
+/**
+ * iotctl services list [<appId>]
+ */
 async function servicesList(appId) {
     (0, core_1.clearApiCache)();
     try {
@@ -55,6 +58,9 @@ async function servicesList(appId) {
         });
     }
 }
+/**
+ * iotctl services start <serviceId>
+ */
 async function servicesStart(serviceId) {
     if (!serviceId) {
         throw new core_1.CLIError('Service ID is required', 1, {
@@ -79,6 +85,9 @@ async function servicesStart(serviceId) {
         });
     }
 }
+/**
+ * iotctl services stop <serviceId>
+ */
 async function servicesStop(serviceId) {
     if (!serviceId) {
         throw new core_1.CLIError('Service ID is required', 1, {
@@ -103,6 +112,9 @@ async function servicesStop(serviceId) {
         });
     }
 }
+/**
+ * iotctl services restart <serviceId>
+ */
 async function servicesRestart(serviceId) {
     if (!serviceId) {
         throw new core_1.CLIError('Service ID is required', 1, {
@@ -127,6 +139,9 @@ async function servicesRestart(serviceId) {
         });
     }
 }
+/**
+ * iotctl services logs <serviceId> [-f]
+ */
 async function servicesLogs(serviceId, follow = false) {
     (0, core_1.clearApiCache)();
     if (!serviceId) {
@@ -186,6 +201,9 @@ async function servicesLogs(serviceId, follow = false) {
         });
     }
 }
+/**
+ * iotctl services info <serviceId>
+ */
 async function servicesInfo(serviceId) {
     (0, core_1.clearApiCache)();
     if (!serviceId) {

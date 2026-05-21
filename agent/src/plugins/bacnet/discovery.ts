@@ -20,7 +20,7 @@ import os from 'os';
 import { createHash } from 'crypto';
 import BACnet from 'bacstack';
 import { LogComponents } from '../../logging/types';
-import { BaseDiscoveryPlugin, type DiscoveredDevice, type ValidationResult } from '../types';
+import { BaseDiscovery, type DiscoveredDevice, type ValidationResult } from '../types';
 import { pLimit } from '../../lib/p-limit.js';
 
 export interface BACnetDiscoveryOptions {
@@ -150,7 +150,7 @@ enum BacnetPropertyId {
 	VENDOR_NAME = 121,
 }
 
-export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
+export class BACnetDiscovery extends BaseDiscovery {
 	private client?: BACnetClientLike;  // Reuse same BACnet client across discovery and validation
 	private readonly AGENT_PORT = 47809;  // Agent uses different port than devices (47808)
 	private readonly AGENT_DEVICE_ID = 4190000;  // Gateway-style device ID

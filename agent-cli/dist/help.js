@@ -8,9 +8,31 @@ function formatSubcommands(command, subcommands) {
     if (subcommands.length === 0) {
         return ['  ' + command];
     }
-    return subcommands
+    const unique = Array.from(new Set(subcommands));
+    return unique
         .sort((a, b) => a.localeCompare(b))
-        .map((subcommand) => '  ' + command + ' ' + subcommand);
+        .map((subcommand) => (subcommand.length === 0 ? '  ' + command : '  ' + command + ' ' + subcommand));
+}
+function collectCommands(prefix, group) {
+    const rows = [];
+    if (group && typeof group === 'object' && typeof group._default === 'function') {
+        rows.push(prefix);
+    }
+    const keys = Object.keys(group).filter((key) => key !== '_default');
+    if (keys.length === 0) {
+        return rows.length > 0 ? rows : [prefix];
+    }
+    for (const key of keys) {
+        const value = group[key];
+        const nextPrefix = `${prefix} ${key}`;
+        if (typeof value === 'function') {
+            rows.push(nextPrefix);
+        }
+        else if (value && typeof value === 'object') {
+            rows.push(...collectCommands(nextPrefix, value));
+        }
+    }
+    return rows;
 }
 function showHelp(commands) {
     const topLevel = Object.keys(commands)
@@ -22,15 +44,15 @@ function showHelp(commands) {
     const rows = [];
     rows.push('');
     rows.push('╔═══════════════════════════════════════════════════════════════════════════╗');
-    rows.push('║                           iotctl - IoT Control                             ║');
-    rows.push('║                        Iotistica Device Management CLI                      ║');
+    rows.push('║                           iotctl - IoT Control                            ║');
+    rows.push('║                        Iotistica Management CLI                           ║');
     rows.push('╚═══════════════════════════════════════════════════════════════════════════╝');
     rows.push('');
     rows.push('AVAILABLE COMMANDS (generated from live dispatcher):');
     rows.push('');
     for (const command of topLevel) {
         const commandGroup = commands[command];
-        const subcommands = Object.keys(commandGroup).filter((key) => key !== '_default');
+        const subcommands = collectCommands(command, commandGroup).map((entry) => entry.slice(command.length + 1));
         rows.push(...formatSubcommands(command, subcommands));
     }
     if (aliasTopLevel.length > 0) {
@@ -41,7 +63,7 @@ function showHelp(commands) {
         }
     }
     rows.push('');
-    rows.push('NOTE: Commands with no subcommands accept a direct form, e.g. iotctl status.');
+    rows.push('NOTE: Direct command forms are included when a group has a default handler.');
     rows.push('');
     console.log(rows.join('\n'));
 }

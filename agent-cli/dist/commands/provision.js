@@ -6,6 +6,9 @@ exports.deprovision = deprovision;
 exports.mqttListUsers = mqttListUsers;
 exports.factoryReset = factoryReset;
 const core_1 = require("../core");
+/**
+ * iotctl provision <key> --api <endpoint> [--name <device-name>] [--type <device-type>]
+ */
 async function provisionWithKey(key) {
     if (!key) {
         throw new core_1.CLIError('Provisioning key is required', 1, {
@@ -61,6 +64,9 @@ async function provisionWithKey(key) {
         throw new core_1.CLIError('Provisioning failed', 1);
     }
 }
+/**
+ * iotctl provision status
+ */
 async function provisionStatus() {
     (0, core_1.clearApiCache)();
     try {
@@ -83,6 +89,9 @@ async function provisionStatus() {
         throw new core_1.CLIError('Failed to get provisioning status', 1);
     }
 }
+/**
+ * iotctl deprovision
+ */
 async function deprovision() {
     try {
         core_1.logger.warn('Deprovisioning device - this will remove cloud registration');
@@ -101,6 +110,9 @@ async function deprovision() {
         });
     }
 }
+/**
+ * iotctl mqtt users
+ */
 async function mqttListUsers() {
     (0, core_1.clearApiCache)();
     try {
@@ -135,6 +147,9 @@ async function mqttListUsers() {
         });
     }
 }
+/**
+ * iotctl factory-reset
+ */
 async function factoryReset() {
     try {
         core_1.logger.warn('WARNING: Factory reset will DELETE ALL DATA');

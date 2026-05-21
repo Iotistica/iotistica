@@ -7,6 +7,9 @@ exports.appsRestart = appsRestart;
 exports.appsInfo = appsInfo;
 exports.appsPurge = appsPurge;
 const core_1 = require("../core");
+/**
+ * iotctl apps list
+ */
 async function appsList() {
     (0, core_1.clearApiCache)();
     try {
@@ -39,6 +42,9 @@ async function appsList() {
         });
     }
 }
+/**
+ * iotctl apps start <appId>
+ */
 async function appsStart(appId) {
     if (!appId) {
         throw new core_1.CLIError('Application ID is required', 1, {
@@ -63,6 +69,9 @@ async function appsStart(appId) {
         });
     }
 }
+/**
+ * iotctl apps stop <appId>
+ */
 async function appsStop(appId) {
     if (!appId) {
         throw new core_1.CLIError('Application ID is required', 1, {
@@ -87,6 +96,9 @@ async function appsStop(appId) {
         });
     }
 }
+/**
+ * iotctl apps restart <appId>
+ */
 async function appsRestart(appId) {
     if (!appId) {
         throw new core_1.CLIError('Application ID is required', 1, {
@@ -108,6 +120,9 @@ async function appsRestart(appId) {
         });
     }
 }
+/**
+ * iotctl apps info <appId>
+ */
 async function appsInfo(appId) {
     if (!appId) {
         throw new core_1.CLIError('Application ID is required', 1, {
@@ -125,6 +140,9 @@ async function appsInfo(appId) {
         });
     }
 }
+/**
+ * iotctl apps purge <appId>
+ */
 async function appsPurge(appId) {
     if (!appId) {
         throw new core_1.CLIError('Application ID is required', 1, {

@@ -44,7 +44,7 @@ export interface DeviceDataPoint {
  *
  * Generic across all protocols (Modbus, SNMP, OPC-UA, MQTT, BACnet)
  */
-export interface DeviceStatus {
+export interface IDeviceStatus {
 	// Basic identity
 	deviceName: string;
 
@@ -91,6 +91,43 @@ export interface Logger {
 	info(message: string, ...args: any[]): void;
 	warn(message: string, ...args: any[]): void;
 	error(message: string, ...args: any[]): void;
+}
+
+/**
+ * Common runtime contract for protocol adapters managed by AdapterManager.
+ */
+export interface IProtocolAdapter {
+	start(): Promise<void>;
+	stop(): Promise<void>;
+	isRunning(): boolean;
+	getDeviceStatuses(): IDeviceStatus[];
+	on(event: string, listener: (...args: any[]) => void): this;
+}
+
+/**
+ * Startup callback registered per protocol in AdapterManager.
+ */
+export type ProtocolAdapterStarter = () => Promise<void>;
+
+/**
+ * External plugin module configuration in agent config.
+ */
+export interface ExternalPluginConfig {
+	modulePath: string;
+	enabled?: boolean;
+	options?: Record<string, unknown>;
+	allowBuiltInOverride?: boolean;
+}
+
+/**
+ * Manifest exposed by external protocol plugins.
+ */
+export interface ExternalPluginManifest {
+	name: string;
+	version: string;
+	apiVersion: string;
+	protocol: string;
+	description?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,7 +184,7 @@ export interface PluginInfo {
 	capabilities?: string[];
 }
 
-export abstract class BaseDiscoveryPlugin {
+export abstract class BaseDiscovery {
 	protected logger?: AgentLogger;
 	readonly protocol: string;
 

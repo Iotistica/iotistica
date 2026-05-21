@@ -577,22 +577,23 @@ router.post('/v1/vpn/tailscale/ping', async (req: Request, res: Response, next: 
 });
 
 /**
- * GET /v1/modbus/devices
- * Get all Modbus device statuses
+ * GET /v1/adapters/:protocol/devices
+ * Get all device statuses for a given protocol adapter
  */
-router.get('/v1/modbus/devices', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/v1/adapters/:protocol/devices', async (req: Request, res: Response, next: NextFunction) => {
 	try {
+		const { protocol } = req.params;
 		const adapterManager = actions.getAdapterManager();
 		if (!adapterManager) {
 			return res.status(503).json({ error: 'devices feature not initialized' });
 		}
 
-		const modbusAdapter = adapterManager.getAdapter('modbus');
-		if (!modbusAdapter) {
-			return res.status(404).json({ error: 'Modbus adapter not running' });
+		const adapter = adapterManager.getAdapter(protocol);
+		if (!adapter) {
+			return res.status(404).json({ error: `No adapter running for protocol: ${protocol}` });
 		}
 
-		const devices = modbusAdapter.getDeviceStatuses();
+		const devices = adapter.getDeviceStatuses();
 		return res.status(200).json({ devices });
 	} catch (error) {
 		next(error);
@@ -600,28 +601,35 @@ router.get('/v1/modbus/devices', async (req: Request, res: Response, next: NextF
 });
 
 /**
- * GET /v1/modbus/devices/:deviceName
- * Get specific Modbus device status with enriched metrics
+ * GET /v1/adapters/:protocol/devices/:deviceName
+ * Get a specific device status. Returns enriched status when the adapter supports it.
  */
-router.get('/v1/modbus/devices/:deviceName', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/v1/adapters/:protocol/devices/:deviceName', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const { deviceName } = req.params;
+		const { protocol, deviceName } = req.params;
 		const adapterManager = actions.getAdapterManager();
-		
 		if (!adapterManager) {
 			return res.status(503).json({ error: 'devices feature not initialized' });
 		}
 
-		const modbusAdapter = adapterManager.getAdapter('modbus');
-		if (!modbusAdapter) {
-			return res.status(404).json({ error: 'Modbus adapter not running' });
+		const adapter = adapterManager.getAdapter(protocol);
+		if (!adapter) {
+			return res.status(404).json({ error: `No adapter running for protocol: ${protocol}` });
 		}
 
-		const status = modbusAdapter.getEnrichedDeviceStatus(deviceName);
+		// Use enriched status if the adapter supports it (e.g. ModbusAdapter), otherwise filter from statuses
+		if ('getEnrichedDeviceStatus' in adapter && typeof (adapter as any).getEnrichedDeviceStatus === 'function') {
+			const status = (adapter as any).getEnrichedDeviceStatus(deviceName);
+			if (!status) {
+				return res.status(404).json({ error: `Device not found: ${deviceName}` });
+			}
+			return res.status(200).json(status);
+		}
+
+		const status = adapter.getDeviceStatuses().find((d) => d.deviceName === deviceName);
 		if (!status) {
 			return res.status(404).json({ error: `Device not found: ${deviceName}` });
 		}
-
 		return res.status(200).json(status);
 	} catch (error) {
 		next(error);
@@ -629,28 +637,30 @@ router.get('/v1/modbus/devices/:deviceName', async (req: Request, res: Response,
 });
 
 /**
- * GET /v1/modbus/devices/:deviceName/metrics
- * Get Modbus device metrics summary with P95/P99 statistics
+ * GET /v1/adapters/:protocol/devices/:deviceName/metrics
+ * Get metrics summary for a specific device. Only supported by adapters that expose getDeviceMetricsSummary().
  */
-router.get('/v1/modbus/devices/:deviceName/metrics', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/v1/adapters/:protocol/devices/:deviceName/metrics', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const { deviceName } = req.params;
+		const { protocol, deviceName } = req.params;
 		const adapterManager = actions.getAdapterManager();
-		
 		if (!adapterManager) {
 			return res.status(503).json({ error: 'devices feature not initialized' });
 		}
 
-		const modbusAdapter = adapterManager.getAdapter('modbus');
-		if (!modbusAdapter) {
-			return res.status(404).json({ error: 'Modbus adapter not running' });
+		const adapter = adapterManager.getAdapter(protocol);
+		if (!adapter) {
+			return res.status(404).json({ error: `No adapter running for protocol: ${protocol}` });
 		}
 
-		const metrics = modbusAdapter.getDeviceMetricsSummary(deviceName);
+		if (!('getDeviceMetricsSummary' in adapter) || typeof (adapter as any).getDeviceMetricsSummary !== 'function') {
+			return res.status(501).json({ error: `Metrics summary not supported for protocol: ${protocol}` });
+		}
+
+		const metrics = (adapter as any).getDeviceMetricsSummary(deviceName);
 		if (!metrics) {
 			return res.status(404).json({ error: `Device not found: ${deviceName}` });
 		}
-
 		return res.status(200).json(metrics);
 	} catch (error) {
 		next(error);
@@ -658,29 +668,31 @@ router.get('/v1/modbus/devices/:deviceName/metrics', async (req: Request, res: R
 });
 
 /**
- * GET /v1/modbus/metrics
- * Get all Modbus device metrics summaries
+ * GET /v1/adapters/:protocol/metrics
+ * Get metrics summaries for all devices. Only supported by adapters that expose getAllDeviceMetrics().
  */
-router.get('/v1/modbus/metrics', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/v1/adapters/:protocol/metrics', async (req: Request, res: Response, next: NextFunction) => {
 	try {
+		const { protocol } = req.params;
 		const adapterManager = actions.getAdapterManager();
 		if (!adapterManager) {
 			return res.status(503).json({ error: 'devices feature not initialized' });
 		}
 
-		const modbusAdapter = adapterManager.getAdapter('modbus');
-		if (!modbusAdapter) {
-			return res.status(404).json({ error: 'Modbus adapter not running' });
+		const adapter = adapterManager.getAdapter(protocol);
+		if (!adapter) {
+			return res.status(404).json({ error: `No adapter running for protocol: ${protocol}` });
 		}
 
-		const allMetrics = modbusAdapter.getAllDeviceMetrics();
-		
-		// Convert Map to object for JSON serialization
-		const metricsObject: Record<string, any> = {};
-		for (const [deviceName, metrics] of allMetrics) {
-			metricsObject[deviceName] = metrics;
+		if (!('getAllDeviceMetrics' in adapter) || typeof (adapter as any).getAllDeviceMetrics !== 'function') {
+			return res.status(501).json({ error: `Device metrics not supported for protocol: ${protocol}` });
 		}
 
+		const allMetrics: Map<string, unknown> = (adapter as any).getAllDeviceMetrics();
+		const metricsObject: Record<string, unknown> = {};
+		for (const [name, metrics] of allMetrics) {
+			metricsObject[name] = metrics;
+		}
 		return res.status(200).json(metricsObject);
 	} catch (error) {
 		next(error);

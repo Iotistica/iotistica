@@ -11,7 +11,7 @@ const discovery_1 = require("./commands/discovery");
 const adapters_1 = require("./commands/adapters");
 const provision_1 = require("./commands/provision");
 const system_1 = require("./commands/system");
-const device_1 = require("./commands/device");
+const agent_1 = require("./commands/agent");
 function buildCommands(args) {
     const commands = {
         provision: {
@@ -59,31 +59,19 @@ function buildCommands(args) {
             info: services_1.servicesInfo,
         },
         status: {
-            _default: device_1.showStatusEnhanced,
+            _default: agent_1.showStatusEnhanced,
         },
         discover: {
             _default: discovery_1.discover,
         },
         devices: {
-            list: discovery_1.devicesList,
-            show: discovery_1.endpointsShow,
-            _default: discovery_1.devicesList,
-        },
-        endpoints: {
-            list: discovery_1.endpointsList,
-            show: discovery_1.endpointsShow,
-            add: discovery_1.endpointsAdd,
-            remove: discovery_1.endpointsRemove,
-            clean: discovery_1.endpointsClean,
-            _default: discovery_1.endpointsList,
-        },
-        adapters: {
             list: adapters_1.adaptersList,
             show: adapters_1.adaptersShow,
-            add: adapters_1.adaptersAdd,
-            remove: adapters_1.adaptersRemove,
             enable: adapters_1.adaptersEnable,
             disable: adapters_1.adaptersDisable,
+            add: adapters_1.adaptersAdd,
+            remove: adapters_1.adaptersRemove,
+            clean: discovery_1.endpointsClean,
             'add-mqtt': adapters_1.mqttAdd,
             'add-modbus': adapters_1.modbusAdd,
             'add-opcua': adapters_1.opcuaAdd,
@@ -95,10 +83,24 @@ function buildCommands(args) {
             _default: provision_1.mqttListUsers,
         },
         diagnostics: {
-            _default: device_1.runDiagnostics,
+            _default: agent_1.runDiagnostics,
+        },
+        agent: {
+            status: agent_1.showStatusEnhanced,
+            restart: agent_1.restart,
+            diagnostics: agent_1.runDiagnostics,
+            pull: agent_1.agentPullTargetState,
+            update: (version) => (0, agent_1.agentUpdate)(version),
+            _default: agent_1.showStatusEnhanced,
         },
         db: {
+            backups: {
+                list: db_1.dbList,
+                _default: db_1.dbList,
+            },
             backup: db_1.dbBackup,
+            stats: db_1.dbStats,
+            info: db_1.dbStats,
             list: db_1.dbList,
             verify: db_1.dbVerify,
             restore: db_1.dbRestore,
@@ -106,20 +108,20 @@ function buildCommands(args) {
             _default: db_1.dbList,
         },
         buffer: {
-            status: device_1.bufferStatus,
-            _default: device_1.bufferStatus,
+            status: agent_1.bufferStatus,
+            _default: agent_1.bufferStatus,
         },
         memory: {
-            _default: device_1.memoryDiagnostics,
+            _default: agent_1.memoryDiagnostics,
         },
         diag: {
-            _default: device_1.runDiagnostics,
+            _default: agent_1.runDiagnostics,
         },
         restart: {
-            _default: device_1.restart,
+            _default: agent_1.restart,
         },
         update: {
-            _default: (version) => (0, device_1.agentUpdate)(version),
+            _default: (version) => (0, agent_1.agentUpdate)(version),
         },
         logs: {
             _default: () => {
@@ -150,6 +152,24 @@ function buildCommands(args) {
     };
     return commands;
 }
+async function executeCommand(node, args) {
+    if (typeof node === 'function') {
+        await node(...args);
+        return;
+    }
+    const [subcommand, ...rest] = args;
+    if (subcommand && node[subcommand]) {
+        await executeCommand(node[subcommand], rest);
+        return;
+    }
+    if (node._default) {
+        await node._default(...args);
+        return;
+    }
+    throw new core_1.CLIError('Unknown command', 1, {
+        hint: 'Use "iotctl help" for usage information',
+    });
+}
 async function main() {
     const args = process.argv.slice(2);
     const commands = buildCommands(args);
@@ -158,9 +178,6 @@ async function main() {
         return;
     }
     const command = args[0];
-    const subcommand = args[1];
-    const arg1 = args[2];
-    const arg2 = args[3];
     const commandGroup = commands[command];
     if (!commandGroup) {
         throw new core_1.CLIError('Unknown command', 1, {
@@ -168,18 +185,7 @@ async function main() {
             hint: 'Use "iotctl help" for usage information',
         });
     }
-    if (subcommand && commandGroup[subcommand]) {
-        await commandGroup[subcommand](arg1, arg2);
-    }
-    else if (commandGroup._default) {
-        await commandGroup._default(subcommand, arg1, arg2);
-    }
-    else {
-        throw new core_1.CLIError(`Unknown ${command} command`, 1, {
-            command: subcommand,
-            hint: 'Use "iotctl help" for usage information',
-        });
-    }
+    await executeCommand(commandGroup, args.slice(1));
 }
 function handleError(error) {
     if (error instanceof core_1.CLIError) {

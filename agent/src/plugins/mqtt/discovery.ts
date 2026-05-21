@@ -17,7 +17,7 @@ import type { AgentLogger } from "../../logging/agent-logger";
 import { createHash } from "crypto";
 import { LogComponents } from "../../logging/types";
 import {
-	BaseDiscoveryPlugin,
+	BaseDiscovery,
 	type DiscoveredDevice,
 	type ValidationResult,
 } from "../types";
@@ -49,7 +49,7 @@ interface TopicValidation {
 	hasLive?: boolean; // Did we receive a live (non-retained) message?
 }
 
-export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
+export class MqttDiscovery extends BaseDiscovery {
 	private client?: mqtt.MqttClient;
 	private validatedTopics: Map<string, TopicValidation> = new Map();
 	private brokerConfig?: MqttDiscoveryOptions; // Store for validate() reuse

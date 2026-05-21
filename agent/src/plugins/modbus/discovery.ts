@@ -14,7 +14,7 @@
 import type { AgentLogger } from '../../logging/agent-logger';
 import { createHash } from 'crypto';
 import { LogComponents } from '../../logging/types';
-import { BaseDiscoveryPlugin, type DiscoveredDevice, type ValidationResult } from '../types';
+import { BaseDiscovery, type DiscoveredDevice, type ValidationResult } from '../types';
 import type { ConfigManager } from '../../core/config.js';
 
 export interface ModbusDiscoveryOptions {
@@ -46,7 +46,7 @@ interface _ProfileMap {
 
 const _PROFILE_ENV = process.env.MODBUS_PROFILE || 'Generic';
 
-export class ModbusDiscoveryPlugin extends BaseDiscoveryPlugin {
+export class ModbusDiscovery extends BaseDiscovery {
 	private configManager?: ConfigManager;
 
 	constructor(logger?: AgentLogger, configManager?: ConfigManager) {

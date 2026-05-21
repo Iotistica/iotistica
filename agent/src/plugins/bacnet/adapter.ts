@@ -1,7 +1,7 @@
-import { EventEmitter } from 'events';
+import { BaseProtocolAdapter, type GenericDeviceConfig } from '../base.js';
 import { type BACnetAdapterConfig, type BACnetDevice } from './types';
 import { BACnetClient } from './client';
-import { type DeviceDataPoint, type DeviceStatus, type Logger } from '../types.js';
+import { type DeviceDataPoint, type IDeviceStatus, type Logger } from '../types.js';
 import { DeviceModel } from '../../db/models/device.model.js';
 import { pLimit } from '../../lib/p-limit.js';
 
@@ -20,12 +20,9 @@ import { pLimit } from '../../lib/p-limit.js';
  * - 'device-disconnected': Emitted when a device disconnects
  * - 'device-error': Emitted when a device encounters an error
  */
-export class BACnetAdapter extends EventEmitter {
+export class BACnetAdapter extends BaseProtocolAdapter {
 	private config: BACnetAdapterConfig;
-	private logger: Logger;
 	private clients: Map<string, BACnetClient> = new Map();
-	private deviceStatuses: Map<string, DeviceStatus> = new Map();
-	private running = false;
 	private pollLoopRunning = false;
 
 	// Human-readable names resolved from BACnet Device objectName at init time.
@@ -33,20 +30,17 @@ export class BACnetAdapter extends EventEmitter {
 	private resolvedDeviceNames: Map<string, string> = new Map();
   
 	// Performance tracking
-	private pollHistory: Map<string, boolean[]> = new Map();
 	private lastValues: Map<string, Map<string, any>> = new Map();
 	private lastPollTimes: Map<string, number> = new Map();
 	private retryAttempts: Map<string, number> = new Map();
-	private readonly pollHistorySize = 100;
 	private readonly POLL_TICK_INTERVAL = 1000; // 1 second tick
 	private readonly MAX_RETRY_DELAY = 30000; // 30 seconds max retry delay
 
 	constructor(config: BACnetAdapterConfig, logger: Logger) {
-		super();
+		super(config.devices as unknown as GenericDeviceConfig[], logger);
 		this.config = config;
-		this.logger = logger;
     
-		this.initializeDeviceStatuses();
+		this.initializeBACnetDeviceStatuses();
 	}
 
 	/**
@@ -67,7 +61,7 @@ export class BACnetAdapter extends EventEmitter {
       
 			const results = await Promise.allSettled(
 				enabledDevices.map(deviceConfig => 
-					limit(() => this.initializeDevice(deviceConfig))
+					limit(() => this.initializeBACnetDevice(deviceConfig))
 				)
 			);
       
@@ -126,14 +120,14 @@ export class BACnetAdapter extends EventEmitter {
 	/**
    * Get status of all devices
    */
-	getDeviceStatuses(): DeviceStatus[] {
+	getDeviceStatuses(): IDeviceStatus[] {
 		return Array.from(this.deviceStatuses.values());
 	}
 
 	/**
    * Get status of a specific device
    */
-	getDeviceStatus(deviceName: string): DeviceStatus | undefined {
+	getDeviceStatus(deviceName: string): IDeviceStatus | undefined {
 		return this.deviceStatuses.get(deviceName);
 	}
 
@@ -186,7 +180,7 @@ export class BACnetAdapter extends EventEmitter {
 	/**
    * Initialize device statuses for all configured devices
    */
-	private initializeDeviceStatuses(): void {
+	private initializeBACnetDeviceStatuses(): void {
 		for (const deviceConfig of this.config.devices) {
 			this.deviceStatuses.set(deviceConfig.name, {
 				deviceName: deviceConfig.name,
@@ -211,7 +205,7 @@ export class BACnetAdapter extends EventEmitter {
 	/**
    * Initialize a single BACnet device
    */
-	private async initializeDevice(deviceConfig: BACnetDevice): Promise<void> {
+	private async initializeBACnetDevice(deviceConfig: BACnetDevice): Promise<void> {
 		try {
 			const client = new BACnetClient(
 				deviceConfig,
@@ -378,7 +372,7 @@ export class BACnetAdapter extends EventEmitter {
 			});
 
 			// Track poll success
-			this.recordPollResult(deviceName, true);
+			this.recordBACnetPollResult(deviceName, true);
 			this.retryAttempts.set(deviceName, 0);
 
 			// Emit data event
@@ -396,7 +390,7 @@ export class BACnetAdapter extends EventEmitter {
 				errorCount,
 			});
 
-			this.recordPollResult(deviceName, false);
+			this.recordBACnetPollResult(deviceName, false);
 			this.emit('device-error', deviceName, errorMessage);
 
 			this.logger.warn(`Error polling BACnet device ${deviceName}: ${errorMessage}`);
@@ -406,7 +400,7 @@ export class BACnetAdapter extends EventEmitter {
 	/**
    * Record poll result for success rate calculation
    */
-	private recordPollResult(deviceName: string, success: boolean): void {
+	private recordBACnetPollResult(deviceName: string, success: boolean): void {
 		const history = this.pollHistory.get(deviceName) || [];
 		history.push(success);
 
@@ -434,7 +428,7 @@ export class BACnetAdapter extends EventEmitter {
 	/**
    * Update device status
    */
-	private updateDeviceStatus(deviceName: string, updates: Partial<DeviceStatus>): void {
+	private updateDeviceStatus(deviceName: string, updates: Partial<IDeviceStatus>): void {
 		const currentStatus = this.deviceStatuses.get(deviceName);
 		if (!currentStatus) {
 			return;
@@ -443,7 +437,7 @@ export class BACnetAdapter extends EventEmitter {
 		const newStatus = { ...currentStatus, ...updates };
     
 		// Calculate communication quality based on connection state and success rate
-		newStatus.communicationQuality = this.calculateCommunicationQuality(
+		newStatus.communicationQuality = this.calculateBACnetCommunicationQuality(
 			newStatus.connected,
 			newStatus.pollSuccessRate,
 			newStatus.errorCount
@@ -455,7 +449,7 @@ export class BACnetAdapter extends EventEmitter {
 	/**
    * Calculate communication quality indicator
    */
-	private calculateCommunicationQuality(
+	private calculateBACnetCommunicationQuality(
 		connected: boolean,
 		successRate: number,
 		errorCount: number

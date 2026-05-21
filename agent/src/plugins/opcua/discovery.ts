@@ -8,7 +8,7 @@
 import type { AgentLogger } from '../../logging/agent-logger';
 import { createHash } from 'crypto';
 import { LogComponents } from '../../logging/types';
-import { BaseDiscoveryPlugin, type DiscoveredDevice } from '../types';
+import { BaseDiscovery, type DiscoveredDevice } from '../types';
 import type { ConfigManager } from '../../core/config.js';
 
 export interface OPCUADiscoveryOptions {
@@ -16,7 +16,7 @@ export interface OPCUADiscoveryOptions {
   scanForServers?: boolean; // Use LDS (Local Discovery Server)
 }
 
-export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
+export class OPCUADiscovery extends BaseDiscovery {
 	private configManager?: ConfigManager;
 
 	private scoreSecurityMode(securityMode: number | string | undefined): number {

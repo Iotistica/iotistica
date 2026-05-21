@@ -72,7 +72,7 @@ import {
 	DataType as _DataType,
 } from 'node-opcua-client';
 import { BaseProtocolAdapter, type GenericDeviceConfig } from '../base.js';
-import { type DeviceDataPoint, type Logger } from '../types.js';
+import { type DeviceDataPoint, type Logger, type IProtocolAdapter } from '../types.js';
 import { ConsoleLogger } from '../logger.js';
 import {
 	type OPCUADeviceConfig,
@@ -106,7 +106,7 @@ interface OPCUASession {
  * Extends BaseProtocolAdapter to provide OPC-UA-specific functionality.
  * Manages OPC-UA client connections, sessions, and data reading.
  */
-export class OPCUAAdapter extends BaseProtocolAdapter {
+export class OPCUAAdapter extends BaseProtocolAdapter  {
 	private sessions: Map<string, OPCUASession> = new Map();
 
 	// Human-readable names resolved from the OPC-UA server at connect time.

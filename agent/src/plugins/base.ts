@@ -1,7 +1,7 @@
 /** Base protocol adapter for common device lifecycle, polling, and status behavior. */
 
 import { EventEmitter } from 'events';
-import { type DeviceDataPoint, type DeviceStatus, type Logger } from './types.js';
+import { type DeviceDataPoint, type IDeviceStatus, type Logger, type IProtocolAdapter } from './types.js';
 import { type Endpoint } from '../db/models/endpoint.model.js';
 import { DeviceModel } from '../db/models/device.model.js';
 
@@ -23,12 +23,12 @@ export interface ProtocolConnection {
 	backoffDelay: number;
 }
 
-export abstract class BaseProtocolAdapter extends EventEmitter {
+export abstract class BaseProtocolAdapter extends EventEmitter implements IProtocolAdapter {
 	protected logger: Logger;
 	protected devices: Map<string, GenericDeviceConfig> = new Map();
 	protected connections: Map<string, ProtocolConnection> = new Map();
 	protected pollTimers: Map<string, NodeJS.Timeout> = new Map();
-	protected deviceStatuses: Map<string, DeviceStatus> = new Map();
+	protected deviceStatuses: Map<string, IDeviceStatus> = new Map();
 	protected running = false;
 	
 	protected pollHistory: Map<string, boolean[]> = new Map();
@@ -39,17 +39,19 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 	protected readonly backoffMultiplier = 2;
 
 	constructor(
-		devices: GenericDeviceConfig[],
-		logger: Logger
+		devices: GenericDeviceConfig[] = [],
+		logger?: Logger
 	) {
 		super();
-		this.logger = logger;
+		this.logger = logger!;
 		
 		for (const device of devices) {
 			this.devices.set(device.name, device);
 		}
 		
-		this.initializeDeviceStatuses();
+		if (devices.length > 0) {
+			this.initializeDeviceStatuses();
+		}
 	}
 
 	async start(): Promise<void> {
@@ -109,7 +111,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 		}
 	}
 
-	getDeviceStatuses(): DeviceStatus[] {
+	getDeviceStatuses(): IDeviceStatus[] {
 		return Array.from(this.deviceStatuses.values());
 	}
 
@@ -117,18 +119,24 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 		return this.running;
 	}
 
-	protected abstract getProtocolName(): string;
 
-	protected abstract connectDevice(device: GenericDeviceConfig): Promise<any>;
+	protected getProtocolName(): string { return this.constructor.name; }
 
-	protected abstract disconnectDevice(deviceName: string): Promise<void>;
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	protected async connectDevice(_device: GenericDeviceConfig): Promise<any> { return null; }
 
-	protected abstract readDeviceData(
-		deviceName: string,
-		device: GenericDeviceConfig
-	): Promise<DeviceDataPoint[]>;
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	protected async disconnectDevice(_deviceName: string): Promise<void> { }
 
-	protected abstract validateDeviceConfig(device: GenericDeviceConfig): void;
+	protected async readDeviceData(
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
+		_deviceName: string,
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
+		_device: GenericDeviceConfig
+	): Promise<DeviceDataPoint[]> { return []; }
+
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	protected validateDeviceConfig(_device: GenericDeviceConfig): void { }
 
 	protected async initializeDevice(device: GenericDeviceConfig): Promise<void> {
 		try {
@@ -162,7 +170,6 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 			this.scheduleDeviceRetry(device);
 		}
 	}
-
 	protected startPolling(device: GenericDeviceConfig): void {
 		const pollDevice = async () => {
 			try {
@@ -318,7 +325,7 @@ export abstract class BaseProtocolAdapter extends EventEmitter {
 		status.communicationQuality = this.calculateCommunicationQuality(status);
 	}
 
-	protected calculateCommunicationQuality(status: DeviceStatus): 'good' | 'degraded' | 'poor' | 'offline' {
+	protected calculateCommunicationQuality(status: IDeviceStatus): 'good' | 'degraded' | 'poor' | 'offline' {
 		if (!status.connected) {
 			return 'offline';
 		}

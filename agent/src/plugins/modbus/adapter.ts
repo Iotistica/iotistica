@@ -1,8 +1,8 @@
-import { EventEmitter } from 'events';
+import { BaseProtocolAdapter, type GenericDeviceConfig } from '../base.js';
 import { type ModbusAdapterConfig } from './types';
 import { type ModbusDevice } from './types';
 import { ModbusClient } from './client';
-import { type DeviceDataPoint, type DeviceStatus, type Logger } from '../types.js';
+import { type DeviceDataPoint, type IDeviceStatus, type Logger } from '../types.js';
 import { DeviceMetrics, type MetricsSummary } from '../metrics.js';
 import { EndpointModel } from '../../db/models/endpoint.model.js';
 import { DeviceModel } from '../../db/models/device.model.js';
@@ -23,13 +23,10 @@ import { pLimit } from '../../lib/p-limit.js';
  * - 'device-disconnected': Emitted when a device disconnects
  * - 'device-error': Emitted when a device encounters an error
  */
-export class ModbusAdapter extends EventEmitter {
+export class ModbusAdapter extends BaseProtocolAdapter{
 	private config: ModbusAdapterConfig;
-	private logger: Logger;
 	private clients: Map<string, ModbusClient> = new Map();
-	private deviceStatuses: Map<string, DeviceStatus> = new Map();
 	private deviceMetrics: Map<string, DeviceMetrics> = new Map(); // Time-series metrics
-	private running = false;
 	private pollLoopRunning = false;
 
 	// Human-readable display names from device config (Modbus has no server-side name discovery).
@@ -41,21 +38,18 @@ export class ModbusAdapter extends EventEmitter {
 	private lastBackpressureLog = 0;
   
 	// Performance tracking
-	private pollHistory: Map<string, boolean[]> = new Map(); // Track last N poll results
 	private lastValues: Map<string, Map<string, any>> = new Map(); // Track last register values for change detection
 	private lastPollTimes: Map<string, number> = new Map(); // Track last poll timestamp per device
 	private retryAttempts: Map<string, number> = new Map(); // Track retry attempts per device
-	private readonly pollHistorySize = 100; // Track last 100 polls for success rate
 	private readonly POLL_TICK_INTERVAL = 1000; // Global poll loop tick interval (1 second)
 	private readonly POLL_CONCURRENCY = 20; // Max concurrent device polls
 	private readonly MAX_RETRY_DELAY = 30000; // Max retry delay: 30 seconds
 
 	constructor(config: ModbusAdapterConfig, logger: Logger) {
-		super();
+		super(config.devices as unknown as GenericDeviceConfig[], logger);
 		this.config = config;
-		this.logger = logger;
     
-		this.initializeDeviceStatuses();
+		this.initializeModbusDeviceStatuses();
 	}
 
 	/**
@@ -78,7 +72,7 @@ export class ModbusAdapter extends EventEmitter {
 			// Use allSettled to ensure one device failure doesn't block others
 			const results = await Promise.allSettled(
 				enabledDevices.map(deviceConfig => 
-					limit(() => this.initializeDevice(deviceConfig))
+					limit(() => this.initializeModbusDevice(deviceConfig))
 				)
 			);
       
@@ -143,14 +137,14 @@ export class ModbusAdapter extends EventEmitter {
 	/**
    * Get status of all devices
    */
-	getDeviceStatuses(): DeviceStatus[] {
+	getDeviceStatuses(): IDeviceStatus[] {
 		return Array.from(this.deviceStatuses.values());
 	}
 
 	/**
    * Get status of a specific device
    */
-	getDeviceStatus(deviceName: string): DeviceStatus | undefined {
+	getDeviceStatus(deviceName: string): IDeviceStatus | undefined {
 		return this.deviceStatuses.get(deviceName);
 	}
 
@@ -171,7 +165,7 @@ export class ModbusAdapter extends EventEmitter {
 		deviceConfig.enabled = true;
     
 		if (this.running) {
-			await this.initializeDevice(deviceConfig);
+			await this.initializeModbusDevice(deviceConfig);
 		}
 
 		this.logger.debug(`Device ${deviceName} enabled`);
@@ -234,7 +228,7 @@ export class ModbusAdapter extends EventEmitter {
    * Get enriched device status with metrics
    * Merges existing DeviceStatus with time-series metrics
    */
-	getEnrichedDeviceStatus(deviceName: string): DeviceStatus | null {
+	getEnrichedDeviceStatus(deviceName: string): IDeviceStatus | null {
 		const status = this.deviceStatuses.get(deviceName);
 		if (!status) return null;
     
@@ -249,7 +243,7 @@ export class ModbusAdapter extends EventEmitter {
 	/**
    * Initialize device statuses
    */
-	private initializeDeviceStatuses(): void {
+	private initializeModbusDeviceStatuses(): void {
 		for (const device of this.config.devices) {
 			this.deviceStatuses.set(device.name, {
 				deviceName: device.name,
@@ -277,7 +271,7 @@ export class ModbusAdapter extends EventEmitter {
 	/**
    * Initialize and start polling for a device
    */
-	private async initializeDevice(deviceConfig: ModbusDevice): Promise<void> {
+	private async initializeModbusDevice(deviceConfig: ModbusDevice): Promise<void> {
 		try {
 			this.logger.debug(`Initializing Modbus device: ${deviceConfig.name}`);
 
@@ -472,7 +466,7 @@ export class ModbusAdapter extends EventEmitter {
       
 			if (!isConnected) {
 				// Record failed poll
-				this.recordPollResult(deviceConfig.name, false);
+				this.recordModbusPollResult(deviceConfig.name, false);
         
 				// CRITICAL: Call readAllRegisters even when disconnected
 				// This triggers tryEnsureConnected() which schedules reconnection
@@ -489,7 +483,7 @@ export class ModbusAdapter extends EventEmitter {
 				const registersUpdated = this.trackRegisterChanges(deviceConfig.name, dataPoints);
         
 				// Record successful poll with metrics
-				this.recordPollResult(deviceConfig.name, true, responseTime, registersUpdated);
+				this.recordModbusPollResult(deviceConfig.name, true, responseTime, registersUpdated);
         
 				// Reset retry attempts on successful poll
 				this.retryAttempts.set(deviceConfig.name, 0);
@@ -520,7 +514,7 @@ export class ModbusAdapter extends EventEmitter {
 			status.lastError = errorMessage;
       
 			// Extract quality code for metrics and data points
-			const qualityCode = this.extractQualityCode(errorMessage);
+			const qualityCode = this.extractModbusQualityCode(errorMessage);
       
 			// Record failed poll in metrics
 			const metrics = this.deviceMetrics.get(deviceConfig.name);
@@ -550,14 +544,14 @@ export class ModbusAdapter extends EventEmitter {
 			}
       
 			// Try to reconnect
-			this.scheduleDeviceRetry(deviceConfig);
+			this.scheduleModbusDeviceRetry(deviceConfig);
 		}
 	}
 
 	/**
    * Extract quality code from error message
    */
-	private extractQualityCode(errorMessage: string): string {
+	private extractModbusQualityCode(errorMessage: string): string {
 		if (errorMessage.includes('ETIMEDOUT') || errorMessage.includes('timeout')) {
 			return 'TIMEOUT';
 		}
@@ -601,7 +595,7 @@ export class ModbusAdapter extends EventEmitter {
 	/**
    * Record poll result and update metrics
    */
-	private recordPollResult(
+	private recordModbusPollResult(
 		deviceName: string,
 		success: boolean,
 		responseTimeMs?: number,
@@ -648,14 +642,14 @@ export class ModbusAdapter extends EventEmitter {
 		}
 
 		// Update communication quality based on success rate and connection state
-		status.communicationQuality = this.calculateCommunicationQuality(status);
+		status.communicationQuality = this.calculateModbusCommunicationQuality(status);
 	}
 
 	/**
    * Calculate communication quality based on metrics
    */
-	private calculateCommunicationQuality(
-		status: DeviceStatus
+	private calculateModbusCommunicationQuality(
+		status: IDeviceStatus
 	): 'good' | 'degraded' | 'poor' | 'offline' {
 		if (!status.connected) {
 			return 'offline';
@@ -681,7 +675,7 @@ export class ModbusAdapter extends EventEmitter {
    * - Adds random jitter to avoid thundering herd problem
    * - Respects max retry attempts from device config
    */
-	private scheduleDeviceRetry(deviceConfig: ModbusDevice): void {
+	private scheduleModbusDeviceRetry(deviceConfig: ModbusDevice): void {
 		// Get current retry attempt (increment for this retry)
 		const currentAttempt = (this.retryAttempts.get(deviceConfig.name) || 0) + 1;
 		this.retryAttempts.set(deviceConfig.name, currentAttempt);
@@ -723,7 +717,7 @@ export class ModbusAdapter extends EventEmitter {
       
 			try {
 				await this.cleanupDevice(deviceConfig.name);
-				await this.initializeDevice(deviceConfig);
+				await this.initializeModbusDevice(deviceConfig);
         
 				// Check if connection succeeded
 				const status = this.deviceStatuses.get(deviceConfig.name);

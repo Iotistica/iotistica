@@ -5,11 +5,11 @@ import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { EndpointModel } from '../db/models/endpoint.model';
 import { MetadataModel } from '../db/models';
-import type { BaseDiscoveryPlugin, DiscoveredDevice } from '../plugins/types';
-import { ModbusDiscoveryPlugin } from '../plugins/modbus/discovery';
-import { OPCUADiscoveryPlugin } from '../plugins/opcua/discovery';
-import { MqttDiscoveryPlugin } from '../plugins/mqtt/discovery';
-import { BACnetDiscoveryPlugin } from '../plugins/bacnet/discovery';
+import type { BaseDiscovery, DiscoveredDevice } from '../plugins/types';
+import { ModbusDiscovery } from '../plugins/modbus/discovery';
+import { OPCUADiscovery } from '../plugins/opcua/discovery';
+import { MqttDiscovery } from '../plugins/mqtt/discovery';
+import { BACnetDiscovery } from '../plugins/bacnet/discovery';
 import type { ConfigManager } from '../core/config.js';
 import { DiscoveryOptionsBuilder } from './options.js';
 import { DiscoveryStore } from './db.js';
@@ -40,7 +40,7 @@ export class DiscoveryService extends EventEmitter {
 	private configManager?: ConfigManager;
 	private metadata: DiscoveryMetadata;
 	private readonly MIN_DISCOVERY_INTERVAL_MS = 60 * 60 * 1000;
-	private plugins: Map<string, BaseDiscoveryPlugin>;
+	private plugins: Map<string, BaseDiscovery>;
 	private lightTimer?: NodeJS.Timeout;
 	private fullTimer?: NodeJS.Timeout;
 	private optionsBuilder: DiscoveryOptionsBuilder;
@@ -71,13 +71,13 @@ export class DiscoveryService extends EventEmitter {
 		}
 	}
 
-	private initializePlugins(): Map<string, BaseDiscoveryPlugin> {
-		const plugins = new Map<string, BaseDiscoveryPlugin>();
+	private initializePlugins(): Map<string, BaseDiscovery> {
+		const plugins = new Map<string, BaseDiscovery>();
     
-		plugins.set('modbus', new ModbusDiscoveryPlugin(this.logger, this.configManager));
-		plugins.set('opcua', new OPCUADiscoveryPlugin(this.logger, this.configManager));
-		plugins.set('mqtt', new MqttDiscoveryPlugin(this.logger));
-		plugins.set('bacnet', new BACnetDiscoveryPlugin(this.logger));
+		plugins.set('modbus', new ModbusDiscovery(this.logger, this.configManager));
+		plugins.set('opcua', new OPCUADiscovery(this.logger, this.configManager));
+		plugins.set('mqtt', new MqttDiscovery(this.logger));
+		plugins.set('bacnet', new BACnetDiscovery(this.logger));
     
 		return plugins;
 	}

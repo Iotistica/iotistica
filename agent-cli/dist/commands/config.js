@@ -7,6 +7,9 @@ exports.configGet = configGet;
 exports.configShow = configShow;
 exports.configReset = configReset;
 const core_1 = require("../core");
+/**
+ * iotctl config set-api <url>
+ */
 async function configSetApi(url) {
     if (!url) {
         throw new core_1.CLIError('API URL is required', 1, {
@@ -33,6 +36,9 @@ async function configSetApi(url) {
         throw new core_1.CLIError('Failed to update API endpoint', 1);
     }
 }
+/**
+ * iotctl config get-api
+ */
 async function configGetApi() {
     (0, core_1.clearApiCache)();
     try {
@@ -48,6 +54,9 @@ async function configGetApi() {
         throw new core_1.CLIError('Failed to retrieve API endpoint', 1);
     }
 }
+/**
+ * iotctl config set <key> <value>
+ */
 async function configSet(key, value) {
     if (!key || !value) {
         throw new core_1.CLIError('Both key and value are required', 1, {
@@ -75,6 +84,9 @@ async function configSet(key, value) {
         });
     }
 }
+/**
+ * iotctl config get <key>
+ */
 async function configGet(key) {
     if (!key) {
         throw new core_1.CLIError('Key is required', 1, {
@@ -99,6 +111,9 @@ async function configGet(key) {
         });
     }
 }
+/**
+ * iotctl config show
+ */
 async function configShow() {
     (0, core_1.clearApiCache)();
     try {
@@ -122,6 +137,9 @@ async function configShow() {
         });
     }
 }
+/**
+ * iotctl config reset
+ */
 async function configReset() {
     try {
         await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/factory-reset`, {

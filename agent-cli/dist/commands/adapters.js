@@ -36,12 +36,27 @@ function formatConnection(protocol, connection) {
         case 'snmp':
             return `${connection.host}:${connection.port || 161}`;
         case 'bacnet':
-            return `Device ID: ${connection.deviceId}`;
+            return `Device ID: ${connection.deviceInstance}`;
         case 'can':
             return `${connection.interface} (${connection.protocol || 'CAN'})`;
         default:
             return JSON.stringify(connection);
     }
+}
+function deriveState(adapter) {
+    const health = adapter.health || {};
+    if (health.status)
+        return health.status;
+    if (!adapter.enabled)
+        return 'disabled';
+    const lastSeenRaw = health.lastSeen || adapter.lastSeenAt;
+    if (!lastSeenRaw)
+        return 'offline';
+    const lastSeenMs = new Date(lastSeenRaw).getTime();
+    if (Number.isNaN(lastSeenMs))
+        return 'offline';
+    const stalenessThresholdMs = 24 * 60 * 60 * 1000;
+    return (Date.now() - lastSeenMs) < stalenessThresholdMs ? 'online' : 'offline';
 }
 async function postAdapter(body) {
     const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints`, {
@@ -49,7 +64,7 @@ async function postAdapter(body) {
         body: JSON.stringify(body),
     });
     const ep = result.endpoint;
-    core_1.logger.info(`Adapter added: ${ep.name}`, {
+    core_1.logger.info(`Device added: ${ep.name}`, {
         uuid: ep.uuid,
         protocol: ep.protocol,
         enabled: ep.enabled,
@@ -58,6 +73,9 @@ async function postAdapter(body) {
 // ---------------------------------------------------------------------------
 // List / show
 // ---------------------------------------------------------------------------
+/**
+ * iotctl devices list [--protocol <protocol>]
+ */
 async function adaptersList() {
     (0, core_1.clearApiCache)();
     try {
@@ -66,10 +84,10 @@ async function adaptersList() {
         const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints${query}`);
         const adapters = result.endpoints || [];
         if (adapters.length === 0) {
-            core_1.logger.info('No adapters configured');
+            core_1.logger.info('No devices configured');
             return;
         }
-        core_1.logger.info(`Found ${adapters.length} adapter${adapters.length === 1 ? '' : 's'}${protocolFilter ? ` (${protocolFilter})` : ''}`);
+        core_1.logger.info(`Found ${adapters.length} device${adapters.length === 1 ? '' : 's'}${protocolFilter ? ` (${protocolFilter})` : ''}`);
         console.log('');
         const byProtocol = adapters.reduce((acc, a) => {
             const proto = a.protocol || 'unknown';
@@ -79,17 +97,24 @@ async function adaptersList() {
             return acc;
         }, {});
         for (const [protocol, items] of Object.entries(byProtocol)) {
-            console.log(`\n${protocol.toUpperCase()} Adapters:`);
+            console.log(`\n${protocol.toUpperCase()} Devices:`);
             console.log('━'.repeat(60));
             for (const adapter of items) {
                 const icon = adapter.enabled ? '✓' : '✗';
                 const connectionStr = formatConnection(adapter.protocol, adapter.connection);
                 const dataPoints = adapter.data_points || [];
+                const health = adapter.health || {};
+                const state = deriveState(adapter);
                 const extra = {
                     uuid: adapter.uuid || '(none)',
                     connection: connectionStr,
+                    state,
                     interval: `${adapter.poll_interval}ms`,
                 };
+                const lastSeen = health.lastSeen || adapter.lastSeenAt;
+                if (lastSeen) {
+                    extra.lastSeen = new Date(lastSeen).toLocaleString();
+                }
                 if (protocol === 'mqtt') {
                     const topics = dataPoints.map((dp) => dp.topic || dp.name).filter(Boolean);
                     extra.topics = topics.length > 0 ? topics.join(', ') : '(none)';
@@ -105,35 +130,47 @@ async function adaptersList() {
         console.log('');
     }
     catch (error) {
-        throw new core_1.CLIError('Failed to list adapters', 1, { error: error.message });
+        throw new core_1.CLIError('Failed to list devices', 1, { error: error.message });
     }
 }
+/**
+ * iotctl devices show <name>
+ */
 async function adaptersShow(name) {
     (0, core_1.clearApiCache)();
     try {
         const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints`);
         const adapters = result.endpoints || [];
         if (!name) {
-            core_1.logger.info('Usage: iotctl adapters show <name>', {
-                hint: 'Run "iotctl adapters list" to see all adapter names',
+            core_1.logger.info('Usage: iotctl devices show <name>', {
+                hint: 'Run "iotctl devices list" to see all device names',
             });
             return;
         }
         const adapter = adapters.find((a) => a.name === name);
         if (!adapter) {
-            throw new core_1.CLIError(`Adapter not found: ${name}`, 1, {
-                hint: 'Run "iotctl adapters list" to see all adapter names',
+            throw new core_1.CLIError(`Device not found: ${name}`, 1, {
+                hint: 'Run "iotctl devices list" to see all device names',
             });
         }
         console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
-        console.log('║                    ADAPTER DETAILS                                ║');
+        console.log('║                    DEVICE DETAILS                                 ║');
         console.log('╚═══════════════════════════════════════════════════════════════════╝\n');
+        const health = adapter.health || {};
         core_1.logger.info('Name', { value: adapter.name });
         core_1.logger.info('Protocol', { value: adapter.protocol });
         core_1.logger.info('UUID', { value: adapter.uuid });
         core_1.logger.info('Enabled', { value: adapter.enabled ? 'Yes' : 'No' });
+        core_1.logger.info('State', { value: deriveState(adapter) });
         core_1.logger.info('Poll Interval', { value: `${adapter.poll_interval}ms` });
         core_1.logger.info('Connection', { value: formatConnection(adapter.protocol, adapter.connection) });
+        const lastSeen = health.lastSeen || adapter.lastSeenAt;
+        if (lastSeen) {
+            core_1.logger.info('Last Seen', { value: new Date(lastSeen).toLocaleString() });
+        }
+        if (health.lastError) {
+            core_1.logger.info('Last Error', { value: health.lastError });
+        }
         const dataPoints = adapter.data_points || [];
         if (dataPoints.length > 0) {
             console.log('\nData Points:');
@@ -160,65 +197,74 @@ async function adaptersShow(name) {
     catch (error) {
         if (error instanceof core_1.CLIError)
             throw error;
-        throw new core_1.CLIError('Failed to show adapter details', 1, { error: error.message });
+        throw new core_1.CLIError('Failed to show device details', 1, { error: error.message });
     }
 }
 // ---------------------------------------------------------------------------
 // Remove / enable / disable
 // ---------------------------------------------------------------------------
+/**
+ * iotctl devices remove <uuid>
+ */
 async function adaptersRemove(uuid) {
     if (!uuid) {
-        throw new core_1.CLIError('UUID is required', 1, { usage: 'iotctl adapters remove <uuid>' });
+        throw new core_1.CLIError('UUID is required', 1, { usage: 'iotctl devices remove <uuid>' });
     }
     try {
         await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints/${encodeURIComponent(uuid)}`, { method: 'DELETE' });
-        core_1.logger.info(`Adapter removed: ${uuid}`);
+        core_1.logger.info(`Device removed: ${uuid}`);
     }
     catch (error) {
         if (error instanceof core_1.CLIError)
             throw error;
-        throw new core_1.CLIError('Failed to remove adapter', 1, { error: error.message });
+        throw new core_1.CLIError('Failed to remove device', 1, { error: error.message });
     }
 }
+/**
+ * iotctl devices enable <uuid>
+ */
 async function adaptersEnable(uuid) {
     if (!uuid) {
-        throw new core_1.CLIError('UUID is required', 1, { usage: 'iotctl adapters enable <uuid>' });
+        throw new core_1.CLIError('UUID is required', 1, { usage: 'iotctl devices enable <uuid>' });
     }
     try {
         await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints/${encodeURIComponent(uuid)}`, {
             method: 'PATCH',
             body: JSON.stringify({ enabled: true }),
         });
-        core_1.logger.info(`Adapter enabled: ${uuid}`);
+        core_1.logger.info(`Device enabled: ${uuid}`);
     }
     catch (error) {
         if (error instanceof core_1.CLIError)
             throw error;
-        throw new core_1.CLIError('Failed to enable adapter', 1, { error: error.message });
+        throw new core_1.CLIError('Failed to enable device', 1, { error: error.message });
     }
 }
+/**
+ * iotctl devices disable <uuid>
+ */
 async function adaptersDisable(uuid) {
     if (!uuid) {
-        throw new core_1.CLIError('UUID is required', 1, { usage: 'iotctl adapters disable <uuid>' });
+        throw new core_1.CLIError('UUID is required', 1, { usage: 'iotctl devices disable <uuid>' });
     }
     try {
         await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints/${encodeURIComponent(uuid)}`, {
             method: 'PATCH',
             body: JSON.stringify({ enabled: false }),
         });
-        core_1.logger.info(`Adapter disabled: ${uuid}`);
+        core_1.logger.info(`Device disabled: ${uuid}`);
     }
     catch (error) {
         if (error instanceof core_1.CLIError)
             throw error;
-        throw new core_1.CLIError('Failed to disable adapter', 1, { error: error.message });
+        throw new core_1.CLIError('Failed to disable device', 1, { error: error.message });
     }
 }
 // ---------------------------------------------------------------------------
 // Protocol-specific add commands
 // ---------------------------------------------------------------------------
 /**
- * iotctl adapters add-mqtt --name <name> --broker <url>
+ * iotctl devices add-mqtt --name <name> --broker <url>
  *   [--username <user>] [--password <pass>] [--topics <t1,t2>]
  *   [--interval <ms>] [--disabled]
  */
@@ -232,12 +278,12 @@ async function mqttAdd() {
     const enabled = !process.argv.includes('--disabled');
     if (!name) {
         throw new core_1.CLIError('--name is required', 1, {
-            usage: 'iotctl adapters add-mqtt --name <name> --broker mqtt://host:1883 [--topics t1,t2] [--username u] [--password p] [--interval ms] [--disabled]',
+            usage: 'iotctl devices add-mqtt --name <name> --broker mqtt://host:1883 [--topics t1,t2] [--username u] [--password p] [--interval ms] [--disabled]',
         });
     }
     if (!broker) {
         throw new core_1.CLIError('--broker is required', 1, {
-            usage: 'iotctl adapters add-mqtt --name <name> --broker mqtt://host:1883',
+            usage: 'iotctl devices add-mqtt --name <name> --broker mqtt://host:1883',
         });
     }
     const topics = topicsRaw ? topicsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [];
@@ -259,11 +305,11 @@ async function mqttAdd() {
     catch (error) {
         if (error instanceof core_1.CLIError)
             throw error;
-        throw new core_1.CLIError('Failed to add MQTT adapter', 1, { error: error.message });
+        throw new core_1.CLIError('Failed to add MQTT device', 1, { error: error.message });
     }
 }
 /**
- * iotctl adapters add-modbus --name <name> --host <ip>
+ * iotctl devices add-modbus --name <name> --host <ip>
  *   [--port <port>] [--slave <id>] [--interval <ms>] [--disabled]
  */
 async function modbusAdd() {
@@ -275,12 +321,12 @@ async function modbusAdd() {
     const enabled = !process.argv.includes('--disabled');
     if (!name) {
         throw new core_1.CLIError('--name is required', 1, {
-            usage: 'iotctl adapters add-modbus --name <name> --host <ip> [--port 502] [--slave 1] [--interval ms] [--disabled]',
+            usage: 'iotctl devices add-modbus --name <name> --host <ip> [--port 502] [--slave 1] [--interval ms] [--disabled]',
         });
     }
     if (!host) {
         throw new core_1.CLIError('--host is required', 1, {
-            usage: 'iotctl adapters add-modbus --name <name> --host 192.168.1.10 --port 502 --slave 1',
+            usage: 'iotctl devices add-modbus --name <name> --host 192.168.1.10 --port 502 --slave 1',
         });
     }
     try {
@@ -296,11 +342,11 @@ async function modbusAdd() {
     catch (error) {
         if (error instanceof core_1.CLIError)
             throw error;
-        throw new core_1.CLIError('Failed to add Modbus adapter', 1, { error: error.message });
+        throw new core_1.CLIError('Failed to add Modbus device', 1, { error: error.message });
     }
 }
 /**
- * iotctl adapters add-opcua --name <name> --endpoint opc.tcp://host:4840
+ * iotctl devices add-opcua --name <name> --endpoint opc.tcp://host:4840
  *   [--interval <ms>] [--disabled]
  */
 async function opcuaAdd() {
@@ -310,12 +356,12 @@ async function opcuaAdd() {
     const enabled = !process.argv.includes('--disabled');
     if (!name) {
         throw new core_1.CLIError('--name is required', 1, {
-            usage: 'iotctl adapters add-opcua --name <name> --endpoint opc.tcp://host:4840 [--interval ms] [--disabled]',
+            usage: 'iotctl devices add-opcua --name <name> --endpoint opc.tcp://host:4840 [--interval ms] [--disabled]',
         });
     }
     if (!endpointUrl) {
         throw new core_1.CLIError('--endpoint is required', 1, {
-            usage: 'iotctl adapters add-opcua --name <name> --endpoint opc.tcp://host:4840',
+            usage: 'iotctl devices add-opcua --name <name> --endpoint opc.tcp://host:4840',
         });
     }
     try {
@@ -331,11 +377,11 @@ async function opcuaAdd() {
     catch (error) {
         if (error instanceof core_1.CLIError)
             throw error;
-        throw new core_1.CLIError('Failed to add OPC-UA adapter', 1, { error: error.message });
+        throw new core_1.CLIError('Failed to add OPC-UA device', 1, { error: error.message });
     }
 }
 /**
- * iotctl adapters add-snmp --name <name> --host <ip>
+ * iotctl devices add-snmp --name <name> --host <ip>
  *   [--port <port>] [--community <community>] [--interval <ms>] [--disabled]
  */
 async function snmpAdd() {
@@ -347,12 +393,12 @@ async function snmpAdd() {
     const enabled = !process.argv.includes('--disabled');
     if (!name) {
         throw new core_1.CLIError('--name is required', 1, {
-            usage: 'iotctl adapters add-snmp --name <name> --host <ip> [--port 161] [--community public] [--interval ms] [--disabled]',
+            usage: 'iotctl devices add-snmp --name <name> --host <ip> [--port 161] [--community public] [--interval ms] [--disabled]',
         });
     }
     if (!host) {
         throw new core_1.CLIError('--host is required', 1, {
-            usage: 'iotctl adapters add-snmp --name <name> --host 192.168.1.1 --community public',
+            usage: 'iotctl devices add-snmp --name <name> --host 192.168.1.1 --community public',
         });
     }
     try {
@@ -368,11 +414,11 @@ async function snmpAdd() {
     catch (error) {
         if (error instanceof core_1.CLIError)
             throw error;
-        throw new core_1.CLIError('Failed to add SNMP adapter', 1, { error: error.message });
+        throw new core_1.CLIError('Failed to add SNMP device', 1, { error: error.message });
     }
 }
 /**
- * iotctl adapters add --protocol <protocol> ...
+ * iotctl devices add --protocol <protocol> ...
  * Generic dispatcher: routes to the protocol-specific add command.
  */
 async function adaptersAdd() {
@@ -389,13 +435,12 @@ async function adaptersAdd() {
             return snmpAdd();
         case '':
             throw new core_1.CLIError('--protocol is required', 1, {
-                usage: 'iotctl adapters add --protocol <mqtt|modbus|opcua|snmp> [options]',
+                usage: 'iotctl devices add --protocol <mqtt|modbus|opcua|snmp> [options]',
                 protocols: 'mqtt, modbus, opcua, snmp',
             });
         default:
             throw new core_1.CLIError(`Unsupported protocol: ${protocol}`, 1, {
                 supported: 'mqtt, modbus, opcua, snmp',
-                hint: 'For other protocols use: iotctl endpoints add --protocol <protocol> --connection <json>',
             });
     }
 }

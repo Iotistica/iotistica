@@ -6,10 +6,17 @@ import { EventEmitter } from "events";
 import { type AgentLogger } from "../logging/agent-logger.js";
 import { ModbusAdapter } from "./modbus/adapter.js";
 import { type ModbusAdapterConfig } from "./modbus/types.js";
-import { LocalBrokerMqttAdapter } from "./mqtt/adapter.js";
+import { MqttAdapter } from "./mqtt/adapter.js";
 import { type MqttAdapterConfig } from "./mqtt/types.js";
 import { SocketServer } from "../core/socket-server.js";
-import { type DeviceDataPoint, type SocketOutput } from "./types.js";
+import {
+	type DeviceDataPoint,
+	type ExternalPluginConfig,
+	type IProtocolAdapter,
+	type ProtocolAdapterStarter,
+	type SocketOutput,
+} from "./types.js";
+import { PluginLoader } from "./plugin-loader.js";
 import { EndpointOutputModel } from "../db/models/endpoint-outputs.model.js";
 import { EndpointModel } from "../db/models/endpoint.model.js";
 import { encodeIfUuid } from "../mqtt/codec.js";
@@ -26,16 +33,21 @@ export interface AdapterConfig {
 	snmp?: { enabled: boolean };
 	mqtt?: { enabled: boolean; config?: MqttAdapterConfig };
 	bacnet?: { enabled: boolean; config?: BACnetAdapterConfig };
+	plugins?: ExternalPluginConfig[];
 }
 
 export class AdapterManager extends EventEmitter {
-	private adapters: Map<string, any> = new Map();
+	private adapters: Map<string, IProtocolAdapter> = new Map();
 	private socketServers: Map<string, SocketServer> = new Map();
+	private adapterStarters: Map<string, ProtocolAdapterStarter> = new Map();
+	private protocolEnabledOverrides: Map<string, boolean> = new Map();
 	// Shared endpoint UUID lookup for MQTT hot-reloads.
 	private mqttEndpointUuidByName: Map<string, string> = new Map();
 	private config: AdapterConfig;
 	private deviceUuid: string;
 	private running = false;
+	private pluginsLoaded = false;
+	private readonly pluginLoader: PluginLoader;
 	private readonly logger: {
 		info(m: string): void;
 		warn(m: string): void;
@@ -124,7 +136,7 @@ export class AdapterManager extends EventEmitter {
 	/** Wire standard adapter events. */
 	private wireAdapterEvents(
 		protocol: string,
-		adapter: EventEmitter,
+		adapter: IProtocolAdapter,
 		socket: SocketServer,
 		uuidMap: Map<string, string>,
 	): void {
@@ -166,17 +178,99 @@ export class AdapterManager extends EventEmitter {
 					agentLogger.debugSync(m, { component: "Adapters", args: a });
 			},
 		};
+		this.pluginLoader = new PluginLoader(agentLogger);
+		this.registerBuiltInProtocolStarters();
+	}
+
+	private registerBuiltInProtocolStarters(): void {
+		this.registerProtocolStarter("modbus", () => this.startModbusAdapter());
+		this.registerProtocolStarter("opcua", () => this.startOPCUAAdapter());
+		this.registerProtocolStarter("mqtt", () => this.startMQTTAdapter());
+		this.registerProtocolStarter("bacnet", () => this.startBACnetAdapter());
+	}
+
+	private isProtocolEnabled(protocol: string): boolean {
+		switch (protocol) {
+			case "modbus":
+				return Boolean(this.config.modbus?.enabled);
+			case "opcua":
+				return Boolean(this.config.opcua?.enabled);
+			case "mqtt":
+				return Boolean(this.config.mqtt?.enabled);
+			case "bacnet":
+				return Boolean(this.config.bacnet?.enabled);
+			case "can":
+				return Boolean(this.config.can?.enabled);
+			case "snmp":
+				return Boolean(this.config.snmp?.enabled);
+			default:
+				if (this.protocolEnabledOverrides.has(protocol)) {
+					return Boolean(this.protocolEnabledOverrides.get(protocol));
+				}
+				return this.adapterStarters.has(protocol);
+		}
+	}
+
+	public registerProtocolStarter(
+		protocol: string,
+		starter: ProtocolAdapterStarter,
+		enabled: boolean = true,
+	): void {
+		const normalizedProtocol = protocol.toLowerCase();
+		this.adapterStarters.set(normalizedProtocol, starter);
+		this.protocolEnabledOverrides.set(normalizedProtocol, enabled);
+	}
+
+	public async attachAdapter(
+		protocol: string,
+		adapter: IProtocolAdapter,
+		uuidMap: Map<string, string> = new Map(),
+	): Promise<void> {
+		const normalizedProtocol = protocol.toLowerCase();
+		const socket = await this.createSocketServer(normalizedProtocol);
+		this.adapters.set(normalizedProtocol, adapter);
+		this.wireAdapterEvents(normalizedProtocol, adapter, socket, uuidMap);
+		await adapter.start();
+	}
+
+	public buildEndpointUuidMap(devices: any[]): Map<string, string> {
+		return this.buildUuidMap(devices);
+	}
+
+	private async ensureExternalPluginStartersRegistered(): Promise<void> {
+		if (this.pluginsLoaded) {
+			return;
+		}
+
+		await this.pluginLoader.registerFromConfig(this, this.config.plugins);
+		this.pluginsLoaded = true;
 	}
 
 	/** Start all enabled protocol adapters. */
 	async start(): Promise<void> {
 		if (this.running) return;
-		if (this.config.modbus?.enabled) await this.startModbusAdapter();
-		if (this.config.opcua?.enabled) await this.startOPCUAAdapter();
-		if (this.config.mqtt?.enabled) await this.startMQTTAdapter();
-		if (this.config.bacnet?.enabled) await this.startBACnetAdapter();
-		if (this.config.can?.enabled)
-			this.logger.warn("CAN adapter not yet implemented");
+
+		await this.ensureExternalPluginStartersRegistered();
+
+		const builtInOrder = ["modbus", "opcua", "mqtt", "bacnet", "can", "snmp"];
+		const customOrder = [...this.adapterStarters.keys()].filter(
+			(protocol) => !builtInOrder.includes(protocol),
+		);
+		const startOrder = [...builtInOrder, ...customOrder];
+		for (const protocol of startOrder) {
+			if (!this.isProtocolEnabled(protocol)) {
+				continue;
+			}
+
+			const starter = this.adapterStarters.get(protocol);
+			if (!starter) {
+				this.logger.warn(`${protocol.toUpperCase()} adapter not yet implemented`);
+				continue;
+			}
+
+			await starter();
+		}
+
 		this.running = true;
 		this.emit("started");
 	}
@@ -427,7 +521,7 @@ export class AdapterManager extends EventEmitter {
 
 			// Hot-update subscriptions without reconnecting.
 			const existingAdapter = this.adapters.get("mqtt") as
-				| LocalBrokerMqttAdapter
+				| MqttAdapter
 				| undefined;
 			if (existingAdapter) {
 				this.logger.info(
@@ -438,7 +532,7 @@ export class AdapterManager extends EventEmitter {
 			}
 
 			const socket = await this.createSocketServer("mqtt");
-			const adapter = new LocalBrokerMqttAdapter(
+			const adapter = new MqttAdapter(
 				mqttConfig,
 				this.logger,
 				this.deviceUuid,
@@ -659,12 +753,12 @@ export class AdapterManager extends EventEmitter {
 	}
 
 	/** Get a specific protocol adapter. */
-	getAdapter(protocol: string): any | undefined {
+	getAdapter(protocol: string): IProtocolAdapter | undefined {
 		return this.adapters.get(protocol);
 	}
 
 	/** Get all running adapters. */
-	getAllAdapters(): Map<string, any> {
+	getAllAdapters(): Map<string, IProtocolAdapter> {
 		return new Map(this.adapters);
 	}
 }

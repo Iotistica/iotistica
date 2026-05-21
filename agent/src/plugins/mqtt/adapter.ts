@@ -1,7 +1,7 @@
-import { EventEmitter } from "events";
+import { BaseProtocolAdapter } from "../base.js";
 import * as mqtt from "mqtt";
 import * as mqttPattern from "mqtt-pattern";
-import { type DeviceDataPoint, type DeviceStatus, type Logger } from "../types.js";
+import { type DeviceDataPoint, type IDeviceStatus, type Logger } from "../types.js";
 import { type MqttAdapterConfig, type MqttDevice, type MqttMetricConfig } from "./types.js";
 import { parsePayload, coerceType } from "./payload.js";
 import { agentTopic } from "../../mqtt/topics.js";
@@ -26,16 +26,13 @@ import { EndpointModel } from "../../db/models/endpoint.model.js";
  * - 'device-disconnected': Emitted when broker disconnects
  * - 'device-error': Emitted when an error occurs
  */
-export class LocalBrokerMqttAdapter extends EventEmitter {
+export class MqttAdapter extends BaseProtocolAdapter {
 	private static readonly MAX_QUEUE_DEPTH = 1000; // Max buffered data batches
 	private static readonly MAX_PAYLOAD_BYTES = 1 * 1024 * 1024; // 1MB max payload (edge-safe default)
 
 	private config: MqttAdapterConfig;
-	private logger: Logger;
 	private client: mqtt.MqttClient | null = null;
 	private subscriptions: Map<string, MqttDevice> = new Map();
-	private deviceStatuses: Map<string, DeviceStatus> = new Map();
-	private running = false;
 	private connected = false;
 	private emitQueue: DeviceDataPoint[][] = [];
 	private processingEmitQueue = false;
@@ -55,9 +52,8 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 	private displayNamesByTopic = new Map<string, string>();
 
 	constructor(config: MqttAdapterConfig, logger: Logger, deviceUuid?: string) {
-		super();
+		super([], logger);
 		this.config = config;
-		this.logger = logger;
 		this.deviceUuid = deviceUuid?.trim() || null;
 		this.currentReconnectPeriod = this.getBaseReconnectPeriod();
 
@@ -100,7 +96,7 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 			}
 		}
 
-		this.initializeDeviceStatuses();
+		this.initializeMqttDeviceStatuses();
 	}
 
 	private compileMetricPath(
@@ -198,6 +194,10 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 				error instanceof Error ? error.message : String(error);
 			this.logger.error(`Error stopping MQTT Adapter: ${errorMessage}`);
 		}
+	}
+
+	isRunning(): boolean {
+		return this.running;
 	}
 
 	/**
@@ -330,14 +330,14 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 	/**
 	 * Get status of all devices
 	 */
-	getDeviceStatuses(): DeviceStatus[] {
+	getDeviceStatuses(): IDeviceStatus[] {
 		return Array.from(this.deviceStatuses.values());
 	}
 
 	/**
 	 * Get status of a specific device
 	 */
-	getDeviceStatus(deviceName: string): DeviceStatus | undefined {
+	getDeviceStatus(deviceName: string): IDeviceStatus | undefined {
 		return this.deviceStatuses.get(deviceName);
 	}
 
@@ -771,13 +771,13 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 	}
 
 	private enqueueData(points: DeviceDataPoint[], topic: string): void {
-		if (this.emitQueue.length >= LocalBrokerMqttAdapter.MAX_QUEUE_DEPTH) {
+		if (this.emitQueue.length >= MqttAdapter.MAX_QUEUE_DEPTH) {
 			this.droppedMessageCount++;
 			if (this.droppedMessageCount % 100 === 1) {
 				this.logger.warn("Dropping MQTT messages due to bounded queue limit", {
 					queueDepth: this.emitQueue.length,
 					droppedTotal: this.droppedMessageCount,
-					maxQueueDepth: LocalBrokerMqttAdapter.MAX_QUEUE_DEPTH,
+					maxQueueDepth: MqttAdapter.MAX_QUEUE_DEPTH,
 					topic,
 				});
 			}
@@ -1238,12 +1238,12 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 	): void {
 		// Production fix #8: Max payload size guard
 		// Protects against memory exhaustion from malicious/corrupt messages
-		if (payload.length > LocalBrokerMqttAdapter.MAX_PAYLOAD_BYTES) {
+		if (payload.length > MqttAdapter.MAX_PAYLOAD_BYTES) {
 			this.droppedMessageCount++;
 			this.logger.warn("Dropping oversized MQTT message", {
 				topic,
 				payloadSize: payload.length,
-				maxAllowed: LocalBrokerMqttAdapter.MAX_PAYLOAD_BYTES,
+				maxAllowed: MqttAdapter.MAX_PAYLOAD_BYTES,
 				droppedTotal: this.droppedMessageCount,
 				hint: "Possible JSON bomb or malicious payload",
 			});
@@ -1524,7 +1524,7 @@ export class LocalBrokerMqttAdapter extends EventEmitter {
 	 * - Last Will and Testament (LWT) messages
 	 * - Application-specific staleness thresholds
 	 */
-	private initializeDeviceStatuses(): void {
+	private initializeMqttDeviceStatuses(): void {
 		for (const device of this.config.devices) {
 			this.deviceStatuses.set(device.name, {
 				deviceName: device.name,

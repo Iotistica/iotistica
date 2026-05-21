@@ -5,7 +5,7 @@
  * for all protocol adapters (Modbus, SNMP, OPC-UA, MQTT, BACnet)
  */
 
-import { type DeviceStatus } from './types.js';
+import { type IDeviceStatus } from './types.js';
 
 /**
  * Metrics configuration
@@ -156,7 +156,7 @@ export class DeviceMetrics {
 	/**
    * Export to DeviceStatus.metrics format
    */
-	toDeviceStatusMetrics(): DeviceStatus['metrics'] {
+	toDeviceStatusMetrics(): IDeviceStatus['metrics'] {
 		return {
 			pollDurations: [...this.pollDurations],
 			pollSuccessCount: this.pollSuccessCount,

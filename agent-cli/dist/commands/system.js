@@ -5,6 +5,9 @@ exports.showVersion = showVersion;
 const fs_1 = require("fs");
 const path_1 = require("path");
 const core_1 = require("../core");
+/**
+ * iotctl logs [-f] [--lines <count>]
+ */
 function showLogs(follow = false, lines = 50) {
     throw new core_1.CLIError('Agent logs not available from inside container', 1, {
         note: 'Run from host machine instead',
@@ -12,6 +15,9 @@ function showLogs(follow = false, lines = 50) {
         hint_compose: follow ? 'docker-compose logs -f agent-1' : `docker-compose logs --tail=${lines} agent-1`,
     });
 }
+/**
+ * iotctl version
+ */
 function showVersion() {
     const possiblePaths = [
         (0, path_1.join)(process.cwd(), 'package.json'),
