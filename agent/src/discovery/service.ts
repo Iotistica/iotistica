@@ -8,7 +8,7 @@ import { MetadataModel } from '../db/models';
 import type { BaseDiscoveryPlugin, DiscoveredDevice } from '../plugins/types';
 import { ModbusDiscoveryPlugin } from '../plugins/modbus/discovery';
 import { OPCUADiscoveryPlugin } from '../plugins/opcua/discovery';
-import { LocalBrokerMqttDiscoveryPlugin } from '../plugins/mqtt/discovery';
+import { MqttDiscoveryPlugin } from '../plugins/mqtt/discovery';
 import { BACnetDiscoveryPlugin } from '../plugins/bacnet/discovery';
 import type { ConfigManager } from '../core/config.js';
 import { DiscoveryOptionsBuilder } from './options.js';
@@ -76,7 +76,7 @@ export class DiscoveryService extends EventEmitter {
     
 		plugins.set('modbus', new ModbusDiscoveryPlugin(this.logger, this.configManager));
 		plugins.set('opcua', new OPCUADiscoveryPlugin(this.logger, this.configManager));
-		plugins.set('mqtt', new LocalBrokerMqttDiscoveryPlugin(this.logger));
+		plugins.set('mqtt', new MqttDiscoveryPlugin(this.logger));
 		plugins.set('bacnet', new BACnetDiscoveryPlugin(this.logger));
     
 		return plugins;

@@ -6,21 +6,6 @@
  *
  * Pattern: MQTT topic = endpoint (like Modbus register or OPC-UA node)
  *
- * Discovery Strategy:
- * - User supplies specific topics to validate
- * - Subscribe to each topic
- * - Wait for messages (10-15 seconds)
- * - If messages received → topic is active
- * - Infer basic data type (number, boolean, string, json)
- * - Return validated topics as candidates
- *
- * No Complex Features:
- * - ❌ No wildcard scanning
- * - ❌ No metadata parsing
- * - ❌ No confidence scoring
- * - ❌ No compound topic analysis
- * - ❌ No observer roots
- * - ❌ No passive discovery
  *
  * Industrial Best Practice:
  * - Explicit configuration > Auto-discovery magic
@@ -64,7 +49,7 @@ interface TopicValidation {
 	hasLive?: boolean; // Did we receive a live (non-retained) message?
 }
 
-export class LocalBrokerMqttDiscoveryPlugin extends BaseDiscoveryPlugin {
+export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 	private client?: mqtt.MqttClient;
 	private validatedTopics: Map<string, TopicValidation> = new Map();
 	private brokerConfig?: MqttDiscoveryOptions; // Store for validate() reuse
