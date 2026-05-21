@@ -5,7 +5,7 @@ import type { AgentLogger } from '../logging/agent-logger';
 import { LogComponents } from '../logging/types';
 import { EndpointModel } from '../db/models/endpoint.model';
 import { MetadataModel } from '../db/models';
-import type { BaseDiscovery, DiscoveredDevice } from '../plugins/types';
+import type { IDiscovery, DiscoveredDevice } from '../plugins/types';
 import { ModbusDiscovery } from '../plugins/modbus/discovery';
 import { OPCUADiscovery } from '../plugins/opcua/discovery';
 import { MqttDiscovery } from '../plugins/mqtt/discovery';
@@ -40,7 +40,7 @@ export class DiscoveryService extends EventEmitter {
 	private configManager?: ConfigManager;
 	private metadata: DiscoveryMetadata;
 	private readonly MIN_DISCOVERY_INTERVAL_MS = 60 * 60 * 1000;
-	private plugins: Map<string, BaseDiscovery>;
+	private plugins: Map<string, IDiscovery>;
 	private lightTimer?: NodeJS.Timeout;
 	private fullTimer?: NodeJS.Timeout;
 	private optionsBuilder: DiscoveryOptionsBuilder;
@@ -71,8 +71,8 @@ export class DiscoveryService extends EventEmitter {
 		}
 	}
 
-	private initializePlugins(): Map<string, BaseDiscovery> {
-		const plugins = new Map<string, BaseDiscovery>();
+	private initializePlugins(): Map<string, IDiscovery> {
+		const plugins = new Map<string, IDiscovery>();
     
 		plugins.set('modbus', new ModbusDiscovery(this.logger, this.configManager));
 		plugins.set('opcua', new OPCUADiscovery(this.logger, this.configManager));
