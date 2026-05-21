@@ -94,6 +94,23 @@ export interface Logger {
 }
 
 /**
+ * Standard client contract for protocol-specific device clients.
+ *
+ * Adapters orchestrate multiple clients; each client owns one device connection.
+ * External plugin authors should follow this shape to keep lifecycle behavior
+ * consistent across protocols.
+ */
+export interface IProtocolClient<
+	TReadRequest = unknown,
+	TReadResult = DeviceDataPoint[]
+> {
+	connect(): Promise<void>;
+	disconnect(): Promise<void>;
+	isConnected(): boolean;
+	read(request?: TReadRequest): Promise<TReadResult>;
+}
+
+/**
  * Common runtime contract for protocol adapters managed by AdapterManager.
  */
 export interface IProtocolAdapter {

@@ -470,13 +470,13 @@ export class ModbusAdapter extends BaseProtocolAdapter{
         
 				// CRITICAL: Call readAllRegisters even when disconnected
 				// This triggers tryEnsureConnected() which schedules reconnection
-				const dataPoints = enrich(await client.readAllRegisters());
+				const dataPoints = enrich(await client.read());
         
 				if (dataPoints.length > 0) {
 					this.emit('data', dataPoints);
 				}
 			} else {
-				const dataPoints = enrich(await client.readAllRegisters());
+				const dataPoints = enrich(await client.read());
 				const responseTime = Date.now() - startTime;
 
 				// Track register changes

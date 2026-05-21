@@ -2,6 +2,46 @@
 
 The adapter manager supports external protocol plugin modules loaded from config module paths.
 
+## Standard framework for new plugins
+
+Use the same structure as built-in protocols:
+
+1. `client`: one instance per device connection
+2. `adapter`: orchestrates clients, polling/subscriptions, and emits adapter events
+3. `manifest`: plugin identity/version/API compatibility
+
+### Client contract
+
+Keep all protocol/device I/O in a client class with a stable lifecycle:
+
+- `connect(): Promise<void>`
+- `disconnect(): Promise<void>`
+- `isConnected(): boolean`
+- `read(request?): Promise<DeviceDataPoint[]>`
+
+The agent now exposes this as `IProtocolClient` in `agent/src/plugins/types.ts`.
+Built-in protocol clients implement this contract, and adapters call `read()` as the
+standardized entry point.
+
+### Adapter contract
+
+Your adapter must satisfy the runtime adapter interface used by `AdapterManager`:
+
+- `start()`
+- `stop()`
+- `isRunning()`
+- `getDeviceStatuses()`
+- `on(event, listener)`
+
+Emitted events should follow built-ins:
+
+- `started`
+- `stopped`
+- `data`
+- `device-connected`
+- `device-disconnected`
+- `device-error`
+
 ## Runtime contract
 
 A plugin module must export:
@@ -41,5 +81,7 @@ The loader validates plugin `manifest.apiVersion` major version compatibility wi
 
 See:
 
-- `agent/plugins/sample-external-plugin/manifest.json`
-- `agent/plugins/sample-external-plugin/index.mjs`
+- `agent/src/plugins/examples/sample-external-plugin/manifest.json`
+- `agent/src/plugins/examples/sample-external-plugin/index.mjs`
+
+This sample intentionally uses the same client + adapter pattern as Modbus/BACnet.

@@ -1,5 +1,5 @@
 import { type BACnetDevice, type BACnetObject, BACnetProperty } from './types';
-import { type Logger } from '../types';
+import { type Logger, type IProtocolClient } from '../types';
 import { pLimit } from '../../lib/p-limit.js';
 import BACnet from 'bacstack';
 
@@ -18,7 +18,7 @@ interface BACnetReadResult {
  * BACnet Client wrapper for bacstack library
  * Handles connection, reads, and error handling for a single device
  */
-export class BACnetClient {
+export class BACnetClient implements IProtocolClient<BACnetObject[], Map<string, { value: any; quality: 'GOOD' | 'BAD'; error?: string }>> {
 	private config: BACnetDevice;
 	private logger: Logger;
 	private client: any;
@@ -251,6 +251,10 @@ export class BACnetClient {
 
 		await Promise.all(readPromises);
 		return results;
+	}
+
+	async read(objects: BACnetObject[] = this.config.objects): Promise<Map<string, { value: any; quality: 'GOOD' | 'BAD'; error?: string }>> {
+		return this.readObjects(objects);
 	}
 
 	/**

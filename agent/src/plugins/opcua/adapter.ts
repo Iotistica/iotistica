@@ -54,21 +54,14 @@
  * @module opcua-adapter
  */
 
-import { createHash } from 'crypto';
 // @ts-ignore - Optional dependency: node-opcua-client may not be installed
 import {
-	OPCUAClient,
 	type ClientSession,
 	type DataValue,
 	AttributeIds,
-	MessageSecurityMode,
-	SecurityPolicy,
-	UserTokenType,
-	type ClientSubscription,
 	TimestampsToReturn,
 	MonitoringParametersOptions as _MonitoringParametersOptions,
 	type ReadValueIdOptions,
-	type ClientMonitoredItem,
 	DataType as _DataType,
 } from 'node-opcua-client';
 import { BaseProtocolAdapter, type GenericDeviceConfig } from '../base.js';
@@ -76,29 +69,9 @@ import { type DeviceDataPoint, type Logger, type IProtocolAdapter } from '../typ
 import { ConsoleLogger } from '../logger.js';
 import {
 	type OPCUADeviceConfig,
-	type OPCUAConnection,
 	type OPCUADataPoint,
-	type OPCUACertificateTrustMode,
-	type OPCUASecurityMode,
-	type OPCUASecurityPolicy,
 } from './types.js';
-
-/**
- * OPC-UA Client Session Manager
- * Wraps OPCUAClient and ClientSession for a single device
- */
-interface OPCUASession {
-  client: OPCUAClient;
-  session: ClientSession | null;
-  subscription: ClientSubscription | null; // Legacy - kept for backwards compatibility
-  subscriptions: ClientSubscription[]; // Multiple subscriptions for load distribution
-  monitoredItems: Map<string, ClientMonitoredItem>; // nodeId -> monitored item
-  validatedNodes: Set<string>; // NodeIDs that passed validation
-  reconnecting: boolean;
-  reconnectTimer?: NodeJS.Timeout;
-  currentRetryDelay: number;
-  consecutiveFailures: number;
-}
+import { OPCUADeviceClient, type OPCUASession } from './client.js';
 
 /**
  * OPC-UA Protocol Adapter
@@ -107,6 +80,7 @@ interface OPCUASession {
  * Manages OPC-UA client connections, sessions, and data reading.
  */
 export class OPCUAAdapter extends BaseProtocolAdapter  {
+	private clients: Map<string, OPCUADeviceClient> = new Map();
 	private sessions: Map<string, OPCUASession> = new Map();
 
 	// Human-readable names resolved from the OPC-UA server at connect time.
@@ -119,10 +93,6 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 	// Takes precedence over resolvedDeviceNames when present.
 	private resolvedNodeDisplayNames: Map<string, string> = new Map();
   
-	// Concurrency control: OPC-UA sessions do NOT support concurrent requests
-	// Concurrent reads will cause BadSessionIdInvalid, BadSecureChannelClosed, or corrupted data
-	private locks: Map<string, Promise<any>> = new Map();
-  
 	// Subscription splitting (many PLCs struggle with 200+ monitored items)
 	private readonly MAX_MONITORED_ITEMS_PER_SUBSCRIPTION = 100; // Split subscriptions beyond this
   
@@ -131,9 +101,9 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 	private readonly MAX_RETRY_DELAY = 60000;  // 60 seconds
 	private readonly MAX_RETRY_ATTEMPTS = 10;  // Cap consecutive failures
   
-	// Read retry settings
-	private readonly MAX_READ_RETRIES = 3;     // Retry reads up to 3 times
-	private readonly READ_RETRY_DELAY = 100;   // 100ms between retries
+	// Read retry settings (passed into runtime OPCUADeviceClient)
+	private readonly MAX_READ_RETRIES = 3;
+	private readonly READ_RETRY_DELAY = 100;
 
 	// Rediscovery throttle: only emit 'rediscovery-needed' once per device per cooldown period
 	private readonly REDISCOVERY_COOLDOWN_MS = 30000; // 30 seconds
@@ -168,66 +138,6 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 		return `${match[1]}${match[2]}`;
 	}
 
-	private normalizeThumbprint(thumbprint: string): string {
-		return thumbprint.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
-	}
-
-	private calculateCertificateThumbprint(certificate: Buffer): string {
-		return createHash('sha1').update(certificate).digest('hex');
-	}
-
-	private async createCertificateManager(trustMode: OPCUACertificateTrustMode): Promise<any> {
-		const { getDefaultCertificateManager } = await import('node-opcua-certificate-manager');
-		const certificateManager = getDefaultCertificateManager('PKI');
-		certificateManager.automaticallyAcceptUnknownCertificate = trustMode === 'trust-on-first-use';
-		return certificateManager;
-	}
-
-	private async createClientOptions(connection: OPCUAConnection): Promise<Record<string, unknown>> {
-		return {
-			applicationName: 'Iotistica Agent',
-			applicationUri: 'urn:iotistica:agent',
-			connectionStrategy: {
-				initialDelay: 1000,
-				maxRetry: 3,
-				maxDelay: connection.connectionTimeout || 10000,
-			},
-			securityMode: this.convertSecurityMode(connection.securityMode),
-			securityPolicy: this.convertSecurityPolicy(connection.securityPolicy),
-			endpointMustExist: false,
-			keepSessionAlive: true,
-			requestedSessionTimeout: connection.sessionTimeout || 60000,
-			clientCertificateManager: await this.createCertificateManager(
-				connection.certificateTrustMode || 'strict'
-			),
-		};
-	}
-
-	private assertExpectedServerThumbprint(
-		expectedThumbprint: string | undefined,
-		certificate: Buffer | undefined,
-		deviceName: string,
-		endpointUrl: string
-	): void {
-		if (!expectedThumbprint) {
-			return;
-		}
-
-		if (!certificate) {
-			throw new Error(
-				`Device ${deviceName}: expected server certificate thumbprint is configured but endpoint ${endpointUrl} did not provide a certificate`
-			);
-		}
-
-		const actualThumbprint = this.calculateCertificateThumbprint(certificate);
-		const normalizedExpected = this.normalizeThumbprint(expectedThumbprint);
-
-		if (actualThumbprint !== normalizedExpected) {
-			throw new Error(
-				`Device ${deviceName}: server certificate thumbprint mismatch for ${endpointUrl}. Expected ${normalizedExpected}, got ${actualThumbprint}`
-			);
-		}
-	}
 
 	private buildStableNodeDeviceId(device: OPCUADeviceConfig, dataPoint: OPCUADataPoint): string {
 		const endpointKey = device.connection.endpointUrl
@@ -669,25 +579,6 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 	}
 
 	/**
-   * Serialize OPC-UA requests per device to prevent concurrent access
-   * OPC-UA sessions do NOT support concurrent operations - they will fail with:
-   * - BadSessionIdInvalid
-   * - BadSecureChannelClosed
-   * - BadSequenceNumberUnknown
-   * - Corrupted read results
-   * 
-   * @param deviceName - Device to lock
-   * @param fn - Function to execute with exclusive access
-   * @returns Result of the function
-   */
-	private async lock<T>(deviceName: string, fn: () => Promise<T>): Promise<T> {
-		const prev = this.locks.get(deviceName) || Promise.resolve();
-		const next = prev.then(fn, fn); // Execute fn after previous completes (or fails)
-		this.locks.set(deviceName, next.catch(() => {})); // Catch to prevent unhandled rejection
-		return next;
-	}
-  
-	/**
    * Extract normalized quality code from OPC-UA status code
    * Maps OPC-UA status codes to standard quality codes for pipeline consistency
    * 
@@ -800,97 +691,6 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 	}
   
 	/**
-   * Check if OPC-UA status code represents a transient error that should be retried
-   * 
-   * @param statusCode - OPC-UA status code
-   * @returns True if error is transient and should be retried
-   */
-	private isTransientError(statusCode: any): boolean {
-		if (!statusCode) {
-			return false;
-		}
-    
-		const statusName = statusCode.name || statusCode.toString();
-    
-		// Transient errors that often succeed on retry
-		const transientPatterns = [
-			'BadOutOfRange',           // Value temporarily out of range
-			'BadNotConnected',         // Temporary connection issue
-			'BadNoCommunication',      // Communication hiccup
-			'BadTimeout',              // Network delay
-			'BadCommunicationError',   // Transient network error
-			'BadServerHalted',         // Server temporarily unavailable
-			'BadDataUnavailable',      // Data not ready yet
-			'BadWaitingForInitialData', // Waiting for initialization
-		];
-    
-		return transientPatterns.some(pattern => statusName.includes(pattern));
-	}
-  
-	/**
-   * Read node values with automatic retry for transient errors
-   * Retries up to MAX_READ_RETRIES times with READ_RETRY_DELAY between attempts
-   * 
-   * @param session - Active OPC-UA session
-   * @param nodesToRead - Array of nodes to read
-   * @returns Array of data values
-   */
-	private async readWithRetry(session: ClientSession, nodesToRead: ReadValueIdOptions[]): Promise<DataValue[]> {
-		const results = await session.read(nodesToRead);
-    
-		// PERFORMANCE: Smart retry - only retry failed nodes, not successful ones
-		// Before: 1 transient error → re-read all 100 nodes
-		// After: 1 transient error → re-read only that 1 node
-		// This prevents load amplification on weak PLCs
-    
-		for (let attempt = 1; attempt <= this.MAX_READ_RETRIES; attempt++) {
-			// Find indices of nodes with transient errors
-			const failedIndices: number[] = [];
-			results.forEach((dv: DataValue, idx: number) => {
-				if (!dv.statusCode.isGood() && this.isTransientError(dv.statusCode)) {
-					failedIndices.push(idx);
-				}
-			});
-      
-			// If no transient errors, or this is the last attempt, return results
-			if (failedIndices.length === 0 || attempt === this.MAX_READ_RETRIES) {
-				if (attempt > 1 && failedIndices.length > 0) {
-					this.logger.warn(`Max retries reached with ${failedIndices.length} transient errors remaining`, {
-						attempt,
-						failedNodes: failedIndices.length,
-						totalNodes: nodesToRead.length
-					});
-				} else if (attempt > 1) {
-					this.logger.debug(`All transient errors resolved after ${attempt} attempts`);
-				}
-				return results;
-			}
-      
-			// Log and retry only failed nodes
-			this.logger.debug(`Retrying ${failedIndices.length} transient errors (attempt ${attempt}/${this.MAX_READ_RETRIES})`, {
-				failedNodes: failedIndices.length,
-				totalNodes: nodesToRead.length,
-				successfulNodes: nodesToRead.length - failedIndices.length
-			});
-      
-			// Wait before retry
-			await new Promise(resolve => setTimeout(resolve, this.READ_RETRY_DELAY));
-      
-			// Retry only failed nodes
-			const retryNodes = failedIndices.map(idx => nodesToRead[idx]);
-			const retryResults = await session.read(retryNodes);
-      
-			// Update results with retry outcomes
-			retryResults.forEach((dv: DataValue, retryIdx: number) => {
-				const originalIdx = failedIndices[retryIdx];
-				results[originalIdx] = dv;
-			});
-		}
-    
-		return results;
-	}
-
-	/**
    * Returns the protocol name
    * Required by BaseProtocolAdapter
    */
@@ -942,7 +742,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 		}
 
 		if (connection.expectedServerThumbprint) {
-			const normalizedThumbprint = this.normalizeThumbprint(connection.expectedServerThumbprint);
+			const normalizedThumbprint = connection.expectedServerThumbprint.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
 			if (normalizedThumbprint.length !== 40) {
 				throw new Error(
 					`Device ${device.name}: expectedServerThumbprint must be a 40-character SHA-1 thumbprint`
@@ -952,180 +752,28 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 	}
 
 	/**
-   * Discover and select best matching endpoint
-   * Filters by security mode, security policy, and transport profile
-   * 
-   * @param baseUrl - Base OPC-UA discovery URL
-   * @param desiredSecurityMode - Desired security mode
-   * @param desiredSecurityPolicy - Desired security policy
-   * @returns Best matching endpoint or null
-   */
-	private async discoverAndSelectEndpoint(
-		baseUrl: string,
-		desiredSecurityMode: MessageSecurityMode,
-		desiredSecurityPolicy: SecurityPolicy,
-		connection: OPCUAConnection,
-		deviceName: string
-	): Promise<any | null> {
-		try {
-			// Discover all available endpoints
-			// Discover endpoints using getEndpoints (OPC-UA standard method)
-			const discoveryClient = OPCUAClient.create(await this.createClientOptions(connection));
-			await discoveryClient.connect(baseUrl);
-			const allEndpoints = await discoveryClient.getEndpoints();
-			await discoveryClient.disconnect();
-      
-			if (!allEndpoints || allEndpoints.length === 0) {
-				this.logger.warn('No endpoints discovered');
-				return null;
-			}
-      
-			this.logger.debug(`Discovered ${allEndpoints.length} endpoints`);
-      
-			// Filter endpoints by security mode and policy
-			const matchingEndpoints = allEndpoints.filter((endpoint: any) => {
-				const modeMatch = endpoint.securityMode === desiredSecurityMode;
-				const policyMatch = this.matchesSecurityPolicy(endpoint.securityPolicyUri, desiredSecurityPolicy);
-				const transportMatch = endpoint.transportProfileUri?.includes('http://opcfoundation.org/UA-Profile/Transport/uatcp-uasc-uabinary');
-        
-				return modeMatch && policyMatch && transportMatch;
-			});
-      
-			if (matchingEndpoints.length === 0) {
-				this.logger.warn('No endpoints match security requirements', {
-					desiredMode: MessageSecurityMode[desiredSecurityMode],
-					desiredPolicy: desiredSecurityPolicy,
-					availableEndpoints: allEndpoints.map((e: any) => ({
-						url: e.endpointUrl,
-						securityMode: MessageSecurityMode[e.securityMode],
-						securityPolicy: e.securityPolicyUri
-					}))
-				});
-				return null;
-			}
-      
-			// Select best endpoint (prefer exact match, then first available)
-			const bestEndpoint = matchingEndpoints[0];
-
-			this.assertExpectedServerThumbprint(
-				connection.expectedServerThumbprint,
-				bestEndpoint.serverCertificate,
-				deviceName,
-				bestEndpoint.endpointUrl || baseUrl
-			);
-      
-			this.logger.debug('Selected endpoint', {
-				url: bestEndpoint.endpointUrl,
-				securityMode: MessageSecurityMode[bestEndpoint.securityMode],
-				securityPolicy: bestEndpoint.securityPolicyUri,
-				transportProfile: bestEndpoint.transportProfileUri
-			});
-      
-			return bestEndpoint;
-      
-		} catch (error) {
-			this.logger.warn('Endpoint discovery failed', {
-				error: error instanceof Error ? error.message : String(error)
-			});
-			return null;
-		}
-	}
-  
-	/**
-   * Check if endpoint security policy matches desired policy
-   */
-	private matchesSecurityPolicy(endpointPolicyUri: string | undefined, desiredPolicy: SecurityPolicy): boolean {
-		if (!endpointPolicyUri) {
-			return desiredPolicy === SecurityPolicy.None;
-		}
-    
-		// Map policy URIs to SecurityPolicy enum
-		const policyMap: Record<string, SecurityPolicy> = {
-			'http://opcfoundation.org/UA/SecurityPolicy#None': SecurityPolicy.None,
-			'http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15': SecurityPolicy.Basic128Rsa15,
-			'http://opcfoundation.org/UA/SecurityPolicy#Basic256': SecurityPolicy.Basic256,
-			'http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256': SecurityPolicy.Basic256Sha256,
-			'http://opcfoundation.org/UA/SecurityPolicy#Aes128_Sha256_RsaOaep': SecurityPolicy.Aes128_Sha256_RsaOaep,
-			'http://opcfoundation.org/UA/SecurityPolicy#Aes256_Sha256_RsaPss': SecurityPolicy.Aes256_Sha256_RsaPss,
-		};
-    
-		return policyMap[endpointPolicyUri] === desiredPolicy;
-	}
-
-	/**
    * Connects to an OPC-UA device
-   * Creates OPCUAClient, discovers endpoints, and establishes session
+   * Runtime connection details are delegated to OPCUADeviceClient.
    * 
    * @param device - Device configuration
    * @returns OPCUASession object with client and session
    */
 	protected async connectDevice(device: OPCUADeviceConfig): Promise<OPCUASession> {
-		const { connection } = device;
-
-		this.logger.debug(`Connecting to OPC-UA device: ${device.name}`);
-		this.logger.debug(`Endpoint: ${connection.endpointUrl}`);
-
-		// Step 1: Discover and select best matching endpoint
-		const desiredSecurityMode = this.convertSecurityMode(connection.securityMode);
-		const desiredSecurityPolicy = this.convertSecurityPolicy(connection.securityPolicy);
-    
-		const discoveredEndpoint = await this.discoverAndSelectEndpoint(
-			connection.endpointUrl,
-			desiredSecurityMode,
-			desiredSecurityPolicy,
-			connection,
-			device.name
-		);
-
-		// Step 2: Create OPC-UA client with endpoint requirements
-		// Use static applicationUri to avoid certificate regeneration when hostname changes
-		const client = OPCUAClient.create(await this.createClientOptions(connection));
+		const runtimeClient = new OPCUADeviceClient(device, this.logger, {
+			minRetryDelay: this.MIN_RETRY_DELAY,
+			maxReadRetries: this.MAX_READ_RETRIES,
+			readRetryDelayMs: this.READ_RETRY_DELAY,
+		});
 
 		try {
-			// Step 3: Connect to server (use discovered endpoint if available)
-			const connectUrl = discoveredEndpoint?.endpointUrl || connection.endpointUrl;
-			this.logger.debug(`Attempting connection to ${connectUrl}`, {
-				securityMode: MessageSecurityMode[this.convertSecurityMode(connection.securityMode)],
-				securityPolicy: connection.securityPolicy
-			});
-      
-			await client.connect(connectUrl);
-			this.assertExpectedServerThumbprint(
-				connection.expectedServerThumbprint,
-				discoveredEndpoint?.serverCertificate || (client as any).serverCertificate,
-				device.name,
-				connectUrl
-			);
-			this.logger.debug(`Connected to ${connectUrl}`);
-
-			// Step 4: Create session with optional authentication
-			this.logger.debug('Creating session...');
-			let session: ClientSession;
-			if (connection.username && connection.password) {
-				session = await client.createSession({
-					type: UserTokenType.UserName,
-					userName: connection.username,
-					password: connection.password,
-				});
-				this.logger.debug(`Session created with username authentication`);
-			} else {
-				session = await client.createSession();
-				this.logger.debug(`Session created with anonymous authentication`);
+			await runtimeClient.connect();
+			const sessionWrapper = runtimeClient.getSessionWrapper();
+			if (!sessionWrapper?.session) {
+				throw new Error(`Failed to establish OPC-UA session for ${device.name}`);
 			}
 
-			this.logger.debug(`Session established for device: ${device.name}`);
-
-			const sessionWrapper: OPCUASession = {
-				client,
-				session,
-				subscription: null,
-				subscriptions: [], // Initialize empty array for multiple subscriptions
-				monitoredItems: new Map(),
-				validatedNodes: new Set(),
-				reconnecting: false,
-				currentRetryDelay: this.MIN_RETRY_DELAY,
-				consecutiveFailures: 0
-			};
+			const session = sessionWrapper.session;
+			this.clients.set(device.name, runtimeClient);
 
 			// Resolve human-readable display name for this device.
 			// Only set when explicitly configured via metadata.displayName — do NOT read ns=0;i=2253
@@ -1261,12 +909,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 
 			return sessionWrapper;
 		} catch (error) {
-			// Clean up client if session creation failed
-			try {
-				await client.disconnect();
-			} catch (disconnectError) {
-				this.logger.debug(`Error disconnecting client during cleanup: ${disconnectError}`);
-			}
+			await runtimeClient.disconnect().catch(() => {});
 			throw error;
 		}
 	}
@@ -1418,7 +1061,12 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
     
 		try {
 			// Clean up old client/session if they exist
-			await this.cleanupSession(sessionWrapper, false);
+			const runtimeClient = this.clients.get(device.name);
+			if (runtimeClient) {
+				await runtimeClient.cleanup(false);
+			} else {
+				await this.cleanupSession(sessionWrapper, false);
+			}
       
 			// Create new connection
 			const newSession = await this.connectDevice(device);
@@ -1516,21 +1164,33 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
    */
 	protected async disconnectDevice(deviceName: string): Promise<void> {
 		const sessionWrapper = this.sessions.get(deviceName);
-		if (!sessionWrapper) {
+		const runtimeClient = this.clients.get(deviceName);
+		if (!sessionWrapper && !runtimeClient) {
 			return;
 		}
 
 		this.logger.debug(`Disconnecting OPC-UA device: ${deviceName}`);
-    
+	
 		// Stop reconnection attempts
-		sessionWrapper.reconnecting = false;
+		if (sessionWrapper) {
+			sessionWrapper.reconnecting = false;
+		}
     
 		try {
-			await this.cleanupSession(sessionWrapper, true);
+			if (sessionWrapper) {
+				sessionWrapper.reconnecting = false;
+			}
+
+			if (runtimeClient) {
+				await runtimeClient.disconnect();
+			} else if (sessionWrapper) {
+				await this.cleanupSession(sessionWrapper, true);
+			}
 			this.logger.debug(`Disconnected from device: ${deviceName}`);
 		} catch (error) {
 			this.logger.error(`Error disconnecting device ${deviceName}: ${error}`);
 		} finally {
+			this.clients.delete(deviceName);
 			this.sessions.delete(deviceName);
 			this.resolvedDeviceNames.delete(deviceName);
 			// Clean up per-node display names for this device's data points
@@ -1555,6 +1215,11 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 		deviceName: string,
 		device: OPCUADeviceConfig
 	): Promise<DeviceDataPoint[]> {
+		const runtimeClient = this.clients.get(deviceName);
+		if (!runtimeClient) {
+			throw new Error(`No OPC-UA runtime client for device: ${deviceName}`);
+		}
+
 		const sessionWrapper = this.sessions.get(deviceName);
 		if (!sessionWrapper?.session) {
 			throw new Error(`No active session for device: ${deviceName}`);
@@ -1569,7 +1234,6 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 			return [];
 		}
 
-		const { session } = sessionWrapper;
 		const { dataPoints } = device;
 
 		// Filter to only validated metric nodes (exclude metadata)
@@ -1592,9 +1256,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 		const readStartedAt = Date.now();
 
 		// Read all nodes with automatic retry for transient errors
-		const dataValues: DataValue[] = await this.lock(deviceName, () => 
-			this.readWithRetry(session, nodesToRead)
-		);
+		const dataValues: DataValue[] = await runtimeClient.read(nodesToRead);
 
 		// Convert to deviceDataPoint format
 		const results: DeviceDataPoint[] = [];
@@ -1681,44 +1343,6 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 	}
 
 	/**
-   * Converts security mode string to OPC-UA MessageSecurityMode enum
-   */
-	private convertSecurityMode(mode: OPCUASecurityMode): MessageSecurityMode {
-		switch (mode) {
-			case 'None':
-				return MessageSecurityMode.None;
-			case 'Sign':
-				return MessageSecurityMode.Sign;
-			case 'SignAndEncrypt':
-				return MessageSecurityMode.SignAndEncrypt;
-			default:
-				return MessageSecurityMode.None;
-		}
-	}
-
-	/**
-   * Converts security policy string to OPC-UA SecurityPolicy enum
-   */
-	private convertSecurityPolicy(policy: OPCUASecurityPolicy): SecurityPolicy {
-		switch (policy) {
-			case 'None':
-				return SecurityPolicy.None;
-			case 'Basic128Rsa15':
-				return SecurityPolicy.Basic128Rsa15;
-			case 'Basic256':
-				return SecurityPolicy.Basic256;
-			case 'Basic256Sha256':
-				return SecurityPolicy.Basic256Sha256;
-			case 'Aes128_Sha256_RsaOaep':
-				return SecurityPolicy.Aes128_Sha256_RsaOaep;
-			case 'Aes256_Sha256_RsaPss':
-				return SecurityPolicy.Aes256_Sha256_RsaPss;
-			default:
-				return SecurityPolicy.None;
-		}
-	}
-
-	/**
    * Override start to store sessions in map
    */
 	public async start(): Promise<void> {
@@ -1730,6 +1354,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
    */
 	public async stop(): Promise<void> {
 		await super.stop();
+		this.clients.clear();
 		this.sessions.clear();
 	}
 }

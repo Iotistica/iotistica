@@ -323,7 +323,7 @@ export class BACnetAdapter extends BaseProtocolAdapter {
 		try {
 			// Read all enabled objects
 			const enabledObjects = deviceConfig.objects.filter(obj => obj.enabled);
-			const results = await client.readObjects(enabledObjects);
+			const results = await client.read(enabledObjects);
 
 			// Convert results to deviceDataPoint[]
 			const dataPoints: DeviceDataPoint[] = [];

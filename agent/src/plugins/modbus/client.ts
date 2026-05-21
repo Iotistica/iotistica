@@ -7,12 +7,12 @@ import {
 	ByteOrder,
 	Endianness
 } from './types';
-import { type DeviceDataPoint, type Logger } from '../types.js';
+import { type DeviceDataPoint, type Logger, type IProtocolClient } from '../types.js';
 
 /**
  * Modbus Client wrapper that handles different connection types and data reading
  */
-export class ModbusClient {
+export class ModbusClient implements IProtocolClient<void, DeviceDataPoint[]> {
 	private client: ModbusRTU;
 	private device: ModbusDevice;
 	private logger: Logger;
@@ -494,6 +494,10 @@ export class ModbusClient {
 		);
 
 		return dataPoints;
+	}
+
+	async read(): Promise<DeviceDataPoint[]> {
+		return this.readAllRegisters();
 	}
   
 	/**

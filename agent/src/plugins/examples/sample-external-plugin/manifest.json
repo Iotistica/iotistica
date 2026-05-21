@@ -1,0 +1,7 @@
+{
+  "name": "sample-external-plugin",
+  "version": "0.1.0",
+  "apiVersion": "1.0.0",
+  "protocol": "sample",
+  "description": "Reference external protocol plugin using client + adapter pattern"
+}

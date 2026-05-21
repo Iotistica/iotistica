@@ -6,6 +6,7 @@ import { type MqttAdapterConfig, type MqttDevice, type MqttMetricConfig } from "
 import { parsePayload, coerceType } from "./payload.js";
 import { agentTopic } from "../../mqtt/topics.js";
 import { EndpointModel } from "../../db/models/endpoint.model.js";
+import { MqttBrokerClient } from "./client.js";
 
 /**
  * MQTT Adapter
@@ -37,9 +38,7 @@ export class MqttAdapter extends BaseProtocolAdapter {
 	private emitQueue: DeviceDataPoint[][] = [];
 	private processingEmitQueue = false;
 	private droppedMessageCount = 0;
-	private firstConnect = true; // Track first connection for subscription logic
 	private reconnectAttemptCount = 0;
-	private currentReconnectPeriod = 0;
 	private compiledMetrics = new Map<
 		string,
 		Array<MqttMetricConfig & { path: string[] }>
@@ -48,6 +47,7 @@ export class MqttAdapter extends BaseProtocolAdapter {
 	private lwtDeviceIdToName = new Map<string, string>();
 	private brokerStatusTopic: string | null = null;
 	private deviceUuid: string | null = null;
+	private brokerClient: MqttBrokerClient;
 	// Optional human-readable labels keyed by topic (resolve via subscriptions map at publish time)
 	private displayNamesByTopic = new Map<string, string>();
 
@@ -55,7 +55,79 @@ export class MqttAdapter extends BaseProtocolAdapter {
 		super([], logger);
 		this.config = config;
 		this.deviceUuid = deviceUuid?.trim() || null;
-		this.currentReconnectPeriod = this.getBaseReconnectPeriod();
+		if (!this.deviceUuid || this.deviceUuid.toLowerCase() === "unknown") {
+			throw new Error(
+				"MQTT clientId requires a valid device UUID to derive agent-<deviceUuid>.",
+			);
+		}
+		const runtimeDeviceUuid = this.deviceUuid;
+		this.brokerClient = new MqttBrokerClient(this.config, this.logger, runtimeDeviceUuid, {
+			onConnect: (client, connack, firstConnect) => {
+				this.client = client;
+				this.connected = true;
+				this.emit("device-connected", "mqtt-broker");
+
+				this.brokerStatusTopic = this.brokerClient.getBrokerStatusTopic();
+				void this.publishBrokerStatus("online");
+
+				this.subscribeToStatusTopic().catch((err) => {
+					this.logger.warn(
+						`Failed to subscribe to broker status topic: ${err.message}`,
+					);
+				});
+
+				if (!connack.sessionPresent) {
+					this.logger.warn(
+						"MQTT session not present, subscribing all configured topics",
+						{
+							firstConnect,
+							risk: firstConnect
+								? "No broker-side session yet; messages published before the first successful subscribe are not recoverable."
+								: "Persistent session was lost; messages published while the adapter was disconnected may have been dropped by the broker.",
+						},
+					);
+				} else if (firstConnect) {
+					this.logger.debug(
+						"Connected with existing persistent session (sessionPresent=true)",
+					);
+				} else {
+					this.logger.debug("Reconnected - refreshing subscriptions");
+				}
+
+				this.subscribeAllConfiguredDevices().catch((err) => {
+					this.logger.error(
+						`Failed to subscribe configured topics after connect: ${err.message}`,
+					);
+				});
+			},
+			onError: (err) => {
+				this.logger.error(`MQTT client error: ${err.message}`);
+				this.emit("device-error", "mqtt-broker", err);
+			},
+			onOffline: () => {
+				this.connected = false;
+				this.logger.warn("MQTT broker offline");
+				this.emit("device-disconnected", "mqtt-broker");
+			},
+			onReconnect: (attempt, nextReconnectDelayMs) => {
+				this.reconnectAttemptCount = attempt;
+				this.logger.debug("MQTT reconnecting to broker", {
+					attempt,
+					nextReconnectDelayMs,
+				});
+			},
+			onClose: () => {
+				this.connected = false;
+				this.logger.debug("MQTT connection closed");
+			},
+			onMessage: (topic, payload, retain) => {
+				if (topic.startsWith("device/") && topic.endsWith("/status")) {
+					this.handleLwtStatus(topic, payload, retain);
+					return;
+				}
+				this.handleMessage(topic, payload, retain);
+			},
+		});
 
 		for (const device of this.config.devices) {
 			if (device.enabled) {
@@ -137,7 +209,7 @@ export class MqttAdapter extends BaseProtocolAdapter {
 		this.logger.debug("Starting MQTT Adapter...");
 
 		// Create client - let mqtt.js handle connection and reconnection
-		this.createClient();
+		await this.brokerClient.connect();
 
 		this.running = true;
 
@@ -162,20 +234,7 @@ export class MqttAdapter extends BaseProtocolAdapter {
 				// Best-effort unsubscribe to avoid stale persistent subscriptions on broker.
 				await this.unsubscribeAll();
 
-				// Production fix: Remove all listeners to prevent memory leaks
-				this.client.removeAllListeners();
-
-				// Graceful disconnect to ensure socket closes before stop completes.
-				await new Promise<void>((resolve) => {
-					this.client!.end(false, (error?: Error) => {
-						if (error) {
-							this.logger.warn(
-								`Error while ending MQTT client connection: ${error.message}`,
-							);
-						}
-						resolve();
-					});
-				});
+				await this.brokerClient.disconnect();
 
 				this.client = null;
 				this.connected = false;
@@ -185,7 +244,7 @@ export class MqttAdapter extends BaseProtocolAdapter {
 			this.emitQueue = [];
 			this.processingEmitQueue = false;
 			this.running = false;
-			this.firstConnect = true; // Reset for next start
+			// Runtime first-connect flag is managed by MqttBrokerClient.
 
 			this.logger.debug("MQTT Adapter stopped successfully");
 			this.emit("stopped");
@@ -339,243 +398,6 @@ export class MqttAdapter extends BaseProtocolAdapter {
 	 */
 	getDeviceStatus(deviceName: string): IDeviceStatus | undefined {
 		return this.deviceStatuses.get(deviceName);
-	}
-
-	/**
-	 * Create MQTT client and attach event handlers
-	 *
-	 * Self-healing architecture:
-	 * - Does NOT wait for initial connection (no timeout rejection)
-	 * - mqtt.js handles automatic reconnection via reconnectPeriod
-	 * - Survives broker downtime at startup (edge-friendly)
-	 * - Connection state tracked via events
-	 *
-	 * Production-safe:
-	 * - Cleans up old client before creating new one (prevents listener leaks)
-	 * - Uses .on() for ongoing state tracking (not .once() for promises)
-	 * - Handles persistent session subscription logic correctly
-	 * - Emits events for connection state transitions
-	 */
-	private createClient(): void {
-		const brokerUrl = `mqtt://${this.config.broker.host}:${this.config.broker.port}`;
-
-		// Generate stable clientId for persistent sessions (critical for edge agents)
-		const stableClientId = this.resolveStableClientId();
-		this.brokerStatusTopic = this.resolveBrokerStatusTopic();
-
-		this.logger.debug(`Creating MQTT client for broker: ${brokerUrl}`, {
-			clientId: stableClientId,
-			reconnectPeriod: this.currentReconnectPeriod,
-		});
-
-		// Cleanup old client before creating new one (prevents listener leaks)
-		if (this.client) {
-			this.client.removeAllListeners();
-			this.client.end(true);
-			this.client = null;
-		}
-
-		this.client = mqtt.connect(brokerUrl, {
-			clientId: stableClientId,
-			username: this.config.broker.username,
-			password: this.config.broker.password,
-			reconnectPeriod: this.currentReconnectPeriod,
-			clean: false, // Persistent session: survive reconnects, keep subscriptions, replay QoS 1 messages
-			keepalive: 30, // Send pings every 30s (well before mosquitto's 60s idle timeout)
-			...(this.brokerStatusTopic
-				? {
-					will: {
-						topic: this.brokerStatusTopic,
-						payload: Buffer.from("offline"),
-						qos: 1,
-						retain: true,
-					},
-				}
-				: {}),
-		});
-
-		// Event-based state machine (not promise-based)
-		// mqtt.js will keep retrying automatically
-
-		this.client.on("connect", (connack) => {
-			this.connected = true;
-			this.resetReconnectBackoff();
-
-			this.emit("device-connected", "mqtt-broker");
-
-			// Overwrite retained LWT offline marker with current online status.
-			void this.publishBrokerStatus("online");
-
-			// LWT status stream: subscribe once per connected session.
-			this.subscribeToStatusTopic().catch((err) => {
-				this.logger.warn(
-					`Failed to subscribe to broker status topic: ${err.message}`,
-				);
-			});
-
-			// Refresh configured subscriptions on every connect.
-			if (!connack.sessionPresent) {
-				this.logger.warn(
-					"MQTT session not present, subscribing all configured topics",
-					{
-						firstConnect: this.firstConnect,
-						risk: this.firstConnect
-							? "No broker-side session yet; messages published before the first successful subscribe are not recoverable."
-							: "Persistent session was lost; messages published while the adapter was disconnected may have been dropped by the broker.",
-					},
-				);
-			} else if (this.firstConnect) {
-				this.logger.debug(
-					"Connected with existing persistent session (sessionPresent=true)",
-				);
-			} else {
-				this.logger.debug("Reconnected - refreshing subscriptions");
-			}
-
-			this.subscribeAllConfiguredDevices().catch((err) => {
-				this.logger.error(
-					`Failed to subscribe configured topics after connect: ${err.message}`,
-				);
-			});
-
-			this.firstConnect = false;
-		});
-
-		this.client.on("error", (err) => {
-			this.logger.error(`MQTT client error: ${err.message}`);
-			this.emit("device-error", "mqtt-broker", err);
-			// Don't kill the client - let mqtt.js retry
-		});
-
-		this.client.on("offline", () => {
-			this.connected = false;
-			this.logger.warn("MQTT broker offline");
-			this.emit("device-disconnected", "mqtt-broker");
-		});
-
-		this.client.on("reconnect", () => {
-			const nextReconnectDelayMs = this.scheduleNextReconnectBackoff();
-			this.logger.debug("MQTT reconnecting to broker", {
-				attempt: this.reconnectAttemptCount,
-				nextReconnectDelayMs,
-			});
-		});
-
-		this.client.on("close", () => {
-			this.connected = false;
-			this.logger.debug("MQTT connection closed");
-		});
-
-		// Handle incoming messages
-		// Note: MQTT callback signature includes packet metadata (retain flag, qos, etc.)
-		this.client.on("message", (topic, payload, packet) => {
-			if (topic.startsWith("device/") && topic.endsWith("/status")) {
-				this.handleLwtStatus(topic, payload, packet.retain);
-				return;
-			}
-			this.handleMessage(topic, payload, packet.retain);
-		});
-	}
-
-	private resolveStableClientId(): string {
-		const deviceUuid = this.deviceUuid?.trim();
-		if (deviceUuid && deviceUuid.toLowerCase() !== "unknown") {
-			return `agent-${deviceUuid}`;
-		}
-
-		throw new Error(
-			"MQTT clientId requires a valid device UUID to derive agent-<deviceUuid>.",
-		);
-	}
-
-	private getBaseReconnectPeriod(): number {
-		const configured = Number(this.config.reconnect.period);
-		return Number.isFinite(configured) ? Math.max(0, configured) : 0;
-	}
-
-	private getReconnectStrategy(): "fixed" | "exponential" {
-		return this.config.reconnect.strategy === "exponential"
-			? "exponential"
-			: "fixed";
-	}
-
-	private getMaxReconnectPeriod(): number {
-		const base = this.getBaseReconnectPeriod();
-		const configured = Number(this.config.reconnect.maxPeriod);
-
-		if (!Number.isFinite(configured)) {
-			return base;
-		}
-
-		return Math.max(base, configured);
-	}
-
-	private getReconnectJitterRatio(): number {
-		const configured = Number(this.config.reconnect.jitterRatio);
-		if (!Number.isFinite(configured)) {
-			return 0;
-		}
-
-		return Math.min(1, Math.max(0, configured));
-	}
-
-	private applyReconnectPeriod(periodMs: number): void {
-		this.currentReconnectPeriod = periodMs;
-
-		if (this.client) {
-			(this.client.options).reconnectPeriod = periodMs;
-		}
-	}
-
-	private computeReconnectPeriod(attempt: number): number {
-		const base = this.getBaseReconnectPeriod();
-		if (this.getReconnectStrategy() === "fixed") {
-			return base;
-		}
-
-		const maxPeriod = this.getMaxReconnectPeriod();
-		const exponentialDelay = Math.min(
-			maxPeriod,
-			base * 2 ** Math.max(0, attempt - 1),
-		);
-		const jitterRatio = this.getReconnectJitterRatio();
-
-		if (jitterRatio === 0) {
-			return exponentialDelay;
-		}
-
-		const lowerBound = exponentialDelay * (1 - jitterRatio);
-		const upperBound = exponentialDelay * (1 + jitterRatio);
-		return Math.round(lowerBound + Math.random() * (upperBound - lowerBound));
-	}
-
-	private resetReconnectBackoff(): void {
-		this.reconnectAttemptCount = 0;
-		this.applyReconnectPeriod(this.getBaseReconnectPeriod());
-	}
-
-	private scheduleNextReconnectBackoff(): number {
-		this.reconnectAttemptCount += 1;
-		const nextPeriod = this.computeReconnectPeriod(this.reconnectAttemptCount);
-		this.applyReconnectPeriod(nextPeriod);
-		return nextPeriod;
-	}
-
-	private resolveBrokerStatusTopic(): string | null {
-		if (!this.deviceUuid || this.deviceUuid.toLowerCase() === "unknown") {
-			this.logger.debug("Broker status topic skipped: no device UUID provided");
-			return null;
-		}
-
-		try {
-			return agentTopic(this.deviceUuid, "agent", "broker");
-		} catch {
-			// Tenant ID not yet initialized (pre-provisioning). Topic will remain null until reconnect.
-			this.logger.debug(
-				"Broker status topic skipped: tenant ID not yet initialized",
-			);
-			return null;
-		}
 	}
 
 	private async publishBrokerStatus(
