@@ -35,7 +35,7 @@ import { createHttpClient, FetchHttpClient } from '../lib/http-client.js';
 import type { DatabaseClient } from '../db/client.js';
 import { SqliteDatabaseClient } from '../db/client.js';
 import { PopCryptoManager } from '../security/pop-crypto.js';
-import { AgentProvisioningService } from './provisioning.js';
+import { ProvisioningService } from '../sync/provisioning.js';
 
 export class AgentManager {
 	private agentInfo: AgentInfo | null = null;
@@ -44,7 +44,7 @@ export class AgentManager {
 	private dbClient: DatabaseClient;
 	private uuidGenerator: UuidGenerator;
 	private popCrypto?: PopCryptoManager;
-	private provisioningService: AgentProvisioningService;
+	private provisioningService: ProvisioningService;
 
 	// Retry configuration for unreliable edge networks
 	private readonly PROVISIONING_TIMEOUT_MS = 30000; // 30s per attempt
@@ -63,7 +63,7 @@ export class AgentManager {
 		this.httpClient = httpClient || this.createHttpClient(cloudApiEndpoint);
 		this.dbClient = dbClient || new SqliteDatabaseClient();
 		this.uuidGenerator = uuidGenerator || new DefaultUuidGenerator();
-		this.provisioningService = new AgentProvisioningService(
+		this.provisioningService = new ProvisioningService(
 			this.logger,
 			this.httpClient,
 			() => this.popCrypto,

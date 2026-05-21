@@ -4,7 +4,7 @@ import type {
 	ProvisionRequest,
 	ProvisionResponse,
 	ProvisioningConfig,
-} from './types';
+} from '../core/types';
 import { buildApiEndpoint } from '../utils/api-utils';
 import { generateAPIKey, getAPIKeyFingerprint, parseAPIKey } from '../utils/crypto';
 import type { AgentLogger } from '../logging/agent-logger';
@@ -25,7 +25,7 @@ type ProvisioningHooks = {
 	getAgentInfo: () => AgentInfo;
 };
 
-export class AgentProvisioningService {
+export class ProvisioningService {
 	constructor(
 		private readonly logger: AgentLogger | undefined,
 		private readonly httpClient: HttpClient,

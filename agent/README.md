@@ -1,4 +1,4 @@
-﻿# Iotistic Agent
+# Iotistic Agent
 
 Edge device agent for the Iotistic IoT platform. Provides container orchestration, cloud synchronization, device provisioning, and real-time monitoring for IoT devices running on Raspberry Pi, x86_64, and other edge hardware.
 
@@ -1947,6 +1947,236 @@ SELECT * FROM endpoint_outputs WHERE protocol = 'opcua';
 - Subscription-based updates
 - Complex data types
 - Historical data access
+
+## 🔀 IPC Pub/Sub Routing
+
+The agent uses an internal Unix socket / Windows Named Pipe server to route data between protocol adapters (Modbus, OPC-UA, BACnet, …) and downstream consumers (MQTT publisher, Azure IoT Hub, AWS IoT Core, custom forwarders). Adapters produce into a per-protocol socket server; consumers subscribe and receive only what they need.
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                         IOTISTICA AGENT                              │
+│                                                                      │
+│  PROTOCOL ADAPTERS (Producers)                                       │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐                │
+│  │  Modbus │  │  OPC-UA │  │  BACnet │  │   SNMP  │                │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘                │
+│       │            │            │             │                      │
+│       ▼            ▼            ▼             ▼                      │
+│  ┌───────────────────────────────────────────────────────────┐      │
+│  │              IPC SocketServer (per protocol)              │      │
+│  │   sendData(points, topic="modbus")                        │      │
+│  │                                                           │      │
+│  │   Topic index:  modbus → {ClientA, ClientC}               │      │
+│  │                 opcua  → {ClientB}                        │      │
+│  │                 *      → {ClientD}  (wildcard)            │      │
+│  │                                                           │      │
+│  │   Per-client routing rules applied before each send:      │      │
+│  │   • include / exclude metrics & devices                   │      │
+│  │   • quality filter  (GOOD / BAD / UNCERTAIN)              │      │
+│  │   • minIntervalMs throttle                                │      │
+│  │   • maxPointsPerMessage cap                               │      │
+│  └───────────────────────────────────────────────────────────┘      │
+│       │            │            │             │                      │
+│       ▼            ▼            ▼             ▼                      │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐                │
+│  │ClientA  │  │ClientB  │  │ClientC  │  │ClientD  │                │
+│  │(Azure)  │  │(AWS)    │  │(Grafana)│  │(all *)  │                │
+│  └─────────┘  └─────────┘  └─────────┘  └─────────┘                │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Subscription Protocol
+
+Every consumer performs a JSON handshake immediately on connect.
+
+**Step 1** – Client connects to the socket path recorded in `endpoint_outputs.socket_path`.
+
+**Step 2** – Client sends a subscription frame (newline-delimited JSON):
+
+```json
+{
+  "subscribe": ["modbus"],
+  "route": { ... }
+}
+```
+
+- `subscribe`: list of protocol topics to receive. Empty array `[]` = wildcard — receive all topics.
+- `route`: optional per-client routing rules (see below). Omit to receive everything unfiltered.
+
+**Step 3** – Server confirms with the resolved rules:
+
+```json
+{
+  "ok": true,
+  "subscribed_to": ["modbus"],
+  "routing": {
+    "includeMetrics": [],
+    "excludeMetrics": [],
+    "includeDevices": [],
+    "excludeDevices": [],
+    "qualities": ["GOOD", "BAD", "UNCERTAIN"],
+    "minIntervalMs": 0,
+    "maxPointsPerMessage": 0
+  }
+}
+```
+
+**Step 4** – Server streams filtered data frames to this client only.
+
+If the client does not send a subscription within 5 seconds the connection is closed and a warning is logged.
+
+### Routing Rules (`route` object)
+
+All fields are optional. Omitting a field applies no restriction for that dimension.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `includeMetrics` | `string[]` | `[]` | Only forward points whose `metric` matches. Empty = allow all. |
+| `excludeMetrics` | `string[]` | `[]` | Drop points whose `metric` matches. |
+| `includeDevices` | `string[]` | `[]` | Only forward points from these `deviceName` values. Empty = allow all. |
+| `excludeDevices` | `string[]` | `[]` | Drop points from these `deviceName` values. |
+| `qualities` | `string[]` | `["GOOD","BAD","UNCERTAIN"]` | Only forward points whose `quality` is in this set. |
+| `minIntervalMs` | `number` | `0` | Minimum ms between messages to this client. `0` = no throttle. Max `60000`. |
+| `maxPointsPerMessage` | `number` | `0` | Truncate each message to at most this many points. `0` = no cap. Max `1000`. |
+
+Rules are evaluated in this order for every outgoing message:
+
+1. **minIntervalMs** throttle check — if the interval has not elapsed the entire batch is skipped and `lastSentAt` is not updated.
+2. **qualities** filter — individual points whose quality is not in the allowed set are dropped.
+3. **includeMetrics / excludeMetrics** — individual points are dropped by metric name.
+4. **includeDevices / excludeDevices** — individual points are dropped by device name.
+5. **maxPointsPerMessage** cap — batch is truncated to the first N remaining points.
+
+If all points are filtered out after steps 2–4 no message is sent.
+
+### Examples
+
+#### Azure sink — Modbus temperature/humidity, GOOD quality, 5 s throttle
+
+```json
+{
+  "subscribe": ["modbus"],
+  "route": {
+    "includeMetrics": ["temperature", "humidity"],
+    "qualities": ["GOOD"],
+    "minIntervalMs": 5000
+  }
+}
+```
+
+#### AWS sink — OPC-UA, exclude noisy test device, cap at 200 points/message
+
+```json
+{
+  "subscribe": ["opcua"],
+  "route": {
+    "excludeDevices": ["opcua-pump-test"],
+    "qualities": ["GOOD", "UNCERTAIN"],
+    "maxPointsPerMessage": 200
+  }
+}
+```
+
+#### Analytics sink — all protocols, light 500 ms throttle
+
+```json
+{
+  "subscribe": [],
+  "route": {
+    "minIntervalMs": 500
+  }
+}
+```
+
+#### Dashboard — GOOD quality only, named devices, multi-protocol
+
+```json
+{
+  "subscribe": ["modbus", "bacnet"],
+  "route": {
+    "includeDevices": ["boiler-1", "boiler-2", "chiller-main"],
+    "qualities": ["GOOD"]
+  }
+}
+```
+
+#### Alarm forwarder — BAD quality only across all protocols
+
+```json
+{
+  "subscribe": [],
+  "route": {
+    "qualities": ["BAD"]
+  }
+}
+```
+
+### Multi-Cloud Routing (Modbus → Azure, OPC-UA → AWS)
+
+Each cloud destination runs its own `DeviceConnection` pointed at a different socket path. The two adapter streams are completely independent.
+
+**`endpoint_outputs` table** (one row per protocol):
+
+```
+protocol | socket_path                | delimiter | data_format
+---------+----------------------------+-----------+------------
+modbus   | /tmp/iotistica/modbus.sock | \n        | json
+opcua    | /tmp/iotistica/opcua.sock  | \n        | json
+bacnet   | /tmp/iotistica/bacnet.sock | \n        | json
+```
+
+**Azure publisher** connects to `/tmp/iotistica/modbus.sock` and subscribes:
+
+```json
+{ "subscribe": ["modbus"], "route": { "qualities": ["GOOD"] } }
+```
+
+**AWS publisher** connects to `/tmp/iotistica/opcua.sock` and subscribes:
+
+```json
+{ "subscribe": ["opcua"] }
+```
+
+The Modbus SocketServer never delivers to the AWS client; the OPC-UA SocketServer never delivers to the Azure client. Each client pays only for the data it requested.
+
+### Connection Lifecycle
+
+```
+Client connects
+  └─ Server: start 5 s handshake timer
+      └─ Client sends: {"subscribe": [...], "route": {...}}
+          └─ Server: cancel timer, parse rules, add to topic index
+              └─ Server sends: {"ok": true, "subscribed_to": [...], "routing": {...}}
+                  └─ Data flows: adapter → apply routing rules → client socket
+                      └─ On disconnect / error: remove from all indices, destroy socket
+```
+
+### Flow Control and Backpressure
+
+| Event | Action |
+|---|---|
+| Write failure (1st–2nd) | WARN logged, client kept |
+| Write failure (3rd) | ERROR logged |
+| Write failure (4th+) | Client removed, socket destroyed |
+| `minIntervalMs` not elapsed | Entire batch skipped silently |
+| `maxPointsPerMessage` exceeded | First N points sent, remainder dropped |
+
+### Monitoring
+
+`SocketServer.getSubscriptionStats()` returns a snapshot for health endpoints:
+
+```typescript
+{
+  totalClients: 3,
+  topicCounts: {
+    "modbus": 2,
+    "opcua": 1,
+    "*": 1   // wildcard clients (subscribed with [])
+  }
+}
+```
 
 ## License
 

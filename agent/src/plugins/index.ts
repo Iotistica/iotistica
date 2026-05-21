@@ -8,7 +8,7 @@ import { ModbusAdapter } from "./modbus/adapter.js";
 import { type ModbusAdapterConfig } from "./modbus/types.js";
 import { LocalBrokerMqttAdapter } from "./mqtt/adapter.js";
 import { type MqttAdapterConfig } from "./mqtt/types.js";
-import { SocketServer } from "./socket-server.js";
+import { SocketServer } from "../core/socket-server.js";
 import { type DeviceDataPoint, type SocketOutput } from "./types.js";
 import { EndpointOutputModel } from "../db/models/endpoint-outputs.model.js";
 import { EndpointModel } from "../db/models/endpoint.model.js";
@@ -131,7 +131,7 @@ export class AdapterManager extends EventEmitter {
 		const label = protocol.toUpperCase();
 		adapter.on("started", () => this.logger.info(`${label} adapter started`));
 		adapter.on("data", (dps: DeviceDataPoint[]) =>
-			socket.sendData(this.enrichWithEndpointUuid(dps, uuidMap)),
+			socket.sendData(this.enrichWithEndpointUuid(dps, uuidMap), protocol),
 		);
 		adapter.on("device-connected", (name: string) =>
 			this.logger.info(`${label} device connected: ${name}`),

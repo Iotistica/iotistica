@@ -1,11 +1,23 @@
 import * as net from "net";
 import * as fs from "fs";
 import * as path from "path";
-import { type DeviceDataPoint, type SocketOutput, type Logger } from "./types.js";
+import { type DeviceDataPoint, type SocketOutput, type Logger } from "../plugins/types.js";
 
 interface ClientSubscription {
 	socket: net.Socket;
 	topics: Set<string>; // Empty set = all topics
+	rules: ClientRoutingRules;
+	lastSentAt: number;
+}
+
+interface ClientRoutingRules {
+	includeMetrics: Set<string>;
+	excludeMetrics: Set<string>;
+	includeDevices: Set<string>;
+	excludeDevices: Set<string>;
+	allowedQualities: Set<"GOOD" | "BAD" | "UNCERTAIN">;
+	minIntervalMs: number;
+	maxPointsPerMessage: number;
 }
 
 /**
@@ -21,6 +33,17 @@ interface ClientSubscription {
  * Subscription Protocol:
  * 1. Client connects to socket
  * 2. Client sends: {"subscribe": ["modbus", "bacnet"]} (empty array = all topics)
+ *    Optional routing controls:
+ *    {
+ *      "subscribe": ["modbus"],
+ *      "route": {
+ *        "includeMetrics": ["temperature"],
+ *        "excludeDevices": ["pump-2"],
+ *        "qualities": ["GOOD", "UNCERTAIN"],
+ *        "minIntervalMs": 1000,
+ *        "maxPointsPerMessage": 100
+ *      }
+ *    }
  * 3. Server confirms: {"ok": true, "subscribed_to": [...]}
  * 4. Server sends data only to subscribed clients
  */
@@ -38,6 +61,8 @@ export class SocketServer {
 	private readonly MAX_CLIENTS = 10;
 	private readonly SUBSCRIPTION_TIMEOUT_MS = 5000;
 	private readonly BACKPRESSURE_THRESHOLD = 3; // Allow 3 consecutive failures before removal
+	private readonly MAX_POINTS_PER_MESSAGE_LIMIT = 1000;
+	private readonly MAX_MIN_INTERVAL_MS = 60_000;
 
 	constructor(config: SocketOutput, logger: Logger) {
 		this.config = config;
@@ -194,9 +219,6 @@ export class SocketServer {
 		}
 
 		try {
-			const message = this.formatData(dataPoints);
-			const data = message + this.config.delimiter;
-
 			// Track sockets we've already sent to (avoid duplicate sends if socket in both indices)
 			const sentTo = new Set<net.Socket>();
 
@@ -204,20 +226,43 @@ export class SocketServer {
 			const topicSubscribers = this.topicToSockets.get(topic);
 			if (topicSubscribers) {
 				topicSubscribers.forEach((socket) => {
-					this.sendToSocket(socket, data, topic, sentTo);
+					this.routeAndSendToSocket(socket, dataPoints, topic, sentTo);
 				});
 			}
 
 			// Send to wildcard subscribers (not already sent to)
 			this.wildcardSockets.forEach((socket) => {
 				if (!sentTo.has(socket)) {
-					this.sendToSocket(socket, data, topic, sentTo);
+					this.routeAndSendToSocket(socket, dataPoints, topic, sentTo);
 				}
 			});
 		} catch (error) {
 			const errorMessage =
 				error instanceof Error ? error.message : String(error);
 			this.logger.error(`Error sending data: ${errorMessage}`);
+		}
+	}
+
+	private routeAndSendToSocket(
+		socket: net.Socket,
+		dataPoints: DeviceDataPoint[],
+		topic: string,
+		sentTo: Set<net.Socket>,
+	): void {
+		const subscription = this.subscriptions.get(socket);
+		if (!subscription) {
+			return;
+		}
+
+		const filteredPoints = this.applyRoutingRules(subscription, dataPoints);
+		if (filteredPoints.length === 0) {
+			return;
+		}
+
+		const data = this.formatData(filteredPoints) + this.config.delimiter;
+		const sent = this.sendToSocket(socket, data, topic, sentTo);
+		if (sent) {
+			subscription.lastSentAt = Date.now();
 		}
 	}
 
@@ -236,7 +281,7 @@ export class SocketServer {
 		data: string,
 		topic: string,
 		sentTo: Set<net.Socket>,
-	): void {
+	): boolean {
 		try {
 			const flushed = socket.write(data);
 
@@ -269,6 +314,7 @@ export class SocketServer {
 				// Send succeeded: reset failure counter
 				this.slowClients.delete(socket);
 				sentTo.add(socket);
+				return true;
 			}
 		} catch (error) {
 			this.logger.warn(
@@ -276,6 +322,8 @@ export class SocketServer {
 			);
 			this.removeClient(socket);
 		}
+
+		return false;
 	}
 
 	/**
@@ -339,6 +387,8 @@ export class SocketServer {
 		const subscription: ClientSubscription = {
 			socket,
 			topics: new Set(),
+			rules: this.getDefaultRoutingRules(),
+			lastSentAt: 0,
 		};
 
 		// Add to pending subscriptions (NOT active yet - waiting for handshake)
@@ -364,6 +414,9 @@ export class SocketServer {
 					if (msg.subscribe && Array.isArray(msg.subscribe)) {
 						// Clean up old subscriptions first (prevents leaks on re-subscribe)
 						this.unsubscribeAll(socket, subscription);
+
+						// Apply per-client routing / flow-control rules
+						subscription.rules = this.parseRoutingRules(msg.route);
 
 						// Apply subscription filter with explicit state transitions
 						if (msg.subscribe.length > 0) {
@@ -401,6 +454,22 @@ export class SocketServer {
 						if (this.pendingSubscriptions.has(socket)) {
 							this.pendingSubscriptions.delete(socket);
 							this.subscriptions.set(socket, subscription);
+						}
+
+						// Confirm effective subscription/routing back to client
+						try {
+							socket.write(
+								JSON.stringify({
+									ok: true,
+									subscribed_to:
+										subscription.topics.size > 0
+											? Array.from(subscription.topics)
+											: ["*"],
+									routing: this.getSerializableRules(subscription.rules),
+								}) + this.config.delimiter,
+							);
+						} catch (_ackError) {
+							// Non-fatal: subscription is already active.
 						}
 
 						break;
@@ -515,6 +584,159 @@ export class SocketServer {
 				// Ignore errors when destroying socket
 			}
 		}
+	}
+
+	private getDefaultRoutingRules(): ClientRoutingRules {
+		return {
+			includeMetrics: new Set(),
+			excludeMetrics: new Set(),
+			includeDevices: new Set(),
+			excludeDevices: new Set(),
+			allowedQualities: new Set(["GOOD", "BAD", "UNCERTAIN"]),
+			minIntervalMs: 0,
+			maxPointsPerMessage: 0,
+		};
+	}
+
+	private parseRoutingRules(route: unknown): ClientRoutingRules {
+		const rules = this.getDefaultRoutingRules();
+
+		if (!route || typeof route !== "object") {
+			return rules;
+		}
+
+		const candidate = route as {
+			includeMetrics?: unknown;
+			excludeMetrics?: unknown;
+			includeDevices?: unknown;
+			excludeDevices?: unknown;
+			qualities?: unknown;
+			minIntervalMs?: unknown;
+			maxPointsPerMessage?: unknown;
+		};
+
+		rules.includeMetrics = this.asStringSet(candidate.includeMetrics);
+		rules.excludeMetrics = this.asStringSet(candidate.excludeMetrics);
+		rules.includeDevices = this.asStringSet(candidate.includeDevices);
+		rules.excludeDevices = this.asStringSet(candidate.excludeDevices);
+
+		if (Array.isArray(candidate.qualities)) {
+			const qualitySet = new Set<"GOOD" | "BAD" | "UNCERTAIN">();
+			for (const value of candidate.qualities) {
+				if (value === "GOOD" || value === "BAD" || value === "UNCERTAIN") {
+					qualitySet.add(value);
+				}
+			}
+			if (qualitySet.size > 0) {
+				rules.allowedQualities = qualitySet;
+			}
+		}
+
+		if (
+			typeof candidate.minIntervalMs === "number" &&
+			Number.isFinite(candidate.minIntervalMs)
+		) {
+			rules.minIntervalMs = Math.max(
+				0,
+				Math.min(Math.floor(candidate.minIntervalMs), this.MAX_MIN_INTERVAL_MS),
+			);
+		}
+
+		if (
+			typeof candidate.maxPointsPerMessage === "number" &&
+			Number.isFinite(candidate.maxPointsPerMessage)
+		) {
+			rules.maxPointsPerMessage = Math.max(
+				0,
+				Math.min(
+					Math.floor(candidate.maxPointsPerMessage),
+					this.MAX_POINTS_PER_MESSAGE_LIMIT,
+				),
+			);
+		}
+
+		return rules;
+	}
+
+	private asStringSet(value: unknown): Set<string> {
+		if (!Array.isArray(value)) {
+			return new Set();
+		}
+
+		const result = new Set<string>();
+		for (const item of value) {
+			if (typeof item === "string" && item.trim().length > 0) {
+				result.add(item.trim());
+			}
+		}
+
+		return result;
+	}
+
+	private applyRoutingRules(
+		subscription: ClientSubscription,
+		dataPoints: DeviceDataPoint[],
+	): DeviceDataPoint[] {
+		const { rules } = subscription;
+
+		if (
+			rules.minIntervalMs > 0 &&
+			subscription.lastSentAt > 0 &&
+			Date.now() - subscription.lastSentAt < rules.minIntervalMs
+		) {
+			return [];
+		}
+
+		let filtered = dataPoints.filter((point) => {
+			if (!rules.allowedQualities.has(point.quality)) {
+				return false;
+			}
+
+			if (
+				rules.includeMetrics.size > 0 &&
+				!rules.includeMetrics.has(point.metric)
+			) {
+				return false;
+			}
+
+			if (rules.excludeMetrics.has(point.metric)) {
+				return false;
+			}
+
+			if (
+				rules.includeDevices.size > 0 &&
+				!rules.includeDevices.has(point.deviceName)
+			) {
+				return false;
+			}
+
+			if (rules.excludeDevices.has(point.deviceName)) {
+				return false;
+			}
+
+			return true;
+		});
+
+		if (
+			rules.maxPointsPerMessage > 0 &&
+			filtered.length > rules.maxPointsPerMessage
+		) {
+			filtered = filtered.slice(0, rules.maxPointsPerMessage);
+		}
+
+		return filtered;
+	}
+
+	private getSerializableRules(rules: ClientRoutingRules): Record<string, unknown> {
+		return {
+			includeMetrics: Array.from(rules.includeMetrics),
+			excludeMetrics: Array.from(rules.excludeMetrics),
+			includeDevices: Array.from(rules.includeDevices),
+			excludeDevices: Array.from(rules.excludeDevices),
+			qualities: Array.from(rules.allowedQualities),
+			minIntervalMs: rules.minIntervalMs,
+			maxPointsPerMessage: rules.maxPointsPerMessage,
+		};
 	}
 
 	/**
