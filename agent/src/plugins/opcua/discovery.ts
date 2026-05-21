@@ -9,7 +9,6 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { createHash } from 'crypto';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, type DiscoveredDevice } from '../types';
-import { generateFingerprint } from '../fingerprint';
 import type { ConfigManager } from '../../core/config.js';
 
 export interface OPCUADiscoveryOptions {
@@ -105,6 +104,10 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 	constructor(logger?: AgentLogger, configManager?: ConfigManager) {
 		super('opcua', logger);
 		this.configManager = configManager;
+	}
+
+	generateFingerprint(applicationUri: string): string {
+		return createHash('sha256').update(`opcua:${applicationUri}`).digest('hex').substring(0, 32);
 	}
 
 	/**
@@ -358,7 +361,7 @@ export class OPCUADiscoveryPlugin extends BaseDiscoveryPlugin {
 					const applicationUri = preferredEndpoint.server?.applicationUri || `urn:${new URL(url).hostname}:unknown`;
 					
 					// Generate cryptographic fingerprint
-					const fingerprint = generateFingerprint('opcua', applicationUri);
+					const fingerprint = this.generateFingerprint(applicationUri);
 					
 					const certThumbprint = this.calculateThumbprint(preferredEndpoint.serverCertificate);
 					const selectedSecurityMode = this.mapSecurityMode(preferredEndpoint.securityMode);

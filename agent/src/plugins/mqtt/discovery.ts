@@ -14,13 +14,13 @@
  */
 
 import type { AgentLogger } from "../../logging/agent-logger";
+import { createHash } from "crypto";
 import { LogComponents } from "../../logging/types";
 import {
 	BaseDiscoveryPlugin,
 	type DiscoveredDevice,
 	type ValidationResult,
 } from "../types";
-import { generateFingerprint } from '../fingerprint';
 import * as mqtt from "mqtt";
 
 export interface MqttDiscoveryOptions {
@@ -62,6 +62,10 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 		) => mqtt.MqttClient = mqtt.connect,
 	) {
 		super("mqtt", logger);
+	}
+
+	generateFingerprint(topic: string): string {
+		return createHash('sha256').update(`mqtt:${topic}`).digest('hex').substring(0, 32);
 	}
 
 	/**
@@ -390,7 +394,7 @@ export class MqttDiscoveryPlugin extends BaseDiscoveryPlugin {
 		const devices: DiscoveredDevice[] = [];
 
 		for (const validation of validatedTopics) {
-			const fingerprint = generateFingerprint('mqtt', validation.topic);
+			const fingerprint = this.generateFingerprint(validation.topic);
 
 			// Generate name from topic with length limit to avoid excessively long names
 			let topicName = validation.topic.replace(/\//g, "_");

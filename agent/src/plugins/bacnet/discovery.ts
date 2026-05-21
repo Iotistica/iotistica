@@ -17,10 +17,10 @@
 
 import type { AgentLogger } from '../../logging/agent-logger';
 import os from 'os';
+import { createHash } from 'crypto';
 import BACnet from 'bacstack';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscoveryPlugin, type DiscoveredDevice, type ValidationResult } from '../types';
-import { generateFingerprint } from '../fingerprint';
 import { pLimit } from '../../lib/p-limit.js';
 
 export interface BACnetDiscoveryOptions {
@@ -162,6 +162,10 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 
 	constructor(logger?: AgentLogger) {
 		super('bacnet', logger);
+	}
+
+	generateFingerprint(ipAddress: string, deviceInstance: number): string {
+		return createHash('sha256').update(`bacnet:${ipAddress}:${deviceInstance}`).digest('hex').substring(0, 32);
 	}
 
 	private asString(value: unknown): string | undefined {
@@ -599,8 +603,7 @@ export class BACnetDiscoveryPlugin extends BaseDiscoveryPlugin {
 			}
 
 			for (const [deviceInstance, deviceInfo] of devices.entries()) {
-				const fingerprint = generateFingerprint(
-					'bacnet',
+				const fingerprint = this.generateFingerprint(
 					deviceInfo.ipAddress,
 					deviceInstance
 				);

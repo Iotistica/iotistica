@@ -159,6 +159,7 @@ export abstract class BaseDiscoveryPlugin {
 	abstract discover(options?: any): Promise<DiscoveredDevice[]>;
 	abstract validate(device: DiscoveredDevice, timeout?: number): Promise<any>;
 	abstract isAvailable(): Promise<boolean>;
+	abstract generateFingerprint(...args: any[]): string;
 
 	getInfo(): PluginInfo {
 		return {
