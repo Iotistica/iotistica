@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentLogger } from "../logging/agent-logger";
+
 
 /**
  * Unix Socket Output Configuration Schema (Protocol-agnostic)
@@ -104,6 +104,14 @@ export interface IProtocolAdapter {
 	on(event: string, listener: (...args: any[]) => void): this;
 }
 
+export interface IDiscovery {
+	discover(options?: any): Promise<DiscoveredDevice[]>;
+	validate(device: DiscoveredDevice, timeout?: number): Promise<any>;
+	isAvailable(): Promise<boolean>;
+	generateFingerprint(...args: any[]): string;
+	getInfo(): PluginInfo;
+}
+
 /**
  * Startup callback registered per protocol in AdapterManager.
  */
@@ -184,25 +192,4 @@ export interface PluginInfo {
 	capabilities?: string[];
 }
 
-export abstract class BaseDiscovery {
-	protected logger?: AgentLogger;
-	readonly protocol: string;
 
-	constructor(protocol: string, logger?: AgentLogger) {
-		this.protocol = protocol;
-		this.logger = logger;
-	}
-
-	abstract discover(options?: any): Promise<DiscoveredDevice[]>;
-	abstract validate(device: DiscoveredDevice, timeout?: number): Promise<any>;
-	abstract isAvailable(): Promise<boolean>;
-	abstract generateFingerprint(...args: any[]): string;
-
-	getInfo(): PluginInfo {
-		return {
-			protocol: this.protocol,
-			version: "1.0.0",
-			description: `Discovery plugin for ${this.protocol}`,
-		};
-	}
-}

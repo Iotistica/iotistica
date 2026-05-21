@@ -4,6 +4,9 @@ import { EventEmitter } from 'events';
 import { type DeviceDataPoint, type IDeviceStatus, type Logger, type IProtocolAdapter } from './types.js';
 import { type Endpoint } from '../db/models/endpoint.model.js';
 import { DeviceModel } from '../db/models/device.model.js';
+import type { AgentLogger } from "../logging/agent-logger";
+import { IDiscovery, DiscoveredDevice, PluginInfo} from './types.js';
+
 
 export interface GenericDeviceConfig {
 	name: string;
@@ -364,5 +367,28 @@ export abstract class BaseProtocolAdapter extends EventEmitter implements IProto
 					: db.metadata)
 				: undefined
 		}));
+	}
+}
+
+export abstract class BaseDiscovery implements IDiscovery {
+	protected logger?: AgentLogger;
+	readonly protocol: string;
+
+	constructor(protocol: string, logger?: AgentLogger) {
+		this.protocol = protocol;
+		this.logger = logger;
+	}
+
+	abstract discover(options?: any): Promise<DiscoveredDevice[]>;
+	abstract validate(device: DiscoveredDevice, timeout?: number): Promise<any>;
+	abstract isAvailable(): Promise<boolean>;
+	abstract generateFingerprint(...args: any[]): string;
+
+	getInfo(): PluginInfo {
+		return {
+			protocol: this.protocol,
+			version: "1.0.0",
+			description: `Discovery plugin for ${this.protocol}`,
+		};
 	}
 }

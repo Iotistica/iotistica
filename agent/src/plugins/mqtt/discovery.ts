@@ -17,10 +17,11 @@ import type { AgentLogger } from "../../logging/agent-logger";
 import { createHash } from "crypto";
 import { LogComponents } from "../../logging/types";
 import {
-	BaseDiscovery,
 	type DiscoveredDevice,
 	type ValidationResult,
 } from "../types";
+
+import { BaseDiscovery } from '../base';
 import * as mqtt from "mqtt";
 
 export interface MqttDiscoveryOptions {

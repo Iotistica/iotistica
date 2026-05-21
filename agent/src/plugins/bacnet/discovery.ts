@@ -20,7 +20,9 @@ import os from 'os';
 import { createHash } from 'crypto';
 import BACnet from 'bacstack';
 import { LogComponents } from '../../logging/types';
-import { BaseDiscovery, type DiscoveredDevice, type ValidationResult } from '../types';
+import { BaseDiscovery } from '../base';
+import { type DiscoveredDevice, ValidationResult } from '../types';
+
 import { pLimit } from '../../lib/p-limit.js';
 
 export interface BACnetDiscoveryOptions {

@@ -8,7 +8,8 @@
 import type { AgentLogger } from '../../logging/agent-logger';
 import { createHash } from 'crypto';
 import { LogComponents } from '../../logging/types';
-import { BaseDiscovery, type DiscoveredDevice } from '../types';
+import { BaseDiscovery } from '../base';
+import { type DiscoveredDevice } from '../types';
 import type { ConfigManager } from '../../core/config.js';
 
 export interface OPCUADiscoveryOptions {
