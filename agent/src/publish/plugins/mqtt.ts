@@ -20,6 +20,72 @@ interface ExternalMqttConfig {
 	rejectUnauthorized?: boolean;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function loadExternalMqttConfigFromRecord(config: Record<string, unknown> | null | undefined, fallbackDeviceId?: string): ExternalMqttConfig | null {
+	if (!isRecord(config)) {
+		return null;
+	}
+
+	const brokerUrl = typeof config.brokerUrl === 'string'
+		? config.brokerUrl
+		: typeof config.url === 'string'
+			? config.url
+			: typeof config.host === 'string'
+				? config.host
+				: '';
+
+	if (!brokerUrl) {
+		return null;
+	}
+
+	let parsedUrl: URL;
+	try {
+		parsedUrl = new URL(brokerUrl);
+	} catch {
+		throw new Error('Invalid mqtt publisher config brokerUrl. Expected absolute URL like mqtt://host:1883 or mqtts://host:8883');
+	}
+
+	const scheme = parsedUrl.protocol.replace(':', '').toLowerCase();
+	if (scheme !== 'mqtt' && scheme !== 'mqtts' && scheme !== 'ws' && scheme !== 'wss') {
+		throw new Error('mqtt publisher config brokerUrl must use mqtt, mqtts, ws, or wss scheme');
+	}
+
+	const protocol = scheme;
+	const defaultPort = protocol === 'mqtts' ? 8883 : protocol === 'mqtt' ? 1883 : protocol === 'wss' ? 443 : 80;
+	const rejectUnauthorized = typeof config.rejectUnauthorized === 'boolean' ? config.rejectUnauthorized : undefined;
+
+	return {
+		provider: 'mqtt',
+		host: parsedUrl.hostname,
+		port: parsedUrl.port ? Number(parsedUrl.port) : defaultPort,
+		protocol,
+		path: typeof config.path === 'string'
+			? config.path
+			: parsedUrl.pathname && parsedUrl.pathname !== '/' ? parsedUrl.pathname : undefined,
+		clientId:
+			typeof config.clientId === 'string' && config.clientId.trim().length > 0
+				? config.clientId
+				: typeof config.deviceId === 'string' && config.deviceId.trim().length > 0
+					? config.deviceId
+					: fallbackDeviceId || 'device',
+		username: typeof config.username === 'string' ? config.username : parsedUrl.username || undefined,
+		password: typeof config.password === 'string' ? config.password : parsedUrl.password || undefined,
+		topicTemplate:
+			typeof config.topicTemplate === 'string' && config.topicTemplate.trim().length > 0
+				? config.topicTemplate
+				: typeof config.publishTopicTemplate === 'string' && config.publishTopicTemplate.trim().length > 0
+					? config.publishTopicTemplate
+					: '{topic}',
+		ca: typeof config.ca === 'string' ? config.ca : undefined,
+		cert: typeof config.cert === 'string' ? config.cert : undefined,
+		key: typeof config.key === 'string' ? config.key : undefined,
+		rejectUnauthorized,
+	};
+}
+
 function loadExternalMqttConfigFromEnv(fallbackDeviceId?: string): ExternalMqttConfig {
 	const rawUrl = process.env.EXTERNAL_MQTT_BROKER_URL || process.env.MQTT_EXTERNAL_BROKER_URL || '';
 	if (!rawUrl) {
@@ -153,6 +219,17 @@ export class MqttPublishPlugin extends BasePublishPlugin {
 		const client = MqttPublishPlugin.createClientFromEnv(agentLogger);
 
 		return new MqttPublishPlugin(client, logger);
+	}
+
+	public static fromConfig(
+		config: Record<string, unknown> | null | undefined,
+		agentLogger?: AgentLogger,
+		logger?: Logger,
+		fallbackDeviceId?: string,
+	): MqttPublishPlugin {
+		const resolved = loadExternalMqttConfigFromRecord(config, fallbackDeviceId)
+			?? loadExternalMqttConfigFromEnv(fallbackDeviceId);
+		return new MqttPublishPlugin(new ExternalMqttClient(resolved, agentLogger), logger);
 	}
 
 	public static createClientFromEnv(agentLogger?: AgentLogger, deviceUuid?: string): ExternalMqttClient {

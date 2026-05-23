@@ -32,6 +32,5 @@ export type { MessageBufferSyncOptions } from './buffer';
 export { AzureIotClient } from '../publish/plugins/azure';
 export { AwsIotClient as AwsIotMqttClient } from '../publish/plugins/aws';
 export { GcpIotClient as GcpIotMqttClient } from '../publish/plugins/gcp';
-export { createExternalPublishTarget, createExternalPublishClient } from '../publish/core/external-target';
 export { normalizeTarget } from '../publish/core/types';
 export type { CloudPublishTarget } from '../publish/core/types';

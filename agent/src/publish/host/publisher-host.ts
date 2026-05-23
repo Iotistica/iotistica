@@ -24,7 +24,7 @@ interface PublisherHostOptions {
 	endpointName: string;
 	defaultClient: IPublishClient;
 	logger?: Logger;
-	buildPlugin: (target: string, client: IPublishClient, logger?: Logger) => IPublishPlugin;
+	buildPlugin: (publisher: PublisherRecord, client: IPublishClient, logger?: Logger) => IPublishPlugin;
 }
 
 export class PublisherHost implements IPublishSink {
@@ -158,7 +158,14 @@ export class PublisherHost implements IPublishSink {
 
 	private createLegacyFallbackBinding(): HostBinding[] {
 		const target = (process.env.PUBLISH_TARGET || 'iotistica').trim().toLowerCase() || 'iotistica';
-		const plugin = this.options.buildPlugin(target, this.options.defaultClient, this.options.logger);
+		const publisher: PublisherRecord = {
+			id: -1,
+			name: `legacy-${target}`,
+			type: target,
+			config_json: null,
+			enabled: true,
+		};
+		const plugin = this.options.buildPlugin(publisher, this.options.defaultClient, this.options.logger);
 		return [{
 			subscription: {
 				publisher_id: -1,
@@ -167,10 +174,7 @@ export class PublisherHost implements IPublishSink {
 				enabled: true,
 			},
 			publisher: {
-				id: -1,
-				name: `legacy-${target}`,
-				type: target,
-				enabled: true,
+				...publisher,
 			},
 			plugin,
 		}];
@@ -205,7 +209,7 @@ export class PublisherHost implements IPublishSink {
 
 			let plugin = pluginByPublisherId.get(subscription.publisher_id);
 			if (!plugin) {
-				plugin = this.options.buildPlugin(publisher.type, this.options.defaultClient, this.options.logger);
+				plugin = this.options.buildPlugin(publisher, this.options.defaultClient, this.options.logger);
 				pluginByPublisherId.set(subscription.publisher_id, plugin);
 			}
 

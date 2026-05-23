@@ -20,7 +20,6 @@ import { AdapterInitializer } from './adapters.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { type CloudMqttClient } from '../mqtt/manager.js';
-import type { MqttConnection } from '../publish/core/types.js';
 import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
 import { type StateManager } from '../core/state.js';
 
@@ -42,11 +41,6 @@ export interface FeatureContext {
   dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
   pipelineService?: PipelineService; // Node-RED payload transform pipeline (optional)
   liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
-  /**
-   * When set, device data is routed through this connection (IoT Hub, AWS, GCP, …)
-   * instead of the default Iotistica CloudMqttClient.
-   */
-  deviceConnection?: MqttConnection;
 }
 
 export interface InitializedFeatures {
@@ -374,12 +368,7 @@ export class FeatureInitializer {
         useKeyCompactionPoc,
         useDeflatePoc,
         anomalyService,
-        this.context.deviceConnection, // Route device data to external cloud if configured
 			);
-
-			if (this.context.pipelineService) {
-				this.features.devicePublish.setPipelineService(this.context.pipelineService);
-			}
 
 			if (this.context.liveDataInterceptor) {
 				this.features.devicePublish.setLiveDataInterceptor(this.context.liveDataInterceptor);
@@ -639,7 +628,6 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 		anomalyService: ctx.anomalyService,
 		dictionaryManager: ctx.dictionaryManager,
 		pipelineService: ctx.pipelineService,
-		deviceConnection: ctx.deviceConnection,
 	};
 
 	const initializer = new FeatureInitializer(featureContext);

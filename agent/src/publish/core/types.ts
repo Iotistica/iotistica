@@ -102,6 +102,7 @@ export interface PublishPluginStarterContext {
   target: string;
   client: IPublishClient;
   logger?: Logger;
+  config?: Record<string, unknown> | null;
 }
 
 export type PublishPluginStarter = (

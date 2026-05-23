@@ -48,6 +48,16 @@ function deriveState(adapter: any): string {
   return (Date.now() - lastSeenMs) < stalenessThresholdMs ? 'online' : 'offline';
 }
 
+function isAllSelector(value?: string): boolean {
+  return typeof value === 'string' && ['all', '*', 'every'].includes(value.trim().toLowerCase());
+}
+
+async function getAllEndpointUuids(): Promise<string[]> {
+  const result = await apiRequest(`${DEVICE_API_V1}/endpoints`);
+  const adapters: Array<{ uuid?: string }> = result.endpoints || [];
+  return adapters.map((adapter) => adapter.uuid).filter((uuid): uuid is string => typeof uuid === 'string' && uuid.trim().length > 0);
+}
+
 async function postAdapter(body: object): Promise<void> {
   const result = await apiRequest(`${DEVICE_API_V1}/endpoints`, {
     method: 'POST',
@@ -231,6 +241,26 @@ export async function adaptersRemove(uuid?: string): Promise<void> {
 export async function adaptersEnable(uuid?: string): Promise<void> {
   if (!uuid) {
     throw new CLIError('UUID is required', 1, { usage: 'iotctl devices enable <uuid>' });
+  }
+
+  if (isAllSelector(uuid)) {
+    const endpointUuids = await getAllEndpointUuids();
+    if (endpointUuids.length === 0) {
+      logger.info('No devices configured');
+      return;
+    }
+
+    let updatedCount = 0;
+    for (const endpointUuid of endpointUuids) {
+      await apiRequest(`${DEVICE_API_V1}/endpoints/${encodeURIComponent(endpointUuid)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: true }),
+      });
+      updatedCount++;
+    }
+
+    logger.info(`Enabled ${updatedCount} device${updatedCount === 1 ? '' : 's'}`);
+    return;
   }
 
   try {

@@ -70,13 +70,6 @@ export class DevicePublish extends EventEmitter {
 	private pipelineService?: PipelineService;
 	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
 	private readonly externalPayloadFormat: ExternalPayloadFormat;
-	/** External cloud connection; overrides CloudMqttClient for device telemetry routing. */
-	private deviceConnection?: MqttConnection;
-	/**
-   * Shared durable replay worker used for external targets (IoT Hub/AWS/GCP).
-   * For default Iotistica flow, CloudMqttClient already owns this service.
-   */
-	private externalBufferSync?: MessageBufferSync;
 	private readonly publishPluginRegistry: PublishPluginRegistry;
 	private readonly publishPluginLoader: PublishPluginLoader;
 	private readonly publishControlRepository: PublishControlRepository;
@@ -91,7 +84,6 @@ export class DevicePublish extends EventEmitter {
 		useKeyCompactionPoc: boolean = false, // Enable dictionary key compaction POC
 		useDeflatePoc: boolean = false, // Enable DEFLATE compression POC
 		anomalyService?: AnomalyDetectionService,
-		deviceConnection?: MqttConnection, // External cloud target (IoT Hub, AWS, GCP)
 	) {
 		super();
 		this.config = config;
@@ -129,17 +121,7 @@ export class DevicePublish extends EventEmitter {
 		this.useKeyCompactionPoc = useKeyCompactionPoc;
 		this.useDeflatePoc = useDeflatePoc;
 		this.anomalyService = anomalyService;
-		this.deviceConnection = deviceConnection;
-		this.externalPayloadFormat = deviceConnection
-			? resolveExternalPayloadFormat()
-			: 'custom';
-
-		if (deviceConnection) {
-			this.logger.info('External publish payload format selected', {
-				format: this.externalPayloadFormat,
-				setting: process.env.PUBLISH_EXTERNAL_FORMAT || 'custom',
-			});
-		}
+		this.externalPayloadFormat = resolveExternalPayloadFormat();
 
 		this.publishPluginRegistry = new PublishPluginRegistry();
 		this.publishPluginLoader = new PublishPluginLoader(agentLogger);
@@ -243,8 +225,6 @@ export class DevicePublish extends EventEmitter {
 			return;
 		}
 
-		await this.startExternalBufferSyncIfNeeded();
-    
 		// Create and start all devices
 		for (let i = 0; i < deviceConfig.endpoints.length; i++) {
 			const config = deviceConfig.endpoints[i];
@@ -259,9 +239,6 @@ export class DevicePublish extends EventEmitter {
 	}
 
 	private async onStop(): Promise<void> {
-		this.externalBufferSync?.stop();
-		this.externalBufferSync = undefined;
-
 		// Stop all devices
 		await Promise.all(this.devices.map(device => device.stop()));
     
@@ -293,27 +270,9 @@ export class DevicePublish extends EventEmitter {
 		this.isRunning = false;
 	}
 
-	private async startExternalBufferSyncIfNeeded(): Promise<void> {
-		// Default Iotistica path already starts MessageBufferSync in CloudMqttClient.
-		// Only external targets need feature-level wiring to reuse the same replay logic.
-		if (!this.deviceConnection || this.externalBufferSync) {
-			return;
-		}
-
-		const publishClient = this.deviceConnection as Partial<BufferSyncPublishClient>;
-		if (typeof publishClient.on !== 'function' || typeof publishClient.off !== 'function') {
-			this.logger.warn('External device connection does not support EventEmitter connect hooks; durable replay worker not started');
-			return;
-		}
-
-		this.externalBufferSync = new MessageBufferSync(publishClient as BufferSyncPublishClient, this.agentLogger);
-		await this.externalBufferSync.start();
-		this.logger.debug('Shared durable replay worker started for external publish target');
-	}
-
 	/**
-   * Get statistics for all devices (includes health status)
-   */
+	 * Get statistics for all devices (includes health status)
+	 */
 	public getStats(): Record<string, any> {
 		const stats: Record<string, any> = {};
 		const publishConfig = this.config as DevicePublishConfig;
@@ -390,18 +349,17 @@ export class DevicePublish extends EventEmitter {
 			}
 		};
 
-		const selectedConnection = this.deviceConnection ?? this.mqttConnection!;
 		const publishPlugin = new PublisherHost({
 			protocol,
 			endpointName: config.name,
-			defaultClient: selectedConnection,
+			defaultClient: this.mqttConnection!,
 			logger: protocolLogger,
-			buildPlugin: (target, client, logger) => this.createPublishPlugin(target, client, logger),
+			buildPlugin: (publisher, client, logger) => this.createPublishPlugin(publisher, client, logger),
 		});
 
 		return new PublishManager(
 			config,
-			selectedConnection,
+			this.mqttConnection!,
 			publishPlugin,
 			protocolLogger,
 			this.deviceUuid,
@@ -424,8 +382,8 @@ export class DevicePublish extends EventEmitter {
 			AwsPublishPlugin.fromEnv(this.agentLogger, logger);
 		const gcpStarter: PublishPluginStarter = ({ logger }) =>
 			GcpPublishPlugin.fromEnv(this.agentLogger, logger);
-		const mqttStarter: PublishPluginStarter = ({ logger }) =>
-			MqttPublishPlugin.fromEnv(this.agentLogger, logger);
+		const mqttStarter: PublishPluginStarter = ({ logger, config }) =>
+			MqttPublishPlugin.fromConfig(config ?? null, this.agentLogger, logger, this.deviceUuid);
 
 		this.publishPluginRegistry.registerPublishPluginStarter('iotistica', iotisticaStarter, true);
 		this.publishPluginRegistry.registerPublishPluginStarter('azure', azureStarter, true);
@@ -456,21 +414,16 @@ export class DevicePublish extends EventEmitter {
 	}
 
 	private createPublishPlugin(
-		target: string,
+		publisher: { type: string; config_json?: Record<string, unknown> | null },
 		client: IPublishClient,
 		logger?: Logger,
 	): IPublishPlugin {
-		// When an external connection is pre-initialized at startup (ctx.deviceConnection),
-		// reuse that single shared client for all endpoint managers to avoid creating
-		// one MQTT client/reconnect loop per endpoint.
-		if (target !== 'iotistica' && this.deviceConnection) {
-			return new ConnectionPublishPlugin(client, logger);
-		}
-
+		const target = publisher.type;
 		return this.publishPluginRegistry.create(target, {
 			target,
 			client,
 			logger,
+			config: publisher.config_json ?? null,
 		});
 	}
 
