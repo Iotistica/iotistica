@@ -16,6 +16,7 @@ import { HeartbeatManager } from './heartbeat.js';
 import { SchemaDriftDetector } from './drift.js';
 import { SchemaDriftModel } from '../../db/models/schema-drift.model.js';
 import type { DictionaryManager } from '../../mqtt/dictionary.js';
+import type { PublishDestinationInfo } from './types.js';
 
 // Adaptive batch safety limits (calculated once at module load)
 const MAX_BATCH_MESSAGES = 10000;
@@ -518,6 +519,7 @@ export class PublishManager extends EventEmitter {
 		if (this.needStop) return;
 		let bufferedRecordId: number | undefined;
 		let publishConfirmed = false;
+		const destinationContext = this.getPublishDestinationLogContext(topic);
 
 		try {
 			const claimed = await this.persistClaimedBatch(topic, data, msgId);
@@ -546,10 +548,10 @@ export class PublishManager extends EventEmitter {
 			const MessageBufferModel = await this.getMessageBufferModel();
 			MessageBufferModel.deleteByIds([claimed.id]);
 			this.stats.recordPublish(messageCount, batchBytes);
-			this.stats.logPublishSuccess(messageCount, batchBytes, info, endpointName, this.logger, buffered);
+			this.stats.logPublishSuccess(messageCount, batchBytes, info, endpointName, this.logger, buffered, destinationContext);
 			this.batcher.reset();
 		} catch (err) {
-			this.logger?.error(`Failed to publish batch from endpoint '${endpointName}'`, err);
+			this.logger?.error(`Failed to publish batch from endpoint '${endpointName}'`, err, destinationContext);
 
 			try {
 				if (publishConfirmed) {
@@ -574,6 +576,33 @@ export class PublishManager extends EventEmitter {
 				this.logger?.error(`Failed to durably buffer publish failure for endpoint '${endpointName}'`, bufferError);
 			}
 		}
+	}
+
+	private getPublishDestinationLogContext(topic?: string): Record<string, unknown> | undefined {
+		const provider = this.publishPlugin as IPublishSink & {
+			getDestinationInfo?: () => PublishDestinationInfo[];
+		};
+
+		if (typeof provider.getDestinationInfo !== 'function') {
+			return undefined;
+		}
+
+		const destinations = provider.getDestinationInfo();
+		if (!Array.isArray(destinations) || destinations.length === 0) {
+			return undefined;
+		}
+
+		return {
+			topic,
+			destinations: destinations.map((destination) => ({
+				publisher_id: destination.publisherId,
+				publisher_name: destination.publisherName,
+				publisher_type: destination.publisherType,
+				subscription_ids: destination.subscriptionIds,
+				topics: destination.topics,
+			})),
+			destinationCount: destinations.length,
+		};
 	}
 
 	private async publishOffline(

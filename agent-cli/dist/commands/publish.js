@@ -1,5 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.publishPublishersList = publishPublishersList;
+exports.publishSubscriptionsList = publishSubscriptionsList;
 exports.publishSubscriptionsAdd = publishSubscriptionsAdd;
 exports.publishMqttAdd = publishMqttAdd;
 const core_1 = require("../core");
@@ -22,6 +24,76 @@ function parseCsv(input) {
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean);
+}
+/**
+ * iotctl publish publishers list [--include-disabled]
+ */
+async function publishPublishersList() {
+    const includeDisabled = hasFlag('include-disabled');
+    try {
+        const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/publishers?includeDisabled=${includeDisabled ? 'true' : 'false'}`);
+        const publishers = result.publishers || [];
+        if (publishers.length === 0) {
+            core_1.logger.info('No publishers configured');
+            return;
+        }
+        core_1.logger.info(`Found ${publishers.length} publisher${publishers.length === 1 ? '' : 's'}`);
+        for (const publisher of publishers) {
+            core_1.logger.info(`Publisher ${publisher.name || '(unnamed)'}`, {
+                id: publisher.id,
+                type: publisher.type,
+                enabled: publisher.enabled,
+            });
+        }
+    }
+    catch (error) {
+        if (error instanceof core_1.CLIError)
+            throw error;
+        throw new core_1.CLIError('Failed to list publishers', 1, {
+            error: error.message,
+        });
+    }
+}
+/**
+ * iotctl publish subscriptions list [--publisher-id <id>] [--include-disabled]
+ */
+async function publishSubscriptionsList() {
+    const includeDisabled = hasFlag('include-disabled');
+    const publisherIdRaw = getFlag('publisher-id');
+    let publisherQuery = '';
+    if (publisherIdRaw !== undefined) {
+        const publisherId = Number(publisherIdRaw);
+        if (!Number.isFinite(publisherId)) {
+            throw new core_1.CLIError('Invalid --publisher-id value', 1, {
+                publisherId: publisherIdRaw,
+            });
+        }
+        publisherQuery = `&publisher_id=${publisherId}`;
+    }
+    try {
+        const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/subscriptions?includeDisabled=${includeDisabled ? 'true' : 'false'}${publisherQuery}`);
+        const subscriptions = result.subscriptions || [];
+        if (subscriptions.length === 0) {
+            core_1.logger.info('No subscriptions configured');
+            return;
+        }
+        core_1.logger.info(`Found ${subscriptions.length} subscription${subscriptions.length === 1 ? '' : 's'}`);
+        for (const subscription of subscriptions) {
+            core_1.logger.info(`Subscription ${subscription.id ?? '(unknown)'}`, {
+                publisher_id: subscription.publisher_id,
+                topics: subscription.topics,
+                payload_format: subscription.payload_format,
+                enabled: subscription.enabled,
+            });
+        }
+    }
+    catch (error) {
+        if (error instanceof core_1.CLIError)
+            throw error;
+        throw new core_1.CLIError('Failed to list subscriptions', 1, {
+            error: error.message,
+        });
+    }
 }
 async function resolvePublisherId(input) {
     if (input.publisherIdRaw) {

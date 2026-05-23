@@ -84,8 +84,14 @@ function buildCommands(args) {
             _default: provision_1.mqttListUsers,
         },
         publish: {
+            publishers: {
+                list: publish_1.publishPublishersList,
+                _default: publish_1.publishPublishersList,
+            },
             subscriptions: {
                 add: publish_1.publishSubscriptionsAdd,
+                list: publish_1.publishSubscriptionsList,
+                _default: publish_1.publishSubscriptionsList,
             },
             mqtt: {
                 add: publish_1.publishMqttAdd,

@@ -1,4 +1,12 @@
 /**
+ * iotctl publish publishers list [--include-disabled]
+ */
+export declare function publishPublishersList(): Promise<void>;
+/**
+ * iotctl publish subscriptions list [--publisher-id <id>] [--include-disabled]
+ */
+export declare function publishSubscriptionsList(): Promise<void>;
+/**
  * iotctl publish subscriptions add --publisher-id <id>
  *   [--topics modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]
  *   [--include-devices d1,d2] [--exclude-devices d3] [--disabled]

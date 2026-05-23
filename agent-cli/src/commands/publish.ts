@@ -20,6 +20,98 @@ function parseCsv(input?: string): string[] {
     .filter(Boolean);
 }
 
+function normalizeTopicsForDisplay(rawTopics: unknown): string[] | string {
+  if (!Array.isArray(rawTopics) || rawTopics.length === 0) {
+    return '(all protocols)';
+  }
+
+  const topics = rawTopics
+    .map((value) => String(value).trim())
+    .filter(Boolean);
+
+  return topics.length > 0 ? topics : '(all protocols)';
+}
+
+/**
+ * iotctl publish publishers list [--include-disabled]
+ */
+export async function publishPublishersList(): Promise<void> {
+  const includeDisabled = hasFlag('include-disabled');
+
+  try {
+    const result = await apiRequest(
+      `${DEVICE_API_V1}/publish/publishers?includeDisabled=${includeDisabled ? 'true' : 'false'}`,
+    );
+    const publishers: Array<Record<string, any>> = result.publishers || [];
+
+    if (publishers.length === 0) {
+      logger.info('No publishers configured');
+      return;
+    }
+
+    logger.info(`Found ${publishers.length} publisher${publishers.length === 1 ? '' : 's'}`);
+    for (const publisher of publishers) {
+      logger.info(`Publisher ${publisher.name || '(unnamed)'}`, {
+        id: publisher.id,
+        type: publisher.type,
+        enabled: publisher.enabled,
+      });
+    }
+  } catch (error) {
+    if (error instanceof CLIError) throw error;
+    throw new CLIError('Failed to list publishers', 1, {
+      error: (error as Error).message,
+    });
+  }
+}
+
+/**
+ * iotctl publish subscriptions list [--publisher-id <id>] [--include-disabled]
+ */
+export async function publishSubscriptionsList(): Promise<void> {
+  const includeDisabled = hasFlag('include-disabled');
+  const publisherIdRaw = getFlag('publisher-id');
+  let publisherQuery = '';
+
+  if (publisherIdRaw !== undefined) {
+    const publisherId = Number(publisherIdRaw);
+    if (!Number.isFinite(publisherId)) {
+      throw new CLIError('Invalid --publisher-id value', 1, {
+        publisherId: publisherIdRaw,
+      });
+    }
+
+    publisherQuery = `&publisher_id=${publisherId}`;
+  }
+
+  try {
+    const result = await apiRequest(
+      `${DEVICE_API_V1}/publish/subscriptions?includeDisabled=${includeDisabled ? 'true' : 'false'}${publisherQuery}`,
+    );
+    const subscriptions: Array<Record<string, any>> = result.subscriptions || [];
+
+    if (subscriptions.length === 0) {
+      logger.info('No subscriptions configured');
+      return;
+    }
+
+    logger.info(`Found ${subscriptions.length} subscription${subscriptions.length === 1 ? '' : 's'}`);
+    for (const subscription of subscriptions) {
+      logger.info(`Subscription ${subscription.id ?? '(unknown)'}`, {
+        publisher_id: subscription.publisher_id,
+        topics: normalizeTopicsForDisplay(subscription.topics),
+        payload_format: subscription.payload_format,
+        enabled: subscription.enabled,
+      });
+    }
+  } catch (error) {
+    if (error instanceof CLIError) throw error;
+    throw new CLIError('Failed to list subscriptions', 1, {
+      error: (error as Error).message,
+    });
+  }
+}
+
 async function resolvePublisherId(input: {
   publisherIdRaw?: string;
   publisherName?: string;

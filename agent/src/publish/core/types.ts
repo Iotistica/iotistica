@@ -68,6 +68,14 @@ export interface PublishBatchItem {
   options?: { qos?: 0 | 1 | 2 };
 }
 
+export interface PublishDestinationInfo {
+  publisherId?: number;
+  publisherName: string;
+  publisherType: string;
+  subscriptionIds: number[];
+  topics: string[];
+}
+
 export interface IPublishClient {
   connect?(...args: any[]): Promise<void>;
   disconnect?(...args: any[]): Promise<void>;
@@ -83,6 +91,7 @@ export interface IPublishSink {
   isRunning(): boolean;
   isConnected(): boolean;
   publishBatch(batch: PublishBatchItem[]): Promise<void>;
+  getDestinationInfo?(): PublishDestinationInfo[];
 }
 
 export interface IPublishPlugin extends IPublishSink {

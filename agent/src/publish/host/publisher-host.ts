@@ -6,6 +6,7 @@ import type {
 } from '../../db/models/index.js';
 import type {
 	IPublishClient,
+	PublishDestinationInfo,
 	IPublishPlugin,
 	IPublishSink,
 	Logger,
@@ -101,6 +102,58 @@ export class PublisherHost implements IPublishSink {
 			failedDestinations: failures.length,
 			totalDestinations: results.length,
 		});
+	}
+
+	public getDestinationInfo(): PublishDestinationInfo[] {
+		if (this.bindings.length === 0) {
+			return [];
+		}
+
+		const byPublisher = new Map<number, PublishDestinationInfo>();
+
+		for (const binding of this.bindings) {
+			const publisherId = binding.publisher.id ?? -1;
+			const existing = byPublisher.get(publisherId);
+			if (!existing) {
+				byPublisher.set(publisherId, {
+					publisherId: binding.publisher.id,
+					publisherName: binding.publisher.name,
+					publisherType: String(binding.publisher.type),
+					subscriptionIds: binding.subscription.id !== undefined ? [binding.subscription.id] : [],
+					topics: this.normalizeTopics(binding.subscription.topics),
+				});
+				continue;
+			}
+
+			if (binding.subscription.id !== undefined && !existing.subscriptionIds.includes(binding.subscription.id)) {
+				existing.subscriptionIds.push(binding.subscription.id);
+			}
+
+			for (const topic of this.normalizeTopics(binding.subscription.topics)) {
+				if (!existing.topics.includes(topic)) {
+					existing.topics.push(topic);
+				}
+			}
+		}
+
+		for (const destination of byPublisher.values()) {
+			destination.subscriptionIds.sort((a, b) => a - b);
+			destination.topics.sort();
+		}
+
+		return Array.from(byPublisher.values());
+	}
+
+	private normalizeTopics(topics: string[] | undefined): string[] {
+		if (!Array.isArray(topics) || topics.length === 0) {
+			return ['*'];
+		}
+
+		const normalized = topics
+			.map((topic) => topic.trim())
+			.filter((topic) => topic.length > 0);
+
+		return normalized.length > 0 ? normalized : ['*'];
 	}
 
 	private createLegacyFallbackBinding(): HostBinding[] {

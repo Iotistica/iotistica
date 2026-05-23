@@ -43,6 +43,7 @@ export class PublishStats {
 		deviceName: string,
 		logger?: Logger,
 		buffered?: boolean,
+		extraContext?: Record<string, unknown>,
 	): void {
 		if (!logger) return;
 
@@ -79,6 +80,11 @@ export class PublishStats {
 			? `${verb} ${messageCount} messages (no-op baseline)`
 			: `${verb} ${messageCount} messages`;
 
-		logger.info(label, { messages: messageCount, batchBytes, compression: compressionLog });
+		logger.info(label, {
+			messages: messageCount,
+			batchBytes,
+			compression: compressionLog,
+			...(extraContext || {}),
+		});
 	}
 }
