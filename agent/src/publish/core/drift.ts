@@ -6,7 +6,7 @@ import type {
 	SchemaDriftEvent,
 	SchemaDriftStore,
 } from '../../db/models/schema-drift.model.js';
-import type { Logger } from "../types.js";
+import type { Logger } from "./types.js";
 
 type ValueType = "number" | "string" | "boolean" | "object" | "array" | "null";
 type DriftSeverity = "warning" | "critical";

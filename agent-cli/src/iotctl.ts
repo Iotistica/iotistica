@@ -12,6 +12,7 @@ import { adaptersList, adaptersShow, adaptersAdd, adaptersRemove, adaptersEnable
 import { factoryReset, mqttListUsers, provisionStatus, provisionWithKey, deprovision } from './commands/provision';
 import { showLogs, showVersion } from './commands/system';
 import { bufferStatus, memoryDiagnostics, restart, runDiagnostics, showStatusEnhanced, agentUpdate, agentPullTargetState } from './commands/agent';
+import { publishMqttAdd, publishSubscriptionsAdd } from './commands/publish';
 
 function buildCommands(args: string[]): CommandMap {
   const commands: CommandMap = {
@@ -82,6 +83,15 @@ function buildCommands(args: string[]): CommandMap {
     mqtt: {
       users: mqttListUsers,
       _default: mqttListUsers,
+    },
+    publish: {
+      subscriptions: {
+        add: publishSubscriptionsAdd,
+      },
+      mqtt: {
+        add: publishMqttAdd,
+      },
+      _default: () => showHelp(commands),
     },
     diagnostics: {
       _default: runDiagnostics,

@@ -12,7 +12,7 @@ import { DeviceState } from './types.js';
  *   'disconnected' — socket closed (reconnect scheduled internally unless stopped)
  *   'reconnecting' — about to retry (useful for stats tracking)
  */
-export class DeviceConnection extends EventEmitter {
+export class SocketConnection extends EventEmitter {
 	private socket: net.Socket | null = null;
 	private reconnectTimer: NodeJS.Timeout | null = null;
 	private stopped = false;

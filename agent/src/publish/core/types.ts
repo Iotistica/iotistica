@@ -48,7 +48,73 @@ export type DevicePublishConfig = z.infer<typeof DevicePublishConfigSchema> & {
  */
 export type PublishMode = 'direct' | 'buffer-only' | 'recovering';
 
-export interface MqttConnection {
+export type CloudPublishTarget = 'iotistica' | 'azure' | 'aws' | 'gcp' | 'mqtt';
+
+export function normalizeTarget(target?: string): CloudPublishTarget {
+	const value = (target || '').trim().toLowerCase();
+
+	if (value === '' || value === 'iotistica') return 'iotistica';
+	if (value === 'azure') return 'azure';
+	if (value === 'aws' || value === 'awsiot' || value === 'aws-iot') return 'aws';
+	if (value === 'gcp' || value === 'google' || value === 'google-cloud') return 'gcp';
+	if (value === 'mqtt' || value === 'external-mqtt' || value === 'generic-mqtt') return 'mqtt';
+
+	return 'iotistica';
+}
+
+export interface PublishBatchItem {
+  topic: string;
+  payload: string | Buffer;
+  options?: { qos?: 0 | 1 | 2 };
+}
+
+export interface IPublishClient {
+  connect?(...args: any[]): Promise<void>;
+  disconnect?(...args: any[]): Promise<void>;
+  publish(topic: string, payload: string | Buffer, options?: { qos?: 0 | 1 | 2 }): Promise<void>;
+  isConnected(): boolean;
+  getMessageIdGenerator?(): any;
+  getPublishMode?(): PublishMode;
+}
+
+export interface IPublishSink {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  isRunning(): boolean;
+  isConnected(): boolean;
+  publishBatch(batch: PublishBatchItem[]): Promise<void>;
+}
+
+export interface IPublishPlugin extends IPublishSink {
+  on(event: string, listener: (...args: any[]) => void): this;
+}
+
+export interface PublishPluginStarterContext {
+  target: string;
+  client: IPublishClient;
+  logger?: Logger;
+}
+
+export type PublishPluginStarter = (
+  context: PublishPluginStarterContext,
+) => IPublishPlugin;
+
+export interface ExternalPublishPluginManifest {
+  name: string;
+  version: string;
+  apiVersion: string;
+  target: string;
+  description?: string;
+}
+
+export interface ExternalPublishPluginConfig {
+  modulePath: string;
+  enabled?: boolean;
+  options?: Record<string, unknown>;
+  allowBuiltInOverride?: boolean;
+}
+
+export interface MqttConnection extends IPublishClient {
   publish(topic: string, payload: string | Buffer, options?: { qos?: 0 | 1 | 2 }): Promise<void>;
   isConnected(): boolean;
   getMessageIdGenerator?(): any; // Optional for HA deduplication (returns MessageIdGenerator if available)

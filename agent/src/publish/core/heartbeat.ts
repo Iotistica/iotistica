@@ -1,5 +1,5 @@
-import { createJsonPayload, serializePayload } from '../mqtt/manager.js';
-import { agentTopic } from '../mqtt/topics.js';
+import { createJsonPayload, serializePayload } from '../../mqtt/manager.js';
+import { agentTopic } from '../../mqtt/topics.js';
 import type { DeviceConfig, DeviceStats, MqttConnection, Logger } from './types.js';
 import { DeviceState } from './types.js';
 

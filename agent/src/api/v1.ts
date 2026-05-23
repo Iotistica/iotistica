@@ -785,6 +785,142 @@ router.get('/v1/devices', async (req: Request, res: Response, next: NextFunction
 });
 
 /**
+ * GET /v1/publish/publishers
+ * List configured upstream publishers
+ */
+router.get('/v1/publish/publishers', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const includeDisabled = req.query.includeDisabled !== 'false';
+		const publishers = await actions.listPublishers(includeDisabled);
+		return res.status(200).json({ publishers });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/publish/publishers
+ * Create an upstream publisher
+ */
+router.post('/v1/publish/publishers', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const publisher = await actions.createPublisher(req.body);
+		return res.status(201).json({ publisher });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * PATCH /v1/publish/publishers/:id
+ * Update an upstream publisher
+ */
+router.patch('/v1/publish/publishers/:id', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const id = Number(req.params.id);
+		if (!Number.isFinite(id)) {
+			return res.status(400).json({ error: 'Invalid publisher id' });
+		}
+
+		const publisher = await actions.updatePublisher(id, req.body);
+		return res.status(200).json({ publisher });
+	} catch (error: any) {
+		if (error?.statusCode === 404) return res.status(404).json({ error: error.message });
+		next(error);
+	}
+});
+
+/**
+ * DELETE /v1/publish/publishers/:id
+ * Delete an upstream publisher
+ */
+router.delete('/v1/publish/publishers/:id', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const id = Number(req.params.id);
+		if (!Number.isFinite(id)) {
+			return res.status(400).json({ error: 'Invalid publisher id' });
+		}
+
+		await actions.deletePublisher(id);
+		return res.status(200).json({ deleted: true });
+	} catch (error: any) {
+		if (error?.statusCode === 404) return res.status(404).json({ error: error.message });
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/publish/subscriptions
+ * List publish subscriptions (optional query: publisher_id)
+ */
+router.get('/v1/publish/subscriptions', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const includeDisabled = req.query.includeDisabled !== 'false';
+		const publisherId = req.query.publisher_id ? Number(req.query.publisher_id) : undefined;
+		if (publisherId !== undefined && !Number.isFinite(publisherId)) {
+			return res.status(400).json({ error: 'Invalid publisher_id' });
+		}
+
+		const subscriptions = await actions.listPublishSubscriptions(publisherId, includeDisabled);
+		return res.status(200).json({ subscriptions });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/publish/subscriptions
+ * Create a publish subscription
+ */
+router.post('/v1/publish/subscriptions', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const subscription = await actions.createPublishSubscription(req.body);
+		return res.status(201).json({ subscription });
+	} catch (error: any) {
+		if (error?.statusCode === 404) return res.status(404).json({ error: error.message });
+		next(error);
+	}
+});
+
+/**
+ * PATCH /v1/publish/subscriptions/:id
+ * Update a publish subscription
+ */
+router.patch('/v1/publish/subscriptions/:id', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const id = Number(req.params.id);
+		if (!Number.isFinite(id)) {
+			return res.status(400).json({ error: 'Invalid subscription id' });
+		}
+
+		const subscription = await actions.updatePublishSubscription(id, req.body);
+		return res.status(200).json({ subscription });
+	} catch (error: any) {
+		if (error?.statusCode === 404) return res.status(404).json({ error: error.message });
+		next(error);
+	}
+});
+
+/**
+ * DELETE /v1/publish/subscriptions/:id
+ * Delete a publish subscription
+ */
+router.delete('/v1/publish/subscriptions/:id', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const id = Number(req.params.id);
+		if (!Number.isFinite(id)) {
+			return res.status(400).json({ error: 'Invalid subscription id' });
+		}
+
+		await actions.deletePublishSubscription(id);
+		return res.status(200).json({ deleted: true });
+	} catch (error: any) {
+		if (error?.statusCode === 404) return res.status(404).json({ error: error.message });
+		next(error);
+	}
+});
+
+/**
  * POST /v1/update
  * Trigger an OTA agent self-update.
  * Body: { version: string, force?: boolean }

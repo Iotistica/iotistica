@@ -121,6 +121,29 @@ CREATE INDEX IF NOT EXISTS "idx_devices_endpoint_id" ON "devices" ("endpoint_id"
 CREATE INDEX IF NOT EXISTS "idx_devices_protocol" ON "devices" ("protocol");
 CREATE TABLE IF NOT EXISTS `endpoint_outputs` (`id` integer not null primary key autoincrement, `protocol` varchar(50) not null, `socket_path` varchar(500) not null, `data_format` varchar(50) not null default 'json', `delimiter` varchar(10) not null default '
 ', `include_timestamp` boolean not null default '1', `include_device_name` boolean not null default '1', `logging` text null, `created_at` datetime not null default CURRENT_TIMESTAMP, `updated_at` datetime not null default CURRENT_TIMESTAMP, `buffer_capacity` integer null);
+CREATE TABLE IF NOT EXISTS "publishers" (
+	"id"	integer NOT NULL,
+	"name"	varchar(255) NOT NULL,
+	"type"	varchar(50) NOT NULL,
+	"config_json"	text,
+	"enabled"	boolean NOT NULL DEFAULT '1',
+	"last_error"	text,
+	"last_error_at"	datetime,
+	"created_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	"updated_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY("id" AUTOINCREMENT)
+);
+CREATE TABLE IF NOT EXISTS "publish_subscriptions" (
+	"id"	integer NOT NULL,
+	"publisher_id"	integer NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
+	"topics"	text NOT NULL DEFAULT '[]',
+	"route_json"	text,
+	"payload_format"	varchar(20) NOT NULL DEFAULT 'custom',
+	"enabled"	boolean NOT NULL DEFAULT '1',
+	"created_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	"updated_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY("id" AUTOINCREMENT)
+);
 CREATE TABLE IF NOT EXISTS "endpoints" (
 	"id"	integer NOT NULL,
 	"uuid"	varchar(255),
@@ -361,6 +384,19 @@ CREATE INDEX IF NOT EXISTS "dictionary_entries_version_added" ON "dictionary_ent
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "endpoint_outputs_protocol_unique" ON "endpoint_outputs" (
 	"protocol"
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_publishers_name_unique" ON "publishers" (
+	"name"
+);
+CREATE INDEX IF NOT EXISTS "idx_publishers_type_enabled" ON "publishers" (
+	"type",
+	"enabled"
+);
+CREATE INDEX IF NOT EXISTS "idx_publish_subscriptions_publisher_id" ON "publish_subscriptions" (
+	"publisher_id"
+);
+CREATE INDEX IF NOT EXISTS "idx_publish_subscriptions_enabled" ON "publish_subscriptions" (
+	"enabled"
 );
 CREATE INDEX IF NOT EXISTS "endpoints_enabled_index" ON "endpoints" (
 	"enabled"

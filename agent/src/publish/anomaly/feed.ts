@@ -1,7 +1,7 @@
 import type { AnomalyDetectionService } from "../../anomaly/index.js";
 import type { Protocol } from "../../anomaly/types.js";
 import { extractRawDeviceState } from "../../anomaly/device-state.js";
-import type { Logger } from "../types.js";
+import type { Logger } from "../core/types.js";
 
 /**
  * Walks each batch message, extracts every numeric field, and feeds them to the

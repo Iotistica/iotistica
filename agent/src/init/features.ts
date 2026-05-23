@@ -20,7 +20,7 @@ import { AdapterInitializer } from './adapters.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { type CloudMqttClient } from '../mqtt/manager.js';
-import type { MqttConnection } from '../publish/types.js';
+import type { MqttConnection } from '../publish/core/types.js';
 import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
 import { type StateManager } from '../core/state.js';
 

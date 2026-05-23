@@ -1,8 +1,8 @@
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types.js';
-import type { MqttConnection } from '../publish/types.js';
-import { createExternalPublishTarget } from '../publish/external/factory.js';
-import { normalizeTarget } from '../publish/external/types.js';
+import type { MqttConnection } from '../publish/core/types.js';
+import { normalizeTarget } from '../publish/core/types.js';
+import { createExternalPublishTarget } from '../publish/core/external-target.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 
 
@@ -98,6 +98,7 @@ async function _connectExternalTarget(ctx: AgentInitContext): Promise<MqttConnec
 		const client = await createExternalPublishTarget({
 			target: rawTarget,
 			logger: ctx.agentLogger,
+			deviceUuid: ctx.agentInfo?.uuid,
 		});
 
 		if (client) {

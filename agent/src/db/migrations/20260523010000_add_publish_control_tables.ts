@@ -1,0 +1,45 @@
+import type Database from 'better-sqlite3';
+import { tableExists } from '../migration-helpers.js';
+import type { NativeSqliteMigration } from '../migration-types.js';
+
+function up(db: Database.Database): void {
+	if (!tableExists(db, 'publishers')) {
+		db.exec(`
+			CREATE TABLE publishers (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name VARCHAR(255) NOT NULL,
+				type VARCHAR(50) NOT NULL,
+				config_json TEXT,
+				enabled BOOLEAN NOT NULL DEFAULT 1,
+				last_error TEXT,
+				last_error_at DATETIME,
+				created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)
+		`);
+		db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_publishers_name_unique ON publishers(name)');
+		db.exec('CREATE INDEX IF NOT EXISTS idx_publishers_type_enabled ON publishers(type, enabled)');
+	}
+
+	if (!tableExists(db, 'publish_subscriptions')) {
+		db.exec(`
+			CREATE TABLE publish_subscriptions (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				publisher_id INTEGER NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
+				topics TEXT NOT NULL DEFAULT '[]',
+				route_json TEXT,
+				payload_format VARCHAR(20) NOT NULL DEFAULT 'custom',
+				enabled BOOLEAN NOT NULL DEFAULT 1,
+				created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)
+		`);
+		db.exec('CREATE INDEX IF NOT EXISTS idx_publish_subscriptions_publisher_id ON publish_subscriptions(publisher_id)');
+		db.exec('CREATE INDEX IF NOT EXISTS idx_publish_subscriptions_enabled ON publish_subscriptions(enabled)');
+	}
+}
+
+export const migration: NativeSqliteMigration = {
+	name: '20260523010000_add_publish_control_tables.js',
+	up,
+};

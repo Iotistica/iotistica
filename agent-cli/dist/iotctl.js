@@ -12,6 +12,7 @@ const adapters_1 = require("./commands/adapters");
 const provision_1 = require("./commands/provision");
 const system_1 = require("./commands/system");
 const agent_1 = require("./commands/agent");
+const publish_1 = require("./commands/publish");
 function buildCommands(args) {
     const commands = {
         provision: {
@@ -81,6 +82,15 @@ function buildCommands(args) {
         mqtt: {
             users: provision_1.mqttListUsers,
             _default: provision_1.mqttListUsers,
+        },
+        publish: {
+            subscriptions: {
+                add: publish_1.publishSubscriptionsAdd,
+            },
+            mqtt: {
+                add: publish_1.publishMqttAdd,
+            },
+            _default: () => (0, help_1.showHelp)(commands),
         },
         diagnostics: {
             _default: agent_1.runDiagnostics,

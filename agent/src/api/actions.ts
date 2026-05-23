@@ -17,6 +17,7 @@ import type { StateManager } from '../core/state';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/arbiter';
 import { MessageBufferModel } from '../db/models/buffer.model';
+import { PublishersModel, PublishSubscriptionsModel } from '../db/models/index.js';
 import { getDatabasePath } from '../db/db-path';
 import { getDatabase } from '../db/sqlite';
 import { CloudMqttClient } from '../mqtt/manager';
@@ -923,6 +924,173 @@ export const removeAllEndpoints = async () => {
 export const getDevices = async (protocol?: string) => {
 	const { DeviceModel } = await import('../db/models/device.model.js');
 	return await DeviceModel.getAll(protocol);
+};
+
+/**
+ * Publish control: list publishers
+ */
+export const listPublishers = async (includeDisabled: boolean = true) => {
+	return PublishersModel.getAll(includeDisabled);
+};
+
+/**
+ * Publish control: create publisher
+ */
+export const createPublisher = async (body: {
+	name: string;
+	type: string;
+	config_json?: Record<string, unknown>;
+	enabled?: boolean;
+}) => {
+	if (!body?.name || !body?.type) {
+		throw new Error('name and type are required');
+	}
+
+	const created = PublishersModel.create({
+		name: body.name,
+		type: body.type,
+		config_json: body.config_json ?? null,
+		enabled: body.enabled !== false,
+	});
+
+	if (!created) {
+		throw new Error('Failed to create publisher');
+	}
+
+	return created;
+};
+
+/**
+ * Publish control: update publisher
+ */
+export const updatePublisher = async (id: number, body: {
+	name?: string;
+	type?: string;
+	config_json?: Record<string, unknown> | null;
+	enabled?: boolean;
+}) => {
+	const existing = PublishersModel.getById(id);
+	if (!existing) {
+		throw Object.assign(new Error(`Publisher not found: ${id}`), { statusCode: 404 });
+	}
+
+	const updated = PublishersModel.update(id, body);
+	if (!updated) {
+		throw new Error(`Failed to update publisher: ${id}`);
+	}
+
+	return updated;
+};
+
+/**
+ * Publish control: delete publisher
+ */
+export const deletePublisher = async (id: number) => {
+	const deleted = PublishersModel.delete(id);
+	if (!deleted) {
+		throw Object.assign(new Error(`Publisher not found: ${id}`), { statusCode: 404 });
+	}
+
+	return { deleted: true };
+};
+
+/**
+ * Publish control: list subscriptions (optionally filtered by publisher_id)
+ */
+export const listPublishSubscriptions = async (publisherId?: number, includeDisabled: boolean = true) => {
+	if (publisherId !== undefined) {
+		return PublishSubscriptionsModel.getByPublisherId(publisherId, includeDisabled);
+	}
+
+	return PublishSubscriptionsModel.getAll(includeDisabled);
+};
+
+/**
+ * Publish control: create subscription
+ */
+export const createPublishSubscription = async (body: {
+	publisher_id: number;
+	topics?: string[];
+	route_json?: Record<string, unknown> | null;
+	payload_format?: 'custom' | 'tags' | 'ecp';
+	enabled?: boolean;
+}) => {
+	if (!body || !Number.isFinite(body.publisher_id)) {
+		throw new Error('publisher_id is required');
+	}
+
+	const publisher = PublishersModel.getById(body.publisher_id);
+	if (!publisher) {
+		throw Object.assign(new Error(`Publisher not found: ${body.publisher_id}`), { statusCode: 404 });
+	}
+
+	const format = body.payload_format || 'custom';
+	if (format !== 'custom' && format !== 'tags' && format !== 'ecp') {
+		throw new Error(`Invalid payload_format: ${format}`);
+	}
+
+	const created = PublishSubscriptionsModel.create({
+		publisher_id: body.publisher_id,
+		topics: body.topics || [],
+		route_json: (body.route_json as any) ?? null,
+		payload_format: format,
+		enabled: body.enabled !== false,
+	});
+
+	if (!created) {
+		throw new Error('Failed to create publish subscription');
+	}
+
+	return created;
+};
+
+/**
+ * Publish control: update subscription
+ */
+export const updatePublishSubscription = async (id: number, body: {
+	publisher_id?: number;
+	topics?: string[];
+	route_json?: Record<string, unknown> | null;
+	payload_format?: 'custom' | 'tags' | 'ecp';
+	enabled?: boolean;
+}) => {
+	const existing = PublishSubscriptionsModel.getById(id);
+	if (!existing) {
+		throw Object.assign(new Error(`Publish subscription not found: ${id}`), { statusCode: 404 });
+	}
+
+	if (body.publisher_id !== undefined) {
+		const publisher = PublishersModel.getById(body.publisher_id);
+		if (!publisher) {
+			throw Object.assign(new Error(`Publisher not found: ${body.publisher_id}`), { statusCode: 404 });
+		}
+	}
+
+	if (body.payload_format !== undefined) {
+		const format = body.payload_format;
+		if (format !== 'custom' && format !== 'tags' && format !== 'ecp') {
+			throw new Error(`Invalid payload_format: ${format}`);
+		}
+	}
+
+	const updated = PublishSubscriptionsModel.update(id, body as any);
+	if (!updated) {
+		throw new Error(`Failed to update publish subscription: ${id}`);
+	}
+
+	return updated;
+};
+
+/**
+ * Publish control: delete subscription
+ */
+export const deletePublishSubscription = async (id: number) => {
+	const deleted = PublishSubscriptionsModel.delete(id);
+	if (!deleted) {
+		throw Object.assign(new Error(`Publish subscription not found: ${id}`), { statusCode: 404 });
+	}
+
+	return { deleted: true };
 };
 
 /**

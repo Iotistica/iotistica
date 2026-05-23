@@ -6,7 +6,7 @@ import type { AgentFirewall } from '../network/firewall.js';
 import type { ConfigManager } from '../core/config.js';
 import type { PipelineService } from '../features/pipeline/index.js';
 import type { AnomalyDetectionService } from '../anomaly/index.js';
-import type { MqttConnection } from '../publish/types.js';
+import type { MqttConnection } from '../publish/core/types.js';
 import type { StateManager } from '../core/state.js';
 import type { AgentManager } from '../core/index.js';
 import type { AgentInfo } from '../core/types.js';

@@ -46,6 +46,16 @@ export type {
 	SchemaDriftStore,
 } from './schema-drift.model';
 
+// Publish control persistence
+export { PublishersModel } from './publishers.model';
+export type { PublisherRecord, PublisherType } from './publishers.model';
+export { PublishSubscriptionsModel } from './publish-subscriptions.model';
+export type {
+	PublishPayloadFormat,
+	PublishSubscriptionRecord,
+	PublishSubscriptionRoute,
+} from './publish-subscriptions.model';
+
 // Protocol devices (physical/logical devices behind protocol endpoints)
 export { DeviceModel as ProtocolDevicesModel } from './device.model';
 export type { Device as ProtocolDevice } from './device.model';

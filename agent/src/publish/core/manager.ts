@@ -1,21 +1,21 @@
 import { EventEmitter } from 'events';
 import { getHeapStatistics } from 'v8';
-import { agentTopic } from '../mqtt/topics.js';
-import type { PipelineService } from '../features/pipeline/index.js';
-import type { AnomalyDetectionService } from '../anomaly/index.js';
-import type { Protocol } from '../anomaly/types.js';
-import type { DeviceConfig, MqttConnection, Logger, DeviceStats } from './types.js';
+import { agentTopic } from '../../mqtt/topics.js';
+import type { PipelineService } from '../../features/pipeline/index.js';
+import type { AnomalyDetectionService } from '../../anomaly/index.js';
+import type { Protocol } from '../../anomaly/types.js';
+import type { DeviceConfig, MqttConnection, Logger, DeviceStats, IPublishSink } from './types.js';
 import { DeviceState } from './types.js';
-import { AnomalyFeed } from './anomaly/feed.js';
-import { AnomalyEnricher } from './anomaly/enrich.js';
-import { PayloadCompressor } from './compression/compress.js';
+import { AnomalyFeed } from '../anomaly/feed.js';
+import { AnomalyEnricher } from '../anomaly/enrich.js';
+import { PayloadCompressor } from '../compression/compress.js';
 import { MessageBatcher } from './batch.js';
-import { DeviceConnection } from './connection.js';
+import { SocketConnection } from './socket.js';
 import { PublishStats } from './stats.js';
 import { HeartbeatManager } from './heartbeat.js';
-import { SchemaDriftDetector } from './schema/drift.js';
-import { SchemaDriftModel } from '../db/models/schema-drift.model.js';
-import type { DictionaryManager } from '../mqtt/dictionary.js';
+import { SchemaDriftDetector } from './drift.js';
+import { SchemaDriftModel } from '../../db/models/schema-drift.model.js';
+import type { DictionaryManager } from '../../mqtt/dictionary.js';
 
 // Adaptive batch safety limits (calculated once at module load)
 const MAX_BATCH_MESSAGES = 10000;
@@ -30,11 +30,11 @@ type PublishPayload = Record<string, unknown>;
 
 export class PublishManager extends EventEmitter {
 	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-	private messageBufferModel?: typeof import('../db/models/buffer.model.js').MessageBufferModel;
+	private messageBufferModel?: typeof import('../../db/models/buffer.model.js').MessageBufferModel;
 	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-	private messageBufferModelPromise?: Promise<typeof import('../db/models/buffer.model.js').MessageBufferModel>;
+	private messageBufferModelPromise?: Promise<typeof import('../../db/models/buffer.model.js').MessageBufferModel>;
 	private readonly batcher: MessageBatcher;
-	private readonly connection: DeviceConnection;
+	private readonly connection: SocketConnection;
 	private readonly compressor: PayloadCompressor;
 	private readonly stats: PublishStats;
 	private readonly feed: AnomalyFeed;
@@ -85,6 +85,7 @@ export class PublishManager extends EventEmitter {
 	constructor(
     private readonly config: DeviceConfig,
     private readonly mqttConnection: MqttConnection,
+	private readonly publishPlugin: IPublishSink,
     private readonly logger: Logger | undefined,
     private readonly deviceUuid: string,
 	private dictionaryManager?: DictionaryManager,
@@ -98,7 +99,7 @@ export class PublishManager extends EventEmitter {
 		super();
 
 		this.batcher = new MessageBatcher(config, MAX_BATCH_MESSAGES, MAX_BATCH_BYTES, logger);
-		this.connection = new DeviceConnection(config, logger);
+		this.connection = new SocketConnection(config, logger);
 		this.compressor = new PayloadCompressor(
 			{ useMsgpack: useMsgpackPoc, useKeyCompaction: useKeyCompactionPoc, useDeflate: useDeflatePoc },
 			mqttConnection, dictionaryManager,  protocol,
@@ -137,6 +138,7 @@ export class PublishManager extends EventEmitter {
 		}
 		this.logger?.info(`Starting endpoint '${name}'`);
 		this.needStop = false;
+		await this.publishPlugin.start();
 		this.attachConnectionHandlers();
 
 		if (this.config.mqttHeartbeatTopic) {
@@ -163,6 +165,7 @@ export class PublishManager extends EventEmitter {
 		this.connection.disconnect();
 
 		if (this.batcher.messageCount > 0) await this.publishBatch();
+		await this.publishPlugin.stop();
 	}
 
 	getStats(): DeviceStats {
@@ -282,7 +285,7 @@ export class PublishManager extends EventEmitter {
 				}
 			}
 
-			if (!this.mqttConnection.isConnected()) {
+			if (!this.publishPlugin.isConnected()) {
 				await this.publishOffline(topic, data, msgId, messageCount);
 				return;
 			}
@@ -336,50 +339,50 @@ export class PublishManager extends EventEmitter {
 			const timestampMs = Date.now();
 			const tags = tagRecords
 				.map((message: Record<string, unknown>, index: number) => {
-				const name = String(
-					message.metric
+					const name = String(
+						message.metric
 					?? message.metric_name
 					?? message.nodeName
 					?? message.name
 					?? message.tag
 					?? message.id
 					?? `tag_${index}`,
-				);
-				const quality = typeof message.quality === 'string' ? message.quality.toUpperCase() : undefined;
-				const hasError = message.error !== undefined
+					);
+					const quality = typeof message.quality === 'string' ? message.quality.toUpperCase() : undefined;
+					const hasError = message.error !== undefined
 					|| message.errorCode !== undefined
 					|| quality === 'BAD'
 					|| message.qualityCode !== undefined;
 
-				if (hasError) {
+					if (hasError) {
 					// ECP format does not include/report tag error codes.
+						if (this.externalPayloadFormat === 'ecp') {
+							return null;
+						}
+
+						return {
+							name,
+							error: message.error ?? message.errorCode ?? message.qualityCode ?? 'READ_ERROR',
+						};
+					}
+
+					const value = message.value ?? message.rawValue ?? null;
 					if (this.externalPayloadFormat === 'ecp') {
-						return null;
+						if (value === null || value === undefined) {
+							return null;
+						}
+						return {
+							name,
+							value,
+							type: this.inferEcpType(value),
+						};
 					}
 
-					return {
-						name,
-						error: message.error ?? message.errorCode ?? message.qualityCode ?? 'READ_ERROR',
-					};
-				}
-
-				const value = message.value ?? message.rawValue ?? null;
-				if (this.externalPayloadFormat === 'ecp') {
-					if (value === null || value === undefined) {
-						return null;
-					}
 					return {
 						name,
 						value,
-						type: this.inferEcpType(value),
 					};
-				}
-
-				return {
-					name,
-					value,
-				};
-			})
+				})
 				.filter((tag) => tag !== null);
 
 			const data = {
@@ -534,7 +537,9 @@ export class PublishManager extends EventEmitter {
 				return;
 			}
 
-			await this.mqttConnection.publish(topic, payload, { qos: 1 });
+			await this.publishPlugin.publishBatch([
+				{ topic, payload, options: { qos: 1 } },
+			]);
 			publishConfirmed = true;
 
 			const buffered = this.mqttConnection.getPublishMode?.() !== 'direct';
@@ -598,13 +603,13 @@ export class PublishManager extends EventEmitter {
 	}
 
 	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-	private async getMessageBufferModel(): Promise<typeof import('../db/models/buffer.model.js').MessageBufferModel> {
+	private async getMessageBufferModel(): Promise<typeof import('../../db/models/buffer.model.js').MessageBufferModel> {
 		if (this.messageBufferModel) {
 			return this.messageBufferModel;
 		}
 
 		if (!this.messageBufferModelPromise) {
-			this.messageBufferModelPromise = import('../db/models/index.js')
+			this.messageBufferModelPromise = import('../../db/models/index.js')
 				.then(({ MessageBufferModel }) => {
 					this.messageBufferModel = MessageBufferModel;
 					return MessageBufferModel;
