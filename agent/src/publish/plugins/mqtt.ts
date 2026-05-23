@@ -86,59 +86,6 @@ function loadExternalMqttConfigFromRecord(config: Record<string, unknown> | null
 	};
 }
 
-function loadExternalMqttConfigFromEnv(fallbackDeviceId?: string): ExternalMqttConfig {
-	const rawUrl = process.env.EXTERNAL_MQTT_BROKER_URL || process.env.MQTT_EXTERNAL_BROKER_URL || '';
-	if (!rawUrl) {
-		throw new Error('PUBLISH_TARGET=mqtt requires EXTERNAL_MQTT_BROKER_URL');
-	}
-
-	let parsedUrl: URL;
-	try {
-		parsedUrl = new URL(rawUrl);
-	} catch {
-		throw new Error(
-			'Invalid EXTERNAL_MQTT_BROKER_URL. Expected absolute URL like mqtt://host:1883 or mqtts://host:8883',
-		);
-	}
-
-	const scheme = parsedUrl.protocol.replace(':', '').toLowerCase();
-	if (scheme !== 'mqtt' && scheme !== 'mqtts' && scheme !== 'ws' && scheme !== 'wss') {
-		throw new Error('EXTERNAL_MQTT_BROKER_URL must use mqtt, mqtts, ws, or wss scheme');
-	}
-
-	const protocol = scheme;
-	const defaultPort = protocol === 'mqtts' ? 8883 : protocol === 'mqtt' ? 1883 : protocol === 'wss' ? 443 : 80;
-	const envReject = process.env.EXTERNAL_MQTT_REJECT_UNAUTHORIZED;
-	const rejectUnauthorized =
-		envReject === undefined
-			? true
-			: !['0', 'false', 'no', 'off'].includes(envReject.trim().toLowerCase());
-
-	return {
-		provider: 'mqtt',
-		host: parsedUrl.hostname,
-		port: parsedUrl.port ? Number(parsedUrl.port) : defaultPort,
-		protocol,
-		path: parsedUrl.pathname && parsedUrl.pathname !== '/' ? parsedUrl.pathname : undefined,
-		clientId:
-			process.env.EXTERNAL_MQTT_CLIENT_ID ||
-			process.env.DEVICE_UUID ||
-			process.env.DEVICE_ID ||
-			fallbackDeviceId ||
-			'device',
-		username: process.env.EXTERNAL_MQTT_USERNAME || parsedUrl.username || undefined,
-		password: process.env.EXTERNAL_MQTT_PASSWORD || parsedUrl.password || undefined,
-		topicTemplate:
-			process.env.EXTERNAL_MQTT_TOPIC_TEMPLATE ||
-			process.env.MQTT_EXTERNAL_PUBLISH_TOPIC_TEMPLATE ||
-			'{topic}',
-		ca: process.env.EXTERNAL_MQTT_CA_CERT,
-		cert: process.env.EXTERNAL_MQTT_CLIENT_CERT,
-		key: process.env.EXTERNAL_MQTT_CLIENT_KEY,
-		rejectUnauthorized,
-	};
-}
-
 function parseSourceTopic(sourceTopic: string): { endpoint: string; originalTopic: string } {
 	return {
 		endpoint: sourceTopic.split('/').pop() || 'telemetry',
@@ -215,24 +162,16 @@ export class MqttPublishPlugin extends BasePublishPlugin {
 		super(client, logger);
 	}
 
-	public static fromEnv(agentLogger?: AgentLogger, logger?: Logger): MqttPublishPlugin {
-		const client = MqttPublishPlugin.createClientFromEnv(agentLogger);
-
-		return new MqttPublishPlugin(client, logger);
-	}
-
 	public static fromConfig(
 		config: Record<string, unknown> | null | undefined,
 		agentLogger?: AgentLogger,
 		logger?: Logger,
 		fallbackDeviceId?: string,
 	): MqttPublishPlugin {
-		const resolved = loadExternalMqttConfigFromRecord(config, fallbackDeviceId)
-			?? loadExternalMqttConfigFromEnv(fallbackDeviceId);
+		const resolved = loadExternalMqttConfigFromRecord(config, fallbackDeviceId);
+		if (!resolved) {
+			throw new Error('mqtt publisher requires config_json with a brokerUrl');
+		}
 		return new MqttPublishPlugin(new ExternalMqttClient(resolved, agentLogger), logger);
-	}
-
-	public static createClientFromEnv(agentLogger?: AgentLogger, deviceUuid?: string): ExternalMqttClient {
-		return new ExternalMqttClient(loadExternalMqttConfigFromEnv(deviceUuid), agentLogger);
 	}
 }

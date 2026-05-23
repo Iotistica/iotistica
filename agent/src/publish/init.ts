@@ -25,25 +25,6 @@ import { normalizeTarget } from './core/types.js';
 import { PublishPluginRegistry } from './plugin-registry.js';
 import { PublishPluginLoader } from './plugin-loader.js';
 import type { ExternalPublishPluginConfig, PublishPluginStarter, IPublishPlugin, IPublishClient } from './core/types.js';
-import { PublishControlRepository } from './control/repository.js';
-
-type ExternalPayloadFormat = 'custom' | 'tags' | 'ecp';
-
-function resolveExternalPayloadFormat(): ExternalPayloadFormat {
-	const raw = (process.env.PUBLISH_EXTERNAL_FORMAT || 'custom')
-		.trim()
-		.toLowerCase();
-
-	if (raw === 'tags' || raw === 'tag') {
-		return 'tags';
-	}
-
-	if (raw === 'ecp' || raw === 'esp') {
-		return 'ecp';
-	}
-
-	return 'custom';
-}
 
 /**
  * DevicePublish - Manages multiple devices and publishes data to MQTT
@@ -69,10 +50,8 @@ export class DevicePublish extends EventEmitter {
 	private anomalyService?: AnomalyDetectionService;
 	private pipelineService?: PipelineService;
 	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
-	private readonly externalPayloadFormat: ExternalPayloadFormat;
 	private readonly publishPluginRegistry: PublishPluginRegistry;
 	private readonly publishPluginLoader: PublishPluginLoader;
-	private readonly publishControlRepository: PublishControlRepository;
 	private publishPluginStartersLoaded = false;
 
 	constructor(
@@ -121,11 +100,8 @@ export class DevicePublish extends EventEmitter {
 		this.useKeyCompactionPoc = useKeyCompactionPoc;
 		this.useDeflatePoc = useDeflatePoc;
 		this.anomalyService = anomalyService;
-		this.externalPayloadFormat = resolveExternalPayloadFormat();
-
 		this.publishPluginRegistry = new PublishPluginRegistry();
 		this.publishPluginLoader = new PublishPluginLoader(agentLogger);
-		this.publishControlRepository = new PublishControlRepository();
 		this.registerBuiltInPublishPluginStarters();
 	}
 
@@ -187,17 +163,6 @@ export class DevicePublish extends EventEmitter {
 
 	private async onInitialize(): Promise<void> {
 		await this.ensureExternalPublishPluginStartersRegistered();
-
-		try {
-			await this.publishControlRepository.ensureDefaultFromLegacyEnv({
-				targetFromEnv: process.env.PUBLISH_TARGET,
-				defaultPayloadFormat: this.externalPayloadFormat,
-			});
-		} catch (error) {
-			this.logger.warn('Failed to initialize publish control defaults from legacy configuration', {
-				error: error instanceof Error ? error.message : String(error),
-			});
-		}
 
 		const deviceConfig = this.config as DevicePublishConfig;
     
@@ -369,7 +334,6 @@ export class DevicePublish extends EventEmitter {
 			this.useDeflatePoc,
 			protocol,
 			this.anomalyService,
-			this.externalPayloadFormat,
 		);
 	}
 

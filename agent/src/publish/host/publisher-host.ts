@@ -157,7 +157,7 @@ export class PublisherHost implements IPublishSink {
 	}
 
 	private createLegacyFallbackBinding(): HostBinding[] {
-		const target = (process.env.PUBLISH_TARGET || 'iotistica').trim().toLowerCase() || 'iotistica';
+		const target = 'iotistica';
 		const publisher: PublisherRecord = {
 			id: -1,
 			name: `legacy-${target}`,
