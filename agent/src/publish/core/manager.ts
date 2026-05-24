@@ -3,8 +3,8 @@ import { getHeapStatistics } from 'v8';
 import { agentTopic } from '../../mqtt/topics.js';
 import type { AnomalyDetectionService } from '../../anomaly/index.js';
 import type { Protocol } from '../../anomaly/types.js';
-import type { DeviceConfig, MqttConnection, Logger, DeviceStats, IPublishClient, IPublishPlugin, IPublishSink } from './types.js';
-import { DeviceState } from './types.js';
+import type { DeviceConfig, MqttConnection, Logger, DeviceStats, IPublishClient, IPublishPlugin } from './types.js';
+import { DeviceState, normalizeTarget } from './types.js';
 import { AnomalyFeed } from '../anomaly/feed.js';
 import { AnomalyEnricher } from '../anomaly/enrich.js';
 import { PayloadCompressor } from '../compression/compress.js';
@@ -26,9 +26,37 @@ const MAX_BATCH_BYTES = (() => {
 	return Math.min(10 * 1024 * 1024, Math.floor(heapLimit * 0.05));
 })();
 
-type ExternalPayloadFormat = 'custom' | 'tags' | 'ecp';
+type PayloadFormat = 'custom' | 'tags' | 'ecp';
 
 type PublishPayload = Record<string, unknown>;
+
+interface ProtocolMessage extends Record<string, unknown> {
+	readings?: ProtocolMessage[];
+}
+
+interface TagPayload {
+	name: string;
+	value?: unknown;
+	error?: unknown;
+	type?: 1 | 2 | 3 | 4;
+}
+
+interface RuntimeSnapshot {
+	state: DeviceState;
+	addr: string;
+	enabled: boolean;
+	healthy: boolean;
+	lastError: string | null;
+	lastErrorTime: Date | null;
+	messagesReceived: number;
+	messagesPublished: number;
+	bytesReceived: number;
+	bytesPublished: number;
+	reconnectAttempts: number;
+	lastPublishTime?: Date;
+	lastHeartbeatTime?: Date;
+	lastConnectedTime?: Date;
+}
 
 interface HostBinding {
 	subscription: PublishSubscriptionRecord;
@@ -53,9 +81,9 @@ export class PublishManager extends EventEmitter {
 	private needStop = false;
 	private publishing = false;
 	private connectionHandlersAttached = false;
-	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
+	private liveDataInterceptor?: (messages: ProtocolMessage[], endpointName: string) => Promise<ProtocolMessage[]> | ProtocolMessage[];
 	private bindings: HostBinding[] = [];
-	private pluginByPublisherId: Map<number, IPublishPlugin> = new Map();
+	private pluginByDestinationId: Map<number, IPublishPlugin> = new Map();
 
 	private readonly onConnected = (): void => {
 		if (this.needStop) return;
@@ -105,7 +133,7 @@ export class PublishManager extends EventEmitter {
     private useKeyCompactionPoc = false,
     private useDeflatePoc = false,
     private anomalyService?: AnomalyDetectionService,
-	private readonly externalPayloadFormat: ExternalPayloadFormat = 'custom',
+	private readonly payloadFormat: PayloadFormat = 'custom',
 	) {
 		super();
 
@@ -133,7 +161,7 @@ export class PublishManager extends EventEmitter {
 		this.anomalyService = service;
 	}
 
-	public setLiveDataInterceptor(interceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[]): void {
+	public setLiveDataInterceptor(interceptor?: (messages: ProtocolMessage[], endpointName: string) => Promise<ProtocolMessage[]> | ProtocolMessage[]): void {
 		this.liveDataInterceptor = interceptor;
 	}
 
@@ -228,7 +256,7 @@ export class PublishManager extends EventEmitter {
 		}
 
 		this.bindings = [];
-		this.pluginByPublisherId.clear();
+		this.pluginByDestinationId.clear();
 	}
 
 	getStats(): DeviceStats {
@@ -243,7 +271,7 @@ export class PublishManager extends EventEmitter {
    * Inject a simulated protocol message directly into the same publish pipeline.
    * This reuses batching, anomaly enrichment, compression, and MQTT publish paths.
    */
-	public injectSimulationMessage(message: Record<string, any>): void {
+	public injectSimulationMessage(message: ProtocolMessage): void {
 		if (this.needStop) {
 			return;
 		}
@@ -256,7 +284,7 @@ export class PublishManager extends EventEmitter {
 		}
 	}
 
-	getRuntimeSnapshot(staleThresholdMs = 60000): Record<string, any> {
+	getRuntimeSnapshot(staleThresholdMs = 60000): RuntimeSnapshot {
 		const stats = this.getStats();
 		const state = this.getState();
 		const hasRecentData = stats.lastPublishTime &&
@@ -294,7 +322,7 @@ export class PublishManager extends EventEmitter {
 			const topic = agentTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
 			const messageCount = this.batcher.messageCount;
 			const batchBytes = this.batcher.totalBytes;
-			let messages = [...this.batcher.messages];
+			let messages = [...this.batcher.messages] as ProtocolMessage[];
 
 			if (this.liveDataInterceptor) {
 				try {
@@ -331,7 +359,7 @@ export class PublishManager extends EventEmitter {
 		}
 	}
 
-	private processAnomaly(messages: any[], endpointName: string): any[] {
+	private processAnomaly(messages: ProtocolMessage[], endpointName: string): ProtocolMessage[] {
 		if (!this.anomalyService) {
 			this.logger?.debug('Skipping endpoint anomaly processing: no anomaly service bound', {
 				endpointName,
@@ -345,10 +373,10 @@ export class PublishManager extends EventEmitter {
 			messageCount: messages.length,
 		});
 		this.feed.processBatch(messages, endpointName);
-		return this.enricher.enrich(messages, endpointName);
+		return this.enricher.enrich(messages, endpointName) as ProtocolMessage[];
 	}
 
-	private buildPayload(endpointName: string, messages: any[], payloadFormat: ExternalPayloadFormat): {
+	private buildPayload(endpointName: string, messages: ProtocolMessage[], payloadFormat: PayloadFormat): {
     data: PublishPayload;
     msgId: string;
     baselineSize: number;
@@ -356,103 +384,106 @@ export class PublishManager extends EventEmitter {
 		const msgId = this.mqttConnection.getMessageIdGenerator?.()?.generate()
 			?? `${this.deviceUuid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-		if (payloadFormat === 'tags' || payloadFormat === 'ecp') {
-			const externalGroupName = this.normalizeExternalGroupName(endpointName);
-			const parsedMessages = messages as Array<Record<string, unknown>>;
-			const tagRecords: Record<string, unknown>[] = [];
-			for (const message of parsedMessages) {
-				if (Array.isArray(message?.readings)) {
-					for (const reading of message.readings as Array<Record<string, unknown>>) {
-						tagRecords.push(reading);
-					}
-				} else {
-					tagRecords.push(message);
-				}
-			}
-			const externalNodeName = this.resolveExternalNodeName(externalGroupName, parsedMessages, tagRecords);
-
-			const timestampMs = Date.now();
-			const tags = tagRecords
-				.map((message: Record<string, unknown>, index: number) => {
-					const name = String(
-						message.metric
-					?? message.metric_name
-					?? message.nodeName
-					?? message.name
-					?? message.tag
-					?? message.id
-					?? `tag_${index}`,
-					);
-					const quality = typeof message.quality === 'string' ? message.quality.toUpperCase() : undefined;
-					const hasError = message.error !== undefined
-					|| message.errorCode !== undefined
-					|| quality === 'BAD'
-					|| message.qualityCode !== undefined;
-
-					if (hasError) {
-					// ECP format does not include/report tag error codes.
-						if (payloadFormat === 'ecp') {
-							return null;
-						}
-
-						return {
-							name,
-							error: message.error ?? message.errorCode ?? message.qualityCode ?? 'READ_ERROR',
-						};
-					}
-
-					const value = message.value ?? message.rawValue ?? null;
-					if (payloadFormat === 'ecp') {
-						if (value === null || value === undefined) {
-							return null;
-						}
-						return {
-							name,
-							value,
-							type: this.inferEcpType(value),
-						};
-					}
-
-					return {
-						name,
-						value,
-					};
-				})
-				.filter((tag) => tag !== null);
-
+		if (payloadFormat === 'custom') {
+			const timestampIso = new Date().toISOString();
 			const data = {
-				timestamp: timestampMs,
-				node: externalNodeName,
-				group: externalGroupName,
-				tags,
+				timestamp: timestampIso,
+				protocol: this.protocol,
+				messages,
+				msgId,
 			};
-
 			const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
 			return { data, msgId, baselineSize };
 		}
 
-		const timestampIso = new Date().toISOString();
+		const externalGroupName = this.normalizeExternalGroupName(endpointName);
+		const tagRecords = this.collectTagRecords(messages);
+		const externalNodeName = this.resolveExternalNodeName(externalGroupName, messages, tagRecords);
+		const timestampMs = Date.now();
+		const tags = tagRecords
+			.map((message, index) => this.mapTagPayload(message, index, payloadFormat))
+			.filter((tag): tag is TagPayload => tag !== null);
+
 		const data = {
-			timestamp: timestampIso,
-			protocol: this.protocol,
-			messages,
-			msgId,
+			timestamp: timestampMs,
+			node: externalNodeName,
+			group: externalGroupName,
+			tags,
 		};
+
 		const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
 		return { data, msgId, baselineSize };
 	}
 
-	private resolvePayloadFormatForActiveBindings(): ExternalPayloadFormat {
+	private collectTagRecords(messages: ProtocolMessage[]): ProtocolMessage[] {
+		const tagRecords: ProtocolMessage[] = [];
+		for (const message of messages) {
+			if (Array.isArray(message.readings)) {
+				tagRecords.push(...message.readings);
+				continue;
+			}
+
+			tagRecords.push(message);
+		}
+
+		return tagRecords;
+	}
+
+	private mapTagPayload(message: ProtocolMessage, index: number, payloadFormat: Exclude<PayloadFormat, 'custom'>): TagPayload | null {
+		const name = String(
+			message.metric
+			?? message.metric_name
+			?? message.nodeName
+			?? message.name
+			?? message.tag
+			?? message.id
+			?? `tag_${index}`,
+		);
+
+		const quality = typeof message.quality === 'string' ? message.quality.toUpperCase() : undefined;
+		const hasError = message.error !== undefined
+			|| message.errorCode !== undefined
+			|| quality === 'BAD'
+			|| message.qualityCode !== undefined;
+
+		if (hasError) {
+			if (payloadFormat === 'ecp') {
+				return null;
+			}
+
+			return {
+				name,
+				error: message.error ?? message.errorCode ?? message.qualityCode ?? 'READ_ERROR',
+			};
+		}
+
+		const value = message.value ?? message.rawValue ?? null;
+		if (payloadFormat === 'ecp') {
+			if (value === null || value === undefined) {
+				return null;
+			}
+
+			return {
+				name,
+				value,
+				type: this.inferEcpType(value),
+			};
+		}
+
+		return { name, value };
+	}
+
+	private resolvePayloadFormatForActiveBindings(): PayloadFormat {
 		if (this.bindings.length === 0) {
-			return this.externalPayloadFormat;
+			return this.payloadFormat;
 		}
 
 		const nonDefaultBindings = this.bindings.filter((binding) => binding.publisher.id !== -1);
 		if (nonDefaultBindings.length === 0) {
-			return this.externalPayloadFormat;
+			return this.payloadFormat;
 		}
 
-		const formats = new Set<ExternalPayloadFormat>();
+		const formats = new Set<PayloadFormat>();
 		for (const binding of nonDefaultBindings) {
 			const candidate = String(binding.subscription.payload_format || '').toLowerCase();
 			if (candidate === 'custom' || candidate === 'tags' || candidate === 'ecp') {
@@ -461,7 +492,7 @@ export class PublishManager extends EventEmitter {
 		}
 
 		if (formats.size === 0) {
-			return this.externalPayloadFormat;
+			return this.payloadFormat;
 		}
 
 		if (formats.size > 1) {
@@ -481,8 +512,8 @@ export class PublishManager extends EventEmitter {
 
 	private resolveExternalNodeName(
 		externalGroupName: string,
-		messages: Array<Record<string, unknown>>,
-		tagRecords: Array<Record<string, unknown>>,
+		messages: ProtocolMessage[],
+		tagRecords: ProtocolMessage[],
 	): string {
 		const candidates = [
 			...messages,
@@ -499,7 +530,7 @@ export class PublishManager extends EventEmitter {
 		return externalGroupName;
 	}
 
-	private readExternalNodeCandidate(message: Record<string, unknown>): string | null {
+	private readExternalNodeCandidate(message: ProtocolMessage): string | null {
 		const value = message.deviceName
 			?? message.device_name
 			?? message.resolvedDisplayName
@@ -580,7 +611,7 @@ export class PublishManager extends EventEmitter {
 		baselineSize: number,
 		messageCount: number,
 		batchBytes: number,
-		enriched: any[],
+		enriched: ProtocolMessage[],
 		endpointName: string,
 	): Promise<void> {
 		if (this.needStop) return;
@@ -617,34 +648,50 @@ export class PublishManager extends EventEmitter {
 			this.batcher.reset();
 		} catch (err) {
 			this.logger?.error(`Failed to publish batch from endpoint '${endpointName}'`, err, destinationContext);
+			await this.handlePublishFailure(endpointName, err, bufferedRecordId, publishConfirmed, topic, data, msgId, messageCount);
+		}
+	}
 
-			try {
-				if (publishConfirmed) {
-					this.batcher.reset();
-					this.logger?.error(
-						`Published batch from endpoint '${endpointName}' but failed to clean durable buffer record; leaving claimed row for timeout recovery`,
-						err,
-					);
-				} else if (bufferedRecordId !== undefined) {
-					const MessageBufferModel = await this.getMessageBufferModel();
-					MessageBufferModel.markRetryFailed(
-						bufferedRecordId,
-						err instanceof Error ? err.message : String(err),
-					);
-					this.batcher.reset();
-					this.logger?.warn(`Queued failed publish for endpoint '${endpointName}' for durable retry`);
-				} else {
-					await this.publishOffline(topic, data, msgId, messageCount);
-					this.logger?.warn(`Buffered failed publish for endpoint '${endpointName}' to durable storage`);
-				}
-			} catch (bufferError) {
-				this.logger?.error(`Failed to durably buffer publish failure for endpoint '${endpointName}'`, bufferError);
+	private async handlePublishFailure(
+		endpointName: string,
+		err: unknown,
+		bufferedRecordId: number | undefined,
+		publishConfirmed: boolean,
+		topic: string,
+		data: PublishPayload,
+		msgId: string,
+		messageCount: number,
+	): Promise<void> {
+		try {
+			if (publishConfirmed) {
+				this.batcher.reset();
+				this.logger?.error(
+					`Published batch from endpoint '${endpointName}' but failed to clean durable buffer record; leaving claimed row for timeout recovery`,
+					err,
+				);
+				return;
 			}
+
+			if (bufferedRecordId !== undefined) {
+				const MessageBufferModel = await this.getMessageBufferModel();
+				MessageBufferModel.markRetryFailed(
+					bufferedRecordId,
+					err instanceof Error ? err.message : String(err),
+				);
+				this.batcher.reset();
+				this.logger?.warn(`Queued failed publish for endpoint '${endpointName}' for durable retry`);
+				return;
+			}
+
+			await this.publishOffline(topic, data, msgId, messageCount);
+			this.logger?.warn(`Buffered failed publish for endpoint '${endpointName}' to durable storage`);
+		} catch (bufferError) {
+			this.logger?.error(`Failed to durably buffer publish failure for endpoint '${endpointName}'`, bufferError);
 		}
 	}
 
 	private getPublishDestinationLogContext(topic?: string): Record<string, unknown> | undefined {
-		const destinations = this.getDestinationInfo();
+		const destinations = this.getPublishDestinationInfo();
 		if (!Array.isArray(destinations) || destinations.length === 0) {
 			return undefined;
 		}
@@ -652,9 +699,9 @@ export class PublishManager extends EventEmitter {
 		return {
 			topic,
 			destinations: destinations.map((destination) => ({
-				publish_destination_id: destination.publisherId,
-				publisher_name: destination.publisherName,
-				publisher_type: destination.publisherType,
+				publish_destination_id: destination.destinationId,
+				destination_name: destination.destinationName,
+				destination_type: destination.destinationType,
 				subscription_ids: destination.subscriptionIds,
 				topics: destination.topics,
 			})),
@@ -753,21 +800,22 @@ export class PublishManager extends EventEmitter {
 		return plugins.some((plugin) => plugin.isConnected());
 	}
 
-	public getDestinationInfo(): PublishDestinationInfo[] {
+	public getPublishDestinationInfo(): PublishDestinationInfo[] {
 		if (this.bindings.length === 0) {
 			return [];
 		}
 
-		const byPublisher = new Map<number, PublishDestinationInfo>();
+		const byDestination = new Map<number, PublishDestinationInfo>();
 
 		for (const binding of this.bindings) {
-			const publisherId = binding.publisher.id ?? -1;
-			const existing = byPublisher.get(publisherId);
+			const destinationId = binding.publisher.id ?? -1;
+			const normalizedDestinationType = normalizeTarget(binding.publisher.type);
+			const existing = byDestination.get(destinationId);
 			if (!existing) {
-				byPublisher.set(publisherId, {
-					publisherId: binding.publisher.id,
-					publisherName: binding.publisher.name,
-					publisherType: String(binding.publisher.type),
+				byDestination.set(destinationId, {
+					destinationId: binding.publisher.id,
+					destinationName: binding.publisher.name,
+					destinationType: normalizedDestinationType,
 					subscriptionIds: binding.subscription.id !== undefined ? [binding.subscription.id] : [],
 					topics: this.normalizeTopics(binding.subscription.topics),
 				});
@@ -785,12 +833,12 @@ export class PublishManager extends EventEmitter {
 			}
 		}
 
-		for (const destination of byPublisher.values()) {
+		for (const destination of byDestination.values()) {
 			destination.subscriptionIds.sort((a, b) => a - b);
 			destination.topics.sort();
 		}
 
-		return Array.from(byPublisher.values());
+		return Array.from(byDestination.values());
 	}
 
 	private resolveDestinationTopic(binding: HostBinding, sourceTopic: string): string | null {
@@ -805,8 +853,8 @@ export class PublishManager extends EventEmitter {
 				component: 'PublishManager',
 				protocol: this.protocol,
 				endpoint: this.endpointName,
-				publisherId: binding.publisher.id,
-				publisherName: binding.publisher.name,
+				destinationId: binding.publisher.id,
+				destinationName: binding.publisher.name,
 				subscriptionId: binding.subscription.id,
 			});
 			return null;
@@ -819,6 +867,33 @@ export class PublishManager extends EventEmitter {
 		if (this.bindings.length === 0) {
 			throw new Error('No publish destinations configured');
 		}
+
+		const entries = this.collectRouteEntries(sourceTopic, payload);
+		if (entries.length === 0) {
+			throw new Error('No valid publish destinations configured (missing route_json.topic)');
+		}
+
+		const results = await Promise.allSettled(entries.map(([plugin, batch]) => plugin.publishBatch(batch)));
+		const failures = results.filter((result) => result.status === 'rejected') as Array<PromiseRejectedResult>;
+		if (failures.length === 0) {
+			return;
+		}
+
+		if (failures.length === results.length) {
+			const first = failures[0]?.reason;
+			throw first instanceof Error ? first : new Error(String(first));
+		}
+
+		this.logger?.warn('Some publish destinations failed while others succeeded', {
+			component: 'PublishManager',
+			protocol: this.protocol,
+			endpoint: this.endpointName,
+			failedDestinations: failures.length,
+			totalDestinations: entries.length,
+		});
+	}
+
+	private collectRouteEntries(sourceTopic: string, payload: string | Buffer): Array<[IPublishPlugin, PublishBatchItem[]]> {
 
 		const batchesByPlugin = new Map<IPublishPlugin, PublishBatchItem[]>();
 		for (const binding of this.bindings) {
@@ -839,34 +914,11 @@ export class PublishManager extends EventEmitter {
 			batchesByPlugin.set(binding.plugin, items);
 		}
 
-		const entries = Array.from(batchesByPlugin.entries());
-		if (entries.length === 0) {
-			throw new Error('No valid publish destinations configured (missing route_json.topic)');
-		}
-
-		const results = await Promise.allSettled(entries.map(([plugin, batch]) => plugin.publishBatch(batch)));
-		const failures = results.filter((result) => result.status === 'rejected') as Array<PromiseRejectedResult>;
-
-		if (failures.length === 0) {
-			return;
-		}
-
-		if (failures.length === results.length) {
-			const first = failures[0]?.reason;
-			throw first instanceof Error ? first : new Error(String(first));
-		}
-
-		this.logger?.warn('Some publish destinations failed while others succeeded', {
-			component: 'PublishManager',
-			protocol: this.protocol,
-			endpoint: this.endpointName,
-			failedDestinations: failures.length,
-			totalDestinations: entries.length,
-		});
+		return Array.from(batchesByPlugin.entries());
 	}
 
 	private loadBindings(): HostBinding[] {
-		const publishers = PublishDestinationsModel.getAll(false);
+		const destinations = PublishDestinationsModel.getAll(false);
 		const subscriptions = PublishSubscriptionsModel.getAll(false);
 		// If no explicit subscriptions configured, return empty to use default Iotistica
 		if (subscriptions.length === 0) {
@@ -874,23 +926,23 @@ export class PublishManager extends EventEmitter {
 		}
 		// If subscriptions exist but publishers don't, still process subscriptions
 		// (they may be misconfigured but we shouldn't silently ignore them)
-		if (publishers.length === 0) {
+		if (destinations.length === 0) {
 			return [];
 		}
 
-		const publishersById = new Map<number, PublisherRecord>();
-		for (const publisher of publishers) {
-			if (publisher.id !== undefined) {
-				publishersById.set(publisher.id, publisher);
+		const destinationsById = new Map<number, PublisherRecord>();
+		for (const destination of destinations) {
+			if (destination.id !== undefined) {
+				destinationsById.set(destination.id, destination);
 			}
 		}
 
-		this.pluginByPublisherId.clear();
+		this.pluginByDestinationId.clear();
 		const bindings: HostBinding[] = [];
 
 		for (const subscription of subscriptions) {
-			const publisher = publishersById.get(subscription.publish_destination_id);
-			if (!publisher) {
+			const destination = destinationsById.get(subscription.publish_destination_id);
+			if (!destination) {
 				continue;
 			}
 
@@ -898,13 +950,13 @@ export class PublishManager extends EventEmitter {
 				continue;
 			}
 
-			let plugin = this.pluginByPublisherId.get(subscription.publish_destination_id);
+			let plugin = this.pluginByDestinationId.get(subscription.publish_destination_id);
 			if (!plugin) {
-				plugin = this.buildPlugin(publisher, this.defaultClient, this.logger, this.endpointName);
-				this.pluginByPublisherId.set(subscription.publish_destination_id, plugin);
+				plugin = this.buildPlugin(destination, this.defaultClient, this.logger, this.endpointName);
+				this.pluginByDestinationId.set(subscription.publish_destination_id, plugin);
 			}
 
-			bindings.push({ subscription, publisher, plugin });
+			bindings.push({ subscription, publisher: destination, plugin });
 		}
 
 		return bindings;

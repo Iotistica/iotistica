@@ -51,15 +51,18 @@ export type PublishMode = 'direct' | 'buffer-only' | 'recovering';
 export type PublishTarget = 'iotistica' | 'azure' | 'aws' | 'gcp' | 'mqtt';
 
 export function normalizeTarget(target?: string): PublishTarget {
-	const value = (target || '').trim().toLowerCase();
+  const value = target?.trim().toLowerCase() ?? '';
 
-	if (value === '' || value === 'iotistica') return 'iotistica';
-	if (value === 'azure') return 'azure';
-	if (value === 'aws' || value === 'awsiot' || value === 'aws-iot') return 'aws';
-	if (value === 'gcp' || value === 'google' || value === 'google-cloud') return 'gcp';
-	if (value === 'mqtt' || value === 'external-mqtt' || value === 'generic-mqtt') return 'mqtt';
-
-	return 'iotistica';
+  switch (value) {
+    case 'iotistica':
+    case 'azure':
+    case 'aws':
+    case 'gcp':
+    case 'mqtt':
+      return value;
+    default:
+      return 'iotistica';
+  }
 }
 
 export interface PublishBatchItem {
@@ -69,9 +72,9 @@ export interface PublishBatchItem {
 }
 
 export interface PublishDestinationInfo {
-  publisherId?: number;
-  publisherName: string;
-  publisherType: string;
+  destinationId?: number;
+  destinationName: string;
+  destinationType: string;
   subscriptionIds: number[];
   topics: string[];
 }
@@ -85,16 +88,13 @@ export interface IPublishClient {
   getPublishMode?(): PublishMode;
 }
 
-export interface IPublishSink {
+export interface IPublishPlugin {
   start(): Promise<void>;
   stop(): Promise<void>;
   isRunning(): boolean;
   isConnected(): boolean;
   publishBatch(batch: PublishBatchItem[]): Promise<void>;
   getDestinationInfo?(): PublishDestinationInfo[];
-}
-
-export interface IPublishPlugin extends IPublishSink {
   on(event: string, listener: (...args: any[]) => void): this;
 }
 

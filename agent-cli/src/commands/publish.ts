@@ -220,8 +220,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
 /**
  * iotctl publish mqtt add --name <name> --broker <mqtt://host:1883>
  *   [--username u] [--password p] [--client-id id] [--topic-template tpl]
- *   [--topics modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]
- *   [--include-devices d1,d2] [--exclude-devices d3] [--disabled]
+ *   [--disabled]
  */
 export async function publishMqttAdd(): Promise<void> {
   const name = getFlag('name');
@@ -230,44 +229,17 @@ export async function publishMqttAdd(): Promise<void> {
   const password = getFlag('password');
   const clientId = getFlag('client-id');
   const topicTemplate = getFlag('topic-template') || '{topic}';
-  const destinationTopic = (getFlag('destination-topic') || '').trim();
-  const topics = parseCsv(getFlag('topics'));
-  const includeDevices = parseCsv(getFlag('include-devices'));
-  const excludeDevices = parseCsv(getFlag('exclude-devices'));
-  const payloadFormat = (getFlag('payload-format') || 'custom').trim().toLowerCase();
   const enabled = !hasFlag('disabled');
 
   if (!name) {
     throw new CLIError('--name is required', 1, {
-      usage: 'iotctl publish mqtt add --name <name> --broker mqtt://host:1883 [--topics modbus,opcua,mqtt,system]',
+      usage: 'iotctl publish mqtt add --name <name> --broker mqtt://host:1883',
     });
   }
 
   if (!broker) {
     throw new CLIError('--broker is required', 1, {
       usage: 'iotctl publish mqtt add --name <name> --broker mqtt://host:1883',
-    });
-  }
-
-  if (!['custom', 'tags', 'ecp'].includes(payloadFormat)) {
-    throw new CLIError('Invalid --payload-format value', 1, {
-      payloadFormat,
-      supported: 'custom, tags, ecp',
-    });
-  }
-
-  const routeJson: Record<string, unknown> | null =
-    includeDevices.length > 0 || excludeDevices.length > 0 || destinationTopic.length > 0
-      ? {
-          ...(destinationTopic.length > 0 ? { topic: destinationTopic } : {}),
-          ...(includeDevices.length > 0 ? { includeDevices } : {}),
-          ...(excludeDevices.length > 0 ? { excludeDevices } : {}),
-        }
-      : null;
-
-  if (!destinationTopic) {
-    throw new CLIError('--destination-topic is required', 1, {
-      usage: 'iotctl publish mqtt add --name <name> --broker mqtt://host:1883 --destination-topic <topic> [--topics modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]',
     });
   }
 
@@ -293,25 +265,9 @@ export async function publishMqttAdd(): Promise<void> {
       throw new Error('Publisher create did not return id');
     }
 
-    const subscriptionResult = await apiRequest(`${DEVICE_API_V1}/publish/subscriptions`, {
-      method: 'POST',
-      body: JSON.stringify({
-        publish_destination_id: publisher.id,
-        topics,
-        payload_format: payloadFormat,
-        route_json: routeJson,
-        enabled,
-      }),
-    });
-
-    const subscription = subscriptionResult.subscription;
-
     logger.info('MQTT publish destination created', {
       publish_destination_id: publisher.id,
       publisher_name: publisher.name,
-      subscription_id: subscription?.id,
-      topics: subscription?.topics,
-      payload_format: subscription?.payload_format,
       enabled,
     });
 
@@ -319,6 +275,10 @@ export async function publishMqttAdd(): Promise<void> {
       brokerUrl: broker,
       clientId: clientId || '(auto-generated)',
       topicTemplate: topicTemplate,
+    });
+
+    logger.info('No subscription was created automatically. Add one with:', {
+      example: `iotctl publish subscriptions add --publish-destination-id ${publisher.id} --destination-topic <topic>`,
     });
   } catch (error) {
     if (error instanceof CLIError) throw error;
