@@ -478,13 +478,8 @@ export class PublishManager extends EventEmitter {
 			return this.payloadFormat;
 		}
 
-		const nonDefaultBindings = this.bindings.filter((binding) => binding.publisher.id !== -1);
-		if (nonDefaultBindings.length === 0) {
-			return this.payloadFormat;
-		}
-
 		const formats = new Set<PayloadFormat>();
-		for (const binding of nonDefaultBindings) {
+		for (const binding of this.bindings) {
 			const candidate = String(binding.subscription.payload_format || '').toLowerCase();
 			if (candidate === 'custom' || candidate === 'tags' || candidate === 'ecp') {
 				formats.add(candidate);
@@ -920,14 +915,10 @@ export class PublishManager extends EventEmitter {
 	private loadBindings(): HostBinding[] {
 		const destinations = PublishDestinationsModel.getAll(false);
 		const subscriptions = PublishSubscriptionsModel.getAll(false);
-		// If no explicit subscriptions configured, return empty to use default Iotistica
-		if (subscriptions.length === 0) {
-			return [];
-		}
-		// If subscriptions exist but publishers don't, still process subscriptions
-		// (they may be misconfigured but we shouldn't silently ignore them)
-		if (destinations.length === 0) {
-			return [];
+
+		if (subscriptions.length === 0 || destinations.length === 0) {
+			this.pluginByDestinationId.clear();
+			return this.createDefaultIotisticaBinding();
 		}
 
 		const destinationsById = new Map<number, PublisherRecord>();
@@ -957,6 +948,15 @@ export class PublishManager extends EventEmitter {
 			}
 
 			bindings.push({ subscription, publisher: destination, plugin });
+		}
+
+		const hasConfiguredIotisticaBinding = bindings.some((binding) => {
+			const destinationType = normalizeTarget(binding.publisher.type);
+			return destinationType === 'iotistica';
+		});
+
+		if (!hasConfiguredIotisticaBinding) {
+			return [...this.createDefaultIotisticaBinding(), ...bindings];
 		}
 
 		return bindings;

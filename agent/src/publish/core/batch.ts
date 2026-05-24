@@ -47,15 +47,12 @@ export class MessageBatcher extends EventEmitter {
 		}
 	}
 
-	// --- public accessors -------------------------------------------------------
-
 	get messages(): any[] { return this._messages; }
 	get totalBytes(): number { return this._totalBytes; }
 	get firstMessageTime(): number { return this._firstMessageTime; }
 	get messageCount(): number { return this._messages.length; }
 	get totalReceived(): number { return this._totalReceived; }
 
-	// --- data ingestion ---------------------------------------------------------
 
 	/** Called by EndpointConnection whenever data arrives on the socket. */
 	appendData(data: Buffer): void {
