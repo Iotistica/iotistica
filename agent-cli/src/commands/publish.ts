@@ -295,8 +295,10 @@ export async function publishMqttAdd(): Promise<void> {
       enabled,
     });
 
-    logger.warn('Note: mqtt publisher runtime currently reads broker settings from environment variables.', {
-      expectedEnv: 'EXTERNAL_MQTT_BROKER_URL, EXTERNAL_MQTT_USERNAME, EXTERNAL_MQTT_PASSWORD, EXTERNAL_MQTT_CLIENT_ID, EXTERNAL_MQTT_TOPIC_TEMPLATE',
+    logger.info('MQTT publisher configuration stored in database and will be used at runtime', {
+      brokerUrl: broker,
+      clientId: clientId || '(auto-generated)',
+      topicTemplate: topicTemplate,
     });
   } catch (error) {
     if (error instanceof CLIError) throw error;

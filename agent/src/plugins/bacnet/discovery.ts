@@ -616,12 +616,13 @@ export class BACnetDiscovery extends BaseDiscovery {
 					.replace(/[^a-z0-9_]/g, '_')
 					.replace(/^iotistica_+/, '')  // Remove all leading iotistica_ prefixes
 					.replace(/^_+/, '');            // Remove any leading underscores
-				const baseName = normalized ? `iotistica_${normalized}` : `iotistica_bacnet_simulator`;
-				const instanceSuffix = `_${deviceInstance}`;
-				const uniqueEndpointName = baseName.endsWith(instanceSuffix)
-					? baseName
-					: `${baseName}${instanceSuffix}`;
+				const baseName = normalized || 'unknown';
+				const nameWithPrefix = baseName.startsWith('iotistica_') ? baseName : `iotistica_${baseName}`;
 
+				const instanceSuffix = `_${deviceInstance}`;
+				const uniqueEndpointName = nameWithPrefix.endsWith(instanceSuffix)
+					? nameWithPrefix
+					: `${nameWithPrefix}${instanceSuffix}`;
 				discovered.push({
 					name: uniqueEndpointName,
 					protocol: 'bacnet',

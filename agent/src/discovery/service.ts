@@ -295,9 +295,11 @@ export class DiscoveryService extends EventEmitter {
 
 									if (protocol === 'bacnet') {
 										const deviceInstance = device.connection?.deviceInstance;
+										const cleanedBaseName = baseName.replace(/^iotistica_+/, '');
+										const nameWithPrefix = cleanedBaseName.startsWith('iotistica_') ? cleanedBaseName : `iotistica_${cleanedBaseName}`;
 										device.name = typeof deviceInstance === 'number'
-											? `${baseName}_${deviceInstance}`
-											: baseName;
+											? nameWithPrefix.endsWith(`_${deviceInstance}`) ? nameWithPrefix : `${nameWithPrefix}_${deviceInstance}`
+											: nameWithPrefix;
 									} else {
 										device.name = baseName;
 									}
