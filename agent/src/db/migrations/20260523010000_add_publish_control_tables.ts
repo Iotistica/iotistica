@@ -17,15 +17,15 @@ function up(db: Database.Database): void {
 				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 			)
 		`);
-		db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_destinations_name_unique ON publishers(name)');
-		db.exec('CREATE INDEX IF NOT EXISTS idx_publish_destinations_type_enabled ON publishers(type, enabled)');
+		db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_destinations_name_unique ON publish_destinations(name)');
+		db.exec('CREATE INDEX IF NOT EXISTS idx_publish_destinations_type_enabled ON publish_destinations(type, enabled)');
 	}
 
 	if (!tableExists(db, 'publish_subscriptions')) {
 		db.exec(`
 			CREATE TABLE publish_subscriptions (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				publisher_destination_id INTEGER NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
+				publish_destination_id INTEGER NOT NULL REFERENCES publish_destinations(id) ON DELETE CASCADE,
 				topics TEXT NOT NULL DEFAULT '[]',
 				route_json TEXT,
 				payload_format VARCHAR(20) NOT NULL DEFAULT 'custom',
@@ -34,7 +34,7 @@ function up(db: Database.Database): void {
 				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 			)
 		`);
-		db.exec('CREATE INDEX IF NOT EXISTS idx_publish_subscriptions_publisher_id ON publish_subscriptions(publisher_id)');
+		db.exec('CREATE INDEX IF NOT EXISTS idx_publish_subscriptions_publish_destination_id ON publish_subscriptions(publish_destination_id)');
 		db.exec('CREATE INDEX IF NOT EXISTS idx_publish_subscriptions_enabled ON publish_subscriptions(enabled)');
 	}
 }

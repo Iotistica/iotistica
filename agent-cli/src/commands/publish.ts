@@ -66,27 +66,27 @@ export async function publishDestinationsList(): Promise<void> {
 }
 
 /**
- * iotctl publish subscriptions list [--publisher-id <id>] [--include-disabled]
+ * iotctl publish subscriptions list [--publish-destination-id <id>] [--include-disabled]
  */
 export async function publishSubscriptionsList(): Promise<void> {
   const includeDisabled = hasFlag('include-disabled');
-  const publisherIdRaw = getFlag('publisher-id');
-  let publisherQuery = '';
+  const publishDestinationIdRaw = getFlag('publish-destination-id');
+  let destinationQuery = '';
 
-  if (publisherIdRaw !== undefined) {
-    const publisherId = Number(publisherIdRaw);
-    if (!Number.isFinite(publisherId)) {
-      throw new CLIError('Invalid --publisher-id value', 1, {
-        publisherId: publisherIdRaw,
+  if (publishDestinationIdRaw !== undefined) {
+    const publishDestinationId = Number(publishDestinationIdRaw);
+    if (!Number.isFinite(publishDestinationId)) {
+      throw new CLIError('Invalid --publish-destination-id value', 1, {
+        publishDestinationId: publishDestinationIdRaw,
       });
     }
 
-    publisherQuery = `&publisher_id=${publisherId}`;
+    destinationQuery = `&publish_destination_id=${publishDestinationId}`;
   }
 
   try {
     const result = await apiRequest(
-      `${DEVICE_API_V1}/publish/subscriptions?includeDisabled=${includeDisabled ? 'true' : 'false'}${publisherQuery}`,
+      `${DEVICE_API_V1}/publish/subscriptions?includeDisabled=${includeDisabled ? 'true' : 'false'}${destinationQuery}`,
     );
     const subscriptions: Array<Record<string, any>> = result.subscriptions || [];
 
@@ -101,7 +101,7 @@ export async function publishSubscriptionsList(): Promise<void> {
         ? subscription.route_json as Record<string, any>
         : null;
       logger.info(`Subscription ${subscription.id ?? '(unknown)'}`, {
-        publisher_id: subscription.publisher_id,
+        publish_destination_id: subscription.publish_destination_id,
         topics: normalizeTopicsForDisplay(subscription.topics),
         payload_format: subscription.payload_format,
         destination_topic: routeJson?.topic || null,
@@ -132,18 +132,18 @@ async function resolveDestinationId(input: {
   }
 
   if (!input.publishDestinationName) {
-    throw new CLIError('Either --publisher-id or --publisher-name is required', 1, {
-      usage: 'iotctl publish subscriptions add --publisher-id <id> [--topics modbus,opcua] [--payload-format custom|tags|ecp] [--include-devices d1,d2] [--exclude-devices d3] [--disabled]',
+    throw new CLIError('Either --publish-destination-id or --publisher-name is required', 1, {
+      usage: 'iotctl publish subscriptions add --publish-destination-id <id> [--topics modbus,opcua] [--payload-format custom|tags|ecp] [--include-devices d1,d2] [--exclude-devices d3] [--disabled]',
     });
   }
 
   const result = await apiRequest(`${DEVICE_API_V1}/publish/destinations?includeDisabled=true`);
-  const destinations: Array<{ id?: number; name?: string }> = result.publishers || [];
+  const destinations: Array<{ id?: number; name?: string }> = result.destinations || [];
   const destination = destinations.find((item) => item.name === input.publishDestinationName);
 
   if (!destination?.id) {
     throw new CLIError(`Destination not found: ${input.publishDestinationName}`, 1, {
-      hint: 'Use API GET /v1/publish/destinations or provide --publisher-id directly.',
+      hint: 'Use API GET /v1/publish/destinations or provide --publish-destination-id directly.',
     });
   }
 
@@ -151,12 +151,12 @@ async function resolveDestinationId(input: {
 }
 
 /**
- * iotctl publish subscriptions add --publisher-id <id>
+ * iotctl publish subscriptions add --publish-destination-id <id>
  *   [--topics modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]
  *   [--include-devices d1,d2] [--exclude-devices d3] [--disabled]
  */
 export async function publishSubscriptionsAdd(): Promise<void> {
-  const publisherIdRaw = getFlag('publisher-id');
+  const publishDestinationIdRaw = getFlag('publish-destination-id');
   const publisherName = getFlag('publisher-name');
   const topics = parseCsv(getFlag('topics'));
   const includeDevices = parseCsv(getFlag('include-devices'));
@@ -172,7 +172,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
     });
   }
 
-  const publisherId = await resolveDestinationId({ publishDestinationIdRaw: publisherIdRaw, publishDestinationName: publisherName });
+  const publishDestinationId = await resolveDestinationId({ publishDestinationIdRaw, publishDestinationName: publisherName });
 
   const routeJson: Record<string, unknown> | null =
     includeDevices.length > 0 || excludeDevices.length > 0 || destinationTopic.length > 0
@@ -185,7 +185,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
 
   if (!destinationTopic) {
     throw new CLIError('--destination-topic is required', 1, {
-      usage: 'iotctl publish subscriptions add --publisher-id <id> --destination-topic <topic> [--topics modbus,opcua] [--payload-format custom|tags|ecp]',
+      usage: 'iotctl publish subscriptions add --publish-destination-id <id> --destination-topic <topic> [--topics modbus,opcua] [--payload-format custom|tags|ecp]',
     });
   }
 
@@ -193,7 +193,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
     const result = await apiRequest(`${DEVICE_API_V1}/publish/subscriptions`, {
       method: 'POST',
       body: JSON.stringify({
-        publisher_id: publisherId,
+        publish_destination_id: publishDestinationId,
         topics,
         payload_format: payloadFormat,
         route_json: routeJson,
@@ -204,7 +204,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
     const subscription = result.subscription;
     logger.info('Publish subscription created', {
       id: subscription?.id,
-      publisher_id: subscription?.publisher_id,
+      publish_destination_id: subscription?.publish_destination_id,
       payload_format: subscription?.payload_format,
       enabled: subscription?.enabled,
       topics: subscription?.topics,
@@ -296,7 +296,7 @@ export async function publishMqttAdd(): Promise<void> {
     const subscriptionResult = await apiRequest(`${DEVICE_API_V1}/publish/subscriptions`, {
       method: 'POST',
       body: JSON.stringify({
-        publisher_id: publisher.id,
+        publish_destination_id: publisher.id,
         topics,
         payload_format: payloadFormat,
         route_json: routeJson,
@@ -307,7 +307,7 @@ export async function publishMqttAdd(): Promise<void> {
     const subscription = subscriptionResult.subscription;
 
     logger.info('MQTT publish destination created', {
-      publisher_id: publisher.id,
+      publish_destination_id: publisher.id,
       publisher_name: publisher.name,
       subscription_id: subscription?.id,
       topics: subscription?.topics,

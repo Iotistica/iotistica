@@ -983,23 +983,23 @@ export const updatePublisher = async (id: number, body: {
 };
 
 /**
- * Publish control: delete publisher
+ * Publish control: delete destination
  */
 export const deletePublisher = async (id: number) => {
 	const deleted = PublishDestinationsModel.delete(id);
 	if (!deleted) {
-		throw Object.assign(new Error(`Publisher not found: ${id}`), { statusCode: 404 });
+		throw Object.assign(new Error(`Destination not found: ${id}`), { statusCode: 404 });
 	}
 
 	return { deleted: true };
 };
 
 /**
- * Publish control: list subscriptions (optionally filtered by publisher_id)
+ * Publish control: list subscriptions (optionally filtered by publish_destination_id)
  */
-export const listPublishSubscriptions = async (publisherId?: number, includeDisabled: boolean = true) => {
-	if (publisherId !== undefined) {
-		return PublishSubscriptionsModel.getByPublisherId(publisherId, includeDisabled);
+export const listPublishSubscriptions = async (publishDestinationId?: number, includeDisabled: boolean = true) => {
+	if (publishDestinationId !== undefined) {
+		return PublishSubscriptionsModel.getByPublishDestinationId(publishDestinationId, includeDisabled);
 	}
 
 	return PublishSubscriptionsModel.getAll(includeDisabled);
@@ -1009,19 +1009,19 @@ export const listPublishSubscriptions = async (publisherId?: number, includeDisa
  * Publish control: create subscription
  */
 export const createPublishSubscription = async (body: {
-	publisher_id: number;
+	publish_destination_id: number;
 	topics?: string[];
 	route_json?: Record<string, unknown> | null;
 	payload_format?: 'custom' | 'tags' | 'ecp';
 	enabled?: boolean;
 }) => {
-	if (!body || !Number.isFinite(body.publisher_id)) {
-		throw new Error('publisher_id is required');
+	if (!body || !Number.isFinite(body.publish_destination_id)) {
+		throw new Error('publish_destination_id is required');
 	}
 
-	const publisher = PublishDestinationsModel.getById(body.publisher_id);
-	if (!publisher) {
-		throw Object.assign(new Error(`Publisher not found: ${body.publisher_id}`), { statusCode: 404 });
+	const destination = PublishDestinationsModel.getById(body.publish_destination_id);
+	if (!destination) {
+		throw Object.assign(new Error(`Destination not found: ${body.publish_destination_id}`), { statusCode: 404 });
 	}
 
 	const format = body.payload_format || 'custom';
@@ -1029,15 +1029,15 @@ export const createPublishSubscription = async (body: {
 		throw new Error(`Invalid payload_format: ${format}`);
 	}
 
-	if (publisher.type !== 'iotistica') {
+	if (destination.type !== 'iotistica') {
 		const destinationTopic = typeof body.route_json?.topic === 'string' ? body.route_json.topic.trim() : '';
 		if (!destinationTopic) {
-			throw new Error('route_json.topic is required for non-default publishers');
+			throw new Error('route_json.topic is required for non-default destinations');
 		}
 	}
 
 	const created = PublishSubscriptionsModel.create({
-		publisher_id: body.publisher_id,
+		publish_destination_id: body.publish_destination_id,
 		topics: body.topics || [],
 		route_json: (body.route_json as any) ?? null,
 		payload_format: format,
@@ -1055,7 +1055,7 @@ export const createPublishSubscription = async (body: {
  * Publish control: update subscription
  */
 export const updatePublishSubscription = async (id: number, body: {
-	publisher_id?: number;
+	publish_destination_id?: number;
 	topics?: string[];
 	route_json?: Record<string, unknown> | null;
 	payload_format?: 'custom' | 'tags' | 'ecp';
@@ -1066,16 +1066,16 @@ export const updatePublishSubscription = async (id: number, body: {
 		throw Object.assign(new Error(`Publish subscription not found: ${id}`), { statusCode: 404 });
 	}
 
-	let publisher = existing.publisher_id ? PublishDestinationsModel.getById(existing.publisher_id) : null;
-	if (body.publisher_id !== undefined) {
-		publisher = PublishDestinationsModel.getById(body.publisher_id);
-		if (!publisher) {
-			throw Object.assign(new Error(`Publisher not found: ${body.publisher_id}`), { statusCode: 404 });
+	let destination = existing.publish_destination_id ? PublishDestinationsModel.getById(existing.publish_destination_id) : null;
+	if (body.publish_destination_id !== undefined) {
+		destination = PublishDestinationsModel.getById(body.publish_destination_id);
+		if (!destination) {
+			throw Object.assign(new Error(`Destination not found: ${body.publish_destination_id}`), { statusCode: 404 });
 		}
 	}
 
-	if (!publisher) {
-		throw Object.assign(new Error(`Publisher not found: ${existing.publisher_id}`), { statusCode: 404 });
+	if (!destination) {
+		throw Object.assign(new Error(`Destination not found: ${existing.publish_destination_id}`), { statusCode: 404 });
 	}
 
 	if (body.payload_format !== undefined) {
@@ -1085,11 +1085,11 @@ export const updatePublishSubscription = async (id: number, body: {
 		}
 	}
 
-	if (publisher.type !== 'iotistica') {
+	if (destination.type !== 'iotistica') {
 		const effectiveRoute = body.route_json !== undefined ? body.route_json : (existing.route_json as Record<string, unknown> | null | undefined);
 		const destinationTopic = typeof effectiveRoute?.topic === 'string' ? effectiveRoute.topic.trim() : '';
 		if (!destinationTopic) {
-			throw new Error('route_json.topic is required for non-default publishers');
+			throw new Error('route_json.topic is required for non-default destinations');
 		}
 	}
 

@@ -16,7 +16,7 @@ export interface PublishSubscriptionRoute {
 
 export interface PublishSubscriptionRecord {
 	id?: number;
-	publisher_id: number;
+	publish_destination_id: number;
 	topics: string[];
 	route_json?: PublishSubscriptionRoute | null;
 	payload_format: PublishPayloadFormat;
@@ -87,11 +87,11 @@ export class PublishSubscriptionsModel {
 			.filter((row): row is PublishSubscriptionRecord => row !== null);
 	}
 
-	static getByPublisherId(publisherId: number, includeDisabled: boolean = true): PublishSubscriptionRecord[] {
+	static getByPublishDestinationId(publishDestinationId: number, includeDisabled: boolean = true): PublishSubscriptionRecord[] {
 		const db = this.getDb();
 		const rows = includeDisabled
-			? (db.prepare(`SELECT * FROM ${this.table} WHERE publisher_id = ? ORDER BY id ASC`).all(publisherId) as PublishSubscriptionRow[])
-			: (db.prepare(`SELECT * FROM ${this.table} WHERE publisher_id = ? AND enabled = 1 ORDER BY id ASC`).all(publisherId) as PublishSubscriptionRow[]);
+			? (db.prepare(`SELECT * FROM ${this.table} WHERE publish_destination_id = ? ORDER BY id ASC`).all(publishDestinationId) as PublishSubscriptionRow[])
+			: (db.prepare(`SELECT * FROM ${this.table} WHERE publish_destination_id = ? AND enabled = 1 ORDER BY id ASC`).all(publishDestinationId) as PublishSubscriptionRow[]);
 
 		return rows
 			.map((row) => this.mapRow(row))
@@ -107,7 +107,7 @@ export class PublishSubscriptionsModel {
 		const now = new Date().toISOString();
 		const result = this.getDb().prepare(`
 			INSERT INTO ${this.table} (
-				publisher_id,
+				publish_destination_id,
 				topics,
 				route_json,
 				payload_format,
@@ -116,7 +116,7 @@ export class PublishSubscriptionsModel {
 				updated_at
 			) VALUES (?, ?, ?, ?, ?, ?, ?)
 		`).run(
-			input.publisher_id,
+			input.publish_destination_id,
 			JSON.stringify(input.topics || []),
 			input.route_json ? JSON.stringify(input.route_json) : null,
 			input.payload_format,
@@ -133,7 +133,7 @@ export class PublishSubscriptionsModel {
 			updated_at: new Date().toISOString(),
 		};
 
-		if (updates.publisher_id !== undefined) payload.publisher_id = updates.publisher_id;
+		if (updates.publish_destination_id !== undefined) payload.publish_destination_id = updates.publish_destination_id;
 		if (updates.topics !== undefined) payload.topics = JSON.stringify(updates.topics || []);
 		if (updates.route_json !== undefined) payload.route_json = updates.route_json ? JSON.stringify(updates.route_json) : null;
 		if (updates.payload_format !== undefined) payload.payload_format = updates.payload_format;
@@ -154,8 +154,8 @@ export class PublishSubscriptionsModel {
 		return result.changes > 0;
 	}
 
-	static deleteByPublisherId(publisherId: number): number {
-		const result = this.getDb().prepare(`DELETE FROM ${this.table} WHERE publisher_id = ?`).run(publisherId);
+	static deleteByPublishDestinationId(publishDestinationId: number): number {
+		const result = this.getDb().prepare(`DELETE FROM ${this.table} WHERE publish_destination_id = ?`).run(publishDestinationId);
 		return result.changes;
 	}
 }

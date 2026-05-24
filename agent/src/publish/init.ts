@@ -19,10 +19,29 @@ import { AzurePublishPlugin } from './plugins/azure.js';
 import { AwsPublishPlugin } from './plugins/aws.js';
 import { GcpPublishPlugin } from './plugins/gcp.js';
 import { MqttPublishPlugin } from './plugins/mqtt.js';
-import { PublishPluginRegistry } from './plugin-registry.js';
-import { PublishPluginLoader } from './plugin-loader.js';
 import { BasePublishPlugin } from './core/base-plugin.js';
-import type { ExternalPublishPluginConfig, PublishPluginStarter, IPublishPlugin, IPublishClient } from './core/types.js';
+import type { PublishPluginStarter, IPublishPlugin, IPublishClient } from './core/types.js';
+
+/**
+ * Minimal registry for publish plugin starters (built-in only)
+ */
+class PublishPluginRegistry {
+	private readonly starters = new Map<string, PublishPluginStarter>();
+
+	public registerPublishPluginStarter(name: string, starter: PublishPluginStarter): void {
+		const normalizedName = name.trim().toLowerCase();
+		this.starters.set(normalizedName, starter);
+	}
+
+	public create(name: string, context: Parameters<PublishPluginStarter>[0]): IPublishPlugin {
+		const normalizedName = name.trim().toLowerCase();
+		const starter = this.starters.get(normalizedName);
+		if (!starter) {
+			throw new Error(`Publish destination type not found: ${normalizedName}`);
+		}
+		return starter(context);
+	}
+}
 
 /**
  * DevicePublish - Manages multiple devices and publishes data to MQTT
@@ -49,8 +68,6 @@ export class DevicePublish extends EventEmitter {
 	private pipelineService?: PipelineService;
 	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
 	private readonly publishPluginRegistry: PublishPluginRegistry;
-	private readonly publishPluginLoader: PublishPluginLoader;
-	private publishPluginStartersLoaded = false;
 
 	constructor(
 		config: DevicePublishConfig & { enabled: boolean },
@@ -99,7 +116,6 @@ export class DevicePublish extends EventEmitter {
 		this.useDeflatePoc = useDeflatePoc;
 		this.anomalyService = anomalyService;
 		this.publishPluginRegistry = new PublishPluginRegistry();
-		this.publishPluginLoader = new PublishPluginLoader(agentLogger);
 		this.registerBuiltInPublishPluginStarters();
 	}
 
@@ -148,8 +164,6 @@ export class DevicePublish extends EventEmitter {
 	}
 
 	private async onInitialize(): Promise<void> {
-		await this.ensureExternalPublishPluginStartersRegistered();
-
 		const deviceConfig = this.config as DevicePublishConfig;
     
 		if (deviceConfig.endpoints.length === 0) {
@@ -328,32 +342,11 @@ export class DevicePublish extends EventEmitter {
 		const mqttStarter: PublishPluginStarter = ({ logger, config, endpointName }) =>
 			MqttPublishPlugin.fromConfig(config ?? null, this.agentLogger, logger, this.deviceUuid, endpointName);
 
-		this.publishPluginRegistry.registerPublishPluginStarter('iotistica', iotisticaStarter, true);
-		this.publishPluginRegistry.registerPublishPluginStarter('azure', azureStarter, true);
-		this.publishPluginRegistry.registerPublishPluginStarter('aws', awsStarter, true);
-		this.publishPluginRegistry.registerPublishPluginStarter('gcp', gcpStarter, true);
-		this.publishPluginRegistry.registerPublishPluginStarter('mqtt', mqttStarter, true);
-	}
-
-	private async ensureExternalPublishPluginStartersRegistered(): Promise<void> {
-		if (this.publishPluginStartersLoaded) {
-			return;
-		}
-
-		const rawModules = (process.env.PUBLISH_PLUGIN_MODULES || '').trim();
-		if (!rawModules) {
-			this.publishPluginStartersLoaded = true;
-			return;
-		}
-
-		const plugins: ExternalPublishPluginConfig[] = rawModules
-			.split(',')
-			.map((segment) => segment.trim())
-			.filter((segment) => segment.length > 0)
-			.map((modulePath) => ({ modulePath, enabled: true }));
-
-		await this.publishPluginLoader.registerFromConfig(this.publishPluginRegistry, plugins);
-		this.publishPluginStartersLoaded = true;
+		this.publishPluginRegistry.registerPublishPluginStarter('iotistica', iotisticaStarter);
+		this.publishPluginRegistry.registerPublishPluginStarter('azure', azureStarter);
+		this.publishPluginRegistry.registerPublishPluginStarter('aws', awsStarter);
+		this.publishPluginRegistry.registerPublishPluginStarter('gcp', gcpStarter);
+		this.publishPluginRegistry.registerPublishPluginStarter('mqtt', mqttStarter);
 	}
 
 	private createPublishPlugin(

@@ -851,17 +851,17 @@ router.delete('/v1/publish/publishers/:id', async (req: Request, res: Response, 
 
 /**
  * GET /v1/publish/subscriptions
- * List publish subscriptions (optional query: publisher_id)
+ * List publish subscriptions (optional query: publish_destination_id)
  */
 router.get('/v1/publish/subscriptions', async (req: Request, res: Response, next: NextFunction) => {
 	try {
 		const includeDisabled = req.query.includeDisabled !== 'false';
-		const publisherId = req.query.publisher_id ? Number(req.query.publisher_id) : undefined;
-		if (publisherId !== undefined && !Number.isFinite(publisherId)) {
-			return res.status(400).json({ error: 'Invalid publisher_id' });
+		const publishDestinationId = req.query.publish_destination_id ? Number(req.query.publish_destination_id) : undefined;
+		if (publishDestinationId !== undefined && !Number.isFinite(publishDestinationId)) {
+			return res.status(400).json({ error: 'Invalid publish_destination_id' });
 		}
 
-		const subscriptions = await actions.listPublishSubscriptions(publisherId, includeDisabled);
+		const subscriptions = await actions.listPublishSubscriptions(publishDestinationId, includeDisabled);
 		return res.status(200).json({ subscriptions });
 	} catch (error) {
 		next(error);

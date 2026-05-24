@@ -652,7 +652,7 @@ export class PublishManager extends EventEmitter {
 		return {
 			topic,
 			destinations: destinations.map((destination) => ({
-				publisher_id: destination.publisherId,
+				publish_destination_id: destination.publisherId,
 				publisher_name: destination.publisherName,
 				publisher_type: destination.publisherType,
 				subscription_ids: destination.subscriptionIds,
@@ -889,7 +889,7 @@ export class PublishManager extends EventEmitter {
 		const bindings: HostBinding[] = [];
 
 		for (const subscription of subscriptions) {
-			const publisher = publishersById.get(subscription.publisher_id);
+			const publisher = publishersById.get(subscription.publish_destination_id);
 			if (!publisher) {
 				continue;
 			}
@@ -898,10 +898,10 @@ export class PublishManager extends EventEmitter {
 				continue;
 			}
 
-			let plugin = this.pluginByPublisherId.get(subscription.publisher_id);
+			let plugin = this.pluginByPublisherId.get(subscription.publish_destination_id);
 			if (!plugin) {
 				plugin = this.buildPlugin(publisher, this.defaultClient, this.logger, this.endpointName);
-				this.pluginByPublisherId.set(subscription.publisher_id, plugin);
+				this.pluginByPublisherId.set(subscription.publish_destination_id, plugin);
 			}
 
 			bindings.push({ subscription, publisher, plugin });
@@ -922,7 +922,7 @@ export class PublishManager extends EventEmitter {
 		const plugin = this.buildPlugin(publisher, this.defaultClient, this.logger, this.endpointName);
 		return [{
 			subscription: {
-				publisher_id: -1,
+				publish_destination_id: -1,
 				topics: [],
 				payload_format: 'custom',
 				enabled: true,
