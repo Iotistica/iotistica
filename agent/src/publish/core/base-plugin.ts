@@ -16,6 +16,10 @@ export class BasePublishPlugin extends EventEmitter implements IPublishPlugin {
       return;
     }
 
+    if (this.client.connect && !this.client.isConnected()) {
+      await this.client.connect();
+    }
+
     this.running = true;
     this.emit('started');
   }
@@ -23,6 +27,10 @@ export class BasePublishPlugin extends EventEmitter implements IPublishPlugin {
   async stop(): Promise<void> {
     if (!this.running) {
       return;
+    }
+
+    if (this.client.disconnect && this.client.isConnected()) {
+      await this.client.disconnect();
     }
 
     this.running = false;

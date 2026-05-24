@@ -1029,6 +1029,13 @@ export const createPublishSubscription = async (body: {
 		throw new Error(`Invalid payload_format: ${format}`);
 	}
 
+	if (publisher.type !== 'iotistica') {
+		const destinationTopic = typeof body.route_json?.topic === 'string' ? body.route_json.topic.trim() : '';
+		if (!destinationTopic) {
+			throw new Error('route_json.topic is required for non-default publishers');
+		}
+	}
+
 	const created = PublishSubscriptionsModel.create({
 		publisher_id: body.publisher_id,
 		topics: body.topics || [],
@@ -1059,17 +1066,30 @@ export const updatePublishSubscription = async (id: number, body: {
 		throw Object.assign(new Error(`Publish subscription not found: ${id}`), { statusCode: 404 });
 	}
 
+	let publisher = existing.publisher_id ? PublishersModel.getById(existing.publisher_id) : null;
 	if (body.publisher_id !== undefined) {
-		const publisher = PublishersModel.getById(body.publisher_id);
+		publisher = PublishersModel.getById(body.publisher_id);
 		if (!publisher) {
 			throw Object.assign(new Error(`Publisher not found: ${body.publisher_id}`), { statusCode: 404 });
 		}
+	}
+
+	if (!publisher) {
+		throw Object.assign(new Error(`Publisher not found: ${existing.publisher_id}`), { statusCode: 404 });
 	}
 
 	if (body.payload_format !== undefined) {
 		const format = body.payload_format;
 		if (format !== 'custom' && format !== 'tags' && format !== 'ecp') {
 			throw new Error(`Invalid payload_format: ${format}`);
+		}
+	}
+
+	if (publisher.type !== 'iotistica') {
+		const effectiveRoute = body.route_json !== undefined ? body.route_json : (existing.route_json as Record<string, unknown> | null | undefined);
+		const destinationTopic = typeof effectiveRoute?.topic === 'string' ? effectiveRoute.topic.trim() : '';
+		if (!destinationTopic) {
+			throw new Error('route_json.topic is required for non-default publishers');
 		}
 	}
 

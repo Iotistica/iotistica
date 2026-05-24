@@ -183,7 +183,7 @@ export class DevicePublish extends EventEmitter {
 		}
 
 		const deviceConfig = this.config as DevicePublishConfig;
-    
+
 		if (deviceConfig.endpoints.length === 0) {
 			return;
 		}
@@ -318,7 +318,7 @@ export class DevicePublish extends EventEmitter {
 			protocol,
 			config.name,
 			this.mqttConnection!,
-			(publisher, client, logger) => this.createPublishPlugin(publisher, client, logger),
+			(publisher, client, logger, endpointName) => this.createPublishPlugin(publisher, client, logger, endpointName),
 			protocolLogger,
 			this.deviceUuid,
 			this.dictionaryManager,
@@ -338,8 +338,8 @@ export class DevicePublish extends EventEmitter {
 			AwsPublishPlugin.fromEnv(this.agentLogger, logger);
 		const gcpStarter: PublishPluginStarter = ({ logger }) =>
 			GcpPublishPlugin.fromEnv(this.agentLogger, logger);
-		const mqttStarter: PublishPluginStarter = ({ logger, config }) =>
-			MqttPublishPlugin.fromConfig(config ?? null, this.agentLogger, logger, this.deviceUuid);
+		const mqttStarter: PublishPluginStarter = ({ logger, config, endpointName }) =>
+			MqttPublishPlugin.fromConfig(config ?? null, this.agentLogger, logger, this.deviceUuid, endpointName);
 
 		this.publishPluginRegistry.registerPublishPluginStarter('iotistica', iotisticaStarter, true);
 		this.publishPluginRegistry.registerPublishPluginStarter('azure', azureStarter, true);
@@ -373,6 +373,7 @@ export class DevicePublish extends EventEmitter {
 		publisher: { type: string; config_json?: Record<string, unknown> | null },
 		client: IPublishClient,
 		logger?: Logger,
+		endpointName?: string,
 	): IPublishPlugin {
 		const target = publisher.type;
 		return this.publishPluginRegistry.create(target, {
@@ -380,6 +381,7 @@ export class DevicePublish extends EventEmitter {
 			client,
 			logger,
 			config: publisher.config_json ?? null,
+			endpointName,
 		});
 	}
 

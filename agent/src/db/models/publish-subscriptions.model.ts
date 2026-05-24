@@ -11,6 +11,7 @@ export interface PublishSubscriptionRoute {
 	qualities?: Array<'GOOD' | 'BAD' | 'UNCERTAIN'>;
 	minIntervalMs?: number;
 	maxPointsPerMessage?: number;
+	topic?: string;
 }
 
 export interface PublishSubscriptionRecord {

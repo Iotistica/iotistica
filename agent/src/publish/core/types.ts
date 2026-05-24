@@ -65,7 +65,7 @@ export function normalizeTarget(target?: string): CloudPublishTarget {
 export interface PublishBatchItem {
   topic: string;
   payload: string | Buffer;
-  options?: { qos?: 0 | 1 | 2 };
+  options?: { qos?: 0 | 1 | 2; destinationTopic?: string };
 }
 
 export interface PublishDestinationInfo {
@@ -79,7 +79,7 @@ export interface PublishDestinationInfo {
 export interface IPublishClient {
   connect?(...args: any[]): Promise<void>;
   disconnect?(...args: any[]): Promise<void>;
-  publish(topic: string, payload: string | Buffer, options?: { qos?: 0 | 1 | 2 }): Promise<void>;
+  publish(topic: string, payload: string | Buffer, options?: { qos?: 0 | 1 | 2; destinationTopic?: string }): Promise<void>;
   isConnected(): boolean;
   getMessageIdGenerator?(): any;
   getPublishMode?(): PublishMode;
@@ -103,6 +103,7 @@ export interface PublishPluginStarterContext {
   client: IPublishClient;
   logger?: Logger;
   config?: Record<string, unknown> | null;
+  endpointName?: string;
 }
 
 export type PublishPluginStarter = (

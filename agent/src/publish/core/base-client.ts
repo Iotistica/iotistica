@@ -36,21 +36,69 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 
 		await new Promise<void>((resolve, reject) => {
 			const client = mqtt.connect(options as any);
+			let initialized = false;
+
+			const markConnected = () => {
+				this.client = client;
+				const wasConnected = this.connected;
+				this.connected = true;
+
+				if (!wasConnected) {
+					this.logger?.infoSync(`${this.providerName} MQTT connected`, {
+						component: LogComponents.agent,
+						...this.getLogContext(),
+					});
+					this.emit('connect');
+					this.onConnected();
+				}
+			};
 
 			const onConnect = () => {
-				this.client = client;
-				this.connected = true;
-				client.removeListener('error', onError);
-				this.emit('connect');
-				resolve();
+				markConnected();
+				if (!initialized) {
+					initialized = true;
+					client.removeListener('error', onError);
+					resolve();
+				}
+			};
+
+			const onCloseLike = () => {
+				this.connected = false;
+			};
+
+			const onDisconnect = () => {
+				onCloseLike();
+				this.emit('disconnect');
+			};
+
+			const onOffline = () => {
+				onCloseLike();
+			};
+
+			const onReconnect = () => {
+				this.logger?.debugSync(`${this.providerName} MQTT reconnecting`, {
+					component: LogComponents.agent,
+					...this.getLogContext(),
+				});
+			};
+
+			const onEnd = () => {
+				onCloseLike();
+			};
+
+			const onClose = () => {
+				onCloseLike();
 			};
 
 			const onError = (err: Error) => {
-				client.removeListener('connect', onConnect);
-				reject(err);
+				if (!initialized) {
+					initialized = true;
+					client.removeListener('connect', onConnect);
+					reject(err);
+				}
 			};
 
-			client.once('connect', onConnect);
+			client.on('connect', onConnect);
 			client.once('error', onError);
 
 			client.on('error', (err) => {
@@ -62,29 +110,12 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 				this.emit('error', err);
 			});
 
-			client.on('disconnect', () => {
-				this.connected = false;
-				this.emit('disconnect');
-			});
-
-			client.on('offline', () => {
-				this.connected = false;
-			});
-
-			client.on('reconnect', () => {
-				this.logger?.infoSync(`${this.providerName} MQTT reconnecting`, {
-					component: LogComponents.agent,
-					...this.getLogContext(),
-				});
-			});
+			client.on('disconnect', onDisconnect);
+			client.on('offline', onOffline);
+			client.on('reconnect', onReconnect);
+			client.on('end', onEnd);
+			client.on('close', onClose);
 		});
-
-		this.logger?.infoSync(`${this.providerName} MQTT connected`, {
-			component: LogComponents.agent,
-			...this.getLogContext(),
-		});
-
-		this.onConnected();
 	}
 
 	public async disconnect(): Promise<void> {
@@ -99,13 +130,16 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 	public async publish(
 		topic: string,
 		payload: string | Buffer,
-		options?: { qos?: 0 | 1 | 2 },
+		options?: { qos?: 0 | 1 | 2; destinationTopic?: string },
 	): Promise<void> {
 		if (!this.client || !this.connected) {
 			throw new Error(`${this.providerName}: not connected`);
 		}
 
-		const targetTopic = this.buildPublishTopic(topic);
+		const targetTopic =
+			typeof options?.destinationTopic === 'string' && options.destinationTopic.trim().length > 0
+				? options.destinationTopic.trim()
+				: this.buildPublishTopic(topic);
 		const qos = options?.qos ?? 1;
 
 		let lastError: Error | null = null;

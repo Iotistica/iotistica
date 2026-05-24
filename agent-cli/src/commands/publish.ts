@@ -97,10 +97,14 @@ export async function publishSubscriptionsList(): Promise<void> {
 
     logger.info(`Found ${subscriptions.length} subscription${subscriptions.length === 1 ? '' : 's'}`);
     for (const subscription of subscriptions) {
+      const routeJson = subscription.route_json && typeof subscription.route_json === 'object'
+        ? subscription.route_json as Record<string, any>
+        : null;
       logger.info(`Subscription ${subscription.id ?? '(unknown)'}`, {
         publisher_id: subscription.publisher_id,
         topics: normalizeTopicsForDisplay(subscription.topics),
         payload_format: subscription.payload_format,
+        destination_topic: routeJson?.topic || null,
         enabled: subscription.enabled,
       });
     }
@@ -157,6 +161,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
   const topics = parseCsv(getFlag('topics'));
   const includeDevices = parseCsv(getFlag('include-devices'));
   const excludeDevices = parseCsv(getFlag('exclude-devices'));
+  const destinationTopic = (getFlag('destination-topic') || '').trim();
   const payloadFormat = (getFlag('payload-format') || 'custom').trim().toLowerCase();
   const enabled = !hasFlag('disabled');
 
@@ -170,12 +175,19 @@ export async function publishSubscriptionsAdd(): Promise<void> {
   const publisherId = await resolvePublisherId({ publisherIdRaw, publisherName });
 
   const routeJson: Record<string, unknown> | null =
-    includeDevices.length > 0 || excludeDevices.length > 0
+    includeDevices.length > 0 || excludeDevices.length > 0 || destinationTopic.length > 0
       ? {
+          ...(destinationTopic.length > 0 ? { topic: destinationTopic } : {}),
           ...(includeDevices.length > 0 ? { includeDevices } : {}),
           ...(excludeDevices.length > 0 ? { excludeDevices } : {}),
         }
       : null;
+
+  if (!destinationTopic) {
+    throw new CLIError('--destination-topic is required', 1, {
+      usage: 'iotctl publish subscriptions add --publisher-id <id> --destination-topic <topic> [--topics modbus,opcua] [--payload-format custom|tags|ecp]',
+    });
+  }
 
   try {
     const result = await apiRequest(`${DEVICE_API_V1}/publish/subscriptions`, {
@@ -218,6 +230,7 @@ export async function publishMqttAdd(): Promise<void> {
   const password = getFlag('password');
   const clientId = getFlag('client-id');
   const topicTemplate = getFlag('topic-template') || '{topic}';
+  const destinationTopic = (getFlag('destination-topic') || '').trim();
   const topics = parseCsv(getFlag('topics'));
   const includeDevices = parseCsv(getFlag('include-devices'));
   const excludeDevices = parseCsv(getFlag('exclude-devices'));
@@ -244,12 +257,19 @@ export async function publishMqttAdd(): Promise<void> {
   }
 
   const routeJson: Record<string, unknown> | null =
-    includeDevices.length > 0 || excludeDevices.length > 0
+    includeDevices.length > 0 || excludeDevices.length > 0 || destinationTopic.length > 0
       ? {
+          ...(destinationTopic.length > 0 ? { topic: destinationTopic } : {}),
           ...(includeDevices.length > 0 ? { includeDevices } : {}),
           ...(excludeDevices.length > 0 ? { excludeDevices } : {}),
         }
       : null;
+
+  if (!destinationTopic) {
+    throw new CLIError('--destination-topic is required', 1, {
+      usage: 'iotctl publish mqtt add --name <name> --broker mqtt://host:1883 --destination-topic <topic> [--topics modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]',
+    });
+  }
 
   try {
     const publisherResult = await apiRequest(`${DEVICE_API_V1}/publish/publishers`, {

@@ -99,7 +99,7 @@ export class PublishManager extends EventEmitter {
     private readonly protocol: Protocol,
     private readonly endpointName: string,
     private readonly defaultClient: IPublishClient,
-    private readonly buildPlugin: (publisher: PublisherRecord, client: IPublishClient, logger?: Logger) => IPublishPlugin,
+		private readonly buildPlugin: (publisher: PublisherRecord, client: IPublishClient, logger?: Logger, endpointName?: string) => IPublishPlugin,
     private readonly logger: Logger | undefined,
     private readonly deviceUuid: string,
 	private dictionaryManager?: DictionaryManager,
@@ -154,12 +154,52 @@ export class PublishManager extends EventEmitter {
 
 		this.bindings = this.loadBindings();
 		if (this.bindings.length === 0) {
-			this.logger?.warn('No publisher bindings found; using legacy default target');
-			this.bindings = this.createLegacyFallbackBinding();
+			this.logger?.warn('No publisher bindings found; using default Iotistica');
+			this.bindings = this.createDefaultIotisticaBinding();
 		}
 
-		for (const plugin of this.getUniquePlugins()) {
-			await plugin.start();
+		// Try to start plugins and fall back to default if all fail
+		const startedPlugins = new Set<IPublishPlugin>();
+		const failures: Array<{ plugin: IPublishPlugin; error: Error }> = [];
+
+		for (const binding of this.bindings) {
+			if (startedPlugins.has(binding.plugin)) {
+				continue; // Already started this plugin instance
+			}
+
+			this.logger?.info(`Starting publish plugin`, {
+				publisher: binding.publisher.name,
+				type: binding.publisher.type,
+			});
+
+			try {
+				await binding.plugin.start();
+				startedPlugins.add(binding.plugin);
+			} catch (err) {
+				const error = err instanceof Error ? err : new Error(String(err));
+				this.logger?.error(`Failed to start publish plugin`, error, {
+					publisher: binding.publisher.name,
+					type: binding.publisher.type,
+				});
+				failures.push({ plugin: binding.plugin, error });
+				startedPlugins.add(binding.plugin); // Track as attempted
+			}
+		}
+
+		// If all plugins failed and we have non-default bindings, use default Iotistica
+		if (failures.length === startedPlugins.size && failures.length > 0 && this.bindings.some((b) => b.publisher.id !== -1)) {
+			this.logger?.warn(`All publish plugins failed to start; falling back to default Iotistica`, {
+				failedPluginCount: failures.length,
+				errors: failures.map((f) => f.error.message),
+			});
+			this.bindings = this.createDefaultIotisticaBinding();
+			this.logger?.info(`Starting default Iotistica publish plugin`);
+			try {
+				await this.bindings[0].plugin.start();
+			} catch (err) {
+				this.logger?.error('Failed to start default Iotistica publisher', err);
+				throw new Error(`All publish plugins failed and fallback also failed: ${err instanceof Error ? err.message : String(err)}`);
+			}
 		}
 
 		this.attachConnectionHandlers();
@@ -282,7 +322,8 @@ export class PublishManager extends EventEmitter {
 			const enriched = this.processAnomaly(messages, name);
 			if (this.needStop) return;
 
-			let { data, baselineSize, msgId } = this.buildPayload(name, enriched);
+			const payloadFormat = this.resolvePayloadFormatForActiveBindings();
+			let { data, baselineSize, msgId } = this.buildPayload(name, enriched, payloadFormat);
 			if (this.needStop) return;
 
 			// Run payload through the Node-RED pipeline (if configured)
@@ -342,7 +383,7 @@ export class PublishManager extends EventEmitter {
 		return this.enricher.enrich(messages, endpointName);
 	}
 
-	private buildPayload(endpointName: string, messages: any[]): {
+	private buildPayload(endpointName: string, messages: any[], payloadFormat: ExternalPayloadFormat): {
     data: PublishPayload;
     msgId: string;
     baselineSize: number;
@@ -350,7 +391,7 @@ export class PublishManager extends EventEmitter {
 		const msgId = this.mqttConnection.getMessageIdGenerator?.()?.generate()
 			?? `${this.deviceUuid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-		if (this.externalPayloadFormat === 'tags' || this.externalPayloadFormat === 'ecp') {
+		if (payloadFormat === 'tags' || payloadFormat === 'ecp') {
 			const externalGroupName = this.normalizeExternalGroupName(endpointName);
 			const parsedMessages = messages as Array<Record<string, unknown>>;
 			const tagRecords: Record<string, unknown>[] = [];
@@ -385,7 +426,7 @@ export class PublishManager extends EventEmitter {
 
 					if (hasError) {
 					// ECP format does not include/report tag error codes.
-						if (this.externalPayloadFormat === 'ecp') {
+						if (payloadFormat === 'ecp') {
 							return null;
 						}
 
@@ -396,7 +437,7 @@ export class PublishManager extends EventEmitter {
 					}
 
 					const value = message.value ?? message.rawValue ?? null;
-					if (this.externalPayloadFormat === 'ecp') {
+					if (payloadFormat === 'ecp') {
 						if (value === null || value === undefined) {
 							return null;
 						}
@@ -434,6 +475,39 @@ export class PublishManager extends EventEmitter {
 		};
 		const baselineSize = Buffer.byteLength(JSON.stringify(data), 'utf8');
 		return { data, msgId, baselineSize };
+	}
+
+	private resolvePayloadFormatForActiveBindings(): ExternalPayloadFormat {
+		if (this.bindings.length === 0) {
+			return this.externalPayloadFormat;
+		}
+
+		const nonDefaultBindings = this.bindings.filter((binding) => binding.publisher.id !== -1);
+		if (nonDefaultBindings.length === 0) {
+			return this.externalPayloadFormat;
+		}
+
+		const formats = new Set<ExternalPayloadFormat>();
+		for (const binding of nonDefaultBindings) {
+			const candidate = String(binding.subscription.payload_format || '').toLowerCase();
+			if (candidate === 'custom' || candidate === 'tags' || candidate === 'ecp') {
+				formats.add(candidate);
+			}
+		}
+
+		if (formats.size === 0) {
+			return this.externalPayloadFormat;
+		}
+
+		if (formats.size > 1) {
+			this.logger?.warn('Multiple payload formats detected across active publish bindings; using custom format', {
+				component: 'PublishManager',
+				formats: Array.from(formats),
+			});
+			return 'custom';
+		}
+
+		return Array.from(formats)[0];
 	}
 
 	private normalizeExternalGroupName(endpointName: string): string {
@@ -567,9 +641,7 @@ export class PublishManager extends EventEmitter {
 				return;
 			}
 
-			await this.routePublishBatch([
-				{ topic, payload, options: { qos: 1 } },
-			]);
+			await this.routePublishBatch(topic, payload);
 			publishConfirmed = true;
 
 			const buffered = this.mqttConnection.getPublishMode?.() !== 'direct';
@@ -756,13 +828,58 @@ export class PublishManager extends EventEmitter {
 		return Array.from(byPublisher.values());
 	}
 
-	private async routePublishBatch(batch: PublishBatchItem[]): Promise<void> {
-		const plugins = this.getUniquePlugins();
-		if (plugins.length === 0) {
+	private resolveDestinationTopic(binding: HostBinding, sourceTopic: string): string | null {
+		if ((binding.publisher.id ?? -1) === -1) {
+			return sourceTopic;
+		}
+
+		const route = binding.subscription.route_json as PublishSubscriptionRoute | null;
+		const destinationTopic = typeof route?.topic === 'string' ? route.topic.trim() : '';
+		if (destinationTopic.length === 0) {
+			this.logger?.warn('Skipping publish binding without route_json.topic destination', {
+				component: 'PublishManager',
+				protocol: this.protocol,
+				endpoint: this.endpointName,
+				publisherId: binding.publisher.id,
+				publisherName: binding.publisher.name,
+				subscriptionId: binding.subscription.id,
+			});
+			return null;
+		}
+
+		return destinationTopic;
+	}
+
+	private async routePublishBatch(sourceTopic: string, payload: string | Buffer): Promise<void> {
+		if (this.bindings.length === 0) {
 			throw new Error('No publish destinations configured');
 		}
 
-		const results = await Promise.allSettled(plugins.map((plugin) => plugin.publishBatch(batch)));
+		const batchesByPlugin = new Map<IPublishPlugin, PublishBatchItem[]>();
+		for (const binding of this.bindings) {
+			const destinationTopic = this.resolveDestinationTopic(binding, sourceTopic);
+			if (!destinationTopic) {
+				continue;
+			}
+
+			const items = batchesByPlugin.get(binding.plugin) || [];
+			items.push({
+				topic: sourceTopic,
+				payload,
+				options: {
+					qos: 1,
+					destinationTopic,
+				},
+			});
+			batchesByPlugin.set(binding.plugin, items);
+		}
+
+		const entries = Array.from(batchesByPlugin.entries());
+		if (entries.length === 0) {
+			throw new Error('No valid publish destinations configured (missing route_json.topic)');
+		}
+
+		const results = await Promise.allSettled(entries.map(([plugin, batch]) => plugin.publishBatch(batch)));
 		const failures = results.filter((result) => result.status === 'rejected') as Array<PromiseRejectedResult>;
 
 		if (failures.length === 0) {
@@ -779,14 +896,20 @@ export class PublishManager extends EventEmitter {
 			protocol: this.protocol,
 			endpoint: this.endpointName,
 			failedDestinations: failures.length,
-			totalDestinations: results.length,
+			totalDestinations: entries.length,
 		});
 	}
 
 	private loadBindings(): HostBinding[] {
 		const publishers = PublishersModel.getAll(false);
 		const subscriptions = PublishSubscriptionsModel.getAll(false);
-		if (publishers.length === 0 || subscriptions.length === 0) {
+		// If no explicit subscriptions configured, return empty to use default Iotistica
+		if (subscriptions.length === 0) {
+			return [];
+		}
+		// If subscriptions exist but publishers don't, still process subscriptions
+		// (they may be misconfigured but we shouldn't silently ignore them)
+		if (publishers.length === 0) {
 			return [];
 		}
 
@@ -812,7 +935,7 @@ export class PublishManager extends EventEmitter {
 
 			let plugin = this.pluginByPublisherId.get(subscription.publisher_id);
 			if (!plugin) {
-				plugin = this.buildPlugin(publisher, this.defaultClient, this.logger);
+				plugin = this.buildPlugin(publisher, this.defaultClient, this.logger, this.endpointName);
 				this.pluginByPublisherId.set(subscription.publisher_id, plugin);
 			}
 
@@ -822,16 +945,16 @@ export class PublishManager extends EventEmitter {
 		return bindings;
 	}
 
-	private createLegacyFallbackBinding(): HostBinding[] {
+	private createDefaultIotisticaBinding(): HostBinding[] {
 		const target = 'iotistica';
 		const publisher: PublisherRecord = {
 			id: -1,
-			name: `legacy-${target}`,
+			name: target,
 			type: target,
 			config_json: null,
 			enabled: true,
 		};
-		const plugin = this.buildPlugin(publisher, this.defaultClient, this.logger);
+		const plugin = this.buildPlugin(publisher, this.defaultClient, this.logger, this.endpointName);
 		return [{
 			subscription: {
 				publisher_id: -1,

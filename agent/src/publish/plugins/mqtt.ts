@@ -24,7 +24,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function loadExternalMqttConfigFromRecord(config: Record<string, unknown> | null | undefined, fallbackDeviceId?: string): ExternalMqttConfig | null {
+function loadExternalMqttConfigFromRecord(
+	config: Record<string, unknown> | null | undefined,
+	fallbackDeviceId?: string,
+	fallbackEndpointName?: string,
+): ExternalMqttConfig | null {
 	if (!isRecord(config)) {
 		return null;
 	}
@@ -56,6 +60,14 @@ function loadExternalMqttConfigFromRecord(config: Record<string, unknown> | null
 	const protocol = scheme;
 	const defaultPort = protocol === 'mqtts' ? 8883 : protocol === 'mqtt' ? 1883 : protocol === 'wss' ? 443 : 80;
 	const rejectUnauthorized = typeof config.rejectUnauthorized === 'boolean' ? config.rejectUnauthorized : undefined;
+	const sanitizedEndpoint = (fallbackEndpointName || 'endpoint')
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]/g, '-')
+		.replace(/-+/g, '-')
+		.replace(/^-|-$/g, '');
+	const fallbackClientId = fallbackDeviceId && fallbackDeviceId.trim().length > 0
+		? `${fallbackDeviceId}-${sanitizedEndpoint || 'endpoint'}-external-mqtt`
+		: 'device-external-mqtt';
 
 	return {
 		provider: 'mqtt',
@@ -70,7 +82,7 @@ function loadExternalMqttConfigFromRecord(config: Record<string, unknown> | null
 				? config.clientId
 				: typeof config.deviceId === 'string' && config.deviceId.trim().length > 0
 					? config.deviceId
-					: fallbackDeviceId || 'device',
+					: fallbackClientId,
 		username: typeof config.username === 'string' ? config.username : parsedUrl.username || undefined,
 		password: typeof config.password === 'string' ? config.password : parsedUrl.password || undefined,
 		topicTemplate:
@@ -167,8 +179,9 @@ export class MqttPublishPlugin extends BasePublishPlugin {
 		agentLogger?: AgentLogger,
 		logger?: Logger,
 		fallbackDeviceId?: string,
+		fallbackEndpointName?: string,
 	): MqttPublishPlugin {
-		const resolved = loadExternalMqttConfigFromRecord(config, fallbackDeviceId);
+		const resolved = loadExternalMqttConfigFromRecord(config, fallbackDeviceId, fallbackEndpointName);
 		if (!resolved) {
 			throw new Error('mqtt publisher requires config_json with a brokerUrl');
 		}
