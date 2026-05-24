@@ -10,8 +10,8 @@ import {
 	type Logger,
 } from './core/types.js';
 import { PublishManager } from './core/manager.js';
-import { MessageBufferSync } from '../mqtt/buffer.js';
-import type { IPublishClient as BufferSyncPublishClient } from '../mqtt/buffer.js';
+import { MessageBufferSync } from './core/buffer.js';
+import type { IPublishClient as BufferSyncPublishClient } from './core/buffer.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 import type { DictionaryManager } from '../mqtt/dictionary.js';
 import { EventEmitter } from 'events';

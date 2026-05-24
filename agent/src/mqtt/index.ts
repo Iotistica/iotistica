@@ -26,9 +26,9 @@
 export { CloudMqttClient } from './manager';
 export { DictionaryManager} from './dictionary';
 export type { DictionaryMetrics } from './dictionary';
-export { MessageBufferSync } from './buffer';
-export type { BufferSyncConfig } from './buffer';
-export type { MessageBufferSyncOptions } from './buffer';
+export { MessageBufferSync } from '../publish/core/buffer';
+export type { BufferSyncConfig } from '../publish/core/buffer';
+export type { MessageBufferSyncOptions } from '../publish/core/buffer';
 export { AzureIotClient } from '../publish/plugins/azure';
 export { AwsIotClient as AwsIotMqttClient } from '../publish/plugins/aws';
 export { GcpIotClient as GcpIotMqttClient } from '../publish/plugins/gcp';
