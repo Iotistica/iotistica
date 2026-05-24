@@ -1,5 +1,3 @@
-import { EventEmitter } from 'events';
-import type { DeviceConfig, Logger } from './types.js';
 
 /**
  * Owns the raw socket read buffer (frame reassembly) and the parsed message
@@ -7,6 +5,10 @@ import type { DeviceConfig, Logger } from './types.js';
  *   'flush'         — batch should be published immediately
  *   'message-added' — one parsed message was accepted into the batch
  */
+
+import { EventEmitter } from 'events';
+import type { DeviceConfig, Logger } from './types.js';
+
 export class MessageBatcher extends EventEmitter {
 	// Raw socket buffer — accumulates partial frames until a delimiter is seen
 	private readBuffer: Buffer = Buffer.alloc(0);
@@ -88,15 +90,12 @@ export class MessageBatcher extends EventEmitter {
 		this.parseFrames();
 	}
 
-	// --- batch management -------------------------------------------------------
-
 	reset(): void {
 		this._messages.length = 0;
 		this._totalBytes = 0;
 		this._firstMessageTime = Date.now();
 	}
 
-	// --- internals --------------------------------------------------------------
 
 	private isPlainDelimiter(pattern: string): boolean {
 		// Fast-path only literal delimiters with no regex metacharacters.

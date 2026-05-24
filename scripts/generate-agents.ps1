@@ -762,27 +762,57 @@ function Remove-AgentResources {
     Write-Host "  ✅ Removed $removedNetworkCount networks" -ForegroundColor Yellow
     
     # Remove agent images only (not dangling images from other services)
-    Write-Host "`n🖼️  Removing agent images..." -ForegroundColor Cyan
-    $removedCount = 0
+    # Note: Docker removes tags first; many tags can point to the same image ID.
+    Write-Host "`n🖼️  Removing agent image tags..." -ForegroundColor Cyan
+    $imageNames = $imageNames | Sort-Object -Unique
+
+    $existingImageTags = New-Object System.Collections.Generic.List[string]
+    $tagToImageId = @{}
+
     foreach ($image in $imageNames) {
         try {
-            # Force remove image (even if containers exist)
+            $imageId = docker image inspect $image --format '{{.Id}}' 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($imageId)) {
+                $existingImageTags.Add($image)
+                $tagToImageId[$image] = $imageId.Trim()
+            }
+        }
+        catch {
+            # Image tag may not exist, continue
+        }
+    }
+
+    $removedTagCount = 0
+    $removedImageIds = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($image in $existingImageTags) {
+        try {
+            # Force remove image tag (even if containers exist)
             $result = docker rmi -f $image 2>&1
             if ($LASTEXITCODE -eq 0) {
-                $removedCount++
-                if ($removedCount % 10 -eq 0) {
-                    Write-Host "  Removed $removedCount images..." -ForegroundColor Gray
+                $removedTagCount++
+                if ($tagToImageId.ContainsKey($image)) {
+                    [void]$removedImageIds.Add($tagToImageId[$image])
+                }
+
+                if ($removedTagCount % 10 -eq 0) {
+                    Write-Host "  Removed $removedTagCount image tags..." -ForegroundColor Gray
                 }
             } else {
-                Write-Host "  ⚠️  Failed to remove image: $image" -ForegroundColor Yellow
+                Write-Host "  ⚠️  Failed to remove image tag: $image" -ForegroundColor Yellow
                 Write-Host "     Error: $result" -ForegroundColor Gray
             }
         }
         catch {
-            Write-Host "  ⚠️  Error removing image $image : $_" -ForegroundColor Yellow
+            Write-Host "  ⚠️  Error removing image tag $image : $_" -ForegroundColor Yellow
         }
     }
-    Write-Host "  ✅ Removed $removedCount agent images" -ForegroundColor Green
+
+    $missingTagCount = $imageNames.Count - $existingImageTags.Count
+    if ($missingTagCount -gt 0) {
+        Write-Host "  ℹ️  Skipped $missingTagCount image tags that were not present" -ForegroundColor Gray
+    }
+
+    Write-Host "  ✅ Removed $removedTagCount agent image tags ($($removedImageIds.Count) unique image IDs)" -ForegroundColor Green
     
     Write-Host "`n✅ Cleanup complete!" -ForegroundColor Green
     Write-Host "  Agents cleaned: $StartIndex to $endIndex" -ForegroundColor Gray

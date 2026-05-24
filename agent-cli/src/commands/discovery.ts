@@ -1,5 +1,34 @@
 import { DEVICE_API_V1, CLIError, logger, apiRequest, clearApiCache } from '../core';
 
+function parseConnectionValue(source: Record<string, any>): Record<string, any> {
+  const rawConnection = source.connection;
+  if (rawConnection && typeof rawConnection === 'object') {
+    return rawConnection as Record<string, any>;
+  }
+
+  if (typeof source.connectionString === 'string') {
+    try {
+      const parsed = JSON.parse(source.connectionString);
+      if (parsed && typeof parsed === 'object') {
+        return parsed as Record<string, any>;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function isModbusDiscoveryTarget(endpoint: Record<string, any>): boolean {
+  if (endpoint.protocol !== 'modbus') {
+    return false;
+  }
+
+  const connection = parseConnectionValue(endpoint);
+  return connection.slaveRange !== undefined || connection.slaveId !== undefined;
+}
+
 function formatConnection(protocol: string, connection: Record<string, any>): string {
   switch (protocol) {
     case 'modbus': {
@@ -58,7 +87,24 @@ export async function discover(protocolArg?: string): Promise<void> {
     }
 
     if (protocol === 'modbus' || !protocol) {
-      logger.info('(Modbus scanning slave IDs - this may take 30-60 seconds...)');
+      let modbusTargetConfigured = false;
+
+      try {
+        const modbusEndpointsResult = await apiRequest(`${DEVICE_API_V1}/endpoints?protocol=modbus`);
+        const modbusEndpoints = Array.isArray(modbusEndpointsResult.endpoints)
+          ? modbusEndpointsResult.endpoints
+          : [];
+
+        modbusTargetConfigured = modbusEndpoints.some((endpoint: Record<string, any>) => isModbusDiscoveryTarget(endpoint));
+      } catch {
+        // Keep discovery running even if pre-check cannot be completed.
+      }
+
+      if (modbusTargetConfigured) {
+        logger.info('(Modbus scanning slave IDs - this may take 30-60 seconds...)');
+      } else if (protocol === 'modbus') {
+        logger.info('(No Modbus discovery targets configured. Add slaveId or slaveRange to a Modbus endpoint connection.)');
+      }
     }
 
     const result = await apiRequest(`${DEVICE_API_V1}/discover`, {
