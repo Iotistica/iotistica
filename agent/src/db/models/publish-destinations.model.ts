@@ -1,12 +1,12 @@
 import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 
-export type PublisherType = 'iotistica' | 'azure' | 'aws' | 'gcp' | 'mqtt' | string;
+export type DestinationType = 'iotistica' | 'azure' | 'aws' | 'gcp' | 'mqtt' | string;
 
-export interface PublisherRecord {
+export interface PublishDestinationRecord {
 	id?: number;
 	name: string;
-	type: PublisherType;
+	type: DestinationType;
 	config_json?: Record<string, unknown> | null;
 	enabled: boolean;
 	last_error?: string | null;
@@ -15,7 +15,7 @@ export interface PublisherRecord {
 	updated_at?: Date;
 }
 
-type PublisherRow = Omit<PublisherRecord, 'enabled' | 'config_json' | 'last_error_at' | 'created_at' | 'updated_at'> & {
+type PublishDestinationRow = Omit<PublishDestinationRecord, 'enabled' | 'config_json' | 'last_error_at' | 'created_at' | 'updated_at'> & {
 	enabled: number;
 	config_json?: string | null;
 	last_error_at?: string | Date | null;
@@ -23,14 +23,14 @@ type PublisherRow = Omit<PublisherRecord, 'enabled' | 'config_json' | 'last_erro
 	updated_at?: string | Date;
 };
 
-export class PublishersModel {
-	private static readonly table = 'publishers';
+export class PublishDestinationsModel {
+	private static readonly table = 'publish_destinations';
 
 	private static getDb(): Database.Database {
 		return getDatabase();
 	}
 
-	private static mapRow(row: PublisherRow | undefined): PublisherRecord | null {
+	private static mapRow(row: PublishDestinationRow | undefined): PublishDestinationRecord | null {
 		if (!row) {
 			return null;
 		}
@@ -54,23 +54,23 @@ export class PublishersModel {
 		};
 	}
 
-	static getAll(includeDisabled: boolean = true): PublisherRecord[] {
+	static getAll(includeDisabled: boolean = true): PublishDestinationRecord[] {
 		const db = this.getDb();
 		const rows = includeDisabled
-			? (db.prepare(`SELECT * FROM ${this.table} ORDER BY id ASC`).all() as PublisherRow[])
-			: (db.prepare(`SELECT * FROM ${this.table} WHERE enabled = 1 ORDER BY id ASC`).all() as PublisherRow[]);
+			? (db.prepare(`SELECT * FROM ${this.table} ORDER BY id ASC`).all() as PublishDestinationRow[])
+			: (db.prepare(`SELECT * FROM ${this.table} WHERE enabled = 1 ORDER BY id ASC`).all() as PublishDestinationRow[]);
 
 		return rows
 			.map((row) => this.mapRow(row))
-			.filter((row): row is PublisherRecord => row !== null);
+			.filter((row): row is PublishDestinationRecord => row !== null);
 	}
 
-	static getById(id: number): PublisherRecord | null {
-		const row = this.getDb().prepare(`SELECT * FROM ${this.table} WHERE id = ? LIMIT 1`).get(id) as PublisherRow | undefined;
+	static getById(id: number): PublishDestinationRecord | null {
+		const row = this.getDb().prepare(`SELECT * FROM ${this.table} WHERE id = ? LIMIT 1`).get(id) as PublishDestinationRow | undefined;
 		return this.mapRow(row);
 	}
 
-	static create(input: Omit<PublisherRecord, 'id' | 'created_at' | 'updated_at' | 'last_error' | 'last_error_at'>): PublisherRecord | null {
+	static create(input: Omit<PublishDestinationRecord, 'id' | 'created_at' | 'updated_at' | 'last_error' | 'last_error_at'>): PublishDestinationRecord | null {
 		const now = new Date().toISOString();
 		const result = this.getDb().prepare(`
 			INSERT INTO ${this.table} (
@@ -93,7 +93,7 @@ export class PublishersModel {
 		return this.getById(Number(result.lastInsertRowid));
 	}
 
-	static update(id: number, updates: Partial<Omit<PublisherRecord, 'id' | 'created_at'>>): PublisherRecord | null {
+	static update(id: number, updates: Partial<Omit<PublishDestinationRecord, 'id' | 'created_at'>>): PublishDestinationRecord | null {
 		const payload: Record<string, unknown> = {
 			updated_at: new Date().toISOString(),
 		};

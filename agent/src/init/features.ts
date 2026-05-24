@@ -139,11 +139,6 @@ export class FeatureInitializer {
 		this.features.devicePublish?.setAnomalyService?.(anomalyService);
 	}
 
-	public setPipelineService(pipeline?: PipelineService): void {
-		this.context.pipelineService = pipeline;
-		this.features.devicePublish?.setPipelineService?.(pipeline);
-	}
-
 	public setLiveDataInterceptor(interceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[]): void {
 		this.context.liveDataInterceptor = interceptor;
 		this.features.devicePublish?.setLiveDataInterceptor?.(interceptor);
@@ -635,14 +630,6 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 
 	await initDiscoveryService(ctx);
 	featureContext.discoveryService = ctx.discoveryService;
-
-	// Initialize Node-RED pipeline before device publish so it is bound at start
-	const { initPipeline } = await import('./pipeline.js');
-	await initPipeline(ctx);
-	if (ctx.pipelineService) {
-		featureContext.pipelineService = ctx.pipelineService;
-		initializer.setPipelineService(ctx.pipelineService);
-	}
 
 	await initializer.initDeviceFeatures();
 	await initializer.initJobsFeature();

@@ -785,13 +785,13 @@ router.get('/v1/devices', async (req: Request, res: Response, next: NextFunction
 });
 
 /**
- * GET /v1/publish/publishers
- * List configured upstream publishers
+ * GET /v1/publish/destinations
+ * List configured upstream publish destinations
  */
-router.get('/v1/publish/publishers', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/v1/publish/destinations', async (req: Request, res: Response, next: NextFunction) => {
 	try {
 		const includeDisabled = req.query.includeDisabled !== 'false';
-		const publishers = await actions.listPublishers(includeDisabled);
+		const publishers = await actions.listPublishDestinations(includeDisabled);
 		return res.status(200).json({ publishers });
 	} catch (error) {
 		next(error);

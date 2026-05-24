@@ -33,4 +33,4 @@ export { AzureIotClient } from '../publish/plugins/azure';
 export { AwsIotClient as AwsIotMqttClient } from '../publish/plugins/aws';
 export { GcpIotClient as GcpIotMqttClient } from '../publish/plugins/gcp';
 export { normalizeTarget } from '../publish/core/types';
-export type { CloudPublishTarget } from '../publish/core/types';
+export type { PublishTarget as CloudPublishTarget } from '../publish/core/types';

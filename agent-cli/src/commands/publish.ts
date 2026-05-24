@@ -35,31 +35,31 @@ function normalizeTopicsForDisplay(rawTopics: unknown): string[] | string {
 /**
  * iotctl publish publishers list [--include-disabled]
  */
-export async function publishPublishersList(): Promise<void> {
+export async function publishDestinationsList(): Promise<void> {
   const includeDisabled = hasFlag('include-disabled');
 
   try {
     const result = await apiRequest(
-      `${DEVICE_API_V1}/publish/publishers?includeDisabled=${includeDisabled ? 'true' : 'false'}`,
+      `${DEVICE_API_V1}/publish/destinations?includeDisabled=${includeDisabled ? 'true' : 'false'}`,
     );
-    const publishers: Array<Record<string, any>> = result.publishers || [];
+    const publish_destinations: Array<Record<string, any>> = result.publishers || [];
 
-    if (publishers.length === 0) {
+    if (publish_destinations.length === 0) {
       logger.info('No publishers configured');
       return;
     }
 
-    logger.info(`Found ${publishers.length} publisher${publishers.length === 1 ? '' : 's'}`);
-    for (const publisher of publishers) {
-      logger.info(`Publisher ${publisher.name || '(unnamed)'}`, {
-        id: publisher.id,
-        type: publisher.type,
-        enabled: publisher.enabled,
+    logger.info(`Found ${publish_destinations.length} publish destinations${publish_destinations.length === 1 ? '' : 's'}`);
+    for (const destination of publish_destinations) {
+      logger.info(`Destination ${destination.name || '(unnamed)'}`, {
+        id: destination.id,
+        type: destination.type,
+        enabled: destination.enabled,
       });
     }
   } catch (error) {
     if (error instanceof CLIError) throw error;
-    throw new CLIError('Failed to list publishers', 1, {
+    throw new CLIError('Failed to list publish destinations', 1, {
       error: (error as Error).message,
     });
   }
@@ -116,38 +116,38 @@ export async function publishSubscriptionsList(): Promise<void> {
   }
 }
 
-async function resolvePublisherId(input: {
-  publisherIdRaw?: string;
-  publisherName?: string;
+async function resolveDestinationId(input: {
+  publishDestinationIdRaw?: string;
+  publishDestinationName?: string;
 }): Promise<number> {
-  if (input.publisherIdRaw) {
-    const parsed = Number(input.publisherIdRaw);
+  if (input.publishDestinationIdRaw) {
+    const parsed = Number(input.publishDestinationIdRaw);
     if (!Number.isFinite(parsed)) {
-      throw new CLIError('Invalid --publisher-id value', 1, {
-        publisherId: input.publisherIdRaw,
+      throw new CLIError('Invalid --publish-destination-id value', 1, {
+        publishDestinationId: input.publishDestinationIdRaw,
       });
     }
 
     return parsed;
   }
 
-  if (!input.publisherName) {
+  if (!input.publishDestinationName) {
     throw new CLIError('Either --publisher-id or --publisher-name is required', 1, {
       usage: 'iotctl publish subscriptions add --publisher-id <id> [--topics modbus,opcua] [--payload-format custom|tags|ecp] [--include-devices d1,d2] [--exclude-devices d3] [--disabled]',
     });
   }
 
-  const result = await apiRequest(`${DEVICE_API_V1}/publish/publishers?includeDisabled=true`);
-  const publishers: Array<{ id?: number; name?: string }> = result.publishers || [];
-  const publisher = publishers.find((item) => item.name === input.publisherName);
+  const result = await apiRequest(`${DEVICE_API_V1}/publish/destinations?includeDisabled=true`);
+  const destinations: Array<{ id?: number; name?: string }> = result.publishers || [];
+  const destination = destinations.find((item) => item.name === input.publishDestinationName);
 
-  if (!publisher?.id) {
-    throw new CLIError(`Publisher not found: ${input.publisherName}`, 1, {
-      hint: 'Use API GET /v1/publish/publishers or provide --publisher-id directly.',
+  if (!destination?.id) {
+    throw new CLIError(`Destination not found: ${input.publishDestinationName}`, 1, {
+      hint: 'Use API GET /v1/publish/destinations or provide --publisher-id directly.',
     });
   }
 
-  return publisher.id;
+  return destination.id;
 }
 
 /**
@@ -172,7 +172,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
     });
   }
 
-  const publisherId = await resolvePublisherId({ publisherIdRaw, publisherName });
+  const publisherId = await resolveDestinationId({ publishDestinationIdRaw: publisherIdRaw, publishDestinationName: publisherName });
 
   const routeJson: Record<string, unknown> | null =
     includeDevices.length > 0 || excludeDevices.length > 0 || destinationTopic.length > 0

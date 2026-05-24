@@ -3,9 +3,9 @@ import { tableExists } from '../migration-helpers.js';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
 function up(db: Database.Database): void {
-	if (!tableExists(db, 'publishers')) {
+	if (!tableExists(db, 'publish_destinations')) {
 		db.exec(`
-			CREATE TABLE publishers (
+			CREATE TABLE publish_destinations (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
 				name VARCHAR(255) NOT NULL,
 				type VARCHAR(50) NOT NULL,
@@ -17,15 +17,15 @@ function up(db: Database.Database): void {
 				updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 			)
 		`);
-		db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_publishers_name_unique ON publishers(name)');
-		db.exec('CREATE INDEX IF NOT EXISTS idx_publishers_type_enabled ON publishers(type, enabled)');
+		db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_destinations_name_unique ON publishers(name)');
+		db.exec('CREATE INDEX IF NOT EXISTS idx_publish_destinations_type_enabled ON publishers(type, enabled)');
 	}
 
 	if (!tableExists(db, 'publish_subscriptions')) {
 		db.exec(`
 			CREATE TABLE publish_subscriptions (
 				id INTEGER PRIMARY KEY AUTOINCREMENT,
-				publisher_id INTEGER NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
+				publisher_destination_id INTEGER NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
 				topics TEXT NOT NULL DEFAULT '[]',
 				route_json TEXT,
 				payload_format VARCHAR(20) NOT NULL DEFAULT 'custom',

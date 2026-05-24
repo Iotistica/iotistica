@@ -17,7 +17,7 @@ import type { StateManager } from '../core/state';
 import { LogComponents } from '../logging/types';
 import type { HealthReport } from '../health/arbiter';
 import { MessageBufferModel } from '../db/models/buffer.model';
-import { PublishersModel, PublishSubscriptionsModel } from '../db/models/index.js';
+import { PublishDestinationsModel, PublishSubscriptionsModel } from '../db/models/index.js';
 import { getDatabasePath } from '../db/db-path';
 import { getDatabase } from '../db/sqlite';
 import { CloudMqttClient } from '../mqtt/manager';
@@ -929,8 +929,8 @@ export const getDevices = async (protocol?: string) => {
 /**
  * Publish control: list publishers
  */
-export const listPublishers = async (includeDisabled: boolean = true) => {
-	return PublishersModel.getAll(includeDisabled);
+export const listPublishDestinations = async (includeDisabled: boolean = true) => {
+	return PublishDestinationsModel.getAll(includeDisabled);
 };
 
 /**
@@ -946,7 +946,7 @@ export const createPublisher = async (body: {
 		throw new Error('name and type are required');
 	}
 
-	const created = PublishersModel.create({
+	const created = PublishDestinationsModel.create({
 		name: body.name,
 		type: body.type,
 		config_json: body.config_json ?? null,
@@ -969,12 +969,12 @@ export const updatePublisher = async (id: number, body: {
 	config_json?: Record<string, unknown> | null;
 	enabled?: boolean;
 }) => {
-	const existing = PublishersModel.getById(id);
+	const existing = PublishDestinationsModel.getById(id);
 	if (!existing) {
 		throw Object.assign(new Error(`Publisher not found: ${id}`), { statusCode: 404 });
 	}
 
-	const updated = PublishersModel.update(id, body);
+	const updated = PublishDestinationsModel.update(id, body);
 	if (!updated) {
 		throw new Error(`Failed to update publisher: ${id}`);
 	}
@@ -986,7 +986,7 @@ export const updatePublisher = async (id: number, body: {
  * Publish control: delete publisher
  */
 export const deletePublisher = async (id: number) => {
-	const deleted = PublishersModel.delete(id);
+	const deleted = PublishDestinationsModel.delete(id);
 	if (!deleted) {
 		throw Object.assign(new Error(`Publisher not found: ${id}`), { statusCode: 404 });
 	}
@@ -1019,7 +1019,7 @@ export const createPublishSubscription = async (body: {
 		throw new Error('publisher_id is required');
 	}
 
-	const publisher = PublishersModel.getById(body.publisher_id);
+	const publisher = PublishDestinationsModel.getById(body.publisher_id);
 	if (!publisher) {
 		throw Object.assign(new Error(`Publisher not found: ${body.publisher_id}`), { statusCode: 404 });
 	}
@@ -1066,9 +1066,9 @@ export const updatePublishSubscription = async (id: number, body: {
 		throw Object.assign(new Error(`Publish subscription not found: ${id}`), { statusCode: 404 });
 	}
 
-	let publisher = existing.publisher_id ? PublishersModel.getById(existing.publisher_id) : null;
+	let publisher = existing.publisher_id ? PublishDestinationsModel.getById(existing.publisher_id) : null;
 	if (body.publisher_id !== undefined) {
-		publisher = PublishersModel.getById(body.publisher_id);
+		publisher = PublishDestinationsModel.getById(body.publisher_id);
 		if (!publisher) {
 			throw Object.assign(new Error(`Publisher not found: ${body.publisher_id}`), { statusCode: 404 });
 		}

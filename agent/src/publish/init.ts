@@ -115,18 +115,6 @@ export class DevicePublish extends EventEmitter {
 		});
 	}
 
-	public setPipelineService(pipeline?: PipelineService): void {
-		this.pipelineService = pipeline;
-		for (const device of this.devices) {
-			device.setPipelineService(pipeline);
-		}
-
-		this.logger.debug('Updated pipeline service binding for Device Publish Feature', {
-			hasPipelineService: !!pipeline,
-			deviceCount: this.devices.length,
-		});
-	}
-
 	public setLiveDataInterceptor(interceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[]): void {
 		this.liveDataInterceptor = interceptor;
 		for (const device of this.devices) {
@@ -193,7 +181,6 @@ export class DevicePublish extends EventEmitter {
 			const config = deviceConfig.endpoints[i];
 
 			const device = this.createDeviceManager(config, i, deviceConfig.endpoints.length);
-			if (this.pipelineService) device.setPipelineService(this.pipelineService);
 			if (this.liveDataInterceptor) device.setLiveDataInterceptor(this.liveDataInterceptor);
 			this.attachDeviceEventHandlers(device, config.name!);
 			this.devices.push(device);

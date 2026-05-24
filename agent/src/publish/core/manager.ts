@@ -1,7 +1,6 @@
 import { EventEmitter } from 'events';
 import { getHeapStatistics } from 'v8';
 import { agentTopic } from '../../mqtt/topics.js';
-import type { PipelineService } from '../../features/pipeline/index.js';
 import type { AnomalyDetectionService } from '../../anomaly/index.js';
 import type { Protocol } from '../../anomaly/types.js';
 import type { DeviceConfig, MqttConnection, Logger, DeviceStats, IPublishClient, IPublishPlugin, IPublishSink } from './types.js';
@@ -17,7 +16,7 @@ import { SchemaDriftDetector } from './drift.js';
 import { SchemaDriftModel } from '../../db/models/schema-drift.model.js';
 import type { DictionaryManager } from '../../mqtt/dictionary.js';
 import type { PublishDestinationInfo, PublishBatchItem } from './types.js';
-import { PublishersModel, PublishSubscriptionsModel } from '../../db/models/index.js';
+import { PublishDestinationsModel, PublishSubscriptionsModel } from '../../db/models/index.js';
 import type { PublisherRecord, PublishSubscriptionRecord, PublishSubscriptionRoute } from '../../db/models/index.js';
 
 // Adaptive batch safety limits (calculated once at module load)
@@ -54,7 +53,6 @@ export class PublishManager extends EventEmitter {
 	private needStop = false;
 	private publishing = false;
 	private connectionHandlersAttached = false;
-	private pipelineService?: PipelineService;
 	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
 	private bindings: HostBinding[] = [];
 	private pluginByPublisherId: Map<number, IPublishPlugin> = new Map();
@@ -133,10 +131,6 @@ export class PublishManager extends EventEmitter {
 
 	public setAnomalyService(service?: AnomalyDetectionService): void {
 		this.anomalyService = service;
-	}
-
-	public setPipelineService(service?: PipelineService): void {
-		this.pipelineService = service;
 	}
 
 	public setLiveDataInterceptor(interceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[]): void {
@@ -325,35 +319,6 @@ export class PublishManager extends EventEmitter {
 			const payloadFormat = this.resolvePayloadFormatForActiveBindings();
 			let { data, baselineSize, msgId } = this.buildPayload(name, enriched, payloadFormat);
 			if (this.needStop) return;
-
-			// Run payload through the Node-RED pipeline (if configured)
-			if (this.pipelineService) {
-				try {
-					const pipelineStart = Date.now();
-					const result = await this.pipelineService.transform({
-						payload: data,
-						topic,
-						deviceId: name,
-					});
-					if (result.drop) {
-						this.logger?.debug(`Pipeline dropped batch from endpoint '${name}'`);
-						this.batcher.reset();
-						return;
-					}
-					const transformed = result.payload as PublishPayload;
-					baselineSize = Buffer.byteLength(JSON.stringify(transformed), 'utf8');
-					data = transformed;
-					if (typeof (transformed as { msgId?: unknown }).msgId === 'string') {
-						msgId = (transformed as { msgId: string }).msgId;
-					}
-					const transformedMessageCount = Array.isArray((transformed as { messages?: unknown }).messages)
-						? ((transformed as { messages: unknown[] }).messages).length
-						: 0;
-					this.logger?.debug(`Pipeline transform applied for '${name}': ${transformedMessageCount} messages, ${baselineSize} bytes in ${Date.now() - pipelineStart}ms`);
-				} catch (err) {
-					this.logger?.warn(`Pipeline transform failed for '${name}', publishing original payload`, err);
-				}
-			}
 
 			if (!this.isConnected()) {
 				await this.publishOffline(topic, data, msgId, messageCount);
@@ -901,7 +866,7 @@ export class PublishManager extends EventEmitter {
 	}
 
 	private loadBindings(): HostBinding[] {
-		const publishers = PublishersModel.getAll(false);
+		const publishers = PublishDestinationsModel.getAll(false);
 		const subscriptions = PublishSubscriptionsModel.getAll(false);
 		// If no explicit subscriptions configured, return empty to use default Iotistica
 		if (subscriptions.length === 0) {

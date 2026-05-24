@@ -14,7 +14,7 @@ import { showLogs, showVersion } from './commands/system';
 import { bufferStatus, memoryDiagnostics, restart, runDiagnostics, showStatusEnhanced, agentUpdate, agentPullTargetState } from './commands/agent';
 import {
   publishMqttAdd,
-  publishPublishersList,
+  publishDestinationsList,
   publishSubscriptionsAdd,
   publishSubscriptionsList,
 } from './commands/publish';
@@ -91,8 +91,8 @@ function buildCommands(args: string[]): CommandMap {
     },
     publish: {
       publishers: {
-        list: publishPublishersList,
-        _default: publishPublishersList,
+        list: publishDestinationsList,
+        _default: publishDestinationsList,
       },
       subscriptions: {
         add: publishSubscriptionsAdd,

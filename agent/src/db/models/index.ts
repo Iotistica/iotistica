@@ -47,8 +47,8 @@ export type {
 } from './schema-drift.model';
 
 // Publish control persistence
-export { PublishersModel } from './publishers.model';
-export type { PublisherRecord, PublisherType } from './publishers.model';
+export { PublishDestinationsModel} from './publish-destinations.model';
+export type { PublishDestinationRecord as PublisherRecord, DestinationType as PublisherType } from './publish-destinations.model';
 export { PublishSubscriptionsModel } from './publish-subscriptions.model';
 export type {
 	PublishPayloadFormat,
