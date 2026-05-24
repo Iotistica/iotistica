@@ -611,14 +611,16 @@ export class BACnetDiscovery extends BaseDiscovery {
 				);
 
 				const deviceName = deviceInfo.objectName || `bacnet_device_${deviceInstance}`;
-				const normalizedBaseName = deviceName
+				const normalized = deviceName
 					.toLowerCase()
 					.replace(/[^a-z0-9_]/g, '_')
-					.replace(/^(?:iotistica_){2,}/, 'iotistica_');
+					.replace(/^iotistica_+/, '')  // Remove all leading iotistica_ prefixes
+					.replace(/^_+/, '');            // Remove any leading underscores
+				const baseName = normalized ? `iotistica_${normalized}` : `iotistica_bacnet_simulator`;
 				const instanceSuffix = `_${deviceInstance}`;
-				const uniqueEndpointName = normalizedBaseName.endsWith(instanceSuffix)
-					? normalizedBaseName
-					: `${normalizedBaseName}${instanceSuffix}`;
+				const uniqueEndpointName = baseName.endsWith(instanceSuffix)
+					? baseName
+					: `${baseName}${instanceSuffix}`;
 
 				discovered.push({
 					name: uniqueEndpointName,
