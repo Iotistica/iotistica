@@ -90,6 +90,10 @@ function buildCommands(args: string[]): CommandMap {
       _default: mqttListUsers,
     },
     publish: {
+      destinations: {
+        list: publishDestinationsList,
+        _default: publishDestinationsList,
+      },
       publishers: {
         list: publishDestinationsList,
         _default: publishDestinationsList,

@@ -33,7 +33,7 @@ function normalizeTopicsForDisplay(rawTopics: unknown): string[] | string {
 }
 
 /**
- * iotctl publish publishers list [--include-disabled]
+ * iotctl publish destinations list [--include-disabled]
  */
 export async function publishDestinationsList(): Promise<void> {
   const includeDisabled = hasFlag('include-disabled');
@@ -42,10 +42,10 @@ export async function publishDestinationsList(): Promise<void> {
     const result = await apiRequest(
       `${DEVICE_API_V1}/publish/destinations?includeDisabled=${includeDisabled ? 'true' : 'false'}`,
     );
-    const publish_destinations: Array<Record<string, any>> = result.publishers || [];
+    const publish_destinations: Array<Record<string, any>> = result.destinations || result.publishers || [];
 
     if (publish_destinations.length === 0) {
-      logger.info('No publishers configured');
+      logger.info('No publish destinations configured');
       return;
     }
 
@@ -132,13 +132,13 @@ async function resolveDestinationId(input: {
   }
 
   if (!input.publishDestinationName) {
-    throw new CLIError('Either --publish-destination-id or --publisher-name is required', 1, {
-      usage: 'iotctl publish subscriptions add --publish-destination-id <id> [--topics modbus,opcua] [--payload-format custom|tags|ecp] [--include-devices d1,d2] [--exclude-devices d3] [--disabled]',
+    throw new CLIError('Either --publish-destination-id or --destination-name is required', 1, {
+      usage: 'iotctl publish subscriptions add --publish-destination-id <id> [--destination-name <name>] [--topics modbus,opcua] [--payload-format custom|tags|ecp] [--include-devices d1,d2] [--exclude-devices d3] [--disabled]',
     });
   }
 
   const result = await apiRequest(`${DEVICE_API_V1}/publish/destinations?includeDisabled=true`);
-  const destinations: Array<{ id?: number; name?: string }> = result.destinations || [];
+  const destinations: Array<{ id?: number; name?: string }> = result.destinations || result.publishers || [];
   const destination = destinations.find((item) => item.name === input.publishDestinationName);
 
   if (!destination?.id) {
@@ -157,7 +157,7 @@ async function resolveDestinationId(input: {
  */
 export async function publishSubscriptionsAdd(): Promise<void> {
   const publishDestinationIdRaw = getFlag('publish-destination-id');
-  const publisherName = getFlag('publisher-name');
+  const publisherName = getFlag('publisher-name') || getFlag('destination-name');
   const topics = parseCsv(getFlag('topics'));
   const includeDevices = parseCsv(getFlag('include-devices'));
   const excludeDevices = parseCsv(getFlag('exclude-devices'));
