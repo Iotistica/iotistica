@@ -121,7 +121,7 @@ CREATE INDEX IF NOT EXISTS "idx_devices_endpoint_id" ON "devices" ("endpoint_id"
 CREATE INDEX IF NOT EXISTS "idx_devices_protocol" ON "devices" ("protocol");
 CREATE TABLE IF NOT EXISTS `endpoint_outputs` (`id` integer not null primary key autoincrement, `protocol` varchar(50) not null, `socket_path` varchar(500) not null, `data_format` varchar(50) not null default 'json', `delimiter` varchar(10) not null default '
 ', `include_timestamp` boolean not null default '1', `include_device_name` boolean not null default '1', `logging` text null, `created_at` datetime not null default CURRENT_TIMESTAMP, `updated_at` datetime not null default CURRENT_TIMESTAMP, `buffer_capacity` integer null);
-CREATE TABLE IF NOT EXISTS "publishers" (
+CREATE TABLE IF NOT EXISTS "publish_destinations" (
 	"id"	integer NOT NULL,
 	"name"	varchar(255) NOT NULL,
 	"type"	varchar(50) NOT NULL,
@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS "publishers" (
 );
 CREATE TABLE IF NOT EXISTS "publish_subscriptions" (
 	"id"	integer NOT NULL,
-	"publisher_id"	integer NOT NULL REFERENCES publishers(id) ON DELETE CASCADE,
+	"publish_destination_id"	integer NOT NULL REFERENCES publish_destinations(id) ON DELETE CASCADE,
 	"topics"	text NOT NULL DEFAULT '[]',
 	"route_json"	text,
 	"payload_format"	varchar(20) NOT NULL DEFAULT 'custom',
@@ -385,15 +385,15 @@ CREATE INDEX IF NOT EXISTS "dictionary_entries_version_added" ON "dictionary_ent
 CREATE UNIQUE INDEX IF NOT EXISTS "endpoint_outputs_protocol_unique" ON "endpoint_outputs" (
 	"protocol"
 );
-CREATE UNIQUE INDEX IF NOT EXISTS "idx_publishers_name_unique" ON "publishers" (
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_publish_destinations_name_unique" ON "publish_destinations" (
 	"name"
 );
-CREATE INDEX IF NOT EXISTS "idx_publishers_type_enabled" ON "publishers" (
+CREATE INDEX IF NOT EXISTS "idx_publish_destinations_type_enabled" ON "publish_destinations" (
 	"type",
 	"enabled"
 );
-CREATE INDEX IF NOT EXISTS "idx_publish_subscriptions_publisher_id" ON "publish_subscriptions" (
-	"publisher_id"
+CREATE INDEX IF NOT EXISTS "idx_publish_subscriptions_publish_destination_id" ON "publish_subscriptions" (
+	"publish_destination_id"
 );
 CREATE INDEX IF NOT EXISTS "idx_publish_subscriptions_enabled" ON "publish_subscriptions" (
 	"enabled"
