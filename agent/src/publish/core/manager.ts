@@ -4,7 +4,7 @@ import { agentTopic } from '../../mqtt/topics.js';
 import type { PipelineService } from '../../features/pipeline/index.js';
 import type { AnomalyDetectionService } from '../../anomaly/index.js';
 import type { Protocol } from '../../anomaly/types.js';
-import type { DeviceConfig, MqttConnection, Logger, DeviceStats, IPublishSink } from './types.js';
+import type { DeviceConfig, MqttConnection, Logger, DeviceStats, IPublishClient, IPublishPlugin, IPublishSink } from './types.js';
 import { DeviceState } from './types.js';
 import { AnomalyFeed } from '../anomaly/feed.js';
 import { AnomalyEnricher } from '../anomaly/enrich.js';
@@ -16,7 +16,9 @@ import { HeartbeatManager } from './heartbeat.js';
 import { SchemaDriftDetector } from './drift.js';
 import { SchemaDriftModel } from '../../db/models/schema-drift.model.js';
 import type { DictionaryManager } from '../../mqtt/dictionary.js';
-import type { PublishDestinationInfo } from './types.js';
+import type { PublishDestinationInfo, PublishBatchItem } from './types.js';
+import { PublishersModel, PublishSubscriptionsModel } from '../../db/models/index.js';
+import type { PublisherRecord, PublishSubscriptionRecord, PublishSubscriptionRoute } from '../../db/models/index.js';
 
 // Adaptive batch safety limits (calculated once at module load)
 const MAX_BATCH_MESSAGES = 10000;
@@ -28,6 +30,12 @@ const MAX_BATCH_BYTES = (() => {
 type ExternalPayloadFormat = 'custom' | 'tags' | 'ecp';
 
 type PublishPayload = Record<string, unknown>;
+
+interface HostBinding {
+	subscription: PublishSubscriptionRecord;
+	publisher: PublisherRecord;
+	plugin: IPublishPlugin;
+}
 
 export class PublishManager extends EventEmitter {
 	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -48,6 +56,8 @@ export class PublishManager extends EventEmitter {
 	private connectionHandlersAttached = false;
 	private pipelineService?: PipelineService;
 	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
+	private bindings: HostBinding[] = [];
+	private pluginByPublisherId: Map<number, IPublishPlugin> = new Map();
 
 	private readonly onConnected = (): void => {
 		if (this.needStop) return;
@@ -86,16 +96,18 @@ export class PublishManager extends EventEmitter {
 	constructor(
     private readonly config: DeviceConfig,
     private readonly mqttConnection: MqttConnection,
-	private readonly publishPlugin: IPublishSink,
+    private readonly protocol: Protocol,
+    private readonly endpointName: string,
+    private readonly defaultClient: IPublishClient,
+    private readonly buildPlugin: (publisher: PublisherRecord, client: IPublishClient, logger?: Logger) => IPublishPlugin,
     private readonly logger: Logger | undefined,
     private readonly deviceUuid: string,
 	private dictionaryManager?: DictionaryManager,
     private useMsgpackPoc = false,
     private useKeyCompactionPoc = false,
     private useDeflatePoc = false,
-    private readonly protocol: Protocol = 'mqtt',
     private anomalyService?: AnomalyDetectionService,
-		private readonly externalPayloadFormat: ExternalPayloadFormat = 'custom',
+	private readonly externalPayloadFormat: ExternalPayloadFormat = 'custom',
 	) {
 		super();
 
@@ -139,7 +151,17 @@ export class PublishManager extends EventEmitter {
 		}
 		this.logger?.info(`Starting endpoint '${name}'`);
 		this.needStop = false;
-		await this.publishPlugin.start();
+
+		this.bindings = this.loadBindings();
+		if (this.bindings.length === 0) {
+			this.logger?.warn('No publisher bindings found; using legacy default target');
+			this.bindings = this.createLegacyFallbackBinding();
+		}
+
+		for (const plugin of this.getUniquePlugins()) {
+			await plugin.start();
+		}
+
 		this.attachConnectionHandlers();
 
 		if (this.config.mqttHeartbeatTopic) {
@@ -166,7 +188,13 @@ export class PublishManager extends EventEmitter {
 		this.connection.disconnect();
 
 		if (this.batcher.messageCount > 0) await this.publishBatch();
-		await this.publishPlugin.stop();
+
+		for (const plugin of this.getUniquePlugins()) {
+			await plugin.stop();
+		}
+
+		this.bindings = [];
+		this.pluginByPublisherId.clear();
 	}
 
 	getStats(): DeviceStats {
@@ -286,7 +314,7 @@ export class PublishManager extends EventEmitter {
 				}
 			}
 
-			if (!this.publishPlugin.isConnected()) {
+			if (!this.isConnected()) {
 				await this.publishOffline(topic, data, msgId, messageCount);
 				return;
 			}
@@ -539,7 +567,7 @@ export class PublishManager extends EventEmitter {
 				return;
 			}
 
-			await this.publishPlugin.publishBatch([
+			await this.routePublishBatch([
 				{ topic, payload, options: { qos: 1 } },
 			]);
 			publishConfirmed = true;
@@ -579,15 +607,7 @@ export class PublishManager extends EventEmitter {
 	}
 
 	private getPublishDestinationLogContext(topic?: string): Record<string, unknown> | undefined {
-		const provider = this.publishPlugin as IPublishSink & {
-			getDestinationInfo?: () => PublishDestinationInfo[];
-		};
-
-		if (typeof provider.getDestinationInfo !== 'function') {
-			return undefined;
-		}
-
-		const destinations = provider.getDestinationInfo();
+		const destinations = this.getDestinationInfo();
 		if (!Array.isArray(destinations) || destinations.length === 0) {
 			return undefined;
 		}
@@ -685,5 +705,190 @@ export class PublishManager extends EventEmitter {
 		this.connection.off('disconnected', this.onDisconnected);
 		this.connection.off('reconnecting', this.onReconnecting);
 		this.connectionHandlersAttached = false;
+	}
+
+	private isConnected(): boolean {
+		const plugins = this.getUniquePlugins();
+		if (plugins.length === 0) {
+			return false;
+		}
+
+		return plugins.some((plugin) => plugin.isConnected());
+	}
+
+	public getDestinationInfo(): PublishDestinationInfo[] {
+		if (this.bindings.length === 0) {
+			return [];
+		}
+
+		const byPublisher = new Map<number, PublishDestinationInfo>();
+
+		for (const binding of this.bindings) {
+			const publisherId = binding.publisher.id ?? -1;
+			const existing = byPublisher.get(publisherId);
+			if (!existing) {
+				byPublisher.set(publisherId, {
+					publisherId: binding.publisher.id,
+					publisherName: binding.publisher.name,
+					publisherType: String(binding.publisher.type),
+					subscriptionIds: binding.subscription.id !== undefined ? [binding.subscription.id] : [],
+					topics: this.normalizeTopics(binding.subscription.topics),
+				});
+				continue;
+			}
+
+			if (binding.subscription.id !== undefined && !existing.subscriptionIds.includes(binding.subscription.id)) {
+				existing.subscriptionIds.push(binding.subscription.id);
+			}
+
+			for (const topic of this.normalizeTopics(binding.subscription.topics)) {
+				if (!existing.topics.includes(topic)) {
+					existing.topics.push(topic);
+				}
+			}
+		}
+
+		for (const destination of byPublisher.values()) {
+			destination.subscriptionIds.sort((a, b) => a - b);
+			destination.topics.sort();
+		}
+
+		return Array.from(byPublisher.values());
+	}
+
+	private async routePublishBatch(batch: PublishBatchItem[]): Promise<void> {
+		const plugins = this.getUniquePlugins();
+		if (plugins.length === 0) {
+			throw new Error('No publish destinations configured');
+		}
+
+		const results = await Promise.allSettled(plugins.map((plugin) => plugin.publishBatch(batch)));
+		const failures = results.filter((result) => result.status === 'rejected') as Array<PromiseRejectedResult>;
+
+		if (failures.length === 0) {
+			return;
+		}
+
+		if (failures.length === results.length) {
+			const first = failures[0]?.reason;
+			throw first instanceof Error ? first : new Error(String(first));
+		}
+
+		this.logger?.warn('Some publish destinations failed while others succeeded', {
+			component: 'PublishManager',
+			protocol: this.protocol,
+			endpoint: this.endpointName,
+			failedDestinations: failures.length,
+			totalDestinations: results.length,
+		});
+	}
+
+	private loadBindings(): HostBinding[] {
+		const publishers = PublishersModel.getAll(false);
+		const subscriptions = PublishSubscriptionsModel.getAll(false);
+		if (publishers.length === 0 || subscriptions.length === 0) {
+			return [];
+		}
+
+		const publishersById = new Map<number, PublisherRecord>();
+		for (const publisher of publishers) {
+			if (publisher.id !== undefined) {
+				publishersById.set(publisher.id, publisher);
+			}
+		}
+
+		this.pluginByPublisherId.clear();
+		const bindings: HostBinding[] = [];
+
+		for (const subscription of subscriptions) {
+			const publisher = publishersById.get(subscription.publisher_id);
+			if (!publisher) {
+				continue;
+			}
+
+			if (!this.matchesSubscription(subscription)) {
+				continue;
+			}
+
+			let plugin = this.pluginByPublisherId.get(subscription.publisher_id);
+			if (!plugin) {
+				plugin = this.buildPlugin(publisher, this.defaultClient, this.logger);
+				this.pluginByPublisherId.set(subscription.publisher_id, plugin);
+			}
+
+			bindings.push({ subscription, publisher, plugin });
+		}
+
+		return bindings;
+	}
+
+	private createLegacyFallbackBinding(): HostBinding[] {
+		const target = 'iotistica';
+		const publisher: PublisherRecord = {
+			id: -1,
+			name: `legacy-${target}`,
+			type: target,
+			config_json: null,
+			enabled: true,
+		};
+		const plugin = this.buildPlugin(publisher, this.defaultClient, this.logger);
+		return [{
+			subscription: {
+				publisher_id: -1,
+				topics: [],
+				payload_format: 'custom',
+				enabled: true,
+			},
+			publisher: {
+				...publisher,
+			},
+			plugin,
+		}];
+	}
+
+	private getUniquePlugins(): IPublishPlugin[] {
+		const deduped = new Set<IPublishPlugin>();
+		for (const binding of this.bindings) {
+			deduped.add(binding.plugin);
+		}
+		return Array.from(deduped);
+	}
+
+	private matchesSubscription(subscription: PublishSubscriptionRecord): boolean {
+		const topics = Array.isArray(subscription.topics) ? subscription.topics : [];
+		if (topics.length > 0 && !topics.includes(this.protocol)) {
+			return false;
+		}
+
+		const route = subscription.route_json as PublishSubscriptionRoute | null;
+		if (!route) {
+			return true;
+		}
+
+		if (Array.isArray(route.includeDevices) && route.includeDevices.length > 0) {
+			if (!route.includeDevices.includes(this.endpointName)) {
+				return false;
+			}
+		}
+
+		if (Array.isArray(route.excludeDevices) && route.excludeDevices.length > 0) {
+			if (route.excludeDevices.includes(this.endpointName)) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private normalizeTopics(topics: string[] | undefined): string[] {
+		if (!Array.isArray(topics) || topics.length === 0) {
+			return ['*'];
+		}
+
+		const normalized = topics
+			.map((topic) => topic.trim())
+			.filter((topic) => topic.length > 0);
+
+		return normalized.length > 0 ? normalized : ['*'];
 	}
 }

@@ -15,15 +15,13 @@ import type { IPublishClient as BufferSyncPublishClient } from '../mqtt/buffer.j
 import { CloudMqttClient } from '../mqtt/manager.js';
 import type { DictionaryManager } from '../mqtt/dictionary.js';
 import { EventEmitter } from 'events';
-import { ConnectionPublishPlugin } from './core/connection.js';
 import { AzurePublishPlugin } from './plugins/azure.js';
 import { AwsPublishPlugin } from './plugins/aws.js';
 import { GcpPublishPlugin } from './plugins/gcp.js';
 import { MqttPublishPlugin } from './plugins/mqtt.js';
-import { PublisherHost } from './host/publisher-host.js';
-import { normalizeTarget } from './core/types.js';
 import { PublishPluginRegistry } from './plugin-registry.js';
 import { PublishPluginLoader } from './plugin-loader.js';
+import { BasePublishPlugin } from './core/base-plugin.js';
 import type { ExternalPublishPluginConfig, PublishPluginStarter, IPublishPlugin, IPublishClient } from './core/types.js';
 
 /**
@@ -314,32 +312,26 @@ export class DevicePublish extends EventEmitter {
 			}
 		};
 
-		const publishPlugin = new PublisherHost({
-			protocol,
-			endpointName: config.name,
-			defaultClient: this.mqttConnection!,
-			logger: protocolLogger,
-			buildPlugin: (publisher, client, logger) => this.createPublishPlugin(publisher, client, logger),
-		});
-
 		return new PublishManager(
 			config,
 			this.mqttConnection!,
-			publishPlugin,
+			protocol,
+			config.name,
+			this.mqttConnection!,
+			(publisher, client, logger) => this.createPublishPlugin(publisher, client, logger),
 			protocolLogger,
 			this.deviceUuid,
 			this.dictionaryManager,
 			this.useMsgpackPoc,
 			this.useKeyCompactionPoc,
 			this.useDeflatePoc,
-			protocol,
 			this.anomalyService,
 		);
 	}
 
 	private registerBuiltInPublishPluginStarters(): void {
 		const iotisticaStarter: PublishPluginStarter = ({ client, logger }) =>
-			new ConnectionPublishPlugin(client, logger);
+			new BasePublishPlugin(client, logger);
 		const azureStarter: PublishPluginStarter = ({ logger }) =>
 			AzurePublishPlugin.fromEnv(this.agentLogger, logger);
 		const awsStarter: PublishPluginStarter = ({ logger }) =>

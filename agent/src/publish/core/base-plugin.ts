@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import type { IPublishClient, IPublishPlugin, PublishBatchItem, Logger } from './types.js';
 
-export abstract class BasePublishPlugin extends EventEmitter implements IPublishPlugin {
+export class BasePublishPlugin extends EventEmitter implements IPublishPlugin {
   protected running = false;
 
   constructor(
@@ -16,7 +16,6 @@ export abstract class BasePublishPlugin extends EventEmitter implements IPublish
       return;
     }
 
-    await this.client.connect?.();
     this.running = true;
     this.emit('started');
   }
@@ -26,7 +25,6 @@ export abstract class BasePublishPlugin extends EventEmitter implements IPublish
       return;
     }
 
-    await this.client.disconnect?.();
     this.running = false;
     this.emit('stopped');
   }

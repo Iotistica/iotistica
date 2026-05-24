@@ -408,10 +408,6 @@ export class SchemaDriftDetector {
 		this.detectDrift(extracted);
 	}
 
-	// ---------------------------------------------------------------------------
-	// Baseline learning
-	// ---------------------------------------------------------------------------
-
 	private learnBaseline(extracted: ExtractedSchema): void {
 		this.warmupSeen += 1;
 
@@ -472,10 +468,6 @@ export class SchemaDriftDetector {
 
 		this.persistBaselineState();
 	}
-
-	// ---------------------------------------------------------------------------
-	// Drift detection
-	// ---------------------------------------------------------------------------
 
 	private detectDrift(extracted: ExtractedSchema): void {
 		const baseline = this.baseline;
@@ -612,13 +604,8 @@ export class SchemaDriftDetector {
 		if (retiredAt !== undefined) {
 			this.tombstones.delete(field);
 			this.logger?.info(
-				`Previously retired field has reappeared for endpoint '${this.endpointName}'`,
-				{
-					endpointName: this.endpointName,
-					field,
-					retiredAtBatch: retiredAt,
-					reappearedAtBatch: this.totalBatches,
-				},
+				`Field reappeared for endpoint '${this.endpointName}'`,
+				{ endpointName: this.endpointName, field, retiredAtBatch: retiredAt, reappearedAtBatch: this.totalBatches },
 			);
 		}
 
@@ -687,16 +674,11 @@ export class SchemaDriftDetector {
 
 		const freq = this.baselineTypeFreq.get(field);
 		if (!freq) {
-			// First sighting for this baseline field — establish initial type baseline.
 			this.recordTypeFrequency(this.baselineTypeFreq, field, observedTypes);
 			return;
 		}
 
-		// Evaluate expected types from ESTABLISHED frequencies BEFORE updating them,
-		// so a single bad batch cannot immediately widen the accepted type set.
 		const expectedTypes = this.getDominantExpectedTypes(freq);
-
-		// Update type frequency with new observations AFTER the check.
 		this.recordTypeFrequency(this.baselineTypeFreq, field, observedTypes);
 
 		if (expectedTypes.size === 0) {
@@ -757,10 +739,6 @@ export class SchemaDriftDetector {
 		}
 	}
 
-	// ---------------------------------------------------------------------------
-	// Rename candidate detection
-	// ---------------------------------------------------------------------------
-
 	private detectRenameCandidate(
 		missingFields: string[],
 		newFields: string[],
@@ -786,11 +764,7 @@ export class SchemaDriftDetector {
 					continue;
 				}
 
-				const similarity = stringSimilarity(
-					fromRaw,
-					toRaw,
-					maxRenameFieldLength,
-				);
+				const similarity = stringSimilarity(fromRaw, toRaw, maxRenameFieldLength);
 				if (similarity === undefined) {
 					continue;
 				}
@@ -803,10 +777,6 @@ export class SchemaDriftDetector {
 
 		return best && best.similarity >= 0.72 ? best : undefined;
 	}
-
-	// ---------------------------------------------------------------------------
-	// Field extraction with recursive traversal
-	// ---------------------------------------------------------------------------
 
 	private extractSchema(messages: unknown[]): ExtractedSchema {
 		const fields = new Set<string>();
@@ -881,11 +851,8 @@ export class SchemaDriftDetector {
 
 			visited.add(objectRef);
 
-			// Track keys processed via explicit schema-aware paths to prevent
-			// double-counting them as generic key:* fields below.
 			const handledKeys = new Set<string>();
 
-			// Explicit: Modbus / structured readings array.
 			const readings = record.readings;
 			if (Array.isArray(readings)) {
 				handledKeys.add("readings");
@@ -895,10 +862,7 @@ export class SchemaDriftDetector {
 						continue;
 					}
 
-					const fieldNameRaw =
-						toFieldName(rr.metric) ||
-						toFieldName(rr.registerName) ||
-						toFieldName(rr.name);
+const fieldNameRaw = toFieldName(rr.metric) || toFieldName(rr.registerName) || toFieldName(rr.name);
 
 					if (!fieldNameRaw) {
 						continue;
@@ -911,11 +875,7 @@ export class SchemaDriftDetector {
 				}
 			}
 
-			// Explicit: OPC-UA / direct reading object.
-			const directFieldRaw =
-				toFieldName(record.metric) ||
-				toFieldName(record.registerName) ||
-				toFieldName(record.name);
+			const directFieldRaw = toFieldName(record.metric) || toFieldName(record.registerName) || toFieldName(record.name);
 
 			if (directFieldRaw) {
 				handledKeys.add("metric");
@@ -928,9 +888,6 @@ export class SchemaDriftDetector {
 				}
 			}
 
-			// Generic: numeric/boolean leaf fields, skipping already-handled keys and
-			// reserved metadata keys. String values are intentionally excluded here to
-			// avoid false positives from metadata strings (firmwareVersion, etc.).
 			for (const [rawKey, rawValue] of Object.entries(record)) {
 				const normalizedKey = normalizeFieldName(rawKey);
 				if (!normalizedKey) {
@@ -969,10 +926,6 @@ export class SchemaDriftDetector {
 
 		return { fields, typesByField };
 	}
-
-	// ---------------------------------------------------------------------------
-	// Small private helpers
-	// ---------------------------------------------------------------------------
 
 	private canTrackInMap<V>(map: Map<string, V>, field: string): boolean {
 		return map.has(field) || map.size < this.options.maxTrackedFields;
@@ -1019,12 +972,11 @@ export class SchemaDriftDetector {
 	 */
 	private getDominantExpectedTypes(freq: TypeFrequency): Set<ValueType> {
 		const expected = new Set<ValueType>();
-		for (const [type, count] of freq.counts.entries()) {
+		for (const [type, count] of freq.counts) {
 			if (count / freq.total >= this.options.minTypeDominanceRatio) {
 				expected.add(type);
 			}
 		}
-
 		return expected;
 	}
 
