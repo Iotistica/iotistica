@@ -799,10 +799,10 @@ router.get('/v1/publish/destinations', async (req: Request, res: Response, next:
 });
 
 /**
- * POST /v1/publish/publishers
- * Create an upstream publisher
+ * POST /v1/publish/destinations
+ * Create an upstream publish destination
  */
-router.post('/v1/publish/publishers', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/v1/publish/destinations', async (req: Request, res: Response, next: NextFunction) => {
 	try {
 		const publisher = await actions.createPublisher(req.body);
 		return res.status(201).json({ publisher });
@@ -812,14 +812,14 @@ router.post('/v1/publish/publishers', async (req: Request, res: Response, next: 
 });
 
 /**
- * PATCH /v1/publish/publishers/:id
- * Update an upstream publisher
+ * PATCH /v1/publish/destinations/:id
+ * Update an upstream publish destination
  */
-router.patch('/v1/publish/publishers/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.patch('/v1/publish/destinations/:id', async (req: Request, res: Response, next: NextFunction) => {
 	try {
 		const id = Number(req.params.id);
 		if (!Number.isFinite(id)) {
-			return res.status(400).json({ error: 'Invalid publisher id' });
+			return res.status(400).json({ error: 'Invalid destination id' });
 		}
 
 		const publisher = await actions.updatePublisher(id, req.body);
@@ -831,14 +831,14 @@ router.patch('/v1/publish/publishers/:id', async (req: Request, res: Response, n
 });
 
 /**
- * DELETE /v1/publish/publishers/:id
- * Delete an upstream publisher
+ * DELETE /v1/publish/destinations/:id
+ * Delete an upstream publish destination
  */
-router.delete('/v1/publish/publishers/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/v1/publish/destinations/:id', async (req: Request, res: Response, next: NextFunction) => {
 	try {
 		const id = Number(req.params.id);
 		if (!Number.isFinite(id)) {
-			return res.status(400).json({ error: 'Invalid publisher id' });
+			return res.status(400).json({ error: 'Invalid destination id' });
 		}
 
 		await actions.deletePublisher(id);

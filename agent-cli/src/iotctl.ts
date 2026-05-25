@@ -94,17 +94,13 @@ function buildCommands(args: string[]): CommandMap {
         list: publishDestinationsList,
         _default: publishDestinationsList,
       },
-      publishers: {
-        list: publishDestinationsList,
-        _default: publishDestinationsList,
-      },
       subscriptions: {
         add: publishSubscriptionsAdd,
         list: publishSubscriptionsList,
         _default: publishSubscriptionsList,
       },
-      mqtt: {
-        add: publishMqttAdd,
+      add: {
+        mqtt: publishMqttAdd,
       },
       _default: () => showHelp(commands),
     },

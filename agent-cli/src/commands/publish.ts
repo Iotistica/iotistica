@@ -244,7 +244,7 @@ export async function publishMqttAdd(): Promise<void> {
   }
 
   try {
-    const publisherResult = await apiRequest(`${DEVICE_API_V1}/publish/publishers`, {
+    const publisherResult = await apiRequest(`${DEVICE_API_V1}/publish/destinations`, {
       method: 'POST',
       body: JSON.stringify({
         name,
