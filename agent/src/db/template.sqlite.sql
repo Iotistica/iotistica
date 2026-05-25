@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS "publish_subscriptions" (
 	"topics"	text NOT NULL DEFAULT '[]',
 	"route_json"	text,
 	"payload_format"	varchar(20) NOT NULL DEFAULT 'custom',
+	"compression"	varchar(50),
 	"enabled"	boolean NOT NULL DEFAULT '1',
 	"created_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	"updated_at"	datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,

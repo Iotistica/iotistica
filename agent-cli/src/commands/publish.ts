@@ -104,6 +104,7 @@ export async function publishSubscriptionsList(): Promise<void> {
         publish_destination_id: subscription.publish_destination_id,
         protocols: normalizeTopicsForDisplay(subscription.topics),
         payload_format: subscription.payload_format,
+        compression: subscription.compression ?? null,
         destination_topic: routeJson?.topic || null,
         enabled: subscription.enabled,
       });
@@ -163,12 +164,22 @@ export async function publishSubscriptionsAdd(): Promise<void> {
   const excludeDevices = parseCsv(getFlag('exclude-devices'));
   const destinationTopic = (getFlag('destination-topic') || '').trim();
   const payloadFormat = (getFlag('payload-format') || 'custom').trim().toLowerCase();
+  const compressionRaw = (getFlag('compression') || '').trim().toLowerCase();
+  const compression = compressionRaw || null;
   const enabled = !hasFlag('disabled');
 
   if (!['custom', 'tags', 'ecp'].includes(payloadFormat)) {
     throw new CLIError('Invalid --payload-format value', 1, {
       payloadFormat,
       supported: 'custom, tags, ecp',
+    });
+  }
+
+  const VALID_COMPRESSIONS = ['json', 'msgpack', 'json+deflate', 'msgpack+deflate'];
+  if (compression !== null && !VALID_COMPRESSIONS.includes(compression)) {
+    throw new CLIError('Invalid --compression value', 1, {
+      compression,
+      supported: VALID_COMPRESSIONS.join(', '),
     });
   }
 
@@ -185,7 +196,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
 
   if (!destinationTopic) {
     throw new CLIError('--destination-topic is required', 1, {
-      usage: 'iotctl publish subscriptions add --publish-destination-id <id> --destination-topic <topic> [--protocols modbus,opcua] [--payload-format custom|tags|ecp]',
+      usage: 'iotctl publish subscriptions add --publish-destination-id <id> --destination-topic <topic> [--protocols modbus,opcua] [--payload-format custom|tags|ecp] [--compression json|msgpack|json+deflate|msgpack+deflate]',
     });
   }
 
@@ -196,6 +207,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
         publish_destination_id: publishDestinationId,
         topics,
         payload_format: payloadFormat,
+        compression,
         route_json: routeJson,
         enabled,
       }),
@@ -206,6 +218,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
       id: subscription?.id,
       publish_destination_id: subscription?.publish_destination_id,
       payload_format: subscription?.payload_format,
+      compression: subscription?.compression ?? null,
       enabled: subscription?.enabled,
       protocols: subscription?.topics,
     });

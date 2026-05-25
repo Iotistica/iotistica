@@ -8,6 +8,8 @@ import { DeviceState, normalizeTarget } from './types.js';
 import { AnomalyFeed } from '../anomaly/feed.js';
 import { AnomalyEnricher } from '../anomaly/enrich.js';
 import { PayloadCompressor } from '../compression/compress.js';
+import type { CompressorOptions } from '../compression/compress.js';
+import { compressionToOpts } from '../compression/compress.js';
 import { MessageBatcher } from './batch.js';
 import { SocketConnection } from './socket.js';
 import { PublishStats } from './stats.js';
@@ -17,7 +19,7 @@ import { SchemaDriftModel } from '../../db/models/schema-drift.model.js';
 import type { DictionaryManager } from '../../mqtt/dictionary.js';
 import type { PublishDestinationInfo, PublishBatchItem } from './types.js';
 import { PublishDestinationsModel, PublishSubscriptionsModel } from '../../db/models/index.js';
-import type { PublisherRecord, PublishSubscriptionRecord, PublishSubscriptionRoute } from '../../db/models/index.js';
+import type { PublisherRecord, PublishSubscriptionRecord, PublishSubscriptionRoute, SubscriptionCompression } from '../../db/models/index.js';
 
 // Adaptive batch safety limits (calculated once at module load)
 const MAX_BATCH_MESSAGES = 10000;
@@ -483,18 +485,20 @@ export class PublishManager extends EventEmitter {
 
 	private async getCompressedPayloadForFormat(
 		payloadFormat: PayloadFormat,
+		cacheKey: string,
 		endpointName: string,
 		messages: ProtocolMessage[],
-		compressedPayloadCache: Map<PayloadFormat, string | Buffer>,
+		compressedPayloadCache: Map<string, string | Buffer>,
+		overrideOpts?: CompressorOptions,
 	): Promise<string | Buffer> {
-		const cached = compressedPayloadCache.get(payloadFormat);
+		const cached = compressedPayloadCache.get(cacheKey);
 		if (cached !== undefined) {
 			return cached;
 		}
 
 		const { data, baselineSize } = this.buildPayload(endpointName, messages, payloadFormat);
-		const { payload } = await this.compressor.compress(data, baselineSize, this.stats.data.messagesPublished);
-		compressedPayloadCache.set(payloadFormat, payload);
+		const { payload } = await this.compressor.compress(data, baselineSize, this.stats.data.messagesPublished, overrideOpts);
+		compressedPayloadCache.set(cacheKey, payload);
 		return payload;
 	}
 
@@ -629,8 +633,8 @@ export class PublishManager extends EventEmitter {
 				return;
 			}
 
-			const compressedPayloadCache = new Map<PayloadFormat, string | Buffer>();
-			compressedPayloadCache.set(this.payloadFormat, payload);
+			const compressedPayloadCache = new Map<string, string | Buffer>();
+			compressedPayloadCache.set(`${this.payloadFormat}::global`, payload);
 			await this.routePublishBatch(topic, compressedPayloadCache, endpointName, enriched);
 			publishConfirmed = true;
 
@@ -866,7 +870,7 @@ export class PublishManager extends EventEmitter {
 
 	private async routePublishBatch(
 		sourceTopic: string,
-		compressedPayloadCache: Map<PayloadFormat, string | Buffer>,
+		compressedPayloadCache: Map<string, string | Buffer>,
 		endpointName: string,
 		messages: ProtocolMessage[],
 	): Promise<void> {
@@ -901,7 +905,7 @@ export class PublishManager extends EventEmitter {
 
 	private async collectRouteEntries(
 		sourceTopic: string,
-		compressedPayloadCache: Map<PayloadFormat, string | Buffer>,
+		compressedPayloadCache: Map<string, string | Buffer>,
 		endpointName: string,
 		messages: ProtocolMessage[],
 	): Promise<Array<[IPublishPlugin, PublishBatchItem[]]>> {
@@ -914,11 +918,18 @@ export class PublishManager extends EventEmitter {
 			}
 
 			const payloadFormat = this.resolvePayloadFormatForBinding(binding);
+			const subscriptionCompression = (binding.subscription.compression ?? null) as SubscriptionCompression | null;
+			const cacheKey = subscriptionCompression
+				? `${payloadFormat}::${subscriptionCompression}`
+				: `${payloadFormat}::global`;
+			const overrideOpts = subscriptionCompression ? compressionToOpts(subscriptionCompression) : undefined;
 			const payload = await this.getCompressedPayloadForFormat(
 				payloadFormat,
+				cacheKey,
 				endpointName,
 				messages,
 				compressedPayloadCache,
+				overrideOpts,
 			);
 
 			this.logger?.debug('Routing batch to destination', {
@@ -929,6 +940,7 @@ export class PublishManager extends EventEmitter {
 				destinationType: binding.publisher.type,
 				destinationTopic,
 				payloadFormat,
+				compression: subscriptionCompression ?? 'global',
 				subscriptionId: binding.subscription.id ?? null,
 				messageCount: messages.length,
 			});

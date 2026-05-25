@@ -38,6 +38,19 @@ export interface CompressorOptions {
   useDeflate: boolean;
 }
 
+/** The four compression strategies a subscription can request explicitly. */
+export type SubscriptionCompression = 'json' | 'msgpack' | 'json+deflate' | 'msgpack+deflate';
+
+/** Convert a SubscriptionCompression string to CompressorOptions. Dictionary compaction is never
+ *  requested at the per-subscription level (it requires a shared DictionaryManager). */
+export function compressionToOpts(c: SubscriptionCompression): CompressorOptions {
+  return {
+    useMsgpack: c === 'msgpack' || c === 'msgpack+deflate',
+    useKeyCompaction: false,
+    useDeflate: c === 'json+deflate' || c === 'msgpack+deflate',
+  };
+}
+
 // Only compress when beneficial: payload > 4 KB AND CPU < 70 %
 function shouldDeflate(payloadSize: number, cpuLoad: number): boolean {
 	return payloadSize > 4 * 1024 && cpuLoad < 70;
@@ -64,14 +77,16 @@ export class PayloadCompressor {
 		data: unknown,
 		baselineSize: number,
 		publishCount: number,
+		overrideOpts?: CompressorOptions,
 	): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
 		if (shouldMeasureBaseline(publishCount)) {
 			return this.baseline(data, baselineSize);
 		}
-		if (this.dictionaryManager && this.opts.useKeyCompaction) {
-			return this.applyDictionary(data, baselineSize);
+		const opts = overrideOpts ?? this.opts;
+		if (this.dictionaryManager && opts.useKeyCompaction) {
+			return this.applyDictionary(data, baselineSize, opts);
 		}
-		return this.applyMsgpackOrJson(data, baselineSize);
+		return this.applyMsgpackOrJson(data, baselineSize, opts);
 	}
 
 	// --- strategies -------------------------------------------------------------
@@ -142,7 +157,7 @@ export class PayloadCompressor {
 		};
 	}
 
-	private async applyDictionary(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
+	private async applyDictionary(data: unknown, baselineSize: number, opts = this.opts): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
 		const t0 = Date.now();
 		const cpu0 = process.cpuUsage();
 		const dictionaryManager = this.dictionaryManager;
@@ -156,7 +171,7 @@ export class PayloadCompressor {
 
 		let msgpackCpu: { user: number; system: number } | undefined;
 		let intermediate: Buffer | string;
-		if (this.opts.useMsgpack) {
+		if (opts.useMsgpack) {
 			const cpu1 = process.cpuUsage();
 			intermediate = msgpack.encode(compacted);
 			msgpackCpu = process.cpuUsage(cpu1);
@@ -164,13 +179,13 @@ export class PayloadCompressor {
 			intermediate = JSON.stringify(compacted);
 		}
 
-		const { payload: finalPayload, deflateCpu } = await this.maybeDeflatePayload(intermediate, this.opts.useDeflate);
+		const { payload: finalPayload, deflateCpu } = await this.maybeDeflatePayload(intermediate, opts.useDeflate);
 
 		const finalSize = this.sizeOf(finalPayload);
-		const method = this.dictionaryMethod(this.opts.useMsgpack, this.opts.useDeflate);
+		const method = this.dictionaryMethod(opts.useMsgpack, opts.useDeflate);
 
-		const serializationMethod = this.opts.useMsgpack ? 'msgpack' as const : 'dictionary' as const;
-		const serializationCpu = this.opts.useMsgpack ? (msgpackCpu || dictCpu) : dictCpu;
+		const serializationMethod = opts.useMsgpack ? 'msgpack' as const : 'dictionary' as const;
+		const serializationCpu = opts.useMsgpack ? (msgpackCpu || dictCpu) : dictCpu;
 
 		return {
 			payload: finalPayload,
@@ -182,7 +197,7 @@ export class PayloadCompressor {
 		};
 	}
 
-	private async applyMsgpackOrJson(data: unknown, baselineSize: number): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
+	private async applyMsgpackOrJson(data: unknown, baselineSize: number, opts = this.opts): Promise<{ payload: Buffer | string; info: CompressionInfo }> {
 		const t0 = Date.now();
 		const cpu0 = process.cpuUsage();
 		const msgIdGen = this.mqttConnection.getMessageIdGenerator?.();
@@ -192,19 +207,19 @@ export class PayloadCompressor {
 		let finalPayload: Buffer | string;
 		let compressedSize: number;
 
-		if (this.opts.useMsgpack) {
+		if (opts.useMsgpack) {
 			const cpu1 = process.cpuUsage();
 			const payload = serializePayload(createMsgpackPayload(data as object, msgIdGen));
 			msgpackCpu = process.cpuUsage(cpu1);
 
-			const deflated = await this.maybeDeflatePayload(payload, this.opts.useDeflate);
+			const deflated = await this.maybeDeflatePayload(payload, opts.useDeflate);
 			finalPayload = deflated.payload;
 			deflateCpu = deflated.deflateCpu;
 			compressedSize = this.sizeOf(finalPayload);
 		} else {
 			const payload = serializePayload(createJsonPayload(data as object, msgIdGen));
 
-			if (this.opts.useDeflate) {
+			if (opts.useDeflate) {
 				const deflated = await this.maybeDeflatePayload(payload, true);
 				finalPayload = deflated.payload;
 				deflateCpu = deflated.deflateCpu;
@@ -215,7 +230,7 @@ export class PayloadCompressor {
 			}
 		}
 
-		const method = this.standardMethod(this.opts.useMsgpack, this.opts.useDeflate);
+		const method = this.standardMethod(opts.useMsgpack, opts.useDeflate);
 
 		return {
 			payload: finalPayload!,

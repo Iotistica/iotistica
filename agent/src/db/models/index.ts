@@ -54,6 +54,7 @@ export type {
 	PublishPayloadFormat,
 	PublishSubscriptionRecord,
 	PublishSubscriptionRoute,
+	SubscriptionCompression,
 } from './publish-subscriptions.model';
 
 // Protocol devices (physical/logical devices behind protocol endpoints)

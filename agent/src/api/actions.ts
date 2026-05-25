@@ -1013,6 +1013,7 @@ export const createPublishSubscription = async (body: {
 	topics?: string[];
 	route_json?: Record<string, unknown> | null;
 	payload_format?: 'custom' | 'tags' | 'ecp';
+	compression?: 'json' | 'msgpack' | 'json+deflate' | 'msgpack+deflate' | null;
 	enabled?: boolean;
 }) => {
 	if (!body || !Number.isFinite(body.publish_destination_id)) {
@@ -1029,6 +1030,11 @@ export const createPublishSubscription = async (body: {
 		throw new Error(`Invalid payload_format: ${format}`);
 	}
 
+	const VALID_COMPRESSIONS = ['json', 'msgpack', 'json+deflate', 'msgpack+deflate'];
+	if (body.compression != null && !VALID_COMPRESSIONS.includes(body.compression)) {
+		throw new Error(`Invalid compression: ${body.compression}. Supported: ${VALID_COMPRESSIONS.join(', ')}`);
+	}
+
 	if (destination.type !== 'iotistica') {
 		const destinationTopic = typeof body.route_json?.topic === 'string' ? body.route_json.topic.trim() : '';
 		if (!destinationTopic) {
@@ -1041,6 +1047,7 @@ export const createPublishSubscription = async (body: {
 		topics: body.topics || [],
 		route_json: (body.route_json as any) ?? null,
 		payload_format: format,
+		compression: (body.compression as any) ?? null,
 		enabled: body.enabled !== false,
 	});
 
@@ -1059,6 +1066,7 @@ export const updatePublishSubscription = async (id: number, body: {
 	topics?: string[];
 	route_json?: Record<string, unknown> | null;
 	payload_format?: 'custom' | 'tags' | 'ecp';
+	compression?: 'json' | 'msgpack' | 'json+deflate' | 'msgpack+deflate' | null;
 	enabled?: boolean;
 }) => {
 	const existing = PublishSubscriptionsModel.getById(id);
@@ -1083,6 +1091,11 @@ export const updatePublishSubscription = async (id: number, body: {
 		if (format !== 'custom' && format !== 'tags' && format !== 'ecp') {
 			throw new Error(`Invalid payload_format: ${format}`);
 		}
+	}
+
+	const VALID_COMPRESSIONS = ['json', 'msgpack', 'json+deflate', 'msgpack+deflate'];
+	if (body.compression != null && !VALID_COMPRESSIONS.includes(body.compression)) {
+		throw new Error(`Invalid compression: ${body.compression}. Supported: ${VALID_COMPRESSIONS.join(', ')}`);
 	}
 
 	if (destination.type !== 'iotistica') {

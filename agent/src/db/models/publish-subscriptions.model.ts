@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 
 export type PublishPayloadFormat = 'custom' | 'tags' | 'ecp';
+export type SubscriptionCompression = 'json' | 'msgpack' | 'json+deflate' | 'msgpack+deflate';
 
 export interface PublishSubscriptionRoute {
 	includeMetrics?: string[];
@@ -20,6 +21,7 @@ export interface PublishSubscriptionRecord {
 	topics: string[];
 	route_json?: PublishSubscriptionRoute | null;
 	payload_format: PublishPayloadFormat;
+	compression?: SubscriptionCompression | null;
 	enabled: boolean;
 	created_at?: Date;
 	updated_at?: Date;
@@ -111,15 +113,17 @@ export class PublishSubscriptionsModel {
 				topics,
 				route_json,
 				payload_format,
+				compression,
 				enabled,
 				created_at,
 				updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		`).run(
 			input.publish_destination_id,
 			JSON.stringify(input.topics || []),
 			input.route_json ? JSON.stringify(input.route_json) : null,
 			input.payload_format,
+			input.compression ?? null,
 			input.enabled ? 1 : 0,
 			now,
 			now,
@@ -137,6 +141,7 @@ export class PublishSubscriptionsModel {
 		if (updates.topics !== undefined) payload.topics = JSON.stringify(updates.topics || []);
 		if (updates.route_json !== undefined) payload.route_json = updates.route_json ? JSON.stringify(updates.route_json) : null;
 		if (updates.payload_format !== undefined) payload.payload_format = updates.payload_format;
+		if (updates.compression !== undefined) payload.compression = updates.compression ?? null;
 		if (updates.enabled !== undefined) payload.enabled = updates.enabled ? 1 : 0;
 
 		const columns = Object.keys(payload);
