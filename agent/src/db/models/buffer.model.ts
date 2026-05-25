@@ -208,13 +208,18 @@ export class MessageBufferModel {
 	}
 
 	/**
-   * Get oldest N records for flushing (FIFO)
+   * Get oldest N records for flushing (FIFO).
+   *
+   * @param scope.exact         - If set, only return records with this exact endpoint_name.
+   * @param scope.excludePrefix - If set, skip records whose endpoint_name starts with this prefix.
+   *   These two options are mutually exclusive; `exact` takes precedence when both are provided.
    */
 	static dequeueReady(
 		limit: number = 100,
 		now: Date = new Date(),
 		lockTimeoutMs: number = this.DEFAULT_LOCK_TIMEOUT_MS,
 		maxRetries?: number,
+		scope?: { exact?: string; excludePrefix?: string },
 	): MessageBufferRecord[] {
 		if (limit <= 0) {
 			return [];
@@ -224,6 +229,8 @@ export class MessageBufferModel {
 		const lockId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 		const nowIso = now.toISOString();
 		const lockCutoffIso = new Date(now.getTime() - lockTimeoutMs).toISOString();
+		const scopeExact = scope?.exact ?? null;
+		const scopeExcludePattern = scope?.excludePrefix ? `${scope.excludePrefix}%` : null;
 
 		const dequeueTransaction = db.transaction(() => {
 			// Also exclude already-expired records (mirrors EdgeHub MessageIterator which
@@ -240,10 +247,12 @@ export class MessageBufferModel {
           AND (next_retry_at IS NULL OR next_retry_at <= ?)
           AND (? IS NULL OR retry_count < ?)
           AND expires_at > ?
+          AND (? IS NULL OR endpoint_name = ?)
+          AND (? IS NULL OR endpoint_name NOT LIKE ?)
           ORDER BY created_at ASC
           LIMIT ?
         `)
-				.all(lockCutoffIso, nowIso, maxRetries ?? null, maxRetries ?? null, nowIso, limit) as Array<{ id: number }>;
+				.all(lockCutoffIso, nowIso, maxRetries ?? null, maxRetries ?? null, nowIso, scopeExact, scopeExact, scopeExcludePattern, scopeExcludePattern, limit) as Array<{ id: number }>;
 
 			if (candidateRows.length === 0) {
 				return [];

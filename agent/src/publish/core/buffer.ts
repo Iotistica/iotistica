@@ -32,6 +32,17 @@ export interface BufferSyncConfig {
   flushTriggerThreshold: number; // Trigger immediate flush request above this threshold
   maxFlushPerCycle: number; // Hard cap of records handled in a single flush run
   bufferEvenWhenOnline: boolean; // Store-and-forward mode even while connected
+  /**
+   * When set, records are stored and dequeued with this exact endpoint_name instead of
+   * the topic-derived name. Use this to partition per-destination buffers.
+   */
+  scopeEndpointName?: string;
+  /**
+   * When set, the flush step skips records whose endpoint_name starts with this prefix.
+   * Use this on the internal (iotistica) buffer sync to prevent it from flushing
+   * records that belong to external-destination buffer sync instances.
+   */
+  scopeExcludePrefix?: string;
 }
 
 export type MessageBufferSyncOptions = BufferSyncConfig;
@@ -218,7 +229,7 @@ export class MessageBufferSync {
 		}
 
 		await this.withSqliteBusyRetry('buffer-enqueue', () => MessageBufferModel.enqueue({
-			endpoint_name: this.extractEndpointName(topic),
+			endpoint_name: this.config.scopeEndpointName ?? this.extractEndpointName(topic),
 			topic,
 			qos: options?.qos ?? 0,
 			payload: payloadText,
@@ -349,6 +360,10 @@ export class MessageBufferSync {
 						new Date(),
 						undefined,
 						this.config.maxRetries,
+						{
+							exact: this.config.scopeEndpointName,
+							excludePrefix: this.config.scopeExcludePrefix,
+						},
 					)
 				);
         

@@ -184,6 +184,8 @@ export class CloudMqttClient extends EventEmitter {
 			flushTriggerThreshold: 1000,
 			maxFlushPerCycle: 1000,
 			bufferEvenWhenOnline: false,
+			// Prevent internal flush from touching per-destination external buffer records
+			scopeExcludePrefix: 'ext-dest-',
 			enabled: options?.enabled ?? true,
 			...options,
 		});
