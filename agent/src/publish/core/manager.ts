@@ -344,8 +344,7 @@ export class PublishManager extends EventEmitter {
 			const enriched = this.processAnomaly(messages, name);
 			if (this.needStop) return;
 
-			const payloadFormat = this.resolvePayloadFormatForActiveBindings();
-			let { data, baselineSize, msgId } = this.buildPayload(name, enriched, payloadFormat);
+			let { data, baselineSize, msgId } = this.buildPayload(name, enriched, this.payloadFormat);
 			if (this.needStop) return;
 
 			if (!this.isConnected()) {
@@ -473,32 +472,30 @@ export class PublishManager extends EventEmitter {
 		return { name, value };
 	}
 
-	private resolvePayloadFormatForActiveBindings(): PayloadFormat {
-		if (this.bindings.length === 0) {
-			return this.payloadFormat;
+	private resolvePayloadFormatForBinding(binding: HostBinding): PayloadFormat {
+		const candidate = String(binding.subscription.payload_format || '').toLowerCase();
+		if (candidate === 'custom' || candidate === 'tags' || candidate === 'ecp') {
+			return candidate;
 		}
 
-		const formats = new Set<PayloadFormat>();
-		for (const binding of this.bindings) {
-			const candidate = String(binding.subscription.payload_format || '').toLowerCase();
-			if (candidate === 'custom' || candidate === 'tags' || candidate === 'ecp') {
-				formats.add(candidate);
-			}
+		return this.payloadFormat;
+	}
+
+	private async getCompressedPayloadForFormat(
+		payloadFormat: PayloadFormat,
+		endpointName: string,
+		messages: ProtocolMessage[],
+		compressedPayloadCache: Map<PayloadFormat, string | Buffer>,
+	): Promise<string | Buffer> {
+		const cached = compressedPayloadCache.get(payloadFormat);
+		if (cached !== undefined) {
+			return cached;
 		}
 
-		if (formats.size === 0) {
-			return this.payloadFormat;
-		}
-
-		if (formats.size > 1) {
-			this.logger?.warn('Multiple payload formats detected across active publish bindings; using custom format', {
-				component: 'PublishManager',
-				formats: Array.from(formats),
-			});
-			return 'custom';
-		}
-
-		return Array.from(formats)[0];
+		const { data, baselineSize } = this.buildPayload(endpointName, messages, payloadFormat);
+		const { payload } = await this.compressor.compress(data, baselineSize, this.stats.data.messagesPublished);
+		compressedPayloadCache.set(payloadFormat, payload);
+		return payload;
 	}
 
 	private normalizeExternalGroupName(endpointName: string): string {
@@ -632,7 +629,9 @@ export class PublishManager extends EventEmitter {
 				return;
 			}
 
-			await this.routePublishBatch(topic, payload);
+			const compressedPayloadCache = new Map<PayloadFormat, string | Buffer>();
+			compressedPayloadCache.set(this.payloadFormat, payload);
+			await this.routePublishBatch(topic, compressedPayloadCache, endpointName, enriched);
 			publishConfirmed = true;
 
 			const buffered = this.mqttConnection.getPublishMode?.() !== 'direct';
@@ -686,21 +685,28 @@ export class PublishManager extends EventEmitter {
 	}
 
 	private getPublishDestinationLogContext(topic?: string): Record<string, unknown> | undefined {
-		const destinations = this.getPublishDestinationInfo();
-		if (!Array.isArray(destinations) || destinations.length === 0) {
+		if (this.bindings.length === 0) {
 			return undefined;
 		}
 
+		// Only include external (non-iotistica) routes — the internal endpointTopic is already shown separately.
+		const externalRoutes: Array<{ destination: string; destinationTopic: string; payloadFormat: string; subscriptionId: number | undefined }> = [];
+		for (const binding of this.bindings) {
+			if ((binding.publisher.id ?? -1) === -1) continue; // skip default iotistica binding
+			const destinationTopic = this.resolveDestinationTopic(binding, topic ?? '');
+			if (!destinationTopic) continue;
+			externalRoutes.push({
+				destination: binding.publisher.name,
+				destinationTopic,
+				payloadFormat: this.resolvePayloadFormatForBinding(binding),
+				subscriptionId: binding.subscription.id,
+			});
+		}
+
 		return {
-			topic,
-			destinations: destinations.map((destination) => ({
-				publish_destination_id: destination.destinationId,
-				destination_name: destination.destinationName,
-				destination_type: destination.destinationType,
-				subscription_ids: destination.subscriptionIds,
-				topics: destination.topics,
-			})),
-			destinationCount: destinations.length,
+			protocol: this.protocol,
+			endpointTopic: topic,
+			...(externalRoutes.length > 0 ? { externalRoutes } : {}),
 		};
 	}
 
@@ -858,12 +864,17 @@ export class PublishManager extends EventEmitter {
 		return destinationTopic;
 	}
 
-	private async routePublishBatch(sourceTopic: string, payload: string | Buffer): Promise<void> {
+	private async routePublishBatch(
+		sourceTopic: string,
+		compressedPayloadCache: Map<PayloadFormat, string | Buffer>,
+		endpointName: string,
+		messages: ProtocolMessage[],
+	): Promise<void> {
 		if (this.bindings.length === 0) {
 			throw new Error('No publish destinations configured');
 		}
 
-		const entries = this.collectRouteEntries(sourceTopic, payload);
+		const entries = await this.collectRouteEntries(sourceTopic, compressedPayloadCache, endpointName, messages);
 		if (entries.length === 0) {
 			throw new Error('No valid publish destinations configured (missing route_json.topic)');
 		}
@@ -888,7 +899,12 @@ export class PublishManager extends EventEmitter {
 		});
 	}
 
-	private collectRouteEntries(sourceTopic: string, payload: string | Buffer): Array<[IPublishPlugin, PublishBatchItem[]]> {
+	private async collectRouteEntries(
+		sourceTopic: string,
+		compressedPayloadCache: Map<PayloadFormat, string | Buffer>,
+		endpointName: string,
+		messages: ProtocolMessage[],
+	): Promise<Array<[IPublishPlugin, PublishBatchItem[]]>> {
 
 		const batchesByPlugin = new Map<IPublishPlugin, PublishBatchItem[]>();
 		for (const binding of this.bindings) {
@@ -896,6 +912,26 @@ export class PublishManager extends EventEmitter {
 			if (!destinationTopic) {
 				continue;
 			}
+
+			const payloadFormat = this.resolvePayloadFormatForBinding(binding);
+			const payload = await this.getCompressedPayloadForFormat(
+				payloadFormat,
+				endpointName,
+				messages,
+				compressedPayloadCache,
+			);
+
+			this.logger?.debug('Routing batch to destination', {
+				component: 'PublishManager',
+				protocol: this.protocol,
+				endpointName,
+				destinationName: binding.publisher.name,
+				destinationType: binding.publisher.type,
+				destinationTopic,
+				payloadFormat,
+				subscriptionId: binding.subscription.id ?? null,
+				messageCount: messages.length,
+			});
 
 			const items = batchesByPlugin.get(binding.plugin) || [];
 			items.push({

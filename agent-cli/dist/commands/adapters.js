@@ -58,6 +58,14 @@ function deriveState(adapter) {
     const stalenessThresholdMs = 24 * 60 * 60 * 1000;
     return (Date.now() - lastSeenMs) < stalenessThresholdMs ? 'online' : 'offline';
 }
+function isAllSelector(value) {
+    return typeof value === 'string' && ['all', '*', 'every'].includes(value.trim().toLowerCase());
+}
+async function getAllEndpointUuids() {
+    const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints`);
+    const adapters = result.endpoints || [];
+    return adapters.map((adapter) => adapter.uuid).filter((uuid) => typeof uuid === 'string' && uuid.trim().length > 0);
+}
 async function postAdapter(body) {
     const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints`, {
         method: 'POST',
@@ -226,6 +234,23 @@ async function adaptersRemove(uuid) {
 async function adaptersEnable(uuid) {
     if (!uuid) {
         throw new core_1.CLIError('UUID is required', 1, { usage: 'iotctl devices enable <uuid>' });
+    }
+    if (isAllSelector(uuid)) {
+        const endpointUuids = await getAllEndpointUuids();
+        if (endpointUuids.length === 0) {
+            core_1.logger.info('No devices configured');
+            return;
+        }
+        let updatedCount = 0;
+        for (const endpointUuid of endpointUuids) {
+            await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints/${encodeURIComponent(endpointUuid)}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ enabled: true }),
+            });
+            updatedCount++;
+        }
+        core_1.logger.info(`Enabled ${updatedCount} device${updatedCount === 1 ? '' : 's'}`);
+        return;
     }
     try {
         await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints/${encodeURIComponent(uuid)}`, {

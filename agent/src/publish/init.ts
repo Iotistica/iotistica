@@ -20,28 +20,7 @@ import { AwsPublishPlugin } from './plugins/aws.js';
 import { GcpPublishPlugin } from './plugins/gcp.js';
 import { MqttPublishPlugin } from './plugins/mqtt.js';
 import { BasePublishPlugin } from './core/base-plugin.js';
-import type { PublishPluginStarter, IPublishPlugin, IPublishClient } from './core/types.js';
-
-/**
- * Minimal registry for publish plugin starters (built-in only)
- */
-class PublishPluginRegistry {
-	private readonly starters = new Map<string, PublishPluginStarter>();
-
-	public registerPublishPluginStarter(name: string, starter: PublishPluginStarter): void {
-		const normalizedName = name.trim().toLowerCase();
-		this.starters.set(normalizedName, starter);
-	}
-
-	public create(name: string, context: Parameters<PublishPluginStarter>[0]): IPublishPlugin {
-		const normalizedName = name.trim().toLowerCase();
-		const starter = this.starters.get(normalizedName);
-		if (!starter) {
-			throw new Error(`Publish destination type not found: ${normalizedName}`);
-		}
-		return starter(context);
-	}
-}
+import type { IPublishPlugin, IPublishClient } from './core/types.js';
 
 /**
  * DevicePublish - Manages multiple devices and publishes data to MQTT
@@ -65,9 +44,7 @@ export class DevicePublish extends EventEmitter {
 	private readonly useKeyCompactionPoc: boolean;
 	private readonly useDeflatePoc: boolean;
 	private anomalyService?: AnomalyDetectionService;
-	private pipelineService?: PipelineService;
 	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
-	private readonly publishPluginRegistry: PublishPluginRegistry;
 
 	constructor(
 		config: DevicePublishConfig & { enabled: boolean },
@@ -115,8 +92,6 @@ export class DevicePublish extends EventEmitter {
 		this.useKeyCompactionPoc = useKeyCompactionPoc;
 		this.useDeflatePoc = useDeflatePoc;
 		this.anomalyService = anomalyService;
-		this.publishPluginRegistry = new PublishPluginRegistry();
-		this.registerBuiltInPublishPluginStarters();
 	}
 
 	public setAnomalyService(anomalyService?: AnomalyDetectionService): void {
@@ -330,39 +305,22 @@ export class DevicePublish extends EventEmitter {
 		);
 	}
 
-	private registerBuiltInPublishPluginStarters(): void {
-		const iotisticaStarter: PublishPluginStarter = ({ client, logger }) =>
-			new BasePublishPlugin(client, logger);
-		const azureStarter: PublishPluginStarter = ({ logger }) =>
-			AzurePublishPlugin.fromEnv(this.agentLogger, logger);
-		const awsStarter: PublishPluginStarter = ({ logger }) =>
-			AwsPublishPlugin.fromEnv(this.agentLogger, logger);
-		const gcpStarter: PublishPluginStarter = ({ logger }) =>
-			GcpPublishPlugin.fromEnv(this.agentLogger, logger);
-		const mqttStarter: PublishPluginStarter = ({ logger, config, endpointName }) =>
-			MqttPublishPlugin.fromConfig(config ?? null, this.agentLogger, logger, this.deviceUuid, endpointName);
-
-		this.publishPluginRegistry.registerPublishPluginStarter('iotistica', iotisticaStarter);
-		this.publishPluginRegistry.registerPublishPluginStarter('azure', azureStarter);
-		this.publishPluginRegistry.registerPublishPluginStarter('aws', awsStarter);
-		this.publishPluginRegistry.registerPublishPluginStarter('gcp', gcpStarter);
-		this.publishPluginRegistry.registerPublishPluginStarter('mqtt', mqttStarter);
-	}
-
 	private createPublishPlugin(
 		publisher: { type: string; config_json?: Record<string, unknown> | null },
 		client: IPublishClient,
 		logger?: Logger,
 		endpointName?: string,
 	): IPublishPlugin {
-		const target = publisher.type;
-		return this.publishPluginRegistry.create(target, {
-			target,
-			client,
-			logger,
-			config: publisher.config_json ?? null,
-			endpointName,
-		});
+		const target = publisher.type.trim().toLowerCase();
+		const config = publisher.config_json ?? null;
+		switch (target) {
+			case 'iotistica': return new BasePublishPlugin(client, logger);
+			case 'azure': return AzurePublishPlugin.fromEnv(this.agentLogger, logger);
+			case 'aws': return AwsPublishPlugin.fromEnv(this.agentLogger, logger);
+			case 'gcp': return GcpPublishPlugin.fromEnv(this.agentLogger, logger);
+			case 'mqtt': return MqttPublishPlugin.fromConfig(config, this.agentLogger, logger, this.deviceUuid, endpointName);
+			default: throw new Error(`Publish destination type not found: ${target}`);
+		}
 	}
 
 	private isValidProtocol(value: string): boolean {

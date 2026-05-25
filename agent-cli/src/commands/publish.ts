@@ -102,7 +102,7 @@ export async function publishSubscriptionsList(): Promise<void> {
         : null;
       logger.info(`Subscription ${subscription.id ?? '(unknown)'}`, {
         publish_destination_id: subscription.publish_destination_id,
-        topics: normalizeTopicsForDisplay(subscription.topics),
+        protocols: normalizeTopicsForDisplay(subscription.topics),
         payload_format: subscription.payload_format,
         destination_topic: routeJson?.topic || null,
         enabled: subscription.enabled,
@@ -133,7 +133,7 @@ async function resolveDestinationId(input: {
 
   if (!input.publishDestinationName) {
     throw new CLIError('Either --publish-destination-id or --destination-name is required', 1, {
-      usage: 'iotctl publish subscriptions add --publish-destination-id <id> [--destination-name <name>] [--topics modbus,opcua] [--payload-format custom|tags|ecp] [--include-devices d1,d2] [--exclude-devices d3] [--disabled]',
+      usage: 'iotctl publish subscriptions add --publish-destination-id <id> [--destination-name <name>] [--protocols modbus,opcua] [--payload-format custom|tags|ecp] [--include-devices d1,d2] [--exclude-devices d3] [--disabled]',
     });
   }
 
@@ -152,13 +152,13 @@ async function resolveDestinationId(input: {
 
 /**
  * iotctl publish subscriptions add --publish-destination-id <id>
- *   [--topics modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]
+ *   [--protocols modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]
  *   [--include-devices d1,d2] [--exclude-devices d3] [--disabled]
  */
 export async function publishSubscriptionsAdd(): Promise<void> {
   const publishDestinationIdRaw = getFlag('publish-destination-id');
   const publisherName = getFlag('publisher-name') || getFlag('destination-name');
-  const topics = parseCsv(getFlag('topics'));
+  const topics = parseCsv(getFlag('protocols') || getFlag('topics')); // --topics kept as alias
   const includeDevices = parseCsv(getFlag('include-devices'));
   const excludeDevices = parseCsv(getFlag('exclude-devices'));
   const destinationTopic = (getFlag('destination-topic') || '').trim();
@@ -185,7 +185,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
 
   if (!destinationTopic) {
     throw new CLIError('--destination-topic is required', 1, {
-      usage: 'iotctl publish subscriptions add --publish-destination-id <id> --destination-topic <topic> [--topics modbus,opcua] [--payload-format custom|tags|ecp]',
+      usage: 'iotctl publish subscriptions add --publish-destination-id <id> --destination-topic <topic> [--protocols modbus,opcua] [--payload-format custom|tags|ecp]',
     });
   }
 
@@ -207,7 +207,7 @@ export async function publishSubscriptionsAdd(): Promise<void> {
       publish_destination_id: subscription?.publish_destination_id,
       payload_format: subscription?.payload_format,
       enabled: subscription?.enabled,
-      topics: subscription?.topics,
+      protocols: subscription?.topics,
     });
   } catch (error) {
     if (error instanceof CLIError) throw error;

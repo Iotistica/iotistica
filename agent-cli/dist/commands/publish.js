@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.publishPublishersList = publishPublishersList;
+exports.publishDestinationsList = publishDestinationsList;
 exports.publishSubscriptionsList = publishSubscriptionsList;
 exports.publishSubscriptionsAdd = publishSubscriptionsAdd;
 exports.publishMqttAdd = publishMqttAdd;
@@ -25,53 +25,62 @@ function parseCsv(input) {
         .map((value) => value.trim())
         .filter(Boolean);
 }
+function normalizeTopicsForDisplay(rawTopics) {
+    if (!Array.isArray(rawTopics) || rawTopics.length === 0) {
+        return '(all protocols)';
+    }
+    const topics = rawTopics
+        .map((value) => String(value).trim())
+        .filter(Boolean);
+    return topics.length > 0 ? topics : '(all protocols)';
+}
 /**
- * iotctl publish publishers list [--include-disabled]
+ * iotctl publish destinations list [--include-disabled]
  */
-async function publishPublishersList() {
+async function publishDestinationsList() {
     const includeDisabled = hasFlag('include-disabled');
     try {
-        const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/publishers?includeDisabled=${includeDisabled ? 'true' : 'false'}`);
-        const publishers = result.publishers || [];
-        if (publishers.length === 0) {
-            core_1.logger.info('No publishers configured');
+        const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/destinations?includeDisabled=${includeDisabled ? 'true' : 'false'}`);
+        const publish_destinations = result.destinations || result.publishers || [];
+        if (publish_destinations.length === 0) {
+            core_1.logger.info('No publish destinations configured');
             return;
         }
-        core_1.logger.info(`Found ${publishers.length} publisher${publishers.length === 1 ? '' : 's'}`);
-        for (const publisher of publishers) {
-            core_1.logger.info(`Publisher ${publisher.name || '(unnamed)'}`, {
-                id: publisher.id,
-                type: publisher.type,
-                enabled: publisher.enabled,
+        core_1.logger.info(`Found ${publish_destinations.length} publish destinations${publish_destinations.length === 1 ? '' : 's'}`);
+        for (const destination of publish_destinations) {
+            core_1.logger.info(`Destination ${destination.name || '(unnamed)'}`, {
+                id: destination.id,
+                type: destination.type,
+                enabled: destination.enabled,
             });
         }
     }
     catch (error) {
         if (error instanceof core_1.CLIError)
             throw error;
-        throw new core_1.CLIError('Failed to list publishers', 1, {
+        throw new core_1.CLIError('Failed to list publish destinations', 1, {
             error: error.message,
         });
     }
 }
 /**
- * iotctl publish subscriptions list [--publisher-id <id>] [--include-disabled]
+ * iotctl publish subscriptions list [--publish-destination-id <id>] [--include-disabled]
  */
 async function publishSubscriptionsList() {
     const includeDisabled = hasFlag('include-disabled');
-    const publisherIdRaw = getFlag('publisher-id');
-    let publisherQuery = '';
-    if (publisherIdRaw !== undefined) {
-        const publisherId = Number(publisherIdRaw);
-        if (!Number.isFinite(publisherId)) {
-            throw new core_1.CLIError('Invalid --publisher-id value', 1, {
-                publisherId: publisherIdRaw,
+    const publishDestinationIdRaw = getFlag('publish-destination-id');
+    let destinationQuery = '';
+    if (publishDestinationIdRaw !== undefined) {
+        const publishDestinationId = Number(publishDestinationIdRaw);
+        if (!Number.isFinite(publishDestinationId)) {
+            throw new core_1.CLIError('Invalid --publish-destination-id value', 1, {
+                publishDestinationId: publishDestinationIdRaw,
             });
         }
-        publisherQuery = `&publisher_id=${publisherId}`;
+        destinationQuery = `&publish_destination_id=${publishDestinationId}`;
     }
     try {
-        const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/subscriptions?includeDisabled=${includeDisabled ? 'true' : 'false'}${publisherQuery}`);
+        const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/subscriptions?includeDisabled=${includeDisabled ? 'true' : 'false'}${destinationQuery}`);
         const subscriptions = result.subscriptions || [];
         if (subscriptions.length === 0) {
             core_1.logger.info('No subscriptions configured');
@@ -79,10 +88,14 @@ async function publishSubscriptionsList() {
         }
         core_1.logger.info(`Found ${subscriptions.length} subscription${subscriptions.length === 1 ? '' : 's'}`);
         for (const subscription of subscriptions) {
+            const routeJson = subscription.route_json && typeof subscription.route_json === 'object'
+                ? subscription.route_json
+                : null;
             core_1.logger.info(`Subscription ${subscription.id ?? '(unknown)'}`, {
-                publisher_id: subscription.publisher_id,
-                topics: subscription.topics,
+                publish_destination_id: subscription.publish_destination_id,
+                protocols: normalizeTopicsForDisplay(subscription.topics),
                 payload_format: subscription.payload_format,
+                destination_topic: routeJson?.topic || null,
                 enabled: subscription.enabled,
             });
         }
@@ -95,42 +108,43 @@ async function publishSubscriptionsList() {
         });
     }
 }
-async function resolvePublisherId(input) {
-    if (input.publisherIdRaw) {
-        const parsed = Number(input.publisherIdRaw);
+async function resolveDestinationId(input) {
+    if (input.publishDestinationIdRaw) {
+        const parsed = Number(input.publishDestinationIdRaw);
         if (!Number.isFinite(parsed)) {
-            throw new core_1.CLIError('Invalid --publisher-id value', 1, {
-                publisherId: input.publisherIdRaw,
+            throw new core_1.CLIError('Invalid --publish-destination-id value', 1, {
+                publishDestinationId: input.publishDestinationIdRaw,
             });
         }
         return parsed;
     }
-    if (!input.publisherName) {
-        throw new core_1.CLIError('Either --publisher-id or --publisher-name is required', 1, {
-            usage: 'iotctl publish subscriptions add --publisher-id <id> [--topics modbus,opcua] [--payload-format custom|tags|ecp] [--include-devices d1,d2] [--exclude-devices d3] [--disabled]',
+    if (!input.publishDestinationName) {
+        throw new core_1.CLIError('Either --publish-destination-id or --destination-name is required', 1, {
+            usage: 'iotctl publish subscriptions add --publish-destination-id <id> [--destination-name <name>] [--protocols modbus,opcua] [--payload-format custom|tags|ecp] [--include-devices d1,d2] [--exclude-devices d3] [--disabled]',
         });
     }
-    const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/publishers?includeDisabled=true`);
-    const publishers = result.publishers || [];
-    const publisher = publishers.find((item) => item.name === input.publisherName);
-    if (!publisher?.id) {
-        throw new core_1.CLIError(`Publisher not found: ${input.publisherName}`, 1, {
-            hint: 'Use API GET /v1/publish/publishers or provide --publisher-id directly.',
+    const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/destinations?includeDisabled=true`);
+    const destinations = result.destinations || result.publishers || [];
+    const destination = destinations.find((item) => item.name === input.publishDestinationName);
+    if (!destination?.id) {
+        throw new core_1.CLIError(`Destination not found: ${input.publishDestinationName}`, 1, {
+            hint: 'Use API GET /v1/publish/destinations or provide --publish-destination-id directly.',
         });
     }
-    return publisher.id;
+    return destination.id;
 }
 /**
- * iotctl publish subscriptions add --publisher-id <id>
- *   [--topics modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]
+ * iotctl publish subscriptions add --publish-destination-id <id>
+ *   [--protocols modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]
  *   [--include-devices d1,d2] [--exclude-devices d3] [--disabled]
  */
 async function publishSubscriptionsAdd() {
-    const publisherIdRaw = getFlag('publisher-id');
-    const publisherName = getFlag('publisher-name');
-    const topics = parseCsv(getFlag('topics'));
+    const publishDestinationIdRaw = getFlag('publish-destination-id');
+    const publisherName = getFlag('publisher-name') || getFlag('destination-name');
+    const topics = parseCsv(getFlag('protocols') || getFlag('topics')); // --topics kept as alias
     const includeDevices = parseCsv(getFlag('include-devices'));
     const excludeDevices = parseCsv(getFlag('exclude-devices'));
+    const destinationTopic = (getFlag('destination-topic') || '').trim();
     const payloadFormat = (getFlag('payload-format') || 'custom').trim().toLowerCase();
     const enabled = !hasFlag('disabled');
     if (!['custom', 'tags', 'ecp'].includes(payloadFormat)) {
@@ -139,18 +153,24 @@ async function publishSubscriptionsAdd() {
             supported: 'custom, tags, ecp',
         });
     }
-    const publisherId = await resolvePublisherId({ publisherIdRaw, publisherName });
-    const routeJson = includeDevices.length > 0 || excludeDevices.length > 0
+    const publishDestinationId = await resolveDestinationId({ publishDestinationIdRaw, publishDestinationName: publisherName });
+    const routeJson = includeDevices.length > 0 || excludeDevices.length > 0 || destinationTopic.length > 0
         ? {
+            ...(destinationTopic.length > 0 ? { topic: destinationTopic } : {}),
             ...(includeDevices.length > 0 ? { includeDevices } : {}),
             ...(excludeDevices.length > 0 ? { excludeDevices } : {}),
         }
         : null;
+    if (!destinationTopic) {
+        throw new core_1.CLIError('--destination-topic is required', 1, {
+            usage: 'iotctl publish subscriptions add --publish-destination-id <id> --destination-topic <topic> [--protocols modbus,opcua] [--payload-format custom|tags|ecp]',
+        });
+    }
     try {
         const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/subscriptions`, {
             method: 'POST',
             body: JSON.stringify({
-                publisher_id: publisherId,
+                publish_destination_id: publishDestinationId,
                 topics,
                 payload_format: payloadFormat,
                 route_json: routeJson,
@@ -160,10 +180,10 @@ async function publishSubscriptionsAdd() {
         const subscription = result.subscription;
         core_1.logger.info('Publish subscription created', {
             id: subscription?.id,
-            publisher_id: subscription?.publisher_id,
+            publish_destination_id: subscription?.publish_destination_id,
             payload_format: subscription?.payload_format,
             enabled: subscription?.enabled,
-            topics: subscription?.topics,
+            protocols: subscription?.topics,
         });
     }
     catch (error) {
@@ -177,8 +197,7 @@ async function publishSubscriptionsAdd() {
 /**
  * iotctl publish mqtt add --name <name> --broker <mqtt://host:1883>
  *   [--username u] [--password p] [--client-id id] [--topic-template tpl]
- *   [--topics modbus,opcua,mqtt,system] [--payload-format custom|tags|ecp]
- *   [--include-devices d1,d2] [--exclude-devices d3] [--disabled]
+ *   [--disabled]
  */
 async function publishMqttAdd() {
     const name = getFlag('name');
@@ -187,14 +206,10 @@ async function publishMqttAdd() {
     const password = getFlag('password');
     const clientId = getFlag('client-id');
     const topicTemplate = getFlag('topic-template') || '{topic}';
-    const topics = parseCsv(getFlag('topics'));
-    const includeDevices = parseCsv(getFlag('include-devices'));
-    const excludeDevices = parseCsv(getFlag('exclude-devices'));
-    const payloadFormat = (getFlag('payload-format') || 'custom').trim().toLowerCase();
     const enabled = !hasFlag('disabled');
     if (!name) {
         throw new core_1.CLIError('--name is required', 1, {
-            usage: 'iotctl publish mqtt add --name <name> --broker mqtt://host:1883 [--topics modbus,opcua,mqtt,system]',
+            usage: 'iotctl publish mqtt add --name <name> --broker mqtt://host:1883',
         });
     }
     if (!broker) {
@@ -202,18 +217,6 @@ async function publishMqttAdd() {
             usage: 'iotctl publish mqtt add --name <name> --broker mqtt://host:1883',
         });
     }
-    if (!['custom', 'tags', 'ecp'].includes(payloadFormat)) {
-        throw new core_1.CLIError('Invalid --payload-format value', 1, {
-            payloadFormat,
-            supported: 'custom, tags, ecp',
-        });
-    }
-    const routeJson = includeDevices.length > 0 || excludeDevices.length > 0
-        ? {
-            ...(includeDevices.length > 0 ? { includeDevices } : {}),
-            ...(excludeDevices.length > 0 ? { excludeDevices } : {}),
-        }
-        : null;
     try {
         const publisherResult = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/publishers`, {
             method: 'POST',
@@ -234,27 +237,18 @@ async function publishMqttAdd() {
         if (!publisher?.id) {
             throw new Error('Publisher create did not return id');
         }
-        const subscriptionResult = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/publish/subscriptions`, {
-            method: 'POST',
-            body: JSON.stringify({
-                publisher_id: publisher.id,
-                topics,
-                payload_format: payloadFormat,
-                route_json: routeJson,
-                enabled,
-            }),
-        });
-        const subscription = subscriptionResult.subscription;
         core_1.logger.info('MQTT publish destination created', {
-            publisher_id: publisher.id,
+            publish_destination_id: publisher.id,
             publisher_name: publisher.name,
-            subscription_id: subscription?.id,
-            topics: subscription?.topics,
-            payload_format: subscription?.payload_format,
             enabled,
         });
-        core_1.logger.warn('Note: mqtt publisher runtime currently reads broker settings from environment variables.', {
-            expectedEnv: 'EXTERNAL_MQTT_BROKER_URL, EXTERNAL_MQTT_USERNAME, EXTERNAL_MQTT_PASSWORD, EXTERNAL_MQTT_CLIENT_ID, EXTERNAL_MQTT_TOPIC_TEMPLATE',
+        core_1.logger.info('MQTT publisher configuration stored in database and will be used at runtime', {
+            brokerUrl: broker,
+            clientId: clientId || '(auto-generated)',
+            topicTemplate: topicTemplate,
+        });
+        core_1.logger.info('No subscription was created automatically. Add one with:', {
+            example: `iotctl publish subscriptions add --publish-destination-id ${publisher.id} --destination-topic <topic>`,
         });
     }
     catch (error) {

@@ -110,21 +110,6 @@ export type PublishPluginStarter = (
   context: PublishPluginStarterContext,
 ) => IPublishPlugin;
 
-export interface ExternalPublishPluginManifest {
-  name: string;
-  version: string;
-  apiVersion: string;
-  target: string;
-  description?: string;
-}
-
-export interface ExternalPublishPluginConfig {
-  modulePath: string;
-  enabled?: boolean;
-  options?: Record<string, unknown>;
-  allowBuiltInOverride?: boolean;
-}
-
 export interface MqttConnection extends IPublishClient {
   publish(topic: string, payload: string | Buffer, options?: { qos?: 0 | 1 | 2 }): Promise<void>;
   isConnected(): boolean;

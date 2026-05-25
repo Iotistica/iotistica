@@ -4,6 +4,31 @@ exports.discover = discover;
 exports.devicesList = devicesList;
 exports.endpointsClean = endpointsClean;
 const core_1 = require("../core");
+function parseConnectionValue(source) {
+    const rawConnection = source.connection;
+    if (rawConnection && typeof rawConnection === 'object') {
+        return rawConnection;
+    }
+    if (typeof source.connectionString === 'string') {
+        try {
+            const parsed = JSON.parse(source.connectionString);
+            if (parsed && typeof parsed === 'object') {
+                return parsed;
+            }
+        }
+        catch {
+            return {};
+        }
+    }
+    return {};
+}
+function isModbusDiscoveryTarget(endpoint) {
+    if (endpoint.protocol !== 'modbus') {
+        return false;
+    }
+    const connection = parseConnectionValue(endpoint);
+    return connection.slaveRange !== undefined || connection.slaveId !== undefined;
+}
 function formatConnection(protocol, connection) {
     switch (protocol) {
         case 'modbus': {
@@ -57,7 +82,23 @@ async function discover(protocolArg) {
             core_1.logger.info(`Running discovery for all protocols${validate ? ' with validation' : ''}...`);
         }
         if (protocol === 'modbus' || !protocol) {
-            core_1.logger.info('(Modbus scanning slave IDs - this may take 30-60 seconds...)');
+            let modbusTargetConfigured = false;
+            try {
+                const modbusEndpointsResult = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/endpoints?protocol=modbus`);
+                const modbusEndpoints = Array.isArray(modbusEndpointsResult.endpoints)
+                    ? modbusEndpointsResult.endpoints
+                    : [];
+                modbusTargetConfigured = modbusEndpoints.some((endpoint) => isModbusDiscoveryTarget(endpoint));
+            }
+            catch {
+                // Keep discovery running even if pre-check cannot be completed.
+            }
+            if (modbusTargetConfigured) {
+                core_1.logger.info('(Modbus scanning slave IDs - this may take 30-60 seconds...)');
+            }
+            else if (protocol === 'modbus') {
+                core_1.logger.info('(No Modbus discovery targets configured. Add slaveId or slaveRange to a Modbus endpoint connection.)');
+            }
         }
         const result = await (0, core_1.apiRequest)(`${core_1.DEVICE_API_V1}/discover`, {
             method: 'POST',
