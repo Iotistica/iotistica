@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
+import { encryptData, decryptData, isEncrypted, MasterKeyManager } from '../../security/encryption';
+import type { AgentLogger } from '../../logging/agent-logger';
 
 export type DestinationType = 'iotistica' | 'azure' | 'aws' | 'gcp' | 'mqtt' | string;
 
@@ -25,6 +27,22 @@ type PublishDestinationRow = Omit<PublishDestinationRecord, 'enabled' | 'config_
 
 export class PublishDestinationsModel {
 	private static readonly table = 'publish_destinations';
+	private static encryptionEnabled = false;
+
+	/**
+	 * Initialize at-rest encryption for config_json (mirrors AgentModel.initializeEncryption).
+	 * Must be called before first use if encryption is desired.
+	 * MasterKeyManager is shared with AgentModel — no new key file is created if already initialized.
+	 */
+	static initializeEncryption(dataDir?: string, logger?: AgentLogger): void {
+		try {
+			MasterKeyManager.initialize(dataDir, logger);
+			this.encryptionEnabled = true;
+		} catch (error) {
+			console.error('[PublishDestinationsModel] Failed to initialize encryption:', error);
+			this.encryptionEnabled = false;
+		}
+	}
 
 	private static getDb(): Database.Database {
 		return getDatabase();
@@ -35,10 +53,21 @@ export class PublishDestinationsModel {
 			return null;
 		}
 
-		let parsedConfig: Record<string, unknown> | null = null;
-		if (typeof row.config_json === 'string' && row.config_json.trim().length > 0) {
+		// Decrypt config_json if stored encrypted, then parse JSON.
+		let rawConfig = row.config_json ?? null;
+		if (rawConfig && this.encryptionEnabled && isEncrypted(rawConfig)) {
 			try {
-				parsedConfig = JSON.parse(row.config_json) as Record<string, unknown>;
+				rawConfig = decryptData(rawConfig);
+			} catch (error) {
+				console.error('[PublishDestinationsModel] Failed to decrypt config_json:', error);
+				rawConfig = null;
+			}
+		}
+
+		let parsedConfig: Record<string, unknown> | null = null;
+		if (typeof rawConfig === 'string' && rawConfig.trim().length > 0) {
+			try {
+				parsedConfig = JSON.parse(rawConfig) as Record<string, unknown>;
 			} catch {
 				parsedConfig = null;
 			}
@@ -72,6 +101,9 @@ export class PublishDestinationsModel {
 
 	static create(input: Omit<PublishDestinationRecord, 'id' | 'created_at' | 'updated_at' | 'last_error' | 'last_error_at'>): PublishDestinationRecord | null {
 		const now = new Date().toISOString();
+		const configStr = input.config_json ? JSON.stringify(input.config_json) : null;
+		const configValue = configStr && this.encryptionEnabled ? encryptData(configStr) : configStr;
+
 		const result = this.getDb().prepare(`
 			INSERT INTO ${this.table} (
 				name,
@@ -84,7 +116,7 @@ export class PublishDestinationsModel {
 		`).run(
 			input.name,
 			input.type,
-			input.config_json ? JSON.stringify(input.config_json) : null,
+			configValue,
 			input.enabled ? 1 : 0,
 			now,
 			now,
@@ -101,7 +133,8 @@ export class PublishDestinationsModel {
 		if (updates.name !== undefined) payload.name = updates.name;
 		if (updates.type !== undefined) payload.type = updates.type;
 		if (updates.config_json !== undefined) {
-			payload.config_json = updates.config_json ? JSON.stringify(updates.config_json) : null;
+			const configStr = updates.config_json ? JSON.stringify(updates.config_json) : null;
+			payload.config_json = configStr && this.encryptionEnabled ? encryptData(configStr) : configStr;
 		}
 		if (updates.enabled !== undefined) payload.enabled = updates.enabled ? 1 : 0;
 		if (updates.last_error !== undefined) payload.last_error = updates.last_error;

@@ -20,6 +20,7 @@ import type {
 	ProvisionResponse
 } from './types';
 import { AgentModel } from '../db/models/agent.model';
+import { PublishDestinationsModel } from '../db/models/publish-destinations.model';
 import { buildApiEndpoint, getPackageVersion } from '../utils/api-utils';
 import { 
 	DefaultUuidGenerator, 
@@ -194,6 +195,7 @@ export class AgentManager {
 		const dataDir = process.env.DATA_DIR || '/app/data';
 		
 		AgentModel.initializeEncryption(dataDir, this.logger);
+		PublishDestinationsModel.initializeEncryption(dataDir, this.logger);
 
 		// Initialize PoP crypto (generates keys if needed)
 		this.popCrypto = new PopCryptoManager(dataDir, this.logger);

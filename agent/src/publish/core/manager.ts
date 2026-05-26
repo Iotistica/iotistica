@@ -7,9 +7,9 @@ import type { DeviceConfig, MqttConnection, Logger, DeviceStats, IPublishClient,
 import { DeviceState, normalizeTarget } from './types.js';
 import { AnomalyFeed } from '../anomaly/feed.js';
 import { AnomalyEnricher } from '../anomaly/enrich.js';
-import { PayloadCompressor } from '../compression/compress.js';
-import type { CompressorOptions } from '../compression/compress.js';
-import { compressionToOpts } from '../compression/compress.js';
+import { PayloadCompressor } from './compress.js';
+import type { CompressorOptions } from './compress.js';
+import { compressionToOpts } from './compress.js';
 import { MessageBatcher } from './batch.js';
 import { SocketConnection } from './socket.js';
 import { PublishStats } from './stats.js';

@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import * as msgpack from 'msgpack-lite';
 import { createJsonPayload, createMsgpackPayload, serializePayload } from '../../mqtt/manager.js';
 import { getCpuUsage } from '../../system/metrics.js';
-import type { MqttConnection } from '../core/types.js';
+import type { MqttConnection } from './types.js';
 import type { Protocol } from '../../anomaly/types.js';
 import type { DictionaryManager } from '../../mqtt/dictionary.js';
 

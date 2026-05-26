@@ -1,5 +1,5 @@
 import type { DeviceStats, Logger } from '../core/types.js';
-import type { CompressionInfo } from '../compression/compress.js';
+import type { CompressionInfo } from './compress.js';
 
 /**
  * Tracks all publish-side metrics for one endpoint.
