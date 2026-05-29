@@ -6,6 +6,7 @@
 
 import express from 'express';
 import type { Server } from 'http';
+import { join } from 'path';
 import * as middleware from './middleware';
 import * as actions from './actions';
 import type { AgentLogger } from '../logging/agent-logger';
@@ -98,6 +99,13 @@ export class DeviceAPI {
 		// Parse request bodies
 		this.api.use(express.urlencoded({ limit: '10mb', extended: true }));
 		this.api.use(express.json({ limit: '10mb' }));
+
+		// Serve admin panel static files (built output from agent/admin/dist)
+		const adminDist = join(__dirname, '../../admin/dist');
+		this.api.use('/admin', express.static(adminDist));
+		this.api.get('/admin/*splat', (_req, res) => {
+			res.sendFile(join(adminDist, 'index.html'));
+		});
 
 		// Mount all routers
 		for (const router of this.routers) {

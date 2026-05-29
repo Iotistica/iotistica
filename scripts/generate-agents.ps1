@@ -94,6 +94,7 @@ param(
     [string]$LogCompression = "true",
     [string]$RequireProvisioning = "false",
     [string]$ApiSecurityMode = "LOCALHOST_ONLY",
+    [string]$DeviceApiHost = "",
     [int]$MemoryCheckInterval = 30000,
     [int]$MemoryThreshold = 30,
     [string]$LogFilePersistance = "true",
@@ -181,6 +182,7 @@ $ProfileDefaults = @{
     'docker' = @{
         ApiUrl = 'http://localhost:4002'
         UseDirectDb = $true
+        UseHostNetwork = $false
         DbHost = 'localhost'
         DbPort = 5432
         DbName = 'iotistica'
@@ -189,6 +191,10 @@ $ProfileDefaults = @{
         DbSslMode = ''
         DatabaseUrl = ''
         IOTISTICA_API = 'http://api:3002'
+        DeviceApiHost = '0.0.0.0'
+        ApiSecurityMode = 'LOCAL_NETWORK'
+        FirewallEnabled = 'false'
+        FirewallMode = 'off'
     }
     'cloud' = @{
         ApiUrl = 'https://demo-api.iotistica.com/'
@@ -293,6 +299,20 @@ function Resolve-AgentApiEndpoint {
     }
 
     return $ConfiguredEndpoint
+}
+
+function Resolve-MqttBrokerUrl {
+    param(
+        [string]$ProfileName,
+        [bool]$UseHostNetwork,
+        [string]$ConfiguredBrokerUrl
+    )
+
+    if ($ProfileName -eq 'docker' -and -not $UseHostNetwork -and $ConfiguredBrokerUrl -eq 'mqtt://localhost:5884') {
+        return 'mqtt://host.docker.internal:5884'
+    }
+
+    return $ConfiguredBrokerUrl
 }
 
 function Get-AgentContainerPrefix {
@@ -1480,6 +1500,22 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
 
 if ($IncludeAgentCli) {
     $agentCliPort = Get-UniquePort $StartIndex
+    $firstAgentServiceName = "agent-$StartIndex"
+    $agentCliNetworkLines = if ($UseHostNetwork) {
+        @('    network_mode: host')
+    } else {
+        @(
+            '    networks:',
+            '      - iotistic-net'
+        )
+    }
+
+    $agentCliUrl = if ($UseHostNetwork) {
+        "http://localhost:$agentCliPort"
+    } else {
+        "http://${firstAgentServiceName}:$agentCliPort"
+    }
+
     $agentCliServiceLines = @(
         '  agent-cli:',
         '    build:',
@@ -1487,13 +1523,12 @@ if ($IncludeAgentCli) {
         '      dockerfile: Dockerfile',
         '    image: iotistic/agent-cli:dev',
         '    container_name: iotistic-agent-cli',
-        '    network_mode: host',
         '    entrypoint: ["/bin/sh", "-c"]',
         '    command: ["tail -f /dev/null"]',
         '    tty: true',
         '    environment:',
         "      - DEVICE_API_PORT=$agentCliPort",
-        "      - DEVICE_API_URL=http://localhost:$agentCliPort",
+        "      - DEVICE_API_URL=$agentCliUrl",
         '      - CONFIG_DIR=/app/data',
         '      - DEBUG=false',
         '    volumes:',
@@ -1504,6 +1539,8 @@ if ($IncludeAgentCli) {
         '        max-size: "5m"',
         '        max-file: "2"'
     )
+
+    $agentCliServiceLines += $agentCliNetworkLines
 
     $services += ([string]::Join("`n", $agentCliServiceLines))
 

@@ -17,7 +17,8 @@ services:
       - SYS_MODULE
     devices:
       - /dev/net/tun:/dev/net/tun
-    network_mode: host
+    ports:
+      - "48555:48555"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - agent-75-data:/app/data
@@ -25,6 +26,7 @@ services:
       - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth
     environment:
       - DEVICE_API_PORT=48555
+      - DEVICE_API_HOST=0.0.0.0
       - IOTISTICA_API=http://localhost:4002
       - NODE_ENV=development
       - MQTT_AUTH_DIR=/app/data/mosquitto-auth
@@ -34,9 +36,9 @@ services:
       # Bootstrap & Security (not dashboard-controlled)
       - REQUIRE_PROVISIONING=false
       - PROVISIONING_KEY=87e8b0dd03111e98a93d73c3397ae4531895cfa84011dc204f910813ef59b50e
-      - API_SECURITY_MODE=LOCALHOST_ONLY
-      - FIREWALL_ENABLED=true
-      - FIREWALL_MODE=auto
+      - API_SECURITY_MODE=LOCAL_NETWORK
+      - FIREWALL_ENABLED=false
+      - FIREWALL_MODE=off
       # Testing & Development (not dashboard-controlled)
       - SIMULATION_MODE=false
       - SIMULATION_PROFILE=disabled
@@ -49,19 +51,20 @@ services:
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
+    networks:
+      - iotistic-net
   agent-cli:
     build:
       context: ./agent-cli
       dockerfile: Dockerfile
     image: iotistic/agent-cli:dev
     container_name: iotistic-agent-cli
-    network_mode: host
     entrypoint: ["/bin/sh", "-c"]
     command: ["tail -f /dev/null"]
     tty: true
     environment:
       - DEVICE_API_PORT=48555
-      - DEVICE_API_URL=http://localhost:48555
+      - DEVICE_API_URL=http://agent-75:48555
       - CONFIG_DIR=/app/data
       - DEBUG=false
     volumes:
@@ -71,6 +74,8 @@ services:
       options:
         max-size: "5m"
         max-file: "2"
+    networks:
+      - iotistic-net
 volumes:
   agent-75-data:
     driver: local

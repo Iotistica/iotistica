@@ -70,6 +70,18 @@ RUN npx tsc --project tsconfig.build.json && \
     find dist -name "*.map" -delete && \
     npm prune --omit=dev
 
+# ---- Admin panel build stage ----
+FROM node:20-alpine3.22 AS admin-builder
+
+WORKDIR /app
+
+COPY agent/admin/package*.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+COPY agent/admin ./
+RUN npx vite build
+
 # ---- Production stage ------
 FROM node:20-alpine3.22 AS production
 
@@ -107,6 +119,9 @@ COPY --from=deps --chown=agentuser:agentgroup /app/node_modules ./node_modules
 
 # Copy built application from builder stage
 COPY --from=builder --chown=agentuser:agentgroup /app/dist ./dist
+
+# Copy built admin panel from admin-builder stage
+COPY --from=admin-builder --chown=agentuser:agentgroup /app/dist ./admin/dist
 
 # Copy update scripts and entrypoint
 COPY agent/bin/*.sh /app/bin/
