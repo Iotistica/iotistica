@@ -1,6 +1,7 @@
 import ModbusRTU from 'modbus-serial';
 import {
 	type ModbusDevice,
+	type ModbusRegister,
 	ModbusConnectionType,
 	ModbusFunctionCode,
 	ModbusDataType,
@@ -498,6 +499,35 @@ export class ModbusClient implements IProtocolClient<void, DeviceDataPoint[]> {
 
 	async read(): Promise<DeviceDataPoint[]> {
 		return this.readAllRegisters();
+	}
+
+	async writeRegister(registerName: string, value: number | boolean | string): Promise<void> {
+		const register = this.device.registers.find((r) => r.name === registerName);
+		if (!register) {
+			throw new Error(`Register not found: ${registerName}`);
+		}
+
+		if (!this.isConnected()) {
+			throw new Error(`Device ${this.device.name} is not connected`);
+		}
+
+		const timeout = this.device.connection.timeout || 5000;
+
+		try {
+			await this.withTimeout(
+				this.lock(async () => {
+					await this.writeRawRegister(register, value);
+				}),
+				timeout,
+				`write register ${registerName}`
+			);
+		} catch (error) {
+			const errorMessage = this.extractErrorMessage(error);
+			this.logger.error(
+				`Failed to write register ${registerName} on device ${this.device.name}: ${errorMessage}`
+			);
+			throw error;
+		}
 	}
   
 	/**
@@ -1170,6 +1200,245 @@ export class ModbusClient implements IProtocolClient<void, DeviceDataPoint[]> {
 
 		// Apply scaling and offset
 		return (value * register.scale) + register.offset;
+	}
+
+	private async writeRawRegister(register: ModbusRegister, value: number | boolean | string): Promise<void> {
+		const writeFunctionCode = this.resolveWriteFunctionCode(register);
+
+		switch (writeFunctionCode) {
+			case ModbusFunctionCode.WRITE_SINGLE_COIL: {
+				const coilValue = this.serializeBooleanValue(register, value);
+				await this.client.writeCoil(register.address, coilValue);
+				break;
+			}
+
+			case ModbusFunctionCode.WRITE_SINGLE_REGISTER: {
+				const registerValue = this.serializeSingleRegisterValue(register, value);
+				await this.client.writeRegister(register.address, registerValue);
+				break;
+			}
+
+			case ModbusFunctionCode.WRITE_MULTIPLE_COILS: {
+				throw new Error(
+					`Register ${register.name} requires multiple coil values, but API accepts a single primitive value`
+				);
+			}
+
+			case ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS: {
+				const registerValues = this.serializeMultiRegisterValues(register, value);
+				await this.client.writeRegisters(register.address, registerValues);
+				break;
+			}
+
+			default:
+				throw new Error(`Unsupported write function code: ${writeFunctionCode}`);
+		}
+	}
+
+	private resolveWriteFunctionCode(register: ModbusRegister): ModbusFunctionCode {
+		switch (register.functionCode) {
+			case ModbusFunctionCode.WRITE_SINGLE_COIL:
+			case ModbusFunctionCode.WRITE_SINGLE_REGISTER:
+			case ModbusFunctionCode.WRITE_MULTIPLE_COILS:
+			case ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS:
+				return register.functionCode;
+
+			case ModbusFunctionCode.READ_COILS:
+				return (register.count || 1) > 1
+					? ModbusFunctionCode.WRITE_MULTIPLE_COILS
+					: ModbusFunctionCode.WRITE_SINGLE_COIL;
+
+			case ModbusFunctionCode.READ_HOLDING_REGISTERS:
+				return (register.count || 1) > 1
+					? ModbusFunctionCode.WRITE_MULTIPLE_REGISTERS
+					: ModbusFunctionCode.WRITE_SINGLE_REGISTER;
+
+			case ModbusFunctionCode.READ_DISCRETE_INPUTS:
+			case ModbusFunctionCode.READ_INPUT_REGISTERS:
+				throw new Error(`Register ${register.name} is read-only (function code ${register.functionCode})`);
+
+			default:
+				throw new Error(`Unsupported function code for write: ${register.functionCode}`);
+		}
+	}
+
+	private serializeBooleanValue(register: ModbusRegister, value: number | boolean | string): boolean {
+		if (typeof value === 'boolean') {
+			return value;
+		}
+
+		if (typeof value === 'number') {
+			if (value === 0) return false;
+			if (value === 1) return true;
+			throw new Error(`Boolean register ${register.name} only accepts 0 or 1 as numeric values`);
+		}
+
+		if (typeof value === 'string') {
+			const normalized = value.trim().toLowerCase();
+			if (normalized === 'true' || normalized === '1') return true;
+			if (normalized === 'false' || normalized === '0') return false;
+		}
+
+		throw new Error(`Invalid boolean value for register ${register.name}: ${String(value)}`);
+	}
+
+	private serializeSingleRegisterValue(register: ModbusRegister, value: number | boolean | string): number {
+		const rawValue = this.toUnscaledNumeric(register, value);
+
+		switch (register.dataType) {
+			case ModbusDataType.INT16:
+				this.ensureInteger(register.name, rawValue);
+				this.ensureRange(register.name, rawValue, -32768, 32767);
+				return rawValue & 0xffff;
+
+			case ModbusDataType.UINT16:
+				this.ensureInteger(register.name, rawValue);
+				this.ensureRange(register.name, rawValue, 0, 65535);
+				return rawValue;
+
+			default:
+				throw new Error(
+					`Register ${register.name} uses data type ${register.dataType} and requires multi-register write`
+				);
+		}
+	}
+
+	private serializeMultiRegisterValues(register: ModbusRegister, value: number | boolean | string): number[] {
+		const registerCount = register.count || 1;
+		const byteLength = registerCount * 2;
+		const buffer = Buffer.alloc(byteLength);
+
+		switch (register.dataType) {
+			case ModbusDataType.INT32: {
+				const rawValue = this.toUnscaledNumeric(register, value);
+				this.ensureInteger(register.name, rawValue);
+				this.ensureRange(register.name, rawValue, -2147483648, 2147483647);
+				if (byteLength < 4) {
+					throw new Error(`Register ${register.name} requires at least 2 registers for int32`);
+				}
+				buffer.writeInt32BE(rawValue, 0);
+				break;
+			}
+
+			case ModbusDataType.UINT32: {
+				const rawValue = this.toUnscaledNumeric(register, value);
+				this.ensureInteger(register.name, rawValue);
+				this.ensureRange(register.name, rawValue, 0, 4294967295);
+				if (byteLength < 4) {
+					throw new Error(`Register ${register.name} requires at least 2 registers for uint32`);
+				}
+				buffer.writeUInt32BE(rawValue, 0);
+				break;
+			}
+
+			case ModbusDataType.FLOAT32: {
+				const rawValue = this.toUnscaledFloat(register, value);
+				if (byteLength < 4) {
+					throw new Error(`Register ${register.name} requires at least 2 registers for float32`);
+				}
+				buffer.writeFloatBE(rawValue, 0);
+				break;
+			}
+
+			case ModbusDataType.STRING: {
+				const encoding = (register.encoding || 'ascii') as BufferEncoding;
+				const stringValue = typeof value === 'string' ? value : String(value);
+				const encoded = Buffer.from(stringValue, encoding);
+				encoded.copy(buffer, 0, 0, Math.min(encoded.length, buffer.length));
+				break;
+			}
+
+			default:
+				throw new Error(`Unsupported multi-register data type for write: ${register.dataType}`);
+		}
+
+		let byteOrder = register.byteOrder || ByteOrder.ABCD;
+		if (!register.byteOrder && register.endianness) {
+			byteOrder = register.endianness === Endianness.BIG ? ByteOrder.ABCD : ByteOrder.CDAB;
+		}
+
+		return this.packBufferToRegisters(buffer, byteOrder, registerCount);
+	}
+
+	private toUnscaledNumeric(register: ModbusRegister, value: number | boolean | string): number {
+		const parsed = this.toNumber(register.name, value);
+		const scale = register.scale ?? 1;
+		const offset = register.offset ?? 0;
+		const raw = (parsed - offset) / scale;
+		return Math.round(raw);
+	}
+
+	private toUnscaledFloat(register: ModbusRegister, value: number | boolean | string): number {
+		const parsed = this.toNumber(register.name, value);
+		const scale = register.scale ?? 1;
+		const offset = register.offset ?? 0;
+		return (parsed - offset) / scale;
+	}
+
+	private toNumber(registerName: string, value: number | boolean | string): number {
+		if (typeof value === 'number') {
+			if (!Number.isFinite(value)) {
+				throw new Error(`Value for register ${registerName} must be a finite number`);
+			}
+			return value;
+		}
+
+		if (typeof value === 'string') {
+			const parsed = Number(value);
+			if (!Number.isFinite(parsed)) {
+				throw new Error(`Value for register ${registerName} is not a valid number: ${value}`);
+			}
+			return parsed;
+		}
+
+		throw new Error(`Value for register ${registerName} must be numeric`);
+	}
+
+	private ensureInteger(registerName: string, value: number): void {
+		if (!Number.isInteger(value)) {
+			throw new Error(`Value for register ${registerName} must be an integer`);
+		}
+	}
+
+	private ensureRange(registerName: string, value: number, min: number, max: number): void {
+		if (value < min || value > max) {
+			throw new Error(`Value for register ${registerName} out of range (${min} to ${max})`);
+		}
+	}
+
+	private packBufferToRegisters(buffer: Buffer, byteOrder: ByteOrder, count: number): number[] {
+		const registers = new Array<number>(count);
+
+		switch (byteOrder) {
+			case ByteOrder.ABCD:
+				for (let i = 0; i < count; i++) {
+					registers[i] = buffer.readUInt16BE(i * 2);
+				}
+				break;
+
+			case ByteOrder.CDAB:
+				for (let i = 0; i < count; i++) {
+					registers[count - 1 - i] = buffer.readUInt16BE(i * 2);
+				}
+				break;
+
+			case ByteOrder.BADC:
+				for (let i = 0; i < count; i++) {
+					registers[i] = buffer.readUInt16LE(i * 2);
+				}
+				break;
+
+			case ByteOrder.DCBA:
+				for (let i = 0; i < count; i++) {
+					registers[count - 1 - i] = buffer.readUInt16LE(i * 2);
+				}
+				break;
+
+			default:
+				throw new Error(`Unsupported byte order: ${byteOrder}`);
+		}
+
+		return registers;
 	}
 
 	/**

@@ -14,6 +14,7 @@ export interface Endpoint {
   fingerprint?: string; // Cryptographic hash of physical identity (bus+slaveId+deviceId)
   name: string;
   protocol: 'modbus' | 'can' | 'opcua' | 'snmp' | 'mqtt';
+  groupName?: string; // Custom adapter group name (e.g., "warehouse-modbus", "factory-opcua") for multi-instance support
   enabled: boolean;
   poll_interval: number;
   connection: Record<string, any>; // Connection config (host, port, serial, etc.)
@@ -29,6 +30,7 @@ type EndpointRow = Omit<Endpoint, 'enabled' | 'connection' | 'data_points' | 'me
   connection: string | Record<string, any>;
   data_points?: string | any[] | null;
   metadata?: string | Record<string, any> | null;
+  group_name?: string | null;
 };
 
 export class EndpointModel {
@@ -44,11 +46,20 @@ export class EndpointModel {
 		}
 
 		return {
-			...row,
+			id: row.id,
+			uuid: row.uuid,
+			fingerprint: row.fingerprint,
+			name: row.name,
+			protocol: row.protocol,
+			groupName: row.group_name || undefined,
 			enabled: !!row.enabled,
+			poll_interval: row.poll_interval,
 			connection: typeof row.connection === 'string' ? JSON.parse(row.connection) : row.connection,
 			data_points: row.data_points ? (typeof row.data_points === 'string' ? JSON.parse(row.data_points) : row.data_points) : null,
 			metadata: row.metadata ? (typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata) : null,
+			lastSeenAt: row.lastSeenAt ? new Date(row.lastSeenAt as any) : undefined,
+			created_at: row.created_at ? new Date(row.created_at as any) : undefined,
+			updated_at: row.updated_at ? new Date(row.updated_at as any) : undefined,
 		};
 	}
 
@@ -65,6 +76,7 @@ export class EndpointModel {
 		if (endpoint.fingerprint !== undefined || includeDefaults) serialized.fingerprint = endpoint.fingerprint ?? null;
 		if (endpoint.name !== undefined) serialized.name = endpoint.name;
 		if (endpoint.protocol !== undefined) serialized.protocol = endpoint.protocol;
+		if (endpoint.groupName !== undefined || includeDefaults) serialized.group_name = endpoint.groupName ?? null;
 		if (endpoint.enabled !== undefined || includeDefaults) serialized.enabled = endpoint.enabled === undefined ? 1 : (endpoint.enabled ? 1 : 0);
 		if (endpoint.poll_interval !== undefined || includeDefaults) serialized.poll_interval = endpoint.poll_interval ?? 5000;
 		if (endpoint.connection !== undefined) serialized.connection = JSON.stringify(endpoint.connection);

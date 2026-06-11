@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS "endpoints" (
 	"uuid"	varchar(255),
 	"name"	varchar(255) NOT NULL,
 	"protocol"	varchar(50) NOT NULL,
+	"group_name"	varchar(255),
 	"enabled"	boolean NOT NULL DEFAULT '1',
 	"poll_interval"	integer NOT NULL DEFAULT '5000',
 	"connection"	text NOT NULL,

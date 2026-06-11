@@ -129,6 +129,28 @@ export const OPCUADataPointSchema = z.object({
 
 	/** Device group UUID — shared by all nodes in the same profile group */
 	device_uuid: z.string().optional(),
+
+	/** Explicitly allow writes for this node. Default false keeps current read-only behavior. */
+	writable: z.boolean().optional().default(false),
+
+	/**
+	 * Optional OPC UA data type hint used when writing values.
+	 * If omitted, type is inferred from the value at runtime.
+	 */
+	writeDataType: z.enum([
+		'Boolean',
+		'SByte',
+		'Byte',
+		'Int16',
+		'UInt16',
+		'Int32',
+		'UInt32',
+		'Int64',
+		'UInt64',
+		'Float',
+		'Double',
+		'String'
+	]).optional(),
 });
 export type OPCUADataPoint = z.infer<typeof OPCUADataPointSchema>;
 

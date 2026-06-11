@@ -24,6 +24,7 @@ import { CloudMqttClient } from '../mqtt/manager';
 import { encodeIfUuid } from '../mqtt/codec';
 import type { AgentUpdater } from '../updater';
 import type { DiscoveryService } from '../discovery/service';
+import type { OPCUABrowseRequest } from '../plugins/opcua/discovery';
 import { TailscaleManager } from '../network/vpn/tailscale-manager';
 import type { TailscaleConfig, TailscaleStatus } from '../network/vpn/tailscale-manager';
 
@@ -1165,6 +1166,17 @@ export async function runDiscovery(options: {
 		protocols: options.protocols as any
 	};
 	return discoveryService.runDiscovery(discoveryOptions);
+}
+
+/**
+ * Browse OPC UA address space and return full tree nodes for UI tag browser.
+ */
+export async function browseOPCUAAddressSpace(options: OPCUABrowseRequest) {
+	if (!discoveryService) {
+		throw new Error('DiscoveryService not initialized');
+	}
+
+	return discoveryService.browseOPCUAAddressSpace(options);
 }
 
 /**

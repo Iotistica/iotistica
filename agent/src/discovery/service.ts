@@ -7,7 +7,7 @@ import { EndpointModel } from '../db/models/endpoint.model';
 import { MetadataModel } from '../db/models';
 import type { IDiscovery, DiscoveredDevice } from '../plugins/types';
 import { ModbusDiscovery } from '../plugins/modbus/discovery';
-import { OPCUADiscovery } from '../plugins/opcua/discovery';
+import { OPCUADiscovery, type OPCUABrowseRequest, type OPCUABrowseTreeNode } from '../plugins/opcua/discovery';
 import { MqttDiscovery } from '../plugins/mqtt/discovery';
 import { BACnetDiscovery } from '../plugins/bacnet/discovery';
 import type { ConfigManager } from '../core/config.js';
@@ -80,6 +80,23 @@ export class DiscoveryService extends EventEmitter {
 		plugins.set('bacnet', new BACnetDiscovery(this.logger));
     
 		return plugins;
+	}
+
+	async browseOPCUAAddressSpace(request: OPCUABrowseRequest): Promise<OPCUABrowseTreeNode[]> {
+		const plugin = this.plugins.get('opcua');
+		if (!plugin) {
+			throw new Error('OPC-UA discovery plugin not initialized');
+		}
+
+		if (!(plugin instanceof OPCUADiscovery)) {
+			throw new Error('OPC-UA discovery plugin type mismatch');
+		}
+
+		if (!(await plugin.isAvailable())) {
+			throw new Error('OPC-UA discovery plugin is not available on this platform');
+		}
+
+		return plugin.browseAddressSpace(request);
 	}
 
 	public startPeriodicDiscovery(): void {

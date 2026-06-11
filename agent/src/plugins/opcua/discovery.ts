@@ -17,8 +17,117 @@ export interface OPCUADiscoveryOptions {
   scanForServers?: boolean; // Use LDS (Local Discovery Server)
 }
 
+export interface OPCUABrowseRequest {
+	endpointUrl: string;
+	maxDepth?: number;
+	securityMode?: 'None' | 'Sign' | 'SignAndEncrypt';
+	securityPolicy?: 'None' | 'Basic128Rsa15' | 'Basic256' | 'Basic256Sha256' | 'Aes128_Sha256_RsaOaep' | 'Aes256_Sha256_RsaPss';
+	certificateTrustMode?: 'strict' | 'trust-on-first-use';
+	username?: string;
+	password?: string;
+}
+
+export interface OPCUABrowseTreeNode {
+	nodeId: string;
+	browseName: string;
+	nodeClass: string;
+	dataType: string | null;
+	writable: boolean;
+	children: OPCUABrowseTreeNode[];
+}
+
 export class OPCUADiscovery extends BaseDiscovery {
 	private configManager?: ConfigManager;
+
+	private resolveBrowseSecurityMode(mode: OPCUABrowseRequest['securityMode'], MessageSecurityMode: any): any {
+		switch (mode) {
+			case 'Sign':
+				return MessageSecurityMode.Sign;
+			case 'SignAndEncrypt':
+				return MessageSecurityMode.SignAndEncrypt;
+			case 'None':
+			default:
+				return MessageSecurityMode.None;
+		}
+	}
+
+	private resolveBrowseSecurityPolicy(policy: OPCUABrowseRequest['securityPolicy'], SecurityPolicy: any): any {
+		switch (policy) {
+			case 'Basic128Rsa15':
+				return SecurityPolicy.Basic128Rsa15;
+			case 'Basic256':
+				return SecurityPolicy.Basic256;
+			case 'Basic256Sha256':
+				return SecurityPolicy.Basic256Sha256;
+			case 'Aes128_Sha256_RsaOaep':
+				return SecurityPolicy.Aes128_Sha256_RsaOaep;
+			case 'Aes256_Sha256_RsaPss':
+				return SecurityPolicy.Aes256_Sha256_RsaPss;
+			case 'None':
+			default:
+				return SecurityPolicy.None;
+		}
+	}
+
+	private mapNodeClass(value: number | undefined): string {
+		switch (value) {
+			case 1: return 'Object';
+			case 2: return 'Variable';
+			case 4: return 'Method';
+			case 8: return 'ObjectType';
+			case 16: return 'VariableType';
+			case 32: return 'ReferenceType';
+			case 64: return 'DataType';
+			case 128: return 'View';
+			default: return 'Unknown';
+		}
+	}
+
+	private mapDataTypeName(nodeId: any): string | null {
+		if (!nodeId) return null;
+
+		const namespace = typeof nodeId.namespace === 'number' ? nodeId.namespace : 0;
+		const value = typeof nodeId.value === 'number' ? nodeId.value : undefined;
+
+		if (namespace === 0 && value !== undefined) {
+			const builtIn: Record<number, string> = {
+				1: 'Boolean',
+				2: 'SByte',
+				3: 'Byte',
+				4: 'Int16',
+				5: 'UInt16',
+				6: 'Int32',
+				7: 'UInt32',
+				8: 'Int64',
+				9: 'UInt64',
+				10: 'Float',
+				11: 'Double',
+				12: 'String',
+				13: 'DateTime',
+				14: 'Guid',
+				15: 'ByteString',
+				16: 'XmlElement',
+				17: 'NodeId',
+				18: 'ExpandedNodeId',
+				19: 'StatusCode',
+				20: 'QualifiedName',
+				21: 'LocalizedText',
+				22: 'ExtensionObject',
+				23: 'DataValue',
+				24: 'Variant',
+				25: 'DiagnosticInfo',
+			};
+			if (builtIn[value]) {
+				return builtIn[value];
+			}
+		}
+
+		if (typeof nodeId.toString === 'function') {
+			return nodeId.toString();
+		}
+
+		return String(nodeId);
+	}
 
 	private scoreSecurityMode(securityMode: number | string | undefined): number {
 		const mode = typeof securityMode === 'string' ? securityMode : String(securityMode ?? '0');
@@ -109,6 +218,106 @@ export class OPCUADiscovery extends BaseDiscovery {
 
 	generateFingerprint(applicationUri: string): string {
 		return createHash('sha256').update(`opcua:${applicationUri}`).digest('hex').substring(0, 32);
+	}
+
+	async browseAddressSpace(request: OPCUABrowseRequest): Promise<OPCUABrowseTreeNode[]> {
+		if (!request.endpointUrl || typeof request.endpointUrl !== 'string') {
+			throw new Error('endpointUrl is required for OPC UA browse');
+		}
+
+		const maxDepth = Math.min(Math.max(request.maxDepth ?? 6, 1), 20);
+
+		const { OPCUAClient, AttributeIds, MessageSecurityMode, SecurityPolicy, UserTokenType } = await import('node-opcua-client');
+		const { getDefaultCertificateManager } = await import('node-opcua-certificate-manager');
+
+		const certificateManager = getDefaultCertificateManager('PKI');
+		certificateManager.automaticallyAcceptUnknownCertificate =
+			(request.certificateTrustMode || 'strict') === 'trust-on-first-use';
+
+		const client = OPCUAClient.create({
+			applicationName: 'Iotistica Agent',
+			applicationUri: 'urn:iotistica:agent',
+			endpointMustExist: false,
+			securityMode: this.resolveBrowseSecurityMode(request.securityMode, MessageSecurityMode),
+			securityPolicy: this.resolveBrowseSecurityPolicy(request.securityPolicy, SecurityPolicy),
+			clientCertificateManager: certificateManager,
+			connectionStrategy: {
+				maxRetry: 1,
+				initialDelay: 100,
+				maxDelay: 1000,
+			},
+		});
+
+		let session: any;
+		const visited = new Set<string>();
+
+		try {
+			await client.connect(request.endpointUrl);
+
+			if (request.username && request.password) {
+				session = await client.createSession({
+					type: UserTokenType.UserName,
+					userName: request.username,
+					password: request.password,
+				});
+			} else {
+				session = await client.createSession();
+			}
+
+			const browseRecursive = async (nodeId: string, depth: number): Promise<OPCUABrowseTreeNode[]> => {
+				if (depth > maxDepth || visited.has(nodeId)) {
+					return [];
+				}
+
+				visited.add(nodeId);
+
+				const browseResult = await session.browse(nodeId);
+				const references = browseResult.references || [];
+				const nodes: OPCUABrowseTreeNode[] = [];
+
+				for (const ref of references) {
+					const childNodeId = ref.nodeId.toString();
+					const browseName = ref.browseName?.name || childNodeId;
+
+					const [nodeClassResult, dataTypeResult, accessLevelResult, userAccessLevelResult] = await session.read([
+						{ nodeId: childNodeId, attributeId: AttributeIds.NodeClass },
+						{ nodeId: childNodeId, attributeId: AttributeIds.DataType },
+						{ nodeId: childNodeId, attributeId: AttributeIds.AccessLevel },
+						{ nodeId: childNodeId, attributeId: AttributeIds.UserAccessLevel },
+					]);
+
+					const nodeClassValue = Number(nodeClassResult?.value?.value ?? 0);
+					const accessLevel = Number(accessLevelResult?.value?.value ?? 0);
+					const userAccessLevel = Number(userAccessLevelResult?.value?.value ?? accessLevel);
+					const writable = nodeClassValue === 2 && (((accessLevel | userAccessLevel) & 0x02) !== 0);
+
+					const node: OPCUABrowseTreeNode = {
+						nodeId: childNodeId,
+						browseName,
+						nodeClass: this.mapNodeClass(nodeClassValue),
+						dataType: this.mapDataTypeName(dataTypeResult?.value?.value),
+						writable,
+						children: [],
+					};
+
+					if (depth < maxDepth && (nodeClassValue === 1 || nodeClassValue === 8)) {
+						node.children = await browseRecursive(childNodeId, depth + 1);
+					}
+
+					nodes.push(node);
+				}
+
+				return nodes;
+			};
+
+			const rootNodeId = 'ns=0;i=85';
+			return await browseRecursive(rootNodeId, 0);
+		} finally {
+			if (session) {
+				await session.close().catch(() => {});
+			}
+			await client.disconnect().catch(() => {});
+		}
 	}
 
 	/**

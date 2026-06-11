@@ -222,19 +222,32 @@ export class AdapterManager extends EventEmitter {
 	}
 
 	public async attachAdapter(
-		protocol: string,
+		groupName: string,
 		adapter: IProtocolAdapter,
 		uuidMap: Map<string, string> = new Map(),
 	): Promise<void> {
-		const normalizedProtocol = protocol.toLowerCase();
-		const socket = await this.createSocketServer(normalizedProtocol);
-		this.adapters.set(normalizedProtocol, adapter);
-		this.wireAdapterEvents(normalizedProtocol, adapter, socket, uuidMap);
+		const normalizedGroup = groupName.toLowerCase();
+		// Extract protocol from groupName if it contains a dash (e.g., "warehouse-modbus" -> "modbus")
+		const protocol = normalizedGroup.includes('-') 
+			? normalizedGroup.split('-').pop()?.toLowerCase() || normalizedGroup
+			: normalizedGroup;
+		
+		const socket = await this.createSocketServer(protocol);
+		this.adapters.set(normalizedGroup, adapter);
+		this.wireAdapterEvents(normalizedGroup, adapter, socket, uuidMap);
 		await adapter.start();
 	}
 
 	public buildEndpointUuidMap(devices: any[]): Map<string, string> {
 		return this.buildUuidMap(devices);
+	}
+
+	/** Determine effective group name: use explicit groupName or default to protocol. */
+	private getEffectiveGroupName(protocol: string, groupName?: string): string {
+		if (groupName && groupName.trim()) {
+			return groupName.toLowerCase();
+		}
+		return protocol.toLowerCase();
 	}
 
 	private async ensureExternalPluginStartersRegistered(): Promise<void> {
@@ -246,17 +259,35 @@ export class AdapterManager extends EventEmitter {
 		this.pluginsLoaded = true;
 	}
 
-	/** Start all enabled protocol adapters. */
+	/** Start all enabled protocol adapters, supporting multi-instance groups. */
 	async start(): Promise<void> {
 		if (this.running) return;
 
 		await this.ensureExternalPluginStartersRegistered();
 
+		// Load endpoints from DB and group by (protocol, groupName)
+		const allEndpoints = await EndpointModel.getAll();
+		const groupsByProtocol = new Map<string, Map<string, any[]>>();
+		
+		for (const endpoint of allEndpoints) {
+			if (!groupsByProtocol.has(endpoint.protocol)) {
+				groupsByProtocol.set(endpoint.protocol, new Map());
+			}
+			const groupName = this.getEffectiveGroupName(endpoint.protocol, endpoint.groupName);
+			const protocolGroups = groupsByProtocol.get(endpoint.protocol)!;
+			if (!protocolGroups.has(groupName)) {
+				protocolGroups.set(groupName, []);
+			}
+			protocolGroups.get(groupName)!.push(endpoint);
+		}
+
+		// Start adapters for each (protocol, groupName) combination
 		const builtInOrder = ["modbus", "opcua", "mqtt", "bacnet", "can", "snmp"];
 		const customOrder = [...this.adapterStarters.keys()].filter(
 			(protocol) => !builtInOrder.includes(protocol),
 		);
 		const startOrder = [...builtInOrder, ...customOrder];
+		
 		for (const protocol of startOrder) {
 			if (!this.isProtocolEnabled(protocol)) {
 				continue;
@@ -268,11 +299,55 @@ export class AdapterManager extends EventEmitter {
 				continue;
 			}
 
-			await starter();
+			// If endpoints exist for this protocol, start them per group
+			const protocolGroups = groupsByProtocol.get(protocol);
+			if (protocolGroups && protocolGroups.size > 0) {
+				for (const [groupName, endpoints] of protocolGroups) {
+					if (endpoints.length > 0) {
+						await this.startAdapterGroup(protocol, groupName, endpoints);
+					}
+				}
+			} else if (this.config[protocol as keyof AdapterConfig] && 
+						(this.config[protocol as keyof AdapterConfig] as any)?.config) {
+				// Fall back to config-based startup if no DB endpoints
+				await starter();
+			}
 		}
 
 		this.running = true;
 		this.emit("started");
+	}
+
+	/** Start adapter for a specific (protocol, groupName) combination. */
+	private async startAdapterGroup(
+		protocol: string,
+		groupName: string,
+		endpoints: any[],
+	): Promise<void> {
+		try {
+			this.logger.info(`Starting ${protocol.toUpperCase()} adapter group: ${groupName}`);
+			
+			switch (protocol.toLowerCase()) {
+				case 'modbus':
+					await this.startModbusAdapterGroup(groupName, endpoints);
+					break;
+				case 'opcua':
+					await this.startOPCUAAdapterGroup(groupName, endpoints);
+					break;
+				case 'bacnet':
+					await this.startBACnetAdapterGroup(groupName, endpoints);
+					break;
+				case 'mqtt':
+					await this.startMQTTAdapterGroup(groupName, endpoints);
+					break;
+				default:
+					this.logger.warn(`No group handler for protocol: ${protocol}`);
+			}
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			this.logger.error(`Failed to start ${protocol.toUpperCase()} adapter group ${groupName}: ${errorMessage}`);
+			throw error;
+		}
 	}
 
 	/** Stop all running adapters and socket servers. */
@@ -358,7 +433,63 @@ export class AdapterManager extends EventEmitter {
 		}
 	}
 
-	/** Start OPC UA adapter. */
+	/** Start Modbus adapter group for a specific groupName. */
+	private async startModbusAdapterGroup(groupName: string, endpoints: any[]): Promise<void> {
+		try {
+			const modbusConfig: ModbusAdapterConfig = {
+				devices: endpoints.map(
+					(d) =>
+						({
+							uuid: d.uuid,
+							name: d.name,
+							enabled: d.enabled,
+							slaveId: d.connection.slaveId || 1,
+							connection: d.connection as any,
+							pollInterval: d.poll_interval,
+							registers: (d.data_points || []).map((dp: any) => {
+								let functionCode = dp.functionCode;
+								if (!functionCode && dp.type) {
+									const typeMap: Record<string, number> = {
+										coil: 1,
+										discrete: 2,
+										holding: 3,
+										input: 4,
+									};
+									functionCode = typeMap[dp.type.toLowerCase()];
+								}
+								return {
+									...dp,
+									functionCode,
+									dataType: dp.dataType || "float32",
+									count:
+										dp.count ||
+										(dp.dataType === "float32" ||
+										dp.dataType === "int32" ||
+										dp.dataType === "uint32"
+											? 2
+											: 1),
+									scale: dp.scale !== undefined ? dp.scale : 1,
+									offset: dp.offset !== undefined ? dp.offset : 0,
+								};
+							}),
+						}) as any,
+				),
+				logging: { level: "info", enableConsole: false, enableFile: false },
+			};
+
+			const uuidMap = this.buildUuidMap(modbusConfig.devices);
+			const socket = await this.createSocketServer("modbus");
+			const adapter = new ModbusAdapter(modbusConfig, this.logger);
+			this.adapters.set(groupName, adapter);
+			(adapter as any)._socketServer = socket;
+			this.wireAdapterEvents(groupName, adapter, socket, uuidMap);
+			await adapter.start();
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			this.logger.error(`Failed to start Modbus adapter group ${groupName}: ${errorMessage}`);
+			throw error;
+		}
+	}
 	private async startOPCUAAdapter(): Promise<void> {
 		try {
 			let opcuaDevices: any[];
@@ -408,6 +539,46 @@ export class AdapterManager extends EventEmitter {
 		}
 	}
 
+	/** Start OPC UA adapter group for a specific groupName. */
+	private async startOPCUAAdapterGroup(groupName: string, endpoints: any[]): Promise<void> {
+		try {
+			const opcuaDevices = endpoints.map((d) => ({
+				uuid: d.uuid,
+				name: d.name,
+				enabled: d.enabled,
+				connection: d.connection,
+				pollInterval: d.poll_interval,
+				dataPoints: (d.data_points || []).map((dp: any) => ({
+					...dp,
+					dataType: dp.dataType || "number",
+					scalingFactor: dp.scalingFactor || dp.scale || 1,
+					offset: dp.offset || 0,
+				})),
+				metadata: d.metadata || {},
+			})) as any as OPCUAAdapterConfig['devices'];
+
+			const uuidMap = this.buildUuidMap(endpoints);
+			const socket = await this.createSocketServer("opcua");
+			const { OPCUAAdapter } = await import("./opcua/adapter.js");
+			const adapter = new OPCUAAdapter(opcuaDevices, this.logger);
+			this.adapters.set(groupName, adapter);
+			this.wireAdapterEvents(groupName, adapter, socket, uuidMap);
+			adapter.on(
+				"rediscovery-needed",
+				(data: { deviceName: string; endpointUrl: string }) => {
+					this.logger.warn(
+						`OPC-UA adapter group ${groupName} requesting rediscovery for ${data.deviceName} (high NodeID failure rate, endpointUrl: ${data.endpointUrl})`,
+					);
+					this.emit("rediscovery-needed", data);
+				},
+			);
+			await adapter.start();
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			this.logger.error(`Failed to start OPC-UA adapter group ${groupName}: ${errorMessage}`);
+			throw error;
+		}
+	}
 
 	/** Start MQTT adapter, or hot-reload devices if already running. */
 	private async startMQTTAdapter(): Promise<void> {
@@ -550,6 +721,62 @@ export class AdapterManager extends EventEmitter {
 			const errorMessage =
 				error instanceof Error ? error.message : String(error);
 			this.logger.error(`Failed to start MQTT adapter: ${errorMessage}`);
+			throw error;
+		}
+	}
+
+	/** Start MQTT adapter group for a specific groupName. */
+	private async startMQTTAdapterGroup(groupName: string, endpoints: any[]): Promise<void> {
+		try {
+			const brokerUrl = process.env.MQTT_BROKER_URL;
+			if (!brokerUrl)
+				throw new Error("MQTT_BROKER_URL is required for MQTT adapter startup");
+
+			let brokerHost: string;
+			let brokerPort: number;
+			try {
+				const url = new URL(brokerUrl);
+				brokerHost = url.hostname;
+				brokerPort = parseInt(url.port) || 1883;
+			} catch (error) {
+				throw new Error(`Failed to parse MQTT broker URL '${brokerUrl}': ${error}`);
+			}
+
+			const mqttConfig: MqttAdapterConfig = {
+				broker: {
+					host: brokerHost,
+					port: brokerPort,
+					username: process.env.MQTT_USERNAME,
+					password: process.env.MQTT_PASSWORD,
+				},
+				qos: 1,
+				reconnect: {
+					period: 1000,
+					maxAttempts: 10,
+					strategy: "fixed",
+					maxPeriod: 1000,
+					jitterRatio: 0,
+				},
+				devices: endpoints.map((d) => ({
+					name: d.name,
+					enabled: d.enabled,
+					topic: d.connection.topic || "#",
+					qos: (d.connection.qos || 1) as 0 | 1 | 2,
+					dataType: d.connection.dataType || "json",
+					metric: d.connection.metric || d.name,
+				})),
+			};
+
+			const uuidMap = this.buildUuidMap(endpoints);
+			const socket = await this.createSocketServer("mqtt");
+			const adapter = new MqttAdapter(mqttConfig, this.logger);
+			this.adapters.set(groupName, adapter);
+			(adapter as any)._socketServer = socket;
+			this.wireAdapterEvents(groupName, adapter, socket, uuidMap);
+			await adapter.start();
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			this.logger.error(`Failed to start MQTT adapter group ${groupName}: ${errorMessage}`);
 			throw error;
 		}
 	}
@@ -752,9 +979,66 @@ export class AdapterManager extends EventEmitter {
 		}
 	}
 
-	/** Get a specific protocol adapter. */
+	/** Start BACnet adapter group for a specific groupName. */
+	private async startBACnetAdapterGroup(groupName: string, endpoints: any[]): Promise<void> {
+		try {
+			const bacnetConfig = {
+				enabled: true,
+				port: (this.config.bacnet as any)?.port || 47809,
+				globalPollIntervalMs: (this.config.bacnet as any)?.globalPollIntervalMs || 5000,
+				devices: endpoints.map((d) => ({
+					name: d.name,
+					ipAddress: d.connection.ipAddress || d.connection.host,
+					port: d.connection.port || 47808,
+					deviceInstance: d.connection.deviceId || d.connection.deviceInstance || 0,
+					enabled: d.enabled,
+					objects: (d.data_points || []).map((dp: any) => ({
+						name: dp.name || dp.objectName,
+						objectIdentifier: dp.objectIdentifier || dp.objectId,
+						propertyId: dp.propertyId || 85, // PRESENT_VALUE
+						dataType: dp.dataType,
+					})),
+					pollIntervalMs: d.poll_interval || 5000,
+					maxConcurrentReads: d.connection.maxConcurrentReads || 5,
+					connectionTimeoutMs: d.connection.timeout || 5000,
+					retryAttempts: d.connection.retryCount || 3,
+					retryDelayMs: d.connection.retryDelayMs || 1000,
+				})),
+				maxConcurrentDevices: (this.config.bacnet as any)?.maxConcurrentDevices || 10,
+			};
+
+			const uuidMap = this.buildUuidMap(endpoints);
+			const socket = await this.createSocketServer("bacnet");
+			const adapter = new BACnetAdapter(bacnetConfig, this.logger);
+			this.adapters.set(groupName, adapter);
+			this.wireAdapterEvents(groupName, adapter, socket, uuidMap);
+			await adapter.start();
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			this.logger.error(`Failed to start BACnet adapter group ${groupName}: ${errorMessage}`);
+			throw error;
+		}
+	}
+
+	/** Get adapter by groupName (group-based lookup). */
+	getAdapterGroup(groupName: string): IProtocolAdapter | undefined {
+		return this.adapters.get(groupName.toLowerCase());
+	}
+
+	/** Get adapter by protocol (backward compatible - returns first adapter for protocol). */
 	getAdapter(protocol: string): IProtocolAdapter | undefined {
-		return this.adapters.get(protocol);
+		const normalized = protocol.toLowerCase();
+		// First, try direct protocol name (backward compatibility)
+		if (this.adapters.has(normalized)) {
+			return this.adapters.get(normalized);
+		}
+		// If not found, search for any adapter whose groupName ends with the protocol
+		for (const [groupName, adapter] of this.adapters) {
+			if (groupName.endsWith(`-${normalized}`) || groupName === normalized) {
+				return adapter;
+			}
+		}
+		return undefined;
 	}
 
 	/** Get all running adapters. */

@@ -6,6 +6,7 @@
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import * as actions from './actions';
+import { ModbusAdapter } from '../plugins/modbus/adapter.js';
 import { getMemoryDiagnostics, getRestartPolicyStatus } from '../system/memory.js';
 
 export const router = express.Router();
@@ -113,6 +114,43 @@ router.post('/v1/discover', async (req: Request, res: Response, next: NextFuncti
 		});
 
 		return res.status(200).json({ devices });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/discover/opcua/browse
+ * Browse OPC UA address space and return full tree nodes for tag-browser UI.
+ * Body: { endpointUrl, maxDepth?, securityMode?, securityPolicy?, certificateTrustMode?, username?, password? }
+ */
+router.post('/v1/discover/opcua/browse', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { endpointUrl, maxDepth, securityMode, securityPolicy, certificateTrustMode, username, password } = req.body ?? {};
+
+		if (!endpointUrl || typeof endpointUrl !== 'string') {
+			return res.status(400).json({ error: 'Missing or invalid endpointUrl' });
+		}
+
+		const parsedMaxDepth = maxDepth === undefined ? undefined : Number(maxDepth);
+		if (parsedMaxDepth !== undefined && (!Number.isInteger(parsedMaxDepth) || parsedMaxDepth < 1 || parsedMaxDepth > 20)) {
+			return res.status(400).json({ error: 'maxDepth must be an integer between 1 and 20' });
+		}
+
+		const nodes = await actions.browseOPCUAAddressSpace({
+			endpointUrl,
+			maxDepth: parsedMaxDepth,
+			securityMode,
+			securityPolicy,
+			certificateTrustMode,
+			username,
+			password,
+		});
+
+		return res.status(200).json({
+			endpointUrl,
+			nodes,
+		});
 	} catch (error) {
 		next(error);
 	}
@@ -662,6 +700,51 @@ router.get('/v1/adapters/:protocol/devices/:deviceName/metrics', async (req: Req
 			return res.status(404).json({ error: `Device not found: ${deviceName}` });
 		}
 		return res.status(200).json(metrics);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/adapters/modbus/devices/:deviceName/write
+ * Write value to a Modbus register
+ * Body: { register: string, value: number | boolean | string }
+ */
+router.post('/v1/adapters/modbus/devices/:deviceName/write', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { deviceName } = req.params;
+		const { register, value } = req.body ?? {};
+
+		if (!register || typeof register !== 'string') {
+			return res.status(400).json({ error: 'Missing or invalid register field' });
+		}
+
+		if (value === undefined || value === null) {
+			return res.status(400).json({ error: 'Missing value field' });
+		}
+
+		const adapterManager = actions.getAdapterManager();
+		if (!adapterManager) {
+			return res.status(503).json({ error: 'devices feature not initialized' });
+		}
+
+		const adapter = adapterManager.getAdapter('modbus');
+		if (!adapter) {
+			return res.status(404).json({ error: 'No adapter running for protocol: modbus' });
+		}
+
+		if (!(adapter instanceof ModbusAdapter)) {
+			return res.status(500).json({ error: 'Adapter type mismatch for protocol: modbus' });
+		}
+
+		await adapter.writeRegister(deviceName, register, value);
+
+		return res.status(200).json({
+			success: true,
+			deviceName,
+			register,
+			value
+		});
 	} catch (error) {
 		next(error);
 	}

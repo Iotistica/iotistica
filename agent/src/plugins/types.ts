@@ -108,6 +108,7 @@ export interface IProtocolClient<
 	disconnect(): Promise<void>;
 	isConnected(): boolean;
 	read(request?: TReadRequest): Promise<TReadResult>;
+	write?(registerName: string, value: number | boolean | string): Promise<void>;
 }
 
 /**

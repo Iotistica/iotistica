@@ -201,6 +201,19 @@ export class ModbusAdapter extends BaseProtocolAdapter{
 	isRunning(): boolean {
 		return this.running;
 	}
+
+	async writeRegister(deviceName: string, registerName: string, value: number | boolean | string): Promise<void> {
+		const client = this.clients.get(deviceName);
+		if (!client) {
+			throw new Error(`Device not found: ${deviceName}`);
+		}
+
+		if (!client.isConnected()) {
+			throw new Error(`Device ${deviceName} is not connected`);
+		}
+
+		await client.writeRegister(registerName, value);
+	}
   
 	/**
    * Get metrics summary for a specific device

@@ -1357,4 +1357,35 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 		this.clients.clear();
 		this.sessions.clear();
 	}
+
+	/**
+	 * Write a value to an OPC-UA node for a given device.
+	 * Target can be either datapoint name or full nodeId.
+	 */
+	public async writeNode(
+		deviceName: string,
+		target: string,
+		value: number | boolean | string
+	): Promise<void> {
+		const device = this.devices.get(deviceName) as OPCUADeviceConfig | undefined;
+		if (!device) {
+			throw new Error(`Device not found: ${deviceName}`);
+		}
+
+		const runtimeClient = this.clients.get(deviceName);
+		if (!runtimeClient || !runtimeClient.isConnected()) {
+			throw new Error(`Device ${deviceName} is not connected`);
+		}
+
+		const dataPoint = device.dataPoints.find((dp) => dp.name === target || dp.nodeId === target);
+		if (!dataPoint) {
+			throw new Error(`Node not found on device ${deviceName}: ${target}`);
+		}
+
+		if (!dataPoint.writable) {
+			throw new Error(`Node is not writable: ${dataPoint.name} (${dataPoint.nodeId})`);
+		}
+
+		await runtimeClient.write(dataPoint.nodeId, value);
+	}
 }
