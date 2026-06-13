@@ -154,7 +154,12 @@ param(
     # Leave empty (default) to use the standard Iotistica MQTT broker.
     [ValidateSet('', 'iotistica', 'iothub')]
     [string]$PublishTarget = "",
-    [string]$AzureIothubConnectionString = ""
+    [string]$AzureIothubConnectionString = "",
+
+    # Standalone Mode
+    # When set, agents run with no cloud provisioning or sync.
+    # Skips provisioning key generation and omits IOTISTICA_API from compose output.
+    [switch]$Standalone
 )
 
 $ErrorActionPreference = "Stop"
@@ -182,7 +187,6 @@ $ProfileDefaults = @{
     'docker' = @{
         ApiUrl = 'http://localhost:4002'
         UseDirectDb = $true
-        UseHostNetwork = $false
         DbHost = 'localhost'
         DbPort = 5432
         DbName = 'iotistica'
@@ -516,7 +520,12 @@ if (
 }
 # ──────────────────────────────────────────────────────────────────────────────
 
-$ResolvedEnvironmentProfile = Resolve-EnvironmentProfile -RequestedProfile $EnvironmentProfile
+$ResolvedEnvironmentProfile = if ($Standalone) {
+    # Standalone agents don't need cloud API/DB; skip interactive prompt
+    if ($EnvironmentProfile -ne 'auto') { $EnvironmentProfile } else { 'docker' }
+} else {
+    Resolve-EnvironmentProfile -RequestedProfile $EnvironmentProfile
+}
 Apply-EnvironmentProfile -ProfileName $ResolvedEnvironmentProfile
 
 if (-not $PSBoundParameters.ContainsKey('StartIndex')) {
@@ -559,6 +568,13 @@ function Get-OrCreateDefaultFleetUuid {
         [string]$DatabaseUrl
     )
 
+    if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
+        $pgBinCandidates = 14..20 | ForEach-Object { "C:\Program Files\PostgreSQL\$_\bin" }
+        $found = $pgBinCandidates | Where-Object { Test-Path "$_\psql.exe" } | Select-Object -First 1
+        if ($found) {
+            $env:PATH = "$env:PATH;$found"
+        }
+    }
     if (-not (Get-Command psql -ErrorAction SilentlyContinue)) {
         Write-Error "psql is required for direct provisioning. Install PostgreSQL client tools or add psql to PATH."
         exit 1
@@ -1355,16 +1371,23 @@ if ($EnableSimulation) {
 } else {
     Write-Host "Simulation: DISABLED (all agents in normal operation mode)" -ForegroundColor Gray
 }
-Write-Host "🔑 Generating provisioning keys via direct DB access..." -ForegroundColor Cyan
+$resolvedFleetUuid = ""
+$manualProvisioningKey = ""
 
-$resolvedFleetUuid = Get-OrCreateDefaultFleetUuid -PreferredFleetUuid $FleetUuid -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbPassword $DbPassword -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
-Write-Host "📦 Using fleet UUID: $resolvedFleetUuid" -ForegroundColor Gray
-
-$manualProvisioningKey = Resolve-ProvisioningKeyMode -ProvisioningKey $ProvisioningKey -Count $Count
-if ([string]::IsNullOrWhiteSpace($manualProvisioningKey)) {
-    Write-Host "🔐 Provisioning key mode: auto-generate unique keys" -ForegroundColor Gray
+if ($Standalone) {
+    Write-Host "Standalone mode: skipping provisioning key generation" -ForegroundColor Cyan
 } else {
-    Write-Host "🔐 Provisioning key mode: reusing manually supplied key for all generated agents" -ForegroundColor Yellow
+    Write-Host "🔑 Generating provisioning keys via direct DB access..." -ForegroundColor Cyan
+
+    $resolvedFleetUuid = Get-OrCreateDefaultFleetUuid -PreferredFleetUuid $FleetUuid -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbPassword $DbPassword -DbSslMode $DbSslMode -DatabaseUrl $DatabaseUrl
+    Write-Host "📦 Using fleet UUID: $resolvedFleetUuid" -ForegroundColor Gray
+
+    $manualProvisioningKey = Resolve-ProvisioningKeyMode -ProvisioningKey $ProvisioningKey -Count $Count
+    if ([string]::IsNullOrWhiteSpace($manualProvisioningKey)) {
+        Write-Host "🔐 Provisioning key mode: auto-generate unique keys" -ForegroundColor Gray
+    } else {
+        Write-Host "🔐 Provisioning key mode: reusing manually supplied key for all generated agents" -ForegroundColor Yellow
+    }
 }
 
 $services = @()
@@ -1376,7 +1399,9 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     $containerName = Get-AgentContainerName -Index $i -ProfileName $ResolvedEnvironmentProfile
     $port = Get-UniquePort $i
     
-    if ([string]::IsNullOrWhiteSpace($manualProvisioningKey)) {
+    if ($Standalone) {
+        $apiKey = ""
+    } elseif ([string]::IsNullOrWhiteSpace($manualProvisioningKey)) {
         Write-Host "  Generating key for $agentName..." -ForegroundColor Gray
         $apiKey = New-ProvisioningKey -ApiUrl $ApiUrl -FleetUuid $resolvedFleetUuid -UseDirectDb $UseDirectDb `
             -DbHost $DbHost -DbPort $DbPort -DbName $DbName -DbUser $DbUser -DbPassword $DbPassword `
@@ -1418,13 +1443,13 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
         @('    image: iotistic/agent:latest')
     }
     
-    # Network configuration: host mode for discovery or bridge for isolation
+    # Network configuration: host mode for discovery or shared bridge for isolation
     $networkConfigLines = if ($UseHostNetwork) {
         @('    network_mode: host')
     } else {
         @(
             '    networks:',
-            '      - iotistic-net'
+            '      - iotistica-net'
         )
     }
 
@@ -1455,15 +1480,13 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
                 '      - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth',
                 '    environment:',
                 "      - DEVICE_API_PORT=$port",
-                "      - IOTISTICA_API=$cloudApiEndpoint",
                 "      - NODE_ENV=$NodeEnv",
                 '      - MQTT_AUTH_DIR=/app/data/mosquitto-auth',
                 "      - MQTT_BROKER_URL=$MqttBrokerUrl",
                 "      - MQTT_USERNAME=$MqttUsername",
                 "      - MQTT_PASSWORD=$MqttPassword",
                 '      # Bootstrap & Security (not dashboard-controlled)',
-                "      - REQUIRE_PROVISIONING=$RequireProvisioning",
-                "      - PROVISIONING_KEY=$apiKey",
+                "      - STANDALONE=$(if ($Standalone) { 'true' } else { 'false' })",
                 "      - API_SECURITY_MODE=$ApiSecurityMode",
                 "      - FIREWALL_ENABLED=$FirewallEnabled",
                 "      - FIREWALL_MODE=$FirewallMode",
@@ -1480,6 +1503,12 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
                 "      - AGENT_SHELL_HMAC_KEY=$agentShellHmacKeyEnv",
                 '      - AGENT_SHELL_MAX_SESSION_MS=3600000'
         )
+
+        # Cloud connectivity — omitted in standalone mode.
+        if (-not $Standalone) {
+            $serviceLines += "      - IOTISTICA_API=$cloudApiEndpoint"
+            $serviceLines += "      - PROVISIONING_KEY=$apiKey"
+        }
 
         # Optional publish target override — only emit when explicitly set.
         if ($PublishTarget -ne "") {
@@ -1506,7 +1535,7 @@ if ($IncludeAgentCli) {
     } else {
         @(
             '    networks:',
-            '      - iotistic-net'
+            '      - iotistica-net'
         )
     }
 
@@ -1567,8 +1596,8 @@ volumes:
 $networksFooter = @"
 
 networks:
-  iotistic-net:
-    driver: bridge
+  iotistica-net:
+    external: true
 "@
 
 $content = $header + "`n" + ($services -join "`n") + $volumesHeader + "`n" + ($volumes -join "`n    driver: local`n")

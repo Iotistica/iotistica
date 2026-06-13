@@ -453,6 +453,15 @@ export class DevicePublish extends EventEmitter {
 	}
 
 	/**
+	 * Reload publish bindings across all active device managers.
+	 * Called after destinations or subscriptions are created/updated/deleted via admin UI.
+	 */
+	public async reloadAllBindings(): Promise<void> {
+		await Promise.all(this.devices.map((device) => device.reloadBindings()));
+		this.logger.info('Reloaded publish bindings for all endpoints', { deviceCount: this.devices.length });
+	}
+
+	/**
    * Check if MQTT is connected
    */
 	public isMqttConnected(): boolean {

@@ -103,7 +103,7 @@ export class DeviceAPI {
 		// Serve admin panel static files (built output from agent/admin/dist)
 		const adminDist = join(__dirname, '../../admin/dist');
 		this.api.use('/admin', express.static(adminDist));
-		this.api.get('/admin/*splat', (_req, res) => {
+		this.api.get('/admin/*', (_req, res) => {
 			res.sendFile(join(adminDist, 'index.html'));
 		});
 

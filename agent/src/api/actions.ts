@@ -27,6 +27,7 @@ import type { DiscoveryService } from '../discovery/service';
 import type { OPCUABrowseRequest } from '../plugins/opcua/discovery';
 import { TailscaleManager } from '../network/vpn/tailscale-manager';
 import type { TailscaleConfig, TailscaleStatus } from '../network/vpn/tailscale-manager';
+import type { DevicePublish } from '../publish/index.js';
 
 type AgentInstance = {
 	getLifecycleState: () => string;
@@ -48,6 +49,11 @@ let agentInstance: AgentInstance | undefined;
 let healthReporter: (() => HealthReport) | undefined;
 let agentUpdater: AgentUpdater | undefined;
 let tailscaleManager: TailscaleManager | null = null;
+let devicePublish: DevicePublish | undefined;
+
+export function setDevicePublish(dp: DevicePublish | undefined): void {
+	devicePublish = dp;
+}
 
 export function setAgent(agent: AgentInstance): void {
 	agentInstance = agent;
@@ -786,6 +792,7 @@ export const addEndpoint = async (body: {
 	enabled?: boolean;
 	data_points?: any[];
 	metadata?: Record<string, any>;
+	fingerprint?: string;
 }) => {
 	if (!configManager && !stateManager) throw new Error('Config manager not initialized');
 	if (!body.name) throw new Error('name is required');
@@ -850,6 +857,23 @@ export const addEndpoint = async (body: {
 		config.endpoints.push(newEndpoint as any);
 	});
 
+	// Write directly to the endpoints table so GET /v1/endpoints reflects the new
+	// endpoint immediately. applyConfigUpdate only updates target state; the reconciler
+	// that syncs target state → DB runs asynchronously and would otherwise leave the
+	// table empty until the next reconciliation cycle.
+	const { EndpointModel } = await import('../db/models/endpoint.model.js');
+	await EndpointModel.upsert({
+		uuid,
+		fingerprint: body.fingerprint,
+		name: body.name,
+		protocol: body.protocol as any,
+		connection: resolvedConnection,
+		poll_interval: body.poll_interval ?? 5000,
+		enabled: body.enabled !== false,
+		data_points: resolvedDataPoints.length > 0 ? resolvedDataPoints : undefined,
+		metadata: body.metadata,
+	});
+
 	return {
 		uuid,
 		name: body.name,
@@ -889,17 +913,24 @@ export const updateEndpoint = async (uuidOrName: string, patch: { enabled?: bool
 export const removeEndpoint = async (uuid: string) => {
 	if (!configManager && !stateManager) throw new Error('Config manager not initialized');
 
-	let found = false;
-	await applyConfigUpdate((config) => {
-		const endpoints = Array.isArray(config.endpoints) ? config.endpoints : [];
-		const filtered = endpoints.filter((e: any) => e.uuid !== uuid && e.id !== uuid);
-		found = filtered.length !== endpoints.length;
-		config.endpoints = filtered;
-	});
+	const { EndpointModel } = await import('../db/models/endpoint.model.js');
 
-	if (!found) {
+	// Verify the endpoint exists before attempting removal
+	const existing = await EndpointModel.getByUuid(uuid);
+	if (!existing) {
 		throw Object.assign(new Error(`Endpoint not found: ${uuid}`), { statusCode: 404 });
 	}
+
+	// Remove from target state config (keeps reconciler in sync)
+	await applyConfigUpdate((config) => {
+		if (Array.isArray(config.endpoints)) {
+			config.endpoints = config.endpoints.filter((e: any) => e.uuid !== uuid && e.id !== uuid);
+		}
+	});
+
+	// Remove directly from the endpoints table so GET /v1/endpoints reflects
+	// the deletion immediately, without waiting for the reconciliation cycle.
+	await EndpointModel.deleteByUuid(uuid);
 };
 
 /**
@@ -958,6 +989,12 @@ export const createPublisher = async (body: {
 		throw new Error('Failed to create publisher');
 	}
 
+	devicePublish?.reloadAllBindings().catch((err) => {
+		logger?.warnSync('Failed to reload publish bindings after creating destination', {
+			error: err instanceof Error ? err.message : String(err),
+		});
+	});
+
 	return created;
 };
 
@@ -980,6 +1017,12 @@ export const updatePublisher = async (id: number, body: {
 		throw new Error(`Failed to update publisher: ${id}`);
 	}
 
+	devicePublish?.reloadAllBindings().catch((err) => {
+		logger?.warnSync('Failed to reload publish bindings after updating destination', {
+			error: err instanceof Error ? err.message : String(err),
+		});
+	});
+
 	return updated;
 };
 
@@ -991,6 +1034,12 @@ export const deletePublisher = async (id: number) => {
 	if (!deleted) {
 		throw Object.assign(new Error(`Destination not found: ${id}`), { statusCode: 404 });
 	}
+
+	devicePublish?.reloadAllBindings().catch((err) => {
+		logger?.warnSync('Failed to reload publish bindings after deleting destination', {
+			error: err instanceof Error ? err.message : String(err),
+		});
+	});
 
 	return { deleted: true };
 };
@@ -1039,13 +1088,13 @@ export const createPublishSubscription = async (body: {
 	if (destination.type !== 'iotistica') {
 		const destinationTopic = typeof body.route_json?.topic === 'string' ? body.route_json.topic.trim() : '';
 		if (!destinationTopic) {
-			throw new Error('route_json.topic is required for non-default destinations');
+			throw new Error('route_json.topic is required for external destinations');
 		}
 	}
 
 	const created = PublishSubscriptionsModel.create({
 		publish_destination_id: body.publish_destination_id,
-		topics: body.topics || [],
+		topics: body.topics ?? [],
 		route_json: (body.route_json as any) ?? null,
 		payload_format: format,
 		compression: (body.compression as any) ?? null,
@@ -1055,6 +1104,12 @@ export const createPublishSubscription = async (body: {
 	if (!created) {
 		throw new Error('Failed to create publish subscription');
 	}
+
+	devicePublish?.reloadAllBindings().catch((err) => {
+		logger?.warnSync('Failed to reload publish bindings after creating subscription', {
+			error: err instanceof Error ? err.message : String(err),
+		});
+	});
 
 	return created;
 };
@@ -1103,7 +1158,7 @@ export const updatePublishSubscription = async (id: number, body: {
 		const effectiveRoute = body.route_json !== undefined ? body.route_json : (existing.route_json as Record<string, unknown> | null | undefined);
 		const destinationTopic = typeof effectiveRoute?.topic === 'string' ? effectiveRoute.topic.trim() : '';
 		if (!destinationTopic) {
-			throw new Error('route_json.topic is required for non-default destinations');
+			throw new Error('route_json.topic is required for external destinations');
 		}
 	}
 
@@ -1111,6 +1166,12 @@ export const updatePublishSubscription = async (id: number, body: {
 	if (!updated) {
 		throw new Error(`Failed to update publish subscription: ${id}`);
 	}
+
+	devicePublish?.reloadAllBindings().catch((err) => {
+		logger?.warnSync('Failed to reload publish bindings after updating subscription', {
+			error: err instanceof Error ? err.message : String(err),
+		});
+	});
 
 	return updated;
 };
@@ -1123,6 +1184,12 @@ export const deletePublishSubscription = async (id: number) => {
 	if (!deleted) {
 		throw Object.assign(new Error(`Publish subscription not found: ${id}`), { statusCode: 404 });
 	}
+
+	devicePublish?.reloadAllBindings().catch((err) => {
+		logger?.warnSync('Failed to reload publish bindings after deleting subscription', {
+			error: err instanceof Error ? err.message : String(err),
+		});
+	});
 
 	return { deleted: true };
 };
@@ -1156,6 +1223,7 @@ export async function runDiscovery(options: {
 	protocols?: string[];
 	validate?: boolean;
 	forceRun?: boolean;
+	skipDbWrites?: boolean;
 }): Promise<any[]> {
 	if (!discoveryService) {
 		throw new Error('DiscoveryService not initialized');

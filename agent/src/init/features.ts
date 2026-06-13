@@ -19,9 +19,11 @@ import type { AnomalyDetectionService } from '../anomaly/index.js';
 import { AdapterInitializer } from './adapters.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
+import { setDevicePublish } from '../api/actions.js';
 import { type CloudMqttClient } from '../mqtt/manager.js';
 import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
 import { type StateManager } from '../core/state.js';
+import { isStandaloneMode } from '../utils/env.js';
 
 export interface FeatureContext {
   logger: AgentLogger;
@@ -258,6 +260,7 @@ export class FeatureInitializer {
 					});
 				}
 				this.features.devicePublish = undefined;
+				setDevicePublish(undefined);
 				// Dynamic runtime disable — log at INFO so operators know it was explicitly turned off
 				logger.infoSync('Device Publish Feature disabled by feature toggle', {
 					component: LogComponents.agent,
@@ -370,6 +373,7 @@ export class FeatureInitializer {
 			}
 
 			await this.features.devicePublish.start();
+			setDevicePublish(this.features.devicePublish);
 
 			logger.debugSync('Device Publish Feature initialized', {
 				component: LogComponents.agent,
@@ -384,6 +388,7 @@ export class FeatureInitializer {
 				note: 'Continuing without Device Publish'
 			});
 			this.features.devicePublish = undefined;
+			setDevicePublish(undefined);
 		}
 	}
 
@@ -419,6 +424,14 @@ export class FeatureInitializer {
 
 	async initShellHandler(): Promise<void> {
 		const { logger, deviceInfo, mqttManager } = this.context;
+
+		if (isStandaloneMode() || !deviceInfo.provisioned) {
+			logger.debugSync('Shell handler skipped — requires cloud MQTT', {
+				component: LogComponents.agent,
+			});
+			return;
+		}
+
 		const deviceRemoteAccessEnabled = this.isDeviceRemoteAccessEnabled();
 		if (!deviceRemoteAccessEnabled) {
 			if (this.features.shellHandler) {

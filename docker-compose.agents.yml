@@ -1,11 +1,11 @@
 # Auto-generated docker-compose file for 1 agents
-# Generated: 2026-05-25 18:35:20
-# Agents: 75 to 75
-# Ports: 48555 to 48555
+# Generated: 2026-06-13 14:28:51
+# Agents: 1 to 1
+# Ports: 48481 to 48481
 
 services:
-  agent-75:
-    container_name: local-agent-75
+  agent-1:
+    container_name: local-agent-1
     build:
       context: .
       dockerfile: agent/Dockerfile
@@ -18,24 +18,23 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - "48555:48555"
+      - "48481:48481"
+    networks:
+      - iotistica-net
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - agent-75-data:/app/data
+      - agent-1-data:/app/data
       - ./certs/ca.crt:/app/certs/ca.crt:ro
       - ./mosquitto-agent/auth:/app/data/mosquitto-auth  # shared with iotistic-mosquitto-agent for file auth
     environment:
-      - DEVICE_API_PORT=48555
-      - DEVICE_API_HOST=0.0.0.0
-      - IOTISTICA_API=http://localhost:4002
+      - DEVICE_API_PORT=48481
       - NODE_ENV=development
       - MQTT_AUTH_DIR=/app/data/mosquitto-auth
-      - MQTT_BROKER_URL=mqtt://localhost:5884
+      - MQTT_BROKER_URL=mqtt://iotistic-mosquitto-agent:1883
       - MQTT_USERNAME=admin
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
-      - REQUIRE_PROVISIONING=false
-      - PROVISIONING_KEY=87e8b0dd03111e98a93d73c3397ae4531895cfa84011dc204f910813ef59b50e
+      - STANDALONE=true
       - API_SECURITY_MODE=LOCAL_NETWORK
       - FIREWALL_ENABLED=false
       - FIREWALL_MODE=off
@@ -51,8 +50,6 @@ services:
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
-    networks:
-      - iotistic-net
   agent-cli:
     build:
       context: ./agent-cli
@@ -63,8 +60,8 @@ services:
     command: ["tail -f /dev/null"]
     tty: true
     environment:
-      - DEVICE_API_PORT=48555
-      - DEVICE_API_URL=http://agent-75:48555
+      - DEVICE_API_PORT=48481
+      - DEVICE_API_URL=http://agent-1:48481
       - CONFIG_DIR=/app/data
       - DEBUG=false
     volumes:
@@ -75,12 +72,12 @@ services:
         max-size: "5m"
         max-file: "2"
     networks:
-      - iotistic-net
+      - iotistica-net
 volumes:
-  agent-75-data:
+  agent-1-data:
     driver: local
   agent-cli-data:
     driver: local
 networks:
-  iotistic-net:
-    driver: bridge
+  iotistica-net:
+    external: true

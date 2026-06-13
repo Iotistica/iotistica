@@ -6,8 +6,8 @@ import { DeviceState } from './types.js';
 /**
  * Manages the Unix-domain socket lifecycle for one endpoint.
  * Emits:
- *   'connected'    — socket is ready
- *   'data'         — Buffer received from socket
+ *   'connected'    — socket is ready (after subscription ACK received)
+ *   'data'         — Buffer received from socket (never includes the subscription ACK)
  *   'error'        — socket error (close follows)
  *   'disconnected' — socket closed (reconnect scheduled internally unless stopped)
  *   'reconnecting' — about to retry (useful for stats tracking)
@@ -19,6 +19,8 @@ export class SocketConnection extends EventEmitter {
 	private _state: DeviceState = DeviceState.DISCONNECTED;
 	private _attempts = 0;
 	private currentDelay: number;
+	private _subscriptionAcked = false;
+	private _lineBuffer = '';
 
 	private readonly INITIAL_DELAY_MS = 500;
 	private readonly MAX_FAST_DELAY_MS = 8000;
@@ -38,12 +40,13 @@ export class SocketConnection extends EventEmitter {
 	connect(): void {
 		this.stopped = false;
 		this._state = DeviceState.CONNECTING;
-		const _name = this.config.name || 'unknown';
+		this._subscriptionAcked = false;
+		this._lineBuffer = '';
 
 		try {
 			this.socket = net.createConnection(this.config.addr);
 			this.socket.on('connect', () => this.onConnect());
-			this.socket.on('data', (buf: Buffer) => this.emit('data', buf));
+			this.socket.on('data', (buf: Buffer) => this.onData(buf));
 			this.socket.on('error', (err: Error) => this.onSocketError(err));
 			this.socket.on('close', () => this.onClose());
 		} catch (err) {
@@ -68,8 +71,6 @@ export class SocketConnection extends EventEmitter {
 		this._attempts = 0;
 		this.currentDelay = this.INITIAL_DELAY_MS;
 
-		// Send subscription message to socket server
-		// Server expects: {"subscribe": ["topic1", "topic2"]} or {"subscribe": []} for wildcard
 		if (this.socket) {
 			const protocol = this.config.protocol || 'unknown';
 			const subscriptionMessage = JSON.stringify({ subscribe: [protocol] });
@@ -79,16 +80,45 @@ export class SocketConnection extends EventEmitter {
 						`Failed to send subscription message for '${this.config.name || 'unknown'}': ${err.message}`,
 					);
 					this.onSocketError(err);
-					return;
 				}
-				this.logger?.debug(
-					`Sent subscription for protocol '${protocol}' on device '${this.config.name || 'unknown'}'`,
-				);
-				this.emit('connected');
 			});
-		} else {
-			this.emit('connected');
 		}
+	}
+
+	private onData(buf: Buffer): void {
+		if (this._subscriptionAcked) {
+			this.emit('data', buf);
+			return;
+		}
+
+		// Buffer incoming data until we've consumed the subscription ACK line.
+		this._lineBuffer += buf.toString('utf8');
+		const newlineIdx = this._lineBuffer.indexOf('\n');
+		if (newlineIdx === -1) return;
+
+		const line = this._lineBuffer.slice(0, newlineIdx);
+		const remaining = this._lineBuffer.slice(newlineIdx + 1);
+		this._lineBuffer = '';
+		this._subscriptionAcked = true;
+
+		try {
+			const parsed = JSON.parse(line);
+			if (parsed.ok !== true) {
+				this.logger?.error(
+					`Unexpected subscription response for '${this.config.name || 'unknown'}': ${line}`,
+				);
+			}
+		} catch {
+			// Non-JSON first line — treat it as data
+			const passthrough = line + '\n';
+			this.emit('connected');
+			this.emit('data', Buffer.from(passthrough, 'utf8'));
+			if (remaining.length > 0) this.emit('data', Buffer.from(remaining, 'utf8'));
+			return;
+		}
+
+		this.emit('connected');
+		if (remaining.length > 0) this.emit('data', Buffer.from(remaining, 'utf8'));
 	}
 
 	private onSocketError(err: Error): void {
@@ -99,6 +129,8 @@ export class SocketConnection extends EventEmitter {
 
 	private onClose(): void {
 		this._state = DeviceState.DISCONNECTED;
+		this._subscriptionAcked = false;
+		this._lineBuffer = '';
 		this.socket = null;
 		this.logger?.info(`Connection closed for device '${this.config.name || 'unknown'}'`);
 		this.emit('disconnected');

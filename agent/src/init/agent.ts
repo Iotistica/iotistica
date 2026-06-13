@@ -5,6 +5,7 @@ import { setTenantId, resetTenantIdCache } from '../mqtt/topics.js';
 import { getPackageVersion } from '../utils/api-utils.js';
 import { getMacAddress, getOsVersion } from '../system/metrics.js';
 import { CloudLogBackend } from '../logging/cloud-backend.js';
+import { isStandaloneMode } from '../utils/env.js';
 
 function normalizeOptionalEnvValue(value?: string): string | undefined {
 	if (typeof value !== 'string') {
@@ -28,6 +29,10 @@ export async function initAgent(ctx: AgentInitContext): Promise<void> {
 }
 
 export async function initializeCloudLogging(ctx: AgentInitContext): Promise<void> {
+	if (isStandaloneMode()) {
+		return;
+	}
+
 	const cloudApiEndpoint = ctx.configManager!.getCloudApiEndpoint();
 
 	if (
@@ -82,6 +87,15 @@ export async function initializeAgentManager(ctx: AgentInitContext): Promise<voi
 	await ctx.agentManager.initialize();
 
 	let agentInfo = ctx.agentManager.getAgentInfo();
+
+	if (isStandaloneMode()) {
+		ctx.agentLogger?.infoSync('Standalone mode — skipping cloud provisioning', {
+			component: LogComponents.agent,
+		});
+		await ctx.agentManager.markAsLocalMode();
+		agentInfo = ctx.agentManager.getAgentInfo();
+	} else {
+
 	const provisioningApiKey = normalizeOptionalEnvValue(process.env.PROVISIONING_KEY);
 	const cloudEndpoint = process.env.IOTISTICA_API || ctx.configManager!.getCloudApiEndpoint();
 
@@ -131,6 +145,8 @@ export async function initializeAgentManager(ctx: AgentInitContext): Promise<voi
 		await ctx.agentManager.markAsLocalMode();
 		agentInfo = ctx.agentManager.getAgentInfo();
 	}
+
+	} // end of !isStandaloneMode() block
 
 	ctx.agentInfo = agentInfo;
 

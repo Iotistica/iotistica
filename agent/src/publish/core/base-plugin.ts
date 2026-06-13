@@ -29,7 +29,7 @@ export class BasePublishPlugin extends EventEmitter implements IPublishPlugin {
       return;
     }
 
-    if (this.client.disconnect && this.client.isConnected()) {
+    if (this.client.disconnect) {
       await this.client.disconnect();
     }
 

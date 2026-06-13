@@ -178,8 +178,12 @@ export class PublishManager extends EventEmitter {
 
 		this.bindings = this.loadBindings();
 		if (this.bindings.length === 0) {
-			this.logger?.warn('No publisher bindings found; using default Iotistica');
-			this.bindings = this.createDefaultIotisticaBinding();
+			if (this.defaultClient.isConnected()) {
+				this.logger?.warn('No publisher bindings found; using default Iotistica');
+				this.bindings = this.createDefaultIotisticaBinding();
+			} else {
+				this.logger?.info('No publisher bindings found; waiting for bindings to be configured');
+			}
 		}
 
 		// Try to start plugins and fall back to default if all fail
@@ -210,19 +214,27 @@ export class PublishManager extends EventEmitter {
 			}
 		}
 
-		// If all plugins failed and we have non-default bindings, use default Iotistica
+		// If all plugins failed and we have non-default bindings, fall back to Iotistica only when cloud is connected
 		if (failures.length === startedPlugins.size && failures.length > 0 && this.bindings.some((b) => b.publisher.id !== -1)) {
-			this.logger?.warn(`All publish plugins failed to start; falling back to default Iotistica`, {
-				failedPluginCount: failures.length,
-				errors: failures.map((f) => f.error.message),
-			});
-			this.bindings = this.createDefaultIotisticaBinding();
-			this.logger?.info(`Starting default Iotistica publish plugin`);
-			try {
-				await this.bindings[0].plugin.start();
-			} catch (err) {
-				this.logger?.error('Failed to start default Iotistica publisher', err);
-				throw new Error(`All publish plugins failed and fallback also failed: ${err instanceof Error ? err.message : String(err)}`);
+			if (this.defaultClient.isConnected()) {
+				this.logger?.warn(`All publish plugins failed to start; falling back to default Iotistica`, {
+					failedPluginCount: failures.length,
+					errors: failures.map((f) => f.error.message),
+				});
+				this.bindings = this.createDefaultIotisticaBinding();
+				this.logger?.info(`Starting default Iotistica publish plugin`);
+				try {
+					await this.bindings[0].plugin.start();
+				} catch (err) {
+					this.logger?.error('Failed to start default Iotistica publisher', err);
+					throw new Error(`All publish plugins failed and fallback also failed: ${err instanceof Error ? err.message : String(err)}`);
+				}
+			} else {
+				this.logger?.warn(`All publish plugins failed to start; cloud not connected, clearing bindings`, {
+					failedPluginCount: failures.length,
+					errors: failures.map((f) => f.error.message),
+				});
+				this.bindings = [];
 			}
 		}
 
@@ -259,6 +271,40 @@ export class PublishManager extends EventEmitter {
 
 		this.bindings = [];
 		this.pluginByDestinationId.clear();
+	}
+
+	async reloadBindings(): Promise<void> {
+		if (this.needStop) return;
+
+		const oldPlugins = this.getUniquePlugins();
+		const newBindings = this.loadBindings();
+
+		if (newBindings.length === 0 && this.defaultClient.isConnected()) {
+			newBindings.push(...this.createDefaultIotisticaBinding());
+		}
+
+		this.bindings = newBindings;
+		const newPlugins = this.getUniquePlugins();
+
+		for (const plugin of newPlugins) {
+			if (!oldPlugins.includes(plugin)) {
+				try {
+					await plugin.start();
+				} catch (err) {
+					this.logger?.error('Failed to start plugin during binding reload', err);
+				}
+			}
+		}
+
+		for (const plugin of oldPlugins) {
+			if (!newPlugins.includes(plugin)) {
+				await plugin.stop().catch((err) => {
+					this.logger?.error('Failed to stop old plugin during binding reload', err);
+				});
+			}
+		}
+
+		this.logger?.info('Reloaded publish bindings', { bindingCount: this.bindings.length });
 	}
 
 	getStats(): DeviceStats {
@@ -321,7 +367,12 @@ export class PublishManager extends EventEmitter {
 		try {
 
 			const name = this.config.name || 'unknown';
-			const topic = agentTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
+			let topic: string;
+			try {
+				topic = agentTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
+			} catch {
+				topic = `local/${this.deviceUuid}/${this.config.mqttTopic || 'data'}`;
+			}
 			const messageCount = this.batcher.messageCount;
 			const batchBytes = this.batcher.totalBytes;
 			let messages = [...this.batcher.messages] as ProtocolMessage[];
@@ -349,7 +400,8 @@ export class PublishManager extends EventEmitter {
 			let { data, baselineSize, msgId } = this.buildPayload(name, enriched, this.payloadFormat);
 			if (this.needStop) return;
 
-			if (!this.isConnected()) {
+			const hasExternalBindings = this.bindings.some((b) => b.publisher.type !== 'iotistica');
+			if (!this.isConnected() && !hasExternalBindings) {
 				await this.publishOffline(topic, data, msgId, messageCount);
 				return;
 			}
@@ -963,10 +1015,11 @@ export class PublishManager extends EventEmitter {
 	private loadBindings(): HostBinding[] {
 		const destinations = PublishDestinationsModel.getAll(false);
 		const subscriptions = PublishSubscriptionsModel.getAll(false);
+		const cloudConnected = this.defaultClient.isConnected();
 
 		if (subscriptions.length === 0 || destinations.length === 0) {
 			this.pluginByDestinationId.clear();
-			return this.createDefaultIotisticaBinding();
+			return cloudConnected ? this.createDefaultIotisticaBinding() : [];
 		}
 
 		const destinationsById = new Map<number, PublisherRecord>();
@@ -1003,7 +1056,7 @@ export class PublishManager extends EventEmitter {
 			return destinationType === 'iotistica';
 		});
 
-		if (!hasConfiguredIotisticaBinding) {
+		if (!hasConfiguredIotisticaBinding && cloudConnected) {
 			return [...this.createDefaultIotisticaBinding(), ...bindings];
 		}
 

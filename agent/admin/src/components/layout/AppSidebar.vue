@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   CloudUploadOutlined,
   PartitionOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -12,6 +13,11 @@ const router = useRouter()
 const selectedKey = computed(() => route.path)
 
 const menuItems = [
+  {
+    key: '/endpoints',
+    icon: ApartmentOutlined,
+    label: 'Endpoints',
+  },
   {
     key: '/destinations',
     icon: CloudUploadOutlined,

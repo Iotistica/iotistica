@@ -5,15 +5,15 @@ const BASE = '/v1/publish/subscriptions'
 
 export const subscriptionsApi = {
   getAll(): Promise<Subscription[]> {
-    return client.get<Subscription[]>(BASE).then((r) => r.data)
+    return client.get<{ subscriptions: Subscription[] }>(BASE).then((r) => r.data.subscriptions)
   },
 
   create(data: SubscriptionFormData): Promise<Subscription> {
-    return client.post<Subscription>(BASE, data).then((r) => r.data)
+    return client.post<{ subscription: Subscription }>(BASE, data).then((r) => r.data.subscription)
   },
 
   update(id: number, data: Partial<SubscriptionFormData>): Promise<Subscription> {
-    return client.patch<Subscription>(`${BASE}/${id}`, data).then((r) => r.data)
+    return client.patch<{ subscription: Subscription }>(`${BASE}/${id}`, data).then((r) => r.data.subscription)
   },
 
   delete(id: number): Promise<void> {

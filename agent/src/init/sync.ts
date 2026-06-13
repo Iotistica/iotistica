@@ -4,6 +4,7 @@ import { LogComponents } from '../logging/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 import { CloudSync } from '../sync/index.js';
 import { initAnomalyDetection } from './anomaly.js';
+import { isStandaloneMode } from '../utils/env.js';
 
 export async function initSync(ctx: AgentInitContext): Promise<void> {
 	await initAgentSync(ctx);
@@ -35,6 +36,13 @@ export async function initSync(ctx: AgentInitContext): Promise<void> {
 }
 
 export async function initAgentSync(ctx: AgentInitContext): Promise<void> {
+	if (isStandaloneMode()) {
+		ctx.agentLogger?.infoSync('Standalone mode — cloud sync disabled', {
+			component: LogComponents.agent,
+		});
+		return;
+	}
+
 	const cloudApiEndpoint = ctx.configManager!.getCloudApiEndpoint();
 
 	if (!cloudApiEndpoint) {

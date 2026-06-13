@@ -992,12 +992,21 @@ export class AdapterManager extends EventEmitter {
 					port: d.connection.port || 47808,
 					deviceInstance: d.connection.deviceId || d.connection.deviceInstance || 0,
 					enabled: d.enabled,
-					objects: (d.data_points || []).map((dp: any) => ({
-						name: dp.name || dp.objectName,
-						objectIdentifier: dp.objectIdentifier || dp.objectId,
-						propertyId: dp.propertyId || 85, // PRESENT_VALUE
-						dataType: dp.dataType,
-					})),
+					objects: (d.data_points || [])
+						.filter((dp: any) => [
+							'analog-input', 'analog-output', 'analog-value',
+							'binary-input', 'binary-output', 'binary-value',
+							'multi-state-input', 'multi-state-output', 'multi-state-value',
+						].includes(dp.objectType))
+						.map((dp: any) => ({
+							name: dp.name || dp.objectName,
+							objectType: dp.objectType,
+							objectInstance: dp.objectInstance,
+							propertyId: dp.propertyId || 85,
+							unit: dp.unit || dp.units || '',
+							pollIntervalMs: dp.pollIntervalMs || 5000,
+							enabled: dp.enabled !== false,
+						})),
 					pollIntervalMs: d.poll_interval || 5000,
 					maxConcurrentReads: d.connection.maxConcurrentReads || 5,
 					connectionTimeoutMs: d.connection.timeout || 5000,

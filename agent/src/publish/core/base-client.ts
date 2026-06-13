@@ -36,10 +36,12 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 
 		await new Promise<void>((resolve, reject) => {
 			const client = mqtt.connect(options as any);
+			// Assign immediately so disconnect() can always call end(), even if
+			// the initial connection fails and this.client would otherwise stay null.
+			this.client = client;
 			let initialized = false;
 
 			const markConnected = () => {
-				this.client = client;
 				const wasConnected = this.connected;
 				this.connected = true;
 
@@ -125,9 +127,11 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 	public async disconnect(): Promise<void> {
 		this.onPreDisconnect();
 		if (!this.client) return;
-		await new Promise<void>((resolve) => this.client!.end(false, {}, () => resolve()));
+		const client = this.client;
 		this.client = null;
 		this.connected = false;
+		// force=true stops any pending reconnect timer immediately
+		await new Promise<void>((resolve) => client.end(true, {}, () => resolve()));
 		this.emit('disconnect');
 	}
 

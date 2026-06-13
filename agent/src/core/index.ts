@@ -382,6 +382,7 @@ export class AgentManager {
 		this.agentInfo.name = this.agentInfo.name || `agent-${this.agentInfo.uuid.slice(0, 8)}`;
 		this.agentInfo.type = this.agentInfo.type || 'standalone';
 		this.agentInfo.agentVersion = process.env.AGENT_VERSION || getPackageVersion();
+		this.agentInfo.mqttBrokerConfig = undefined;
 
 		await this.saveAgentInfo();
 

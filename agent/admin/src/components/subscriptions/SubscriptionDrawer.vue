@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import type { FormInstance } from 'ant-design-vue'
 import type { Destination, Subscription, SubscriptionFormData, SubscriptionRoute } from '@/types'
@@ -16,6 +16,7 @@ const emit = defineEmits<{
   saved: []
 }>()
 
+const SOURCE_PROTOCOLS = ['bacnet', 'modbus', 'opcua', 'mqtt', 'system']
 const PAYLOAD_FORMATS = ['custom', 'tags', 'ecp']
 const COMPRESSIONS = [
   { label: 'None (global default)', value: null },
@@ -52,6 +53,20 @@ const blankForm = (): SubscriptionFormData => ({
 
 const form = ref<SubscriptionFormData>(blankForm())
 
+const selectedDestination = computed(() =>
+  props.destinations.find((d) => d.id === form.value.publish_destination_id) ?? null,
+)
+
+const isExternalDestination = computed(() =>
+  !!selectedDestination.value && selectedDestination.value.type !== 'iotistica',
+)
+
+const destinationTopicRules = computed(() =>
+  isExternalDestination.value
+    ? [{ required: true, message: 'Destination topic is required for external destinations' }]
+    : [],
+)
+
 watch(
   () => props.open,
   (open) => {
@@ -75,7 +90,7 @@ watch(
 async function submit() {
   await formRef.value?.validate()
   saving.value = true
-  // Strip empty route_json if all fields are empty
+
   const payload = { ...form.value }
   const r = payload.route_json
   const hasRouteConfig =
@@ -143,19 +158,34 @@ function close() {
         </a-select>
       </a-form-item>
 
-      <!-- Topics -->
+      <!-- Destination Topic -->
       <a-form-item
-        label="Topics"
+        label="Destination Topic"
+        name="route_json.topic"
+        :rules="destinationTopicRules"
+        extra="MQTT topic to publish to on the external broker (e.g. sensors/bacnet/readings)"
+      >
+        <a-input
+          v-model:value="form.route_json!.topic"
+          placeholder="e.g. sensors/bacnet/readings"
+        />
+      </a-form-item>
+
+      <!-- Source Protocols -->
+      <a-form-item
+        label="Source Protocols"
         name="topics"
-        :rules="[{ required: true, type: 'array', min: 1, message: 'Add at least one topic' }]"
+        extra="Which protocol endpoints feed this subscription. Leave empty to receive from all."
       >
         <a-select
           v-model:value="form.topics"
-          mode="tags"
-          :token-separators="[',', ' ']"
-          placeholder="Type a topic and press Enter — e.g. sensor/temperature"
-          :open="false"
-        />
+          mode="multiple"
+          placeholder="All protocols (leave empty for all)"
+        >
+          <a-select-option v-for="p in SOURCE_PROTOCOLS" :key="p" :value="p">
+            {{ p }}
+          </a-select-option>
+        </a-select>
       </a-form-item>
 
       <!-- Payload Format -->
@@ -216,9 +246,6 @@ function close() {
               </a-form-item>
             </a-col>
           </a-row>
-          <a-form-item label="Override topic">
-            <a-input v-model:value="form.route_json!.topic" placeholder="Leave empty to use subscription topic" />
-          </a-form-item>
         </a-collapse-panel>
       </a-collapse>
     </a-form>

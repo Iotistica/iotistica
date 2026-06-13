@@ -8,6 +8,8 @@ import { migration as dropAgentCloudId } from './migrations/20260317020000_drop_
 import { migration as addDevicesTable } from './migrations/20260318000000_add_devices_table.js';
 import { migration as addSchemaDriftTables } from './migrations/20260515000000_add_schema_drift_tables.js';
 import { migration as addPublishControlTables } from './migrations/20260523010000_add_publish_control_tables.js';
+import { migration as addCompressionToPublishSubscriptions } from './migrations/20260525000000_add_compression_to_publish_subscriptions.js';
+import { migration as addGroupNameToEndpoints } from './migrations/20260601000000_add_group_name_to_endpoints.js';
 import type { NativeSqliteMigration } from './migration-types.js';
 
 export const nativeMigrations: NativeSqliteMigration[] = [
@@ -21,4 +23,6 @@ export const nativeMigrations: NativeSqliteMigration[] = [
 	addDevicesTable,
 	addSchemaDriftTables,
 	addPublishControlTables,
+	addCompressionToPublishSubscriptions,
+	addGroupNameToEndpoints,
 ];

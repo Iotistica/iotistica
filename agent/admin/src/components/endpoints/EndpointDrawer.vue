@@ -1,0 +1,181 @@
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { message } from 'ant-design-vue'
+import type { FormInstance } from 'ant-design-vue'
+import type { Endpoint, EndpointCreateData } from '@/types'
+import { endpointsApi } from '@/api/endpoints'
+import EndpointConnectionFields from './EndpointConnectionFields.vue'
+
+const props = defineProps<{
+  open: boolean
+  editing: Endpoint | null
+  prefill: EndpointCreateData | null
+}>()
+
+const emit = defineEmits<{
+  'update:open': [val: boolean]
+  saved: []
+}>()
+
+const PROTOCOLS = ['modbus', 'opcua', 'mqtt', 'bacnet']
+
+const formRef = ref<FormInstance>()
+const saving = ref(false)
+
+const form = ref<EndpointCreateData>({
+  name: '',
+  protocol: 'modbus',
+  connection: {},
+  poll_interval: 5000,
+  enabled: true,
+})
+
+// edit-only fields (PATCH supports only these two)
+const editForm = ref({ enabled: true, poll_interval: 5000 })
+
+watch(
+  () => props.open,
+  (open) => {
+    if (!open) return
+    if (props.editing) {
+      editForm.value = {
+        enabled: props.editing.enabled,
+        poll_interval: props.editing.poll_interval,
+      }
+    } else if (props.prefill) {
+      form.value = {
+        name: props.prefill.name,
+        protocol: props.prefill.protocol,
+        connection: { ...props.prefill.connection },
+        poll_interval: props.prefill.poll_interval ?? 5000,
+        enabled: props.prefill.enabled ?? true,
+      }
+    } else {
+      form.value = { name: '', protocol: 'modbus', connection: {}, poll_interval: 5000, enabled: true }
+    }
+  },
+)
+
+function onProtocolChange() {
+  form.value.connection = {}
+}
+
+async function submit() {
+  await formRef.value?.validate()
+  saving.value = true
+  try {
+    if (props.editing) {
+      await endpointsApi.update(props.editing.uuid, editForm.value)
+      message.success('Endpoint updated')
+    } else {
+      await endpointsApi.create(form.value)
+      message.success('Endpoint added')
+    }
+    emit('update:open', false)
+    emit('saved')
+  } catch (err: unknown) {
+    const e = err as { message?: string }
+    message.error(e?.message ?? 'Save failed')
+  } finally {
+    saving.value = false
+  }
+}
+
+function close() {
+  emit('update:open', false)
+}
+</script>
+
+<template>
+  <a-drawer
+    :open="open"
+    :title="editing ? `Edit — ${editing.name}` : 'New Endpoint'"
+    width="480"
+    @close="close"
+  >
+    <!-- Edit mode: only expose what PATCH supports -->
+    <a-form
+      v-if="editing"
+      ref="formRef"
+      :model="editForm"
+      layout="vertical"
+    >
+      <a-form-item label="Enabled" name="enabled">
+        <a-switch v-model:checked="editForm.enabled" />
+      </a-form-item>
+      <a-form-item label="Poll Interval (ms)" name="poll_interval">
+        <a-input-number
+          v-model:value="editForm.poll_interval"
+          :min="100"
+          :step="1000"
+          style="width: 100%"
+        />
+      </a-form-item>
+      <div style="color: #999; font-size: 12px; margin-top: -8px">
+        To change connection settings, delete this endpoint and re-add it.
+      </div>
+    </a-form>
+
+    <!-- Create mode: full form -->
+    <a-form
+      v-else
+      ref="formRef"
+      :model="form"
+      layout="vertical"
+      autocomplete="off"
+    >
+      <a-form-item
+        label="Name"
+        name="name"
+        :rules="[{ required: true, message: 'Name is required' }]"
+      >
+        <a-input v-model:value="form.name" placeholder="e.g. Warehouse Modbus Bus" />
+      </a-form-item>
+
+      <a-form-item label="Protocol" name="protocol">
+        <a-select v-model:value="form.protocol" @change="onProtocolChange">
+          <a-select-option v-for="p in PROTOCOLS" :key="p" :value="p">
+            {{ p.toUpperCase() === 'OPCUA' ? 'OPC-UA' : p.charAt(0).toUpperCase() + p.slice(1) }}
+          </a-select-option>
+        </a-select>
+      </a-form-item>
+
+      <a-divider orientation="left" orientation-margin="0">Connection</a-divider>
+
+      <EndpointConnectionFields
+        :protocol="form.protocol"
+        :model-value="form.connection"
+        @update:model-value="form.connection = $event"
+      />
+
+      <a-divider orientation="left" orientation-margin="0">Options</a-divider>
+
+      <a-row :gutter="16">
+        <a-col :span="14">
+          <a-form-item label="Poll Interval (ms)" name="poll_interval">
+            <a-input-number
+              v-model:value="form.poll_interval"
+              :min="100"
+              :step="1000"
+              style="width: 100%"
+            />
+          </a-form-item>
+        </a-col>
+        <a-col :span="10">
+          <a-form-item label="Enabled" name="enabled">
+            <a-switch v-model:checked="form.enabled" />
+          </a-form-item>
+        </a-col>
+      </a-row>
+    </a-form>
+
+    <template #footer>
+      <a-space>
+        <a-button @click="close">Cancel</a-button>
+        <a-button type="primary" :loading="saving" @click="submit">
+          {{ editing ? 'Save' : 'Add Endpoint' }}
+        </a-button>
+      </a-space>
+    </template>
+  </a-drawer>
+</template>

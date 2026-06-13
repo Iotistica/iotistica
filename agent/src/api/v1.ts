@@ -110,7 +110,8 @@ router.post('/v1/discover', async (req: Request, res: Response, next: NextFuncti
 			trigger: 'manual',
 			protocols,
 			validate,
-			forceRun
+			forceRun,
+			skipDbWrites: true,
 		});
 
 		return res.status(200).json({ devices });

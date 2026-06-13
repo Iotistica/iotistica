@@ -35,16 +35,25 @@ function loadExternalMqttConfigFromRecord(
 		return null;
 	}
 
-	const brokerUrl = typeof config.brokerUrl === 'string'
+	let brokerUrl = typeof config.brokerUrl === 'string'
 		? config.brokerUrl
 		: typeof config.url === 'string'
 			? config.url
-			: typeof config.host === 'string'
-				? config.host
-				: '';
+			: '';
+
+	// Support { host, port } form from the admin UI
+	if (!brokerUrl && typeof config.host === 'string' && config.host) {
+		const port = typeof config.port === 'number' ? config.port : 1883;
+		brokerUrl = `mqtt://${config.host}:${port}`;
+	}
 
 	if (!brokerUrl) {
 		return null;
+	}
+
+	// Prepend scheme if missing so URL parsing works
+	if (!brokerUrl.includes('://')) {
+		brokerUrl = `mqtt://${brokerUrl}`;
 	}
 
 	let parsedUrl: URL;
