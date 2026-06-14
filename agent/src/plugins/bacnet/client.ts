@@ -19,30 +19,30 @@ interface BACnetReadResult {
  * Handles connection, reads, and error handling for a single device
  */
 export class BACnetClient implements IProtocolClient<BACnetObject[], Map<string, { value: any; quality: 'GOOD' | 'BAD'; error?: string }>> {
+	// Each client needs a unique local UDP port so bacstack doesn't fight over the same socket.
+	// Discovery uses 47809; adapter clients start at 47810 and increment per instance.
+	// Fixed ports are more reliable than port=0 (ephemeral) — with ephemeral ports the OS-assigned
+	// port is only known after the async bind completes, and the 100ms heuristic can race on slow
+	// hosts, leaving the transport patch applied to an unbound socket.
+	private static _nextPort = 47810;
+
 	private config: BACnetDevice;
 	private logger: Logger;
 	private client: any;
 	private connected: boolean = false;
 	private lastError: string | null = null;
 
-	constructor(config: BACnetDevice, bacnetPort: number, logger: Logger) {
+	constructor(config: BACnetDevice, _bacnetPort: number, logger: Logger) {
 		this.config = config;
 		this.logger = logger;
 
-		// Initialize bacstack client.
-		// Use port 0 so the OS assigns an ephemeral local port.  This prevents
-		// conflicts with the discovery plugin (port 47809) and with sockets from
-		// a previous adapter instance that may still be in the process of closing
-		// (bacstack's dgram.close() is async — the old socket and a new socket
-		// bound to the same explicit port can temporarily coexist, causing the
-		// kernel to route responses to the wrong socket).  The transport patch
-		// below still forces all outgoing packets to destination port 47808,
-		// so the ephemeral local port has no effect on BACnet behaviour.
+		const localPort = BACnetClient._nextPort++;
+
 		this.client = new BACnet({
 			apduTimeout: config.connectionTimeoutMs,
-			port: 0,
-			broadcastAddress: '255.255.255.255', // Not used for unicast
-			deviceId: 4190000 + Math.floor(Math.random() * 1000), // Unique device ID per client
+			port: localPort,
+			broadcastAddress: '255.255.255.255',
+			deviceId: 4190000 + Math.floor(Math.random() * 1000),
 		});
 
 		// bacstack uses this._settings.port as the UDP destination port even for

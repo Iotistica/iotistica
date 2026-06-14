@@ -11,6 +11,7 @@ import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types';
 import { JobsFeature } from '../features/jobs/monitor.js';
 import { DiscoveryService } from '../discovery/service.js';
+import { DiscoveryRulesScheduler } from '../discovery/rules-scheduler.js';
 
 import { DevicePublish } from '../publish/index.js';
 import type { AdapterManager } from '../plugins/index.js';
@@ -19,7 +20,7 @@ import type { AnomalyDetectionService } from '../anomaly/index.js';
 import { AdapterInitializer } from './adapters.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
-import { setDevicePublish } from '../api/actions.js';
+import { setDevicePublish, setDiscoveryRulesScheduler } from '../api/actions.js';
 import { type CloudMqttClient } from '../mqtt/manager.js';
 import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
 import { type StateManager } from '../core/state.js';
@@ -684,11 +685,17 @@ export async function initDiscoveryService(ctx: AgentInitContext): Promise<void>
 	try {
 		ctx.discoveryService = new DiscoveryService(ctx.agentLogger, ctx.configManager);
 		await ctx.discoveryService.init();
+
+		ctx.discoveryRulesScheduler = new DiscoveryRulesScheduler(ctx.discoveryService, ctx.agentLogger);
+		ctx.discoveryRulesScheduler.start();
+		setDiscoveryRulesScheduler(ctx.discoveryRulesScheduler);
 	} catch (error) {
 		ctx.agentLogger?.errorSync('Failed to initialize Discovery Service', error as Error, {
 			component: LogComponents.agent,
 		});
 		ctx.discoveryService = undefined;
+		ctx.discoveryRulesScheduler = undefined;
+		setDiscoveryRulesScheduler(undefined);
 	}
 }
 

@@ -5,6 +5,7 @@ import {
   CloudUploadOutlined,
   PartitionOutlined,
   ApartmentOutlined,
+  RadarChartOutlined,
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -27,6 +28,11 @@ const menuItems = [
     key: '/subscriptions',
     icon: PartitionOutlined,
     label: 'Subscriptions',
+  },
+  {
+    key: '/discovery-rules',
+    icon: RadarChartOutlined,
+    label: 'Discovery Rules',
   },
 ]
 

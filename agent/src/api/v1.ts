@@ -105,6 +105,7 @@ router.post('/v1/discover', async (req: Request, res: Response, next: NextFuncti
 		const protocols = req.body.protocols as string[] | undefined;
 		const validate = req.body.validate === true || req.body.validate === 'true';
 		const forceRun = req.body.forceRun === true || req.body.forceRun === 'true';
+		const optionOverrides = req.body.overrides as Record<string, Record<string, any>> | undefined;
 
 		const devices = await actions.runDiscovery({
 			trigger: 'manual',
@@ -112,6 +113,7 @@ router.post('/v1/discover', async (req: Request, res: Response, next: NextFuncti
 			validate,
 			forceRun,
 			skipDbWrites: true,
+			...(optionOverrides ? { optionOverrides } : {}),
 		});
 
 		return res.status(200).json({ devices });
@@ -1025,6 +1027,71 @@ router.post('/v1/update', async (req: Request, res: Response, next: NextFunction
 		if (error?.message === 'Agent updater not available') {
 			return res.status(503).json({ error: 'Agent updater not available' });
 		}
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/discovery-rules
+ * List all discovery rules
+ */
+router.get('/v1/discovery-rules', async (_req: Request, res: Response, next: NextFunction) => {
+	try {
+		const rules = await actions.listDiscoveryRules();
+		return res.status(200).json({ rules });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/discovery-rules
+ * Create a discovery rule
+ */
+router.post('/v1/discovery-rules', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const rule = await actions.createDiscoveryRule(req.body);
+		return res.status(201).json({ rule });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * PATCH /v1/discovery-rules/:uuid
+ * Update a discovery rule
+ */
+router.patch('/v1/discovery-rules/:uuid', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const rule = await actions.updateDiscoveryRule(req.params.uuid, req.body);
+		return res.status(200).json({ rule });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * DELETE /v1/discovery-rules/:uuid
+ * Delete a discovery rule
+ */
+router.delete('/v1/discovery-rules/:uuid', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		await actions.deleteDiscoveryRule(req.params.uuid);
+		return res.status(204).send();
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/discovery-rules/:uuid/run
+ * Trigger a discovery rule immediately
+ */
+router.post('/v1/discovery-rules/:uuid/run', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const rule = await actions.runDiscoveryRule(req.params.uuid);
+		return res.status(200).json({ rule });
+	} catch (error) {
 		next(error);
 	}
 });

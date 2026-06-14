@@ -161,7 +161,7 @@ function close() {
       <!-- Destination Topic -->
       <a-form-item
         label="Destination Topic"
-        name="route_json.topic"
+        :name="['route_json', 'topic']"
         :rules="destinationTopicRules"
         extra="MQTT topic to publish to on the external broker (e.g. sensors/bacnet/readings)"
       >

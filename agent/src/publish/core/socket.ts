@@ -123,7 +123,13 @@ export class SocketConnection extends EventEmitter {
 
 	private onSocketError(err: Error): void {
 		this._state = DeviceState.ERROR;
-		this.logger?.error(`Socket error for endpoint '${this.config.name || 'unknown'}'`, err);
+	// ENOENT means the adapter hasn't created the socket yet — normal transient state.
+		const isNotReady = (err as NodeJS.ErrnoException).code === 'ENOENT';
+		if (isNotReady) {
+			this.logger?.debug(`Socket not ready for endpoint '${this.config.name || 'unknown'}' (adapter not started yet)`);
+		} else {
+			this.logger?.error(`Socket error for endpoint '${this.config.name || 'unknown'}'`, err);
+		}
 		this.emit('error', err);
 	}
 
@@ -132,7 +138,7 @@ export class SocketConnection extends EventEmitter {
 		this._subscriptionAcked = false;
 		this._lineBuffer = '';
 		this.socket = null;
-		this.logger?.info(`Connection closed for device '${this.config.name || 'unknown'}'`);
+		this.logger?.debug(`Connection closed for device '${this.config.name || 'unknown'}'`);
 		this.emit('disconnected');
 		if (!this.stopped) this.scheduleReconnect();
 	}

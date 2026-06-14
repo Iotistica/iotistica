@@ -10,6 +10,7 @@ import { migration as addSchemaDriftTables } from './migrations/20260515000000_a
 import { migration as addPublishControlTables } from './migrations/20260523010000_add_publish_control_tables.js';
 import { migration as addCompressionToPublishSubscriptions } from './migrations/20260525000000_add_compression_to_publish_subscriptions.js';
 import { migration as addGroupNameToEndpoints } from './migrations/20260601000000_add_group_name_to_endpoints.js';
+import { migration as addDiscoveryRules } from './migrations/20260614000000_add_discovery_rules.js';
 import type { NativeSqliteMigration } from './migration-types.js';
 
 export const nativeMigrations: NativeSqliteMigration[] = [
@@ -25,4 +26,5 @@ export const nativeMigrations: NativeSqliteMigration[] = [
 	addPublishControlTables,
 	addCompressionToPublishSubscriptions,
 	addGroupNameToEndpoints,
+	addDiscoveryRules,
 ];

@@ -483,11 +483,11 @@ services:
             dockerfile: Dockerfile
         container_name: sim-bacnet
         restart: unless-stopped
-        # host network: shares the Docker Desktop VM network namespace with the agent
-        # (agent also uses network_mode: host), so both are on the same broadcast domain.
-        # Broadcast Who-Is/I-Am packets travel freely between them on port 47808.
+        # Bridge network: same iotistica-net as the agent so BACnet UDP broadcast
+        # and unicast reads work within the bridge subnet.
         # Agent uses port 47809 to avoid collision with the simulator on 47808.
-        network_mode: host
+        networks:
+            - iotistica-net
         environment:
             - BACPYPES_IFACE=0.0.0.0:47808  # ip:port format — bacpypes3 Address() does not accept ip:port/prefix
         logging:
@@ -785,3 +785,4 @@ volumes:
 networks:
   iotistica-net:
     driver: bridge
+    name: iotistica-net

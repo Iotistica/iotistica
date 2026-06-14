@@ -338,7 +338,10 @@ export class DevicePublish extends EventEmitter {
 		});
 
 		device.on('error', (error: Error) => {
-			this.logger.error(`Device '${deviceName}' error: ${error.message}`, error);
+			const isNotReady = (error as NodeJS.ErrnoException).code === 'ENOENT';
+			if (!isNotReady) {
+				this.logger.error(`Device '${deviceName}' error: ${error.message}`, error);
+			}
 		});
 	}
 

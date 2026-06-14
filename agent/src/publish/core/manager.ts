@@ -363,6 +363,15 @@ export class PublishManager extends EventEmitter {
 		if (this.batcher.messageCount === 0) return;
 		if (this.publishing) return;
 
+		// No destinations or subscriptions configured — discard the batch silently.
+		// Buffering without a destination wastes disk and misleads the operator.
+		// Once bindings are added, reloadBindings() will repopulate this.bindings
+		// and subsequent batches will flow normally.
+		if (this.bindings.length === 0) {
+			this.batcher.reset();
+			return;
+		}
+
 		this.publishing = true;
 		try {
 

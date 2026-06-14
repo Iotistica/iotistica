@@ -19,6 +19,11 @@ const router = createRouter({
       component: () => import('@/views/EndpointsView.vue'),
       meta: { title: 'Endpoints' },
     },
+    {
+      path: '/discovery-rules',
+      component: () => import('@/views/DiscoveryRulesView.vue'),
+      meta: { title: 'Discovery Rules' },
+    },
   ],
 })
 

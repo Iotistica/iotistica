@@ -28,6 +28,7 @@ import type { OPCUABrowseRequest } from '../plugins/opcua/discovery';
 import { TailscaleManager } from '../network/vpn/tailscale-manager';
 import type { TailscaleConfig, TailscaleStatus } from '../network/vpn/tailscale-manager';
 import type { DevicePublish } from '../publish/index.js';
+import type { DiscoveryRulesScheduler } from '../discovery/rules-scheduler.js';
 
 type AgentInstance = {
 	getLifecycleState: () => string;
@@ -50,9 +51,14 @@ let healthReporter: (() => HealthReport) | undefined;
 let agentUpdater: AgentUpdater | undefined;
 let tailscaleManager: TailscaleManager | null = null;
 let devicePublish: DevicePublish | undefined;
+let discoveryRulesScheduler: DiscoveryRulesScheduler | undefined;
 
 export function setDevicePublish(dp: DevicePublish | undefined): void {
 	devicePublish = dp;
+}
+
+export function setDiscoveryRulesScheduler(s: DiscoveryRulesScheduler | undefined): void {
+	discoveryRulesScheduler = s;
 }
 
 export function setAgent(agent: AgentInstance): void {
@@ -1224,16 +1230,15 @@ export async function runDiscovery(options: {
 	validate?: boolean;
 	forceRun?: boolean;
 	skipDbWrites?: boolean;
+	optionOverrides?: Record<string, Record<string, any>>;
 }): Promise<any[]> {
 	if (!discoveryService) {
 		throw new Error('DiscoveryService not initialized');
 	}
-	// Cast protocols to the proper type expected by DiscoveryService
-	const discoveryOptions = {
+	return discoveryService.runDiscovery({
 		...options,
-		protocols: options.protocols as any
-	};
-	return discoveryService.runDiscovery(discoveryOptions);
+		protocols: options.protocols as any,
+	});
 }
 
 /**
@@ -1246,6 +1251,106 @@ export async function browseOPCUAAddressSpace(options: OPCUABrowseRequest) {
 
 	return discoveryService.browseOPCUAAddressSpace(options);
 }
+
+/**
+ * Discovery rules: list all rules
+ */
+export const listDiscoveryRules = async () => {
+	const { DiscoveryRuleModel } = await import('../db/models/discovery-rule.model.js');
+	return DiscoveryRuleModel.getAll();
+};
+
+/**
+ * Discovery rules: create a rule
+ */
+export const createDiscoveryRule = async (body: {
+	name: string;
+	protocol: string;
+	interval_seconds?: number;
+	enabled?: boolean;
+	auto_enable?: boolean;
+	target_json?: Record<string, any> | null;
+	params_json?: Record<string, any> | null;
+}) => {
+	if (!body.name) throw new Error('name is required');
+	if (!body.protocol) throw new Error('protocol is required');
+
+	const { DiscoveryRuleModel } = await import('../db/models/discovery-rule.model.js');
+	const rule = DiscoveryRuleModel.create({
+		name: body.name,
+		protocol: body.protocol,
+		interval_seconds: body.interval_seconds ?? 3600,
+		enabled: body.enabled !== false,
+		auto_enable: body.auto_enable === true,
+		target_json: body.target_json ?? null,
+		params_json: body.params_json ?? null,
+	});
+
+	logger?.infoSync('Discovery rule created', {
+		component: LogComponents.deviceApi,
+		ruleUuid: rule.uuid,
+		name: rule.name,
+		protocol: rule.protocol,
+	});
+
+	return rule;
+};
+
+/**
+ * Discovery rules: update a rule
+ */
+export const updateDiscoveryRule = async (uuid: string, body: {
+	name?: string;
+	protocol?: string;
+	interval_seconds?: number;
+	enabled?: boolean;
+	auto_enable?: boolean;
+	target_json?: Record<string, any> | null;
+	params_json?: Record<string, any> | null;
+}) => {
+	const { DiscoveryRuleModel } = await import('../db/models/discovery-rule.model.js');
+	const existing = DiscoveryRuleModel.getByUuid(uuid);
+	if (!existing) {
+		throw Object.assign(new Error(`Discovery rule not found: ${uuid}`), { statusCode: 404 });
+	}
+
+	const rule = DiscoveryRuleModel.update(uuid, body);
+
+	logger?.infoSync('Discovery rule updated', {
+		component: LogComponents.deviceApi,
+		ruleUuid: uuid,
+	});
+
+	return rule;
+};
+
+/**
+ * Discovery rules: delete a rule
+ */
+export const deleteDiscoveryRule = async (uuid: string) => {
+	const { DiscoveryRuleModel } = await import('../db/models/discovery-rule.model.js');
+	const deleted = DiscoveryRuleModel.delete(uuid);
+	if (!deleted) {
+		throw Object.assign(new Error(`Discovery rule not found: ${uuid}`), { statusCode: 404 });
+	}
+
+	logger?.infoSync('Discovery rule deleted', {
+		component: LogComponents.deviceApi,
+		ruleUuid: uuid,
+	});
+
+	return { deleted: true };
+};
+
+/**
+ * Discovery rules: trigger a rule immediately
+ */
+export const runDiscoveryRule = async (uuid: string) => {
+	if (!discoveryRulesScheduler) {
+		throw new Error('Discovery rules scheduler not initialized');
+	}
+	return discoveryRulesScheduler.runNow(uuid);
+};
 
 /**
  * Get SQLite database stats for diagnostics

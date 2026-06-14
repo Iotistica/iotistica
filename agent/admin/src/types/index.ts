@@ -66,6 +66,42 @@ export interface Endpoint {
   responseTimeMs?: number | null
 }
 
+export type DiscoveryRuleStatus = 'idle' | 'running' | 'ok' | 'error'
+
+export interface DiscoveryRuleResult {
+  found: number
+  saved: number
+  skipped: number
+  error?: string
+}
+
+export interface DiscoveryRule {
+  uuid: string
+  name: string
+  enabled: boolean
+  protocol: string
+  interval_seconds: number
+  target_json: Record<string, unknown> | null
+  params_json: Record<string, unknown> | null
+  auto_enable: boolean
+  status: DiscoveryRuleStatus
+  last_run_at: string | null
+  next_run_at: string | null
+  last_result_json: DiscoveryRuleResult | null
+  created_at?: string
+  updated_at?: string
+}
+
+export interface DiscoveryRuleFormData {
+  name: string
+  protocol: string
+  interval_seconds: number
+  enabled: boolean
+  auto_enable: boolean
+  target_json: Record<string, unknown> | null
+  params_json: Record<string, unknown> | null
+}
+
 export interface EndpointCreateData {
   name: string
   protocol: string

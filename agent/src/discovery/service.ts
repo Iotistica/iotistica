@@ -23,6 +23,10 @@ export interface DiscoveryOptions {
 	forceRun?: boolean;
 	protocols?: Array<DiscoveryProtocol>;
 	skipDbWrites?: boolean;
+	// Per-protocol option overrides — merged on top of ConfigManager defaults.
+	// Key is protocol name, value is the plugin-specific options object.
+	// When present for a protocol, the scan runs even if that protocol is globally disabled.
+	optionOverrides?: Record<string, Record<string, any>>;
 }
 
 export type { DiscoveredDevice } from '../plugins/types';
@@ -266,7 +270,12 @@ export class DiscoveryService extends EventEmitter {
 
 			try {
 
-				const pluginOptions = this.optionsBuilder.build(protocol);
+				const baseOptions = this.optionsBuilder.build(protocol);
+				const override = options.optionOverrides?.[protocol];
+				// When a rule provides explicit overrides, run even if global config is absent/disabled.
+				const pluginOptions = override !== undefined
+					? { ...(baseOptions ?? {}), ...override }
+					: baseOptions;
 
 				if (pluginOptions === undefined) {
 					this.logger?.debugSync(`No configuration for ${protocol}, skipping discovery`, {
@@ -276,7 +285,7 @@ export class DiscoveryService extends EventEmitter {
 					});
 					continue;
 				}
-        
+
 				const discovered = await plugin.discover(pluginOptions);
      
 				allDiscovered.push(...discovered);

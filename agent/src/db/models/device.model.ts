@@ -152,7 +152,7 @@ export class DeviceModel {
 				name: device.name,
 				enabled: device.enabled ? 1 : 0,
 				metadata: device.metadata ? JSON.stringify(device.metadata) : null,
-				lastSeenAt: device.lastSeenAt ?? null,
+				lastSeenAt: device.lastSeenAt instanceof Date ? device.lastSeenAt.toISOString() : (device.lastSeenAt ?? null),
 				updated_at: now,
 			});
 		} else {
@@ -188,7 +188,7 @@ export class DeviceModel {
 				enabled: device.enabled ? 1 : 0,
 				identifier: device.identifier ?? null,
 				metadata: device.metadata ? JSON.stringify(device.metadata) : null,
-				lastSeenAt: device.lastSeenAt ?? null,
+				lastSeenAt: device.lastSeenAt instanceof Date ? device.lastSeenAt.toISOString() : (device.lastSeenAt ?? null),
 				created_at: now,
 				updated_at: now,
 			});

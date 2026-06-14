@@ -437,7 +437,8 @@ function Test-AgentResourcesExist {
 
     $combined = [string]::Join("`n", $candidateSources)
     for ($i = $StartIndex; $i -le $endIndex; $i++) {
-        if ($combined -match [regex]::Escape("agent-$i")) {
+        # Use a non-digit lookahead so "agent-2" does not match "agent-24", "agent-25", etc.
+        if ($combined -match "agent-$i(?!\d)") {
             return $true
         }
     }

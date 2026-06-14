@@ -1,6 +1,7 @@
 import type { AgentLogger } from '../logging/agent-logger.js';
 import type { FeatureInitializer } from './features.js';
 import type { DiscoveryService } from '../discovery/service.js';
+import type { DiscoveryRulesScheduler } from '../discovery/rules-scheduler.js';
 import type { AgentUpdater } from '../updater.js';
 import type { AgentFirewall } from '../network/firewall.js';
 import type { ConfigManager } from '../core/config.js';
@@ -41,5 +42,6 @@ export interface AgentInitContext {
 	pipelineService?: PipelineService;
 	simulationOrchestrator?: SimulationOrchestrator;
 	discoveryService?: DiscoveryService;
+	discoveryRulesScheduler?: DiscoveryRulesScheduler;
 	dictionaryManager?: DictionaryManager;
 }
