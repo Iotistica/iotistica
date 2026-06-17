@@ -29,22 +29,10 @@ export class AnomalyFeed {
 	processBatch(messages: unknown[], deviceName: string): void {
 		const service = this.getService();
 		const hasService = !!service;
-		const hasConfiguredMetrics = !!service?.hasConfiguredMetrics();
 
 		if (!hasService) {
 			this.logger?.debug(
 				"Endpoint batch skipped: anomaly service unavailable",
-				{
-					deviceName,
-					messageCount: messages.length,
-				},
-			);
-			return;
-		}
-
-		if (!hasConfiguredMetrics) {
-			this.logger?.debug(
-				"Endpoint batch skipped: no configured anomaly metrics",
 				{
 					deviceName,
 					messageCount: messages.length,
@@ -149,21 +137,20 @@ export class AnomalyFeed {
 			this.buildFriendlyMetricLabel(metricKey, point),
 		);
 		if (!service) return false;
-		const configured = service.isMetricConfigured(metricKey);
 
-		// this.logger?.debug('Config gate check', {
-		//   metricKey,
-		//   configured,
-		// });
-
-		if (!configured) {
-			this.batchSkippedMetrics.add(metricKey);
-			return false;
-		}
+		// Always call processDataPoint so unconfigured metrics are still recorded
+		// in the observed_metrics catalog (recordMetricObservation runs first inside
+		// processDataPoint, before the isMetricConfigured check).
 		const dedupKey = `${metricKey}:${point.timestamp}`;
 		if (this.batchProcessedMetrics.has(dedupKey)) return false;
 		this.batchProcessedMetrics.add(dedupKey);
 		service.processDataPoint({ metric: metricKey, ...point });
+
+		const configured = service.isMetricConfigured(metricKey);
+		if (!configured) {
+			this.batchSkippedMetrics.add(metricKey);
+			return false;
+		}
 		return true;
 	}
 

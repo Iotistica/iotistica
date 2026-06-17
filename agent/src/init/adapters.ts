@@ -27,6 +27,22 @@ export interface AdapterFeatures {
  */
 export class AdapterInitializer {
 	private features: AdapterFeatures = {};
+	// Serializes all adapter reload operations so concurrent reconciliation-complete
+	// events cannot create multiple DevicePublish instances simultaneously.
+	private reloadQueue: Promise<void> = Promise.resolve();
+	// Set to true when pre-discovery stops DevicePublish, so the discovery-complete
+	// else branch knows it needs to restart it. Without this flag, scheduled rule
+	// runs (which do NOT emit pre-discovery) would also stop+restart DevicePublish
+	// on every tick, causing spurious external MQTT reconnects.
+	private pendingDevicePublishRestart = false;
+
+	private scheduleReload(label: string, fn: () => Promise<void>): void {
+		this.reloadQueue = this.reloadQueue.then(() => fn()).catch((err) => {
+			this.context.logger?.errorSync(`Adapter reload failed (${label})`, err as Error, {
+				component: LogComponents.agent,
+			});
+		});
+	}
 
 	constructor(
     private context: FeatureContext,
@@ -127,6 +143,7 @@ export class AdapterInitializer {
 				trigger: data.trigger
 			});
 			try {
+				this.pendingDevicePublishRestart = true;
 				await this.onAdaptersStopping();
 			} catch (error) {
 				logger.errorSync('Failed to stop Device Publish before discovery', error as Error, {
@@ -196,18 +213,26 @@ export class AdapterInitializer {
 					skippedCount: data.skippedCount
 				});
 
-				// pre-discovery stopped Device Publish; restart it so existing endpoints keep publishing.
-				try {
-					await this.onAdaptersReady();
+				// Only restart DevicePublish if pre-discovery actually stopped it.
+				// Scheduled rule runs do NOT emit pre-discovery, so DevicePublish keeps
+				// running and must not be torn down here (doing so causes a spurious
+				// external MQTT reconnect on every scheduler tick).
+				if (this.pendingDevicePublishRestart) {
+					this.pendingDevicePublishRestart = false;
+					try {
+						await this.onAdaptersReady();
+						this._updateCloudSync();
+						logger.infoSync('Restarted Device Publish after discovery (no new devices)', {
+							component: LogComponents.agent,
+							trigger: data.trigger
+						});
+					} catch (error) {
+						logger.errorSync('Failed to restart Device Publish after discovery', error as Error, {
+							component: LogComponents.agent
+						});
+					}
+				} else {
 					this._updateCloudSync();
-					logger.infoSync('Restarted Device Publish after discovery (no new devices)', {
-						component: LogComponents.agent,
-						trigger: data.trigger
-					});
-				} catch (error) {
-					logger.errorSync('Failed to restart Device Publish after discovery', error as Error, {
-						component: LogComponents.agent
-					});
 				}
 			}
 		});
@@ -218,7 +243,7 @@ export class AdapterInitializer {
 		});
 
 		if (this.context.stateReconciler) {
-			this.context.stateReconciler.on('reconciliation-complete', async (hasEndpointChanges: boolean) => {
+			this.context.stateReconciler.on('reconciliation-complete', (hasEndpointChanges: boolean) => {
 				if (!hasEndpointChanges) {
 					logger.debugSync('Skipping adapter reload on reconciliation-complete — no endpoint changes', {
 						component: LogComponents.agent
@@ -233,7 +258,11 @@ export class AdapterInitializer {
 					return;
 				}
 
-				try {
+				// Queue the reload so rapid back-to-back reconciliation events (e.g. user adds
+				// multiple endpoints in quick succession) execute one at a time.  Without this,
+				// concurrent async handlers each call onAdaptersReady() concurrently and create
+				// duplicate DevicePublish instances with the same MQTT clientId.
+				this.scheduleReload('reconciliation-complete', async () => {
 					// Hot-update path: MQTT adapter already connected — diff subscriptions in-place,
 					// but only if no new non-MQTT protocol was added that needs a socket server.
 					if (this.features.devices?.getAdapter('mqtt')) {
@@ -260,6 +289,7 @@ export class AdapterInitializer {
 							});
 
 							await this.features.devices.reloadMQTTAdapter();
+							await this.onAdaptersStopping();
 							await this.onAdaptersReady();
 							this._updateCloudSync();
 
@@ -281,11 +311,7 @@ export class AdapterInitializer {
 					logger.infoSync('Protocol adapters reloaded after reconciliation', {
 						component: LogComponents.agent
 					});
-				} catch (error) {
-					logger.errorSync('Failed to reload after reconciliation', error as Error, {
-						component: LogComponents.agent
-					});
-				}
+				});
 			});
 
 			logger.infoSync('Reconciliation reload watcher initialized', {
@@ -330,6 +356,10 @@ export class AdapterInitializer {
 
 	/** Stop adapters, reinit, restart DevicePublish, update CloudSync. */
 	private async _fullReload(): Promise<void> {
+		// _fullReload handles its own stop+restart cycle; clear the flag so
+		// discovery-complete's else branch doesn't attempt a second restart.
+		this.pendingDevicePublishRestart = false;
+
 		// Release the BACnet discovery plugin's socket so the adapter can bind
 		// to the same port without conflict (both use port 47809 by default).
 		this.context.discoveryService?.releasePluginClient('bacnet');

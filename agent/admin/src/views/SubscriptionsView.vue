@@ -8,6 +8,7 @@ import SubscriptionDrawer from '@/components/subscriptions/SubscriptionDrawer.vu
 import type { Destination, Subscription } from '@/types'
 import { subscriptionsApi } from '@/api/subscriptions'
 import { destinationsApi } from '@/api/destinations'
+import { protocolColor, destinationColor } from '@/utils/protocol'
 
 const rows = ref<Subscription[]>([])
 const destinations = ref<Destination[]>([])
@@ -22,7 +23,8 @@ const destMap = computed<Record<number, Destination>>(() =>
 
 const columns: TableColumnType<Subscription>[] = [
   { title: 'Destination', key: 'destination', width: 180 },
-  { title: 'Topics', dataIndex: 'topics', key: 'topics' },
+  { title: 'Topic', key: 'topic' },
+  { title: 'Source Filter', dataIndex: 'topics', key: 'topics', width: 160 },
   { title: 'Format', dataIndex: 'payload_format', key: 'payload_format', width: 100 },
   { title: 'Compression', dataIndex: 'compression', key: 'compression', width: 160 },
   { title: 'Enabled', dataIndex: 'enabled', key: 'enabled', width: 90 },
@@ -117,20 +119,30 @@ onMounted(load)
         <template v-if="column.key === 'destination'">
           <span v-if="destMap[record.publish_destination_id]">
             {{ destMap[record.publish_destination_id].name }}
-            <a-tag size="small" style="margin-left: 4px">
+            <a-tag size="small" :color="destinationColor(destMap[record.publish_destination_id].type)" style="margin-left: 4px">
               {{ destMap[record.publish_destination_id].type }}
             </a-tag>
           </span>
           <span v-else style="color: #999">ID {{ record.publish_destination_id }}</span>
         </template>
 
+        <template v-else-if="column.key === 'topic'">
+          <span v-if="record.route_json?.topic" style="font-family: monospace; font-size: 12px">
+            {{ record.route_json.topic }}
+          </span>
+          <span v-else style="color: #999">—</span>
+        </template>
+
         <template v-else-if="column.key === 'topics'">
-          <a-tag v-for="t in record.topics" :key="t" style="margin-bottom: 2px">{{ t }}</a-tag>
+          <template v-if="record.topics?.length">
+            <a-tag v-for="t in record.topics" :key="t" :color="protocolColor(t)" style="margin-bottom: 2px">{{ t }}</a-tag>
+          </template>
+          <span v-else style="color: #999">all</span>
         </template>
 
         <template v-else-if="column.key === 'compression'">
           <span v-if="record.compression">{{ record.compression }}</span>
-          <span v-else style="color: #999">global default</span>
+          <span v-else style="color: #999">none</span>
         </template>
 
         <template v-else-if="column.key === 'enabled'">

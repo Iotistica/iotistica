@@ -105,7 +105,19 @@ export class AnomalyDetectionService {
 	// Startup timestamp for warm-up period (prevents false positives on new agents)
 	private startupTimestamp: number = Date.now();
 	private warmupPeriodMs: number;
-	
+	// Raw db reference used for the metric catalog (independent of anomaly storage)
+	private db?: Database.Database;
+	// Catalog of every metric name ever observed by this agent, keyed by metric name.
+	// Persisted to observed_metrics table; survives restarts.
+	private observedMetrics = new Map<string, {
+		name: string;
+		source: string;
+		protocol?: string;
+		unit?: string;
+		lastSeenAt: number;
+		pendingCount: number; // in-memory tally since last DB flush
+	}>();
+
 	constructor(config: AnomalyConfig, db?: Database.Database, logger?: AgentLogger, mqttManager?: CloudMqttClient, deviceUuid?: string, deviceName?: string, deviceType?: Protocol) {
 		this.config = config;
 		this.logger = logger;
@@ -135,13 +147,15 @@ export class AnomalyDetectionService {
 		
 		// Initialize storage if database provided (use default 30 days if not configured)
 		if (db) {
+			this.db = db;
+
 			const retention = config.storage?.retention || 30;
 			this.storage = new AnomalyStorageService(
 				db,
 				retention,
 				logger
 			);
-			
+
 			// Initialize storage and check for existing baselines
 			this.storage.initialize()
 				.then(() => this.checkAndSkipWarmupIfBaselinesExist())
@@ -151,8 +165,12 @@ export class AnomalyDetectionService {
 					});
 					this.storage = undefined; // Disable storage on error
 				});
-			
-			// Start periodic baseline saving
+
+			// Load metric catalog independently — the table may exist even if anomaly
+			// storage init fails, and we want the catalog regardless.
+			this.loadObservedMetricsFromDb().catch(() => { /* non-fatal — first run */ });
+
+			// Start periodic baseline saving (also flushes the metric catalog)
 			this.startPeriodicBaselineSave();
 		}
 		
@@ -172,7 +190,10 @@ export class AnomalyDetectionService {
 	* Process a new data point
 	*/
 	processDataPoint(dataPoint: DataPoint): void {
+		this.recordMetricObservation(dataPoint);
+
 		if (!this.enabled) return;
+		if (!this.isMetricConfigured(dataPoint.metric)) return;
 
 		const normalizedState = this.resolveDeviceState(dataPoint);
 		const normalizedDeviceId = this.resolveDeviceId(dataPoint);
@@ -780,6 +801,152 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
+	* Get all currently tracked metrics with their live anomaly scores.
+	* Uses the internal parseBufferKey so callers don't need to know the key format.
+	*/
+	getTrackedMetrics(): Array<{ metricName: string; deviceState: CanonicalDeviceState; deviceId: string; score: number }> {
+		const results: Array<{ metricName: string; deviceState: CanonicalDeviceState; deviceId: string; score: number }> = [];
+		for (const [bufferKey, score] of this.anomalyScores.entries()) {
+			const parsed = this.parseBufferKey(bufferKey);
+			results.push({ ...parsed, score });
+		}
+		return results;
+	}
+
+	/**
+	* Record a data point in the local metric catalog.
+	* Called for EVERY data point — before any anomaly filtering — so the catalog
+	* reflects all metrics flowing through the agent, not just configured ones.
+	*/
+	private recordMetricObservation(dataPoint: DataPoint): void {
+		if (!dataPoint.metric?.trim()) return;
+		const existing = this.observedMetrics.get(dataPoint.metric);
+		if (existing) {
+			existing.lastSeenAt = dataPoint.timestamp;
+			existing.pendingCount++;
+			if (!existing.protocol && dataPoint.protocol) existing.protocol = dataPoint.protocol;
+			if (!existing.unit && dataPoint.unit) existing.unit = dataPoint.unit;
+		} else {
+			this.observedMetrics.set(dataPoint.metric, {
+				name: dataPoint.metric,
+				source: dataPoint.source,
+				protocol: dataPoint.protocol,
+				unit: dataPoint.unit || undefined,
+				lastSeenAt: dataPoint.timestamp,
+				pendingCount: 1,
+			});
+		}
+	}
+
+	/**
+	* Load the metric catalog from SQLite on startup.
+	*/
+	private async loadObservedMetricsFromDb(): Promise<void> {
+		if (!this.db) return;
+		try {
+			const rows = this.db.prepare(
+				`SELECT name, source, protocol, unit, last_seen_at
+				   FROM observed_metrics
+				  ORDER BY last_seen_at DESC
+				  LIMIT 5000`,
+			).all() as Array<{ name: string; source: string; protocol: string | null; unit: string | null; last_seen_at: number }>;
+
+			for (const row of rows) {
+				// Only seed if not already observed since startup
+				if (!this.observedMetrics.has(row.name)) {
+					this.observedMetrics.set(row.name, {
+						name: row.name,
+						source: row.source,
+						protocol: row.protocol ?? undefined,
+						unit: row.unit ?? undefined,
+						lastSeenAt: row.last_seen_at,
+						pendingCount: 0,
+					});
+				}
+			}
+			this.logger?.debugSync('Loaded metric catalog from DB', {
+				component: LogComponents.anomaly,
+				count: rows.length,
+			});
+		} catch {
+			// Table may not exist yet on first run before migration
+		}
+	}
+
+	/**
+	* Flush in-memory metric catalog observations to SQLite.
+	* Runs on the same 5-minute cycle as baseline saves.
+	*/
+	private async saveObservedMetrics(): Promise<void> {
+		if (!this.db || this.observedMetrics.size === 0) return;
+		try {
+			const upsert = this.db.prepare(`
+				INSERT INTO observed_metrics (name, source, protocol, unit, last_seen_at, observation_count, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(name) DO UPDATE SET
+					last_seen_at      = MAX(last_seen_at, excluded.last_seen_at),
+					observation_count = observation_count + excluded.observation_count,
+					protocol          = COALESCE(protocol, excluded.protocol),
+					unit              = COALESCE(unit, excluded.unit)
+			`);
+			const flush = this.db.transaction(() => {
+				for (const entry of this.observedMetrics.values()) {
+					if (entry.pendingCount === 0) continue; // nothing new since last flush
+					upsert.run(
+						entry.name,
+						entry.source,
+						entry.protocol ?? null,
+						entry.unit ?? null,
+						entry.lastSeenAt,
+						entry.pendingCount,
+						entry.lastSeenAt,
+					);
+					entry.pendingCount = 0; // reset after persisting
+				}
+			});
+			flush();
+		} catch (err) {
+			this.logger?.debugSync('Failed to flush metric catalog', {
+				component: LogComponents.anomaly,
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
+
+	/**
+	* Return all metrics ever observed by this agent (loaded from SQLite on startup,
+	* updated in-memory as data flows through).
+	* Used by the admin UI metric picker and GET /v1/anomaly/metrics.
+	*/
+	getObservedMetrics(): Array<{
+		name: string;
+		source: string;
+		protocol?: string;
+		unit?: string;
+		lastSeenAt: number;
+	}> {
+		return Array.from(this.observedMetrics.values()).map(({ pendingCount: _, ...rest }) => rest);
+	}
+
+	/**
+	* Get current configuration
+	*/
+	getConfig(): AnomalyConfig {
+		return this.config;
+	}
+
+	/**
+	* Get all tracked anomaly scores keyed by buffer key (metric::state::deviceId)
+	*/
+	getAllAnomalyScores(): Record<string, number> {
+		const result: Record<string, number> = {};
+		for (const [key, score] of this.anomalyScores.entries()) {
+			result[key] = score;
+		}
+		return result;
+	}
+
+	/**
 	* Get service statistics
 	*/
 	getStats() {
@@ -998,13 +1165,27 @@ export class AnomalyDetectionService {
 	updateConfig(config: Partial<AnomalyConfig>): void {
 		this.config = { ...this.config, ...config };
 
+		// Sync runtime detection flag so the UI "Enabled" toggle takes effect immediately.
+		// Without this, processDataPoint() always checks this.enabled (not this.config.enabled)
+		// and the toggle would save to DB but never change runtime behaviour.
+		if (config.enabled !== undefined) {
+			this.enabled = config.enabled;
+			this.logger?.infoSync(`Anomaly detection ${config.enabled ? 'enabled' : 'disabled'} via config update`, {
+				component: LogComponents.anomaly,
+			});
+		}
+
 		// Remove in-memory state for metrics no longer present in configuration.
 		// This avoids stale buffers/scores after dashboard metric deletions.
-		const configuredMetricNames = new Set((this.config.metrics || []).map(m => m.name));
+		// IMPORTANT: use getMetricConfig() (same fuzzy matching as processDataPoint) rather
+		// than a plain Set lookup. Buffer keys always carry the canonical incoming name
+		// (e.g. "{agentUuid}_{endpointUuid}_temperature") while config entries may store
+		// bare names ("temperature"). A Set check would falsely prune those buffers every
+		// time the config is saved, wiping accumulated samples needlessly.
 		let prunedMetrics = 0;
 		for (const bufferKey of Array.from(this.buffers.keys())) {
 			const { metricName } = this.parseBufferKey(bufferKey);
-			if (!configuredMetricNames.has(metricName)) {
+			if (!this.getMetricConfig(metricName)) {
 				this.buffers.delete(bufferKey);
 				this.anomalyScores.delete(bufferKey);
 				this.anomalyMetadata.delete(bufferKey);
@@ -1097,6 +1278,8 @@ export class AnomalyDetectionService {
 	* Public for manual triggering and testing
 	*/
 	async saveBaselines(): Promise<void> {
+		await this.saveObservedMetrics();
+
 		if (!this.storage) {
 			this.logger?.warnSync('Cannot save baselines - storage not initialized', {
 				component: LogComponents.anomaly,

@@ -7,6 +7,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import DestinationDrawer from '@/components/destinations/DestinationDrawer.vue'
 import type { Destination } from '@/types'
 import { destinationsApi } from '@/api/destinations'
+import { destinationColor } from '@/utils/protocol'
 
 const rows = ref<Destination[]>([])
 const loading = ref(false)
@@ -99,7 +100,7 @@ onMounted(load)
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'type'">
-          <a-tag>{{ record.type }}</a-tag>
+          <a-tag :color="destinationColor(record.type)">{{ record.type }}</a-tag>
         </template>
 
         <template v-else-if="column.key === 'enabled'">

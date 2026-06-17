@@ -28,19 +28,13 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 	// flag, which may be unavailable during the features phase (before the first cloud poll).
 	const simulationForceEnabled = process.env.SIMULATION_MODE === 'true';
 
-	if (!features.enableAnomalyDetection) {
-		if (simulationForceEnabled) {
-			ctx.agentLogger?.warnSync('Anomaly Detection force-enabled for simulation mode', {
-				component: LogComponents.agent,
-				note: 'SIMULATION_MODE=true requires anomaly detection regardless of cloud config',
-			});
-		} else {
-			ctx.agentLogger?.infoSync('Anomaly Detection disabled by configuration', {
-				component: LogComponents.agent,
-				features
-			});
-			return;
-		}
+	const detectionEnabled = features.enableAnomalyDetection || simulationForceEnabled;
+
+	if (simulationForceEnabled && !features.enableAnomalyDetection) {
+		ctx.agentLogger?.warnSync('Anomaly Detection force-enabled for simulation mode', {
+			component: LogComponents.agent,
+			note: 'SIMULATION_MODE=true requires anomaly detection regardless of cloud config',
+		});
 	}
 
 	if (ctx.anomalyService) {
@@ -76,8 +70,15 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 			'system'
 		);
 
+		// Keep the service in catalog-only mode when detection is disabled.
+		// It still observes every metric that flows through for the admin UI picker.
+		if (!detectionEnabled) {
+			ctx.anomalyService.setEnabled(false);
+		}
+
 		ctx.agentLogger?.infoSync('Anomaly detection initialized', {
 			component: LogComponents.agent,
+			detectionEnabled,
 			enabledMetrics: enabledMetrics.length,
 			sampleMetrics: enabledMetrics.slice(0, 5).map((metric) => metric.name),
 			defaults: config.defaults,

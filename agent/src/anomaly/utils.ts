@@ -112,35 +112,6 @@ export function loadConfigFromEnv(): AnomalyConfig {
 			windowSize: 200,
 			expectedRange: [0, 85],
 		},
-		{
-			name: 'cpu_temp',
-			enabled: true,
-			methods: ['expected_range', 'zscore', 'mad'],
-			threshold: madThreshold,
-			windowSize: 300,
-			expectedRange: [30, 80],
-		},
-		{
-			name: 'temperature',
-			enabled: true,
-			methods: ['zscore', 'mad', 'ewma'],
-			threshold: zscoreThreshold,
-			windowSize: 500,
-		},
-		{
-			name: 'humidity',
-			enabled: true,
-			methods: ['zscore', 'mad'],
-			threshold: zscoreThreshold,
-			windowSize: 500,
-		},
-		{
-			name: 'pressure',
-			enabled: true,
-			methods: ['zscore', 'mad'],
-			threshold: zscoreThreshold,
-			windowSize: 500,
-		},
 	];
 	
 	return {

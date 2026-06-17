@@ -18,7 +18,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - "48481:48481"
+      - "0.0.0.0:48481:48481"
     networks:
       - iotistica-net
     volumes:

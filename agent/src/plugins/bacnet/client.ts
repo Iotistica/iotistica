@@ -159,9 +159,13 @@ export class BACnetClient implements IProtocolClient<BACnetObject[], Map<string,
 	}
 
 	/**
-   * Read a single object's present value
+   * Read a single object's present value, with retry on transient timeout.
+   * retryAttempts and retryDelayMs come from the device config (defaults: 1 / 500ms).
    */
-	async readObject(object: BACnetObject): Promise<{ value: any; quality: 'GOOD' | 'BAD'; error?: string }> {
+	async readObject(
+		object: BACnetObject,
+		remainingRetries: number = this.config.retryAttempts ?? 1
+	): Promise<{ value: any; quality: 'GOOD' | 'BAD'; error?: string }> {
 		if (!this.connected) {
 			return {
 				value: null,
@@ -222,6 +226,12 @@ export class BACnetClient implements IProtocolClient<BACnetObject[], Map<string,
 
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
+
+			if (remainingRetries > 0) {
+				await new Promise(r => setTimeout(r, this.config.retryDelayMs ?? 500));
+				return this.readObject(object, remainingRetries - 1);
+			}
+
 			this.lastError = errorMessage;
 			this.logger.warn(`Error reading ${object.name} from ${this.config.name}: ${errorMessage}`);
 

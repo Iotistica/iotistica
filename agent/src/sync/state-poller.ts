@@ -347,6 +347,17 @@ export class StatePoller extends EventEmitter {
 			});
 		}
 
+		// Preserve locally-managed anomaly config when cloud doesn't include it.
+		// anomalyDetection is managed via the admin UI (not cloud-pushed) so a cloud
+		// state without it must not silently wipe the locally saved metric rules.
+		const existingAnomalyDetection = existingTargetState.config?.anomalyDetection;
+		if (!newTargetState.config?.anomalyDetection && existingAnomalyDetection) {
+			newTargetState.config = {
+				...(newTargetState.config || {}),
+				anomalyDetection: existingAnomalyDetection,
+			};
+		}
+
 		const currentStateHash = calculateHash(this.stateManager.getTargetState?.() ?? {});
 		const newStateHash = calculateHash(newTargetState);
 

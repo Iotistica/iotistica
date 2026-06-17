@@ -11,6 +11,7 @@ import { migration as addPublishControlTables } from './migrations/2026052301000
 import { migration as addCompressionToPublishSubscriptions } from './migrations/20260525000000_add_compression_to_publish_subscriptions.js';
 import { migration as addGroupNameToEndpoints } from './migrations/20260601000000_add_group_name_to_endpoints.js';
 import { migration as addDiscoveryRules } from './migrations/20260614000000_add_discovery_rules.js';
+import { migration as addObservedMetrics } from './migrations/20260615000000_add_observed_metrics.js';
 import type { NativeSqliteMigration } from './migration-types.js';
 
 export const nativeMigrations: NativeSqliteMigration[] = [
@@ -27,4 +28,5 @@ export const nativeMigrations: NativeSqliteMigration[] = [
 	addCompressionToPublishSubscriptions,
 	addGroupNameToEndpoints,
 	addDiscoveryRules,
+	addObservedMetrics,
 ];

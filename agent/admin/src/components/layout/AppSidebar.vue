@@ -6,6 +6,8 @@ import {
   PartitionOutlined,
   ApartmentOutlined,
   RadarChartOutlined,
+  AlertOutlined,
+  SettingOutlined,
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -33,6 +35,16 @@ const menuItems = [
     key: '/discovery-rules',
     icon: RadarChartOutlined,
     label: 'Discovery Rules',
+  },
+  {
+    key: '/anomaly',
+    icon: AlertOutlined,
+    label: 'Anomaly',
+  },
+  {
+    key: '/settings',
+    icon: SettingOutlined,
+    label: 'Settings',
   },
 ]
 

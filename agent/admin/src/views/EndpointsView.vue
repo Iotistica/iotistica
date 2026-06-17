@@ -8,13 +8,7 @@ import EndpointDrawer from '@/components/endpoints/EndpointDrawer.vue'
 import DiscoveryDrawer from '@/components/discovery/DiscoveryDrawer.vue'
 import type { Endpoint, EndpointCreateData } from '@/types'
 import { endpointsApi } from '@/api/endpoints'
-
-const PROTOCOL_COLORS: Record<string, string> = {
-  modbus: 'blue',
-  opcua: 'purple',
-  mqtt: 'green',
-  bacnet: 'orange',
-}
+import { protocolColor } from '@/utils/protocol'
 
 const rows = ref<Endpoint[]>([])
 const loading = ref(false)
@@ -157,7 +151,7 @@ onMounted(load)
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'protocol'">
-          <a-tag :color="PROTOCOL_COLORS[record.protocol]">
+          <a-tag :color="protocolColor(record.protocol)">
             {{ record.protocol === 'opcua' ? 'OPC-UA' : record.protocol }}
           </a-tag>
         </template>

@@ -19,7 +19,7 @@ const emit = defineEmits<{
 const SOURCE_PROTOCOLS = ['bacnet', 'modbus', 'opcua', 'mqtt', 'system']
 const PAYLOAD_FORMATS = ['custom', 'tags', 'ecp']
 const COMPRESSIONS = [
-  { label: 'None (global default)', value: null },
+  { label: 'None', value: null },
   { label: 'JSON', value: 'json' },
   { label: 'MessagePack', value: 'msgpack' },
   { label: 'JSON + Deflate', value: 'json+deflate' },

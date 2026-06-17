@@ -118,9 +118,11 @@ function buildParamsJson(protocol: string): Record<string, any> | null {
 
 const hasParamFields = computed(() => ['bacnet', 'modbus', 'opcua', 'mqtt'].includes(form.value.protocol))
 
+// flush: 'sync' fires the callback immediately (synchronously) when the protocol
+// changes, so the param fields are cleared before parseParamsInto repopulates them.
 watch(() => form.value.protocol, (protocol) => {
   resetProtocolParams(protocol)
-})
+}, { flush: 'sync' })
 
 watch(
   () => props.open,
@@ -136,7 +138,8 @@ watch(
         target_json:      props.editing.target_json,
         params_json:      props.editing.params_json,
       }
-      resetProtocolParams(props.editing.protocol)
+      // The flush:'sync' protocol watcher has already reset the param fields
+      // for this protocol. Now repopulate from the saved data.
       parseParamsInto(props.editing.protocol, props.editing.params_json)
     } else {
       form.value = blankForm()

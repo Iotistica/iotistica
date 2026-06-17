@@ -58,8 +58,8 @@ export const BACnetDeviceSchema = z.object({
 	pollIntervalMs: z.number().min(1000).optional().default(5000), // Device-level poll interval
 	maxConcurrentReads: z.number().min(1).max(10).optional().default(5),
 	connectionTimeoutMs: z.number().min(1000).optional().default(5000),
-	retryAttempts: z.number().min(0).max(5).optional().default(3),
-	retryDelayMs: z.number().min(100).optional().default(1000),
+	retryAttempts: z.number().min(0).max(5).optional().default(1),
+	retryDelayMs: z.number().min(100).optional().default(500),
 });
 
 export type BACnetDevice = z.infer<typeof BACnetDeviceSchema>;

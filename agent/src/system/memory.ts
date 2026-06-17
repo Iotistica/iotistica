@@ -23,6 +23,7 @@ import { LogComponents } from '../logging/types';
 let initialHeap: number = 0;
 let baselineHeap: number = 0; // Sliding baseline (updates when stable)
 let lastBaselineUpdate: number = 0;
+let baselineUpdateCount: number = 0; // Tracks how many baseline updates have occurred
 let heapSamples: Array<{ 
 	timestamp: number; 
 	heapUsed: number; 
@@ -914,15 +915,23 @@ function updateBaselineIfStable(currentHeap: number, currentRSS: number): void {
 	
 	// Only update baseline upward (prevent masking sudden drops that recover)
 	if (avgHeap > baselineHeap) {
-		// 1. Check max drift cap (5% growth limit)
+		// 1. Check max drift cap.
+		// The first update uses a wider cap (25%) to absorb legitimate adapter-load growth:
+		// the initial baseline is set at 60s (agent shell only) and all protocol adapters,
+		// MQTT clients, and caches finish loading after that, adding 10-20% heap permanently.
+		// Subsequent updates use the strict 5% cap to catch slow leaks.
 		const driftPercentage = ((avgHeap - baselineHeap) / baselineHeap) * 100;
-		if (driftPercentage > 5) {
-			logger?.warnSync('Baseline update rejected - drift exceeds 5% cap', {
+		const driftCap = baselineUpdateCount === 0 ? 25 : 5;
+		if (driftPercentage > driftCap) {
+			logger?.warnSync('Baseline update rejected - drift exceeds cap', {
 				component: LogComponents.metrics,
 				currentBaselineMB: bytesToMB(baselineHeap),
 				proposedBaselineMB: bytesToMB(avgHeap),
 				driftPercentage: driftPercentage.toFixed(2),
-				reason: 'Possible slow leak - baseline would mask growth'
+				driftCap,
+				reason: baselineUpdateCount === 0
+					? 'Heap grew more than 25% above startup baseline - possible slow leak or very large adapter load'
+					: 'Possible slow leak - baseline would mask growth'
 			});
 			return;
 		}
@@ -947,7 +956,8 @@ function updateBaselineIfStable(currentHeap: number, currentRSS: number): void {
 		const oldBaselineHeap = baselineHeap;
 		const oldBaselineRSS = baselineRSS;
 		const oldBaselineExternal = baselineExternal;
-		
+
+		baselineUpdateCount++;
 		baselineHeap = avgHeap;
 		baselineRSS = currentRSS; // Update RSS baseline alongside heap
 		
@@ -983,6 +993,8 @@ function updateBaselineIfStable(currentHeap: number, currentRSS: number): void {
 			newBaselineExternalMB: bytesToMB(baselineExternal),
 			externalBaselineUpdated,
 			driftPercentage: driftPercentage.toFixed(2),
+			driftCap,
+			baselineUpdateCount,
 			heapGrowthRateMBperMin: heapGrowthRate?.toFixed(2) || 'null',
 			externalGrowthRateMBperMin: externalGrowthRate?.toFixed(2) || 'null',
 			uptimeHours: (processUptime() / 3600).toFixed(1)

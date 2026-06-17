@@ -396,6 +396,27 @@ async function applyConfigUpdate(mutator: (config: Record<string, any>) => void)
 	if (stateManager) {
 		const currentTarget = stateManager.getTargetState?.() ?? { apps: {}, config: {} };
 		const nextConfig = { ...(currentTarget.config || {}) };
+
+		// Merge any endpoints that exist in the DB but are missing from target state.
+		// DiscoveryStore.save() writes to the endpoints table directly (bypassing
+		// setTarget) so the target state can lag behind the DB.  Without this merge,
+		// calling setTarget here would cause ConfigManager to unregister — and delete —
+		// every endpoint that was discovered but not yet in the target state.
+		try {
+			const { EndpointModel } = await import('../db/models/endpoint.model.js');
+			const dbEndpoints = await EndpointModel.getAll();
+			const targetById = new Map<string, any>(
+				(nextConfig.endpoints || []).map((e: any) => [e.uuid ?? e.id, e])
+			);
+			for (const ep of dbEndpoints) {
+				const id = ep.uuid;
+				if (id && !targetById.has(id)) targetById.set(id, ep);
+			}
+			if (targetById.size > 0) nextConfig.endpoints = Array.from(targetById.values());
+		} catch {
+			// non-fatal — if DB read fails, proceed with target state as-is
+		}
+
 		mutator(nextConfig);
 		await stateManager.setTarget({
 			apps: currentTarget.apps || {},
@@ -1220,6 +1241,153 @@ export const factoryResetDevice = async () => {
 };
 
 /**
+ * Return all metric names the user could plausibly add anomaly rules for.
+ * Merges three sources so the admin UI can show an informed autocomplete:
+ *   - observed — every metric ever seen by this agent (primary, from SQLite catalog)
+ *   - system   — always-available system metrics seeded as defaults
+ *   - endpoint — data-point names from configured endpoints not yet seen in live data
+ * Each entry carries a `configured` flag so the UI can highlight gaps.
+ * Used by: GET /v1/anomaly/metrics
+ */
+export const getAvailableAnomalyMetrics = async (): Promise<
+	Array<{
+		name: string;
+		source: 'live' | 'system' | 'endpoint';
+		score?: number;
+		deviceState?: string;
+		endpointName?: string;
+		unit?: string;
+		configured: boolean;
+	}>
+> => {
+	const configuredNames = new Set(anomalyService?.getConfig().metrics.map((m) => m.name) ?? []);
+	const results = new Map<
+		string,
+		{
+			name: string;
+			source: 'live' | 'system' | 'endpoint';
+			score?: number;
+			deviceState?: string;
+			endpointName?: string;
+			unit?: string;
+			configured: boolean;
+		}
+	>();
+
+	// 1. Persistent metric catalog — every metric the agent has ever observed.
+	//    This is the primary source; falls back gracefully if service unavailable.
+	if (anomalyService) {
+		for (const observed of anomalyService.getObservedMetrics()) {
+			if (!observed.name?.trim()) continue;
+			results.set(observed.name, {
+				name: observed.name,
+				source: 'live',
+				unit: observed.unit,
+				configured: configuredNames.has(observed.name),
+			});
+		}
+
+		// Overlay live anomaly scores and deviceState on top of catalog entries.
+		for (const { metricName, deviceState, score } of anomalyService.getTrackedMetrics()) {
+			const existing = results.get(metricName);
+			if (existing) {
+				existing.score = score;
+				existing.deviceState = deviceState;
+			} else {
+				results.set(metricName, {
+					name: metricName,
+					source: 'live',
+					score,
+					deviceState,
+					configured: configuredNames.has(metricName),
+				});
+			}
+		}
+	}
+
+	// 2. System metrics always produced by the agent (seed even if agent not yet warmed up).
+	for (const name of ['cpu_usage', 'memory_percent', 'cpu_temp', 'disk_usage']) {
+		if (!results.has(name)) {
+			results.set(name, { name, source: 'system', configured: configuredNames.has(name) });
+		}
+	}
+
+	// 3. Data-point names from all configured endpoints not already in the catalog.
+	try {
+		const { EndpointModel } = await import('../db/models/endpoint.model.js');
+		const endpoints = await EndpointModel.getAll();
+		for (const ep of endpoints) {
+			const dataPoints: any[] = Array.isArray(ep.data_points) ? ep.data_points : [];
+			for (const dp of dataPoints) {
+				const dpName: unknown = dp.name ?? dp.key ?? dp.tag ?? dp.label;
+				if (typeof dpName !== 'string' || !dpName.trim()) continue;
+				const name = dpName.trim();
+				if (!results.has(name)) {
+					results.set(name, {
+						name,
+						source: 'endpoint',
+						endpointName: ep.name,
+						configured: configuredNames.has(name),
+					});
+				}
+			}
+		}
+	} catch {
+		// non-fatal — endpoints table may not exist yet
+	}
+
+	return Array.from(results.values()).sort((a, b) => {
+		const order: Record<string, number> = { live: 0, system: 1, endpoint: 2 };
+		return (order[a.source] - order[b.source]) || a.name.localeCompare(b.name);
+	});
+};
+
+/**
+ * Persist the current in-memory anomaly config back to the local target state.
+ * This is the key piece that makes standalone mode work: changes saved via the
+ * admin UI survive agent restarts and are used as the local source of truth when
+ * no cloud reconciliation is available.
+ *
+ * When the agent IS provisioned and the cloud later pushes a new target state,
+ * the cloud config wins (standard reconciliation behaviour — by design).
+ */
+export const persistAnomalyConfig = async (config: Record<string, unknown>): Promise<void> => {
+	await applyConfigUpdate((targetConfig) => {
+		targetConfig.anomalyDetection = config;
+	});
+};
+
+/**
+ * Query stored anomaly baselines from SQLite
+ * Used by: GET /v1/anomaly/baselines
+ */
+export const getAnomalyBaselines = (metric?: string, limit: number = 100): any[] => {
+	try {
+		const db = getDatabase();
+		const cap = Math.min(limit, 500);
+		if (metric) {
+			return db.prepare(
+				`SELECT metric, device_id, device_state, time_slot, mean, std_dev, median, mad,
+				        sample_count, calculated_at
+				   FROM anomaly_baselines
+				  WHERE metric = ?
+				  ORDER BY calculated_at DESC
+				  LIMIT ?`,
+			).all(metric, cap) as any[];
+		}
+		return db.prepare(
+			`SELECT metric, device_id, device_state, time_slot, mean, std_dev, median, mad,
+			        sample_count, calculated_at
+			   FROM anomaly_baselines
+			  ORDER BY calculated_at DESC
+			  LIMIT ?`,
+		).all(cap) as any[];
+	} catch {
+		return [];
+	}
+};
+
+/**
  * Run device discovery
  * @param options Discovery options
  * @returns Array of discovered devices
@@ -1340,6 +1508,65 @@ export const deleteDiscoveryRule = async (uuid: string) => {
 	});
 
 	return { deleted: true };
+};
+
+/**
+ * Get agent settings — the config sub-keys that are user-editable via the admin UI.
+ * Returns the settings shape plus read-only agent info (uuid, name, version).
+ * Deliberately excludes `endpoints`, `apps`, and other internal-only fields.
+ */
+export const getSettings = async (): Promise<Record<string, any>> => {
+	// Prefer the live config manager; fall back to the raw snapshot in SQLite.
+	let config: Record<string, any> = {};
+	if (configManager) {
+		config = configManager.getTargetConfig() as unknown as Record<string, any>;
+	} else if (stateManager) {
+		const raw = stateManager.getTargetState?.();
+		config = (raw as any)?.config ?? {};
+	}
+
+	const settings: Record<string, any> = {};
+	for (const key of ['logging', 'features', 'intervals', 'runtime', 'anomalyDetection']) {
+		if (config[key] !== undefined) settings[key] = config[key];
+	}
+
+	// Attach read-only agent identity (mix DB row for version + agentManager for parsed mqtt config).
+	try {
+		const { AgentModel } = await import('../db/models/agent.model.js');
+		const agent = await AgentModel.get();
+		const agentInfo = agentManager.getAgentInfo();
+		const mqttCfg = agentInfo.mqttBrokerConfig;
+		settings.agent = {
+			uuid: agent?.uuid ?? null,
+			name: agent?.name ?? null,
+			version: agent?.agentVersion ?? null,
+			provisioned: agentInfo.provisioned ?? false,
+			apiEndpoint: agentInfo.apiEndpoint ?? null,
+			mqttBrokerUrl: mqttCfg
+				? `${mqttCfg.protocol}://${mqttCfg.host}:${mqttCfg.port}`
+				: null,
+		};
+	} catch {
+		settings.agent = { uuid: null, name: null, version: null, provisioned: false, apiEndpoint: null, mqttBrokerUrl: null };
+	}
+
+	return settings;
+};
+
+/**
+ * Persist a partial settings update to target state and trigger reconciliation.
+ * Only the keys present in `patch` are merged; unrecognised keys are ignored so
+ * callers cannot accidentally overwrite endpoints or apps config.
+ */
+export const updateSettings = async (patch: Record<string, any>): Promise<void> => {
+	const ALLOWED = new Set(['logging', 'features', 'intervals', 'runtime', 'anomalyDetection']);
+	await applyConfigUpdate((config) => {
+		for (const [key, value] of Object.entries(patch)) {
+			if (ALLOWED.has(key)) {
+				config[key] = value;
+			}
+		}
+	});
 };
 
 /**

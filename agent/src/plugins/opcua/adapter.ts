@@ -793,6 +793,25 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 			// Setup session event handlers for keep-alive monitoring
 			this.setupSessionHandlers(device, sessionWrapper);
 
+			// No data points configured — trigger auto-browse via rediscovery rather than failing.
+			// This self-heals endpoints that were added via discovery without validate:true.
+			if (!device.dataPoints || device.dataPoints.length === 0) {
+				const now = Date.now();
+				const lastEmitted = this.lastRediscoveryNeeded.get(device.name) ?? 0;
+				if (now - lastEmitted >= this.REDISCOVERY_COOLDOWN_MS) {
+					this.lastRediscoveryNeeded.set(device.name, now);
+					this.logger.warn(`OPC-UA device ${device.name} has no data points configured — triggering auto-browse`, {
+						deviceName: device.name,
+						endpointUrl: device.connection.endpointUrl,
+					});
+					this.emit('rediscovery-needed', {
+						deviceName: device.name,
+						endpointUrl: device.connection.endpointUrl,
+					});
+				}
+				return sessionWrapper;
+			}
+
 			// Validate NodeIDs before creating subscription or reads
 			const { valid: validDataPoints, invalid: invalidNodeIds } = await this.validateNodeIds(
 				session,

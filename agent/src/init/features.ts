@@ -281,6 +281,25 @@ export class FeatureInitializer {
 
 
 		try {
+			// Stop any existing DevicePublish before creating a new one.  This is a
+			// defense-in-depth guard: onAdaptersStopping() should already have cleared
+			// features.devicePublish, but if two concurrent callers both pass the
+			// enabled-check above before either assigns the new instance, the second
+			// caller can silently orphan the first instance — creating a zombie MQTT
+			// client that fights the new one for the same clientId.
+			if (this.features.devicePublish) {
+				try {
+					await this.features.devicePublish.stop();
+				} catch (stopErr) {
+					logger.warnSync('Failed to stop previous Device Publish instance before reinit', {
+						component: LogComponents.agent,
+						error: stopErr instanceof Error ? stopErr.message : String(stopErr),
+					});
+				}
+				this.features.devicePublish = undefined;
+				setDevicePublish(undefined);
+			}
+
 			// Load device output configurations from database
 			const { EndpointOutputModel: DeviceOutputModel } = await import('../db/models/endpoint-outputs.model.js');
 			const { EndpointModel: EndpointModel } = await import('../db/models/endpoint.model.js');

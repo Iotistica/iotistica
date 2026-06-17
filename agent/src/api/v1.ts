@@ -335,6 +335,148 @@ router.post('/v1/anomaly/save-baselines', async (req: Request, res: Response, ne
 });
 
 /**
+ * GET /v1/anomaly/metrics
+ * Return all metric names available for anomaly rule configuration.
+ * Merges live tracked metrics, always-on system metrics, and endpoint data-point names.
+ * Each entry carries source, optional live score, and a `configured` flag.
+ */
+router.get('/v1/anomaly/metrics', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const metrics = await actions.getAvailableAnomalyMetrics();
+		return res.status(200).json({ metrics });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/anomaly/config
+ * Return current anomaly detection configuration
+ */
+router.get('/v1/anomaly/config', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const anomalyService = actions.getAnomalyService();
+		if (!anomalyService) {
+			return res.status(503).json({ error: 'Anomaly detection service not available' });
+		}
+		return res.status(200).json({ config: anomalyService.getConfig() });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * PATCH /v1/anomaly/config
+ * Hot-reload anomaly detection configuration (no restart required).
+ * Also persists the merged config to the local target state so it survives
+ * restarts in standalone mode. When the agent is provisioned, the cloud
+ * target state continues to take precedence on the next reconciliation cycle.
+ */
+router.patch('/v1/anomaly/config', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const anomalyService = actions.getAnomalyService();
+		if (!anomalyService) {
+			return res.status(503).json({ error: 'Anomaly detection service not available' });
+		}
+		if (!req.body || typeof req.body !== 'object') {
+			return res.status(400).json({ error: 'Request body must be a JSON object' });
+		}
+		// 1. Apply immediately to the running service (in-memory hot-reload).
+		anomalyService.updateConfig(req.body);
+		// 2. Persist the full merged config to local target state (SQLite) so the
+		//    change survives restarts in standalone mode.
+		await actions.persistAnomalyConfig(anomalyService.getConfig() as unknown as Record<string, unknown>);
+		return res.status(200).json({ config: anomalyService.getConfig() });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/anomaly/alerts
+ * List in-memory anomaly alerts
+ * Query: ?since=<unixMs>, ?severity=critical|warning|info, ?metric=<name>, ?limit=<n>
+ */
+router.get('/v1/anomaly/alerts', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const anomalyService = actions.getAnomalyService();
+		if (!anomalyService) {
+			return res.status(503).json({ error: 'Anomaly detection service not available' });
+		}
+		const since = req.query.since ? Number(req.query.since) : undefined;
+		const severity = req.query.severity as string | undefined;
+		const metric = req.query.metric as string | undefined;
+		const limit = req.query.limit ? Math.min(Number(req.query.limit), 500) : 200;
+
+		let alerts = anomalyService.getAlerts(since);
+		if (severity) alerts = alerts.filter((a) => a.severity === severity);
+		if (metric) alerts = alerts.filter((a) => a.metric === metric);
+		alerts = alerts.slice(0, limit);
+
+		return res.status(200).json({ alerts, total: alerts.length });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * DELETE /v1/anomaly/alerts
+ * Clear all in-memory anomaly alerts
+ */
+router.delete('/v1/anomaly/alerts', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const anomalyService = actions.getAnomalyService();
+		if (!anomalyService) {
+			return res.status(503).json({ error: 'Anomaly detection service not available' });
+		}
+		anomalyService.clearAlerts();
+		return res.status(200).json({ cleared: true });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/anomaly/stats
+ * Get anomaly detection stats, live per-metric scores, and predictions
+ */
+router.get('/v1/anomaly/stats', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const anomalyService = actions.getAnomalyService();
+		if (!anomalyService) {
+			return res.status(503).json({ error: 'Anomaly detection service not available' });
+		}
+		return res.status(200).json({
+			stats: anomalyService.getStats(),
+			scores: anomalyService.getAllAnomalyScores(),
+			predictions: anomalyService.getPredictions() ?? null,
+		});
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/anomaly/baselines
+ * Query persisted baseline statistics from SQLite
+ * Query: ?metric=<name>, ?limit=<n> (max 500)
+ */
+router.get('/v1/anomaly/baselines', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const anomalyService = actions.getAnomalyService();
+		if (!anomalyService) {
+			return res.status(503).json({ error: 'Anomaly detection service not available' });
+		}
+		const metric = req.query.metric as string | undefined;
+		const limit = req.query.limit ? Number(req.query.limit) : 100;
+		const baselines = actions.getAnomalyBaselines(metric, limit);
+		return res.status(200).json({ baselines, total: baselines.length });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
  * GET /v1/memory
  * Get agent process memory diagnostics and leak detection status
  */
@@ -1091,6 +1233,39 @@ router.post('/v1/discovery-rules/:uuid/run', async (req: Request, res: Response,
 	try {
 		const rule = await actions.runDiscoveryRule(req.params.uuid);
 		return res.status(200).json({ rule });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/settings
+ * Return the user-editable agent settings (logging, features, intervals, runtime,
+ * anomalyDetection) plus read-only agent identity (uuid, name, version).
+ */
+router.get('/v1/settings', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const settings = await actions.getSettings();
+		return res.status(200).json({ settings });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * PATCH /v1/settings
+ * Merge a partial settings object into the target config and trigger reconciliation.
+ * Only recognised top-level keys (logging, features, intervals, runtime,
+ * anomalyDetection) are applied; everything else is silently ignored.
+ */
+router.patch('/v1/settings', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		if (!req.body || typeof req.body !== 'object') {
+			return res.status(400).json({ error: 'Request body must be a JSON object' });
+		}
+		await actions.updateSettings(req.body);
+		const settings = await actions.getSettings();
+		return res.status(200).json({ settings });
 	} catch (error) {
 		next(error);
 	}

@@ -86,6 +86,10 @@ export class PublishManager extends EventEmitter {
 	private liveDataInterceptor?: (messages: ProtocolMessage[], endpointName: string) => Promise<ProtocolMessage[]> | ProtocolMessage[];
 	private bindings: HostBinding[] = [];
 	private pluginByDestinationId: Map<number, IPublishPlugin> = new Map();
+	// Serializes concurrent reloadBindings() calls so only one runs at a time.
+	// Without this, two rapid admin-UI actions can create zombie plugins that escape
+	// the stop-before-start guard and produce a duplicate-clientId kick cycle.
+	private reloadQueue: Promise<void> = Promise.resolve();
 
 	private readonly onConnected = (): void => {
 		if (this.needStop) return;
@@ -274,6 +278,14 @@ export class PublishManager extends EventEmitter {
 	}
 
 	async reloadBindings(): Promise<void> {
+		// Chain onto the existing reload so concurrent calls (e.g. two rapid admin-UI
+		// subscription creates) execute sequentially and never interleave plugin
+		// stop/start operations — the root cause of the duplicate-clientId kick cycle.
+		this.reloadQueue = this.reloadQueue.then(() => this._doReloadBindings());
+		return this.reloadQueue;
+	}
+
+	private async _doReloadBindings(): Promise<void> {
 		if (this.needStop) return;
 
 		const oldPlugins = this.getUniquePlugins();
@@ -286,6 +298,18 @@ export class PublishManager extends EventEmitter {
 		this.bindings = newBindings;
 		const newPlugins = this.getUniquePlugins();
 
+		// Stop removed plugins BEFORE starting new ones so that external MQTT clients
+		// sharing the same clientId do not briefly coexist — the broker would kick the
+		// old client when the new one connects, and the old client's 5-second reconnect
+		// timer would then kick the new client back in an infinite cycle.
+		for (const plugin of oldPlugins) {
+			if (!newPlugins.includes(plugin)) {
+				await plugin.stop().catch((err) => {
+					this.logger?.error('Failed to stop old plugin during binding reload', err);
+				});
+			}
+		}
+
 		for (const plugin of newPlugins) {
 			if (!oldPlugins.includes(plugin)) {
 				try {
@@ -293,14 +317,6 @@ export class PublishManager extends EventEmitter {
 				} catch (err) {
 					this.logger?.error('Failed to start plugin during binding reload', err);
 				}
-			}
-		}
-
-		for (const plugin of oldPlugins) {
-			if (!newPlugins.includes(plugin)) {
-				await plugin.stop().catch((err) => {
-					this.logger?.error('Failed to stop old plugin during binding reload', err);
-				});
 			}
 		}
 

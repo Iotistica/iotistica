@@ -1,24 +1,25 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { SearchOutlined, CheckCircleOutlined, ThunderboltOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import type { DiscoveredDevice, DiscoveryRule, Endpoint } from '@/types'
 import { discoveryApi, discoveryRulesApi } from '@/api/discovery'
 import { endpointsApi } from '@/api/endpoints'
+import { protocolColor, protocolLabel } from '@/utils/protocol'
 
 const emit = defineEmits<{
   'update:open': [val: boolean]
   saved: []
 }>()
 
-const props = withDefaults(defineProps<{ open: boolean; existingEndpoints?: Endpoint[] }>(), {
-  existingEndpoints: () => [],
-})
+const props = withDefaults(
+  defineProps<{ open: boolean; existingEndpoints?: Endpoint[]; preSelectedRuleUuid?: string }>(),
+  { existingEndpoints: () => [], preSelectedRuleUuid: undefined },
+)
 
 const PROTOCOLS = ['modbus', 'opcua', 'mqtt', 'bacnet']
 const CONFIDENCE_COLORS: Record<string, string> = { high: 'success', medium: 'warning', low: 'error' }
-const PROTOCOL_LABELS: Record<string, string> = { opcua: 'OPC-UA', modbus: 'Modbus', mqtt: 'MQTT', bacnet: 'BACnet' }
 
 // ── Mode ─────────────────────────────────────────────────────────────────────
 const mode = ref<'custom' | 'rule'>('custom')
@@ -26,6 +27,7 @@ const mode = ref<'custom' | 'rule'>('custom')
 // ── Custom scan ──────────────────────────────────────────────────────────────
 const activeProtocol = ref('all')
 const validate = ref(false)
+const opcuaUrl = ref('')
 
 // ── Rule-based scan ──────────────────────────────────────────────────────────
 const rules = ref<DiscoveryRule[]>([])
@@ -76,16 +78,25 @@ function connSummary(d: DiscoveredDevice): string {
   return JSON.stringify(c).slice(0, 50)
 }
 
+const showOpcuaUrl = computed(
+  () => activeProtocol.value === 'opcua' || activeProtocol.value === 'all',
+)
+
 async function runCustomScan() {
   running.value = true
   results.value = []
   hasRun.value = false
   addedThisSession.value = new Set()
+  const overrides: Record<string, Record<string, any>> = {}
+  if (opcuaUrl.value.trim()) {
+    overrides.opcua = { discoveryUrls: [opcuaUrl.value.trim()] }
+  }
   try {
     results.value = await discoveryApi.run({
       protocols: activeProtocol.value === 'all' ? [...PROTOCOLS] : [activeProtocol.value],
       validate: validate.value,
       forceRun: true,
+      ...(Object.keys(overrides).length ? { overrides } : {}),
     })
     hasRun.value = true
   } catch (err: unknown) {
@@ -107,6 +118,8 @@ async function runRuleScan() {
     results.value = await discoveryApi.run({
       protocols: [rule.protocol],
       forceRun: true,
+      // OPC-UA discovery without validate returns no node IDs; always validate so Add gives usable endpoints
+      validate: rule.protocol === 'opcua',
       // pass rule's params_json as per-protocol overrides (preview only, skipDbWrites=true server-side)
       ...(rule.params_json ? { overrides: { [rule.protocol]: rule.params_json } } : {}),
     })
@@ -150,6 +163,19 @@ function close() {
   emit('update:open', false)
 }
 
+// When opened with a pre-selected rule, switch to rule mode and auto-run
+watch(
+  () => props.open,
+  async (isOpen) => {
+    if (isOpen && props.preSelectedRuleUuid) {
+      await loadRules()
+      mode.value = 'rule'
+      selectedRuleUuid.value = props.preSelectedRuleUuid
+      runRuleScan()
+    }
+  },
+)
+
 onMounted(loadRules)
 </script>
 
@@ -174,13 +200,22 @@ onMounted(loadRules)
           <a-radio-group v-model:value="activeProtocol" button-style="solid" size="small">
             <a-radio-button value="all">All</a-radio-button>
             <a-radio-button v-for="p in PROTOCOLS" :key="p" :value="p">
-              {{ PROTOCOL_LABELS[p] ?? p }}
+              {{ protocolLabel(p) }}
             </a-radio-button>
           </a-radio-group>
           <a-checkbox v-model:checked="validate" style="font-size: 13px">
             Validate
           </a-checkbox>
         </div>
+        <a-input
+          v-if="showOpcuaUrl"
+          v-model:value="opcuaUrl"
+          placeholder="OPC-UA server URL (e.g. opc.tcp://sim-opcua:4840)"
+          allow-clear
+          style="margin-top: 8px"
+        >
+          <template #addonBefore>OPC-UA</template>
+        </a-input>
         <a-button
           type="primary"
           :loading="running"
@@ -205,7 +240,7 @@ onMounted(loadRules)
 
         <template v-if="selectedRule">
           <div class="rule-meta">
-            <a-tag>{{ selectedRule.protocol }}</a-tag>
+            <a-tag :color="protocolColor(selectedRule.protocol)">{{ protocolLabel(selectedRule.protocol) }}</a-tag>
             <span style="color: #888; font-size: 12px">
               every {{ selectedRule.interval_seconds >= 3600 ? selectedRule.interval_seconds/3600 + 'h' : selectedRule.interval_seconds/60 + 'm' }}
               · auto-enable: {{ selectedRule.auto_enable ? 'yes' : 'no' }}
@@ -253,7 +288,7 @@ onMounted(loadRules)
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'protocol'">
-              <a-tag>{{ PROTOCOL_LABELS[record.protocol] ?? record.protocol }}</a-tag>
+              <a-tag :color="protocolColor(record.protocol)">{{ protocolLabel(record.protocol) }}</a-tag>
             </template>
 
             <template v-else-if="column.key === 'connection'">

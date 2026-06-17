@@ -724,22 +724,22 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 			{ metric: 'uptime', value: uptime, unit: 'seconds' },
 		];
 
-		// Process only configured metrics.
+		// Always push through processDataPoint so the metric catalog is populated.
+		// The service itself skips anomaly processing for unconfigured or disabled metrics.
 		for (const item of metricsToFeed) {
+			if (item.value === null || item.value === undefined) continue;
 			const canonicalMetricName = `${deviceUuid}_system_${item.metric}`;
-			if (item.value !== null && item.value !== undefined && anomalyService.isMetricConfigured(canonicalMetricName)) {
-				anomalyService.processDataPoint({
-					source: 'system',
-					protocol: 'system',
-					deviceState: 'running',
-					deviceId: 'system-endpoint',
-					metric: canonicalMetricName,
-					value: item.value,
-					unit: item.unit,
-					timestamp,
-					quality: 'GOOD',
-				});
-			}
+			anomalyService.processDataPoint({
+				source: 'system',
+				protocol: 'system',
+				deviceState: 'running',
+				deviceId: 'system-endpoint',
+				metric: canonicalMetricName,
+				value: item.value,
+				unit: item.unit,
+				timestamp,
+				quality: 'GOOD',
+			});
 		}
 	}
 

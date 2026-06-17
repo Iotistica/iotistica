@@ -118,6 +118,94 @@ export interface EndpointUpdateData {
   poll_interval?: number
 }
 
+// ── Anomaly detection ────────────────────────────────────────────────────────
+
+export type AnomalySeverity = 'info' | 'warning' | 'critical'
+export type DetectionMethod =
+  | 'zscore'
+  | 'mad'
+  | 'iqr'
+  | 'expected_range'
+  | 'rate_change'
+  | 'ewma'
+  | 'fusion'
+  | 'simulation'
+export type SeasonalityPattern = 'none' | 'day-night' | 'hourly' | 'weekly'
+
+export interface AnomalyAlert {
+  id: string
+  severity: AnomalySeverity
+  metric: string
+  deviceState?: string
+  value: number
+  expectedRange: [number, number]
+  deviation: number
+  detectionMethod: DetectionMethod
+  timestamp: number
+  confidence: number
+  message: string
+  fingerprint: string
+  count: number
+  cooldownSec: number
+  firstSeen: number
+  consecutiveCount: number
+}
+
+export interface AnomalyMetricConfig {
+  name: string
+  deviceName?: string
+  enabled: boolean
+  methods: DetectionMethod[]
+  threshold: number
+  windowSize: number
+  expectedRange?: [number, number]
+  minConfidence?: number
+  cooldownMs?: number
+  seasonality?: SeasonalityPattern
+}
+
+export interface AnomalyConfig {
+  enabled?: boolean
+  sensitivity: number
+  metrics: AnomalyMetricConfig[]
+  alerts: {
+    mqtt: boolean
+    cloud: boolean
+    minConfidence: number
+    cooldownMs: number
+    maxQueueSize: number
+  }
+  storage?: {
+    retention: number
+    minSamples?: number
+    baselineMaxAgeDays?: number
+  }
+  warmupPeriodMs?: number
+}
+
+export interface AnomalyStats {
+  enabled: boolean
+  metricsTracked: number
+  stateBucketsTracked: number
+  alertQueueSize: number
+  criticalAlerts: number
+  warningAlerts: number
+  infoAlerts: number
+}
+
+export interface AnomalyBaseline {
+  metric: string
+  device_id: string
+  device_state: string
+  time_slot: number
+  mean: number | null
+  std_dev: number | null
+  median: number | null
+  mad: number | null
+  sample_count: number
+  calculated_at: number
+}
+
 export interface DiscoveredDevice {
   protocol: string
   name: string
@@ -128,4 +216,61 @@ export interface DiscoveredDevice {
   discoveredAt: string
   validated: boolean
   metadata?: Record<string, unknown>
+}
+
+// ── Agent Settings ────────────────────────────────────────────────────────────
+
+export interface AgentSettingsLogging {
+  level?: 'debug' | 'info' | 'warn' | 'error'
+  maxLogs?: number
+  logMaxAge?: number
+  maxLogFileSize?: number
+  enableCompression?: boolean
+  enableRemoteLogging?: boolean
+  enableFilePersistence?: boolean
+}
+
+export interface AgentSettingsFeatures {
+  enableDeviceJobs?: boolean
+  enableAnomalyDetection?: boolean
+  enableDeviceRemoteAccess?: boolean
+  enableDevicePublish?: boolean
+}
+
+export interface AgentSettingsIntervals {
+  agent?: {
+    reportIntervalMs?: number
+    metricsIntervalMs?: number
+    reconciliationIntervalMs?: number
+    targetStatePollIntervalMs?: number
+  }
+  discovery?: {
+    fullIntervalMs?: number
+    lightIntervalMs?: number
+  }
+}
+
+export interface AgentSettingsRuntime {
+  memory?: {
+    thresholdMb?: number
+    checkIntervalMs?: number
+  }
+}
+
+export interface AgentSettingsInfo {
+  uuid: string | null
+  name: string | null
+  version: string | null
+  provisioned: boolean
+  apiEndpoint?: string | null
+  mqttBrokerUrl?: string | null
+}
+
+export interface AgentSettings {
+  agent?: AgentSettingsInfo
+  logging?: AgentSettingsLogging
+  features?: AgentSettingsFeatures
+  intervals?: AgentSettingsIntervals
+  runtime?: AgentSettingsRuntime
+  anomalyDetection?: Record<string, unknown>
 }

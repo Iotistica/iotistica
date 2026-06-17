@@ -1,0 +1,1003 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { message, Modal } from 'ant-design-vue'
+import {
+  ReloadOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+  SaveOutlined,
+  SyncOutlined,
+} from '@ant-design/icons-vue'
+import type { TableColumnType } from 'ant-design-vue'
+import AppLayout from '@/components/layout/AppLayout.vue'
+import { methodColor } from '@/utils/protocol'
+import { anomalyApi } from '@/api/anomaly'
+import type {
+  AnomalyAlert,
+  AnomalyConfig,
+  AnomalyMetricConfig,
+  AnomalyStats,
+  AnomalyBaseline,
+  DetectionMethod,
+} from '@/types'
+
+// ── Shared ────────────────────────────────────────────────────────────────────
+const activeTab = ref('alerts')
+
+function fmtTs(ms: number): string {
+  if (!ms) return '—'
+  return new Date(ms).toLocaleString()
+}
+
+function fmtNum(n: number | null | undefined, decimals = 3): string {
+  if (n == null || isNaN(n)) return '—'
+  return n.toFixed(decimals)
+}
+
+// ── Alerts tab ─────────────────────────────────────────────────────────────────
+const alerts = ref<AnomalyAlert[]>([])
+const alertsLoading = ref(false)
+const filterSeverity = ref('')
+const filterMetric = ref('')
+const autoRefresh = ref(false)
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+const SEVERITY_BADGE: Record<string, string> = {
+  critical: 'error',
+  warning: 'warning',
+  info: 'processing',
+}
+const SEVERITY_COLOR: Record<string, string> = {
+  critical: '#cf1322',
+  warning: '#fa8c16',
+  info: '#1677ff',
+}
+
+const alertColumns: TableColumnType<AnomalyAlert>[] = [
+  { title: 'Severity', key: 'severity', width: 100 },
+  { title: 'Metric', dataIndex: 'metric', key: 'metric', ellipsis: true },
+  { title: 'Value', key: 'value', width: 90 },
+  { title: 'Expected', key: 'expectedRange', width: 140 },
+  { title: 'Dev', key: 'deviation', width: 80 },
+  { title: 'Method', key: 'method', width: 130 },
+  { title: 'Conf', key: 'confidence', width: 75 },
+  { title: 'Time', key: 'timestamp', width: 160 },
+  { title: '#', dataIndex: 'count', key: 'count', width: 55 },
+]
+
+async function loadAlerts() {
+  alertsLoading.value = true
+  try {
+    const params: Record<string, unknown> = {}
+    if (filterSeverity.value) params.severity = filterSeverity.value
+    if (filterMetric.value.trim()) params.metric = filterMetric.value.trim()
+    const data = await anomalyApi.getAlerts(params)
+    alerts.value = data.alerts
+  } catch {
+    // non-fatal
+  } finally {
+    alertsLoading.value = false
+  }
+}
+
+function toggleAutoRefresh() {
+  autoRefresh.value = !autoRefresh.value
+  if (autoRefresh.value) {
+    refreshTimer = setInterval(loadAlerts, 10_000)
+  } else {
+    if (refreshTimer) clearInterval(refreshTimer)
+    refreshTimer = null
+  }
+}
+
+function confirmClearAlerts() {
+  Modal.confirm({
+    title: 'Clear all in-memory alerts?',
+    okType: 'danger',
+    okText: 'Clear',
+    async onOk() {
+      await anomalyApi.clearAlerts()
+      message.success('Alerts cleared')
+      loadAlerts()
+    },
+  })
+}
+
+// ── Stats tab ──────────────────────────────────────────────────────────────────
+const stats = ref<AnomalyStats | null>(null)
+const scores = ref<Record<string, number>>({})
+const predictions = ref<Record<string, unknown> | null>(null)
+const statsLoading = ref(false)
+
+const sortedScores = computed(() =>
+  Object.entries(scores.value)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 40),
+)
+
+function scoreColor(v: number): string {
+  if (v >= 0.8) return '#cf1322'
+  if (v >= 0.5) return '#fa8c16'
+  if (v >= 0.3) return '#faad14'
+  return '#52c41a'
+}
+
+function scorePercent(v: number): number {
+  return Math.round(v * 100)
+}
+
+async function loadStats() {
+  statsLoading.value = true
+  try {
+    const data = await anomalyApi.getStats()
+    stats.value = data.stats
+    scores.value = data.scores
+    predictions.value = data.predictions
+  } catch {
+    // non-fatal
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+// ── Config tab ─────────────────────────────────────────────────────────────────
+const config = ref<AnomalyConfig | null>(null)
+const configLoading = ref(false)
+const configSaving = ref(false)
+
+const metricDrawerOpen = ref(false)
+const editingMetricIdx = ref<number | null>(null)
+const metricForm = ref<AnomalyMetricConfig>(blankMetric())
+const hasExpectedRange = ref(false)
+const expectedMin = ref<number | null>(null)
+const expectedMax = ref<number | null>(null)
+
+const DETECTION_METHODS: DetectionMethod[] = [
+  'zscore', 'mad', 'iqr', 'expected_range', 'rate_change', 'ewma', 'fusion',
+]
+const SEASONALITY_OPTIONS = ['none', 'day-night', 'hourly', 'weekly']
+
+// ── Available metric suggestions ───────────────────────────────────────────
+type MetricSuggestion = {
+  name: string
+  source: 'live' | 'system' | 'endpoint'
+  score?: number
+  deviceState?: string
+  endpointName?: string
+  unit?: string
+  configured: boolean
+}
+const metricSuggestions = ref<MetricSuggestion[]>([])
+const metricSuggestionsLoading = ref(false)
+
+async function loadMetricSuggestions() {
+  metricSuggestionsLoading.value = true
+  try {
+    metricSuggestions.value = await anomalyApi.getMetrics()
+  } catch {
+    // non-fatal
+  } finally {
+    metricSuggestionsLoading.value = false
+  }
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  live: 'Live',
+  system: 'System',
+  endpoint: 'Endpoint',
+}
+const SOURCE_COLOR: Record<string, string> = {
+  live: 'green',
+  system: 'blue',
+  endpoint: 'default',
+}
+
+// Strip leading UUID prefix from canonical metric names so they display readably.
+// e.g. "2c961ee4-42ca-4c73-a95f-6506a719a12d_system_cpu_usage" → "system_cpu_usage"
+const UUID_PREFIX_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i
+function friendlyLabel(name: string): string {
+  return name.replace(UUID_PREFIX_RE, '')
+}
+
+// Group suggestions for the autocomplete dropdown
+const metricAutocompleteOptions = computed(() => {
+  const q = metricForm.value.name.toLowerCase()
+
+  // Filter empty names; search against both canonical name and friendly label
+  const filtered = metricSuggestions.value.filter((s) => {
+    if (!s.name.trim()) return false
+    if (!q) return true
+    return s.name.toLowerCase().includes(q) || friendlyLabel(s.name).toLowerCase().includes(q)
+  })
+
+  const groups: Record<string, MetricSuggestion[]> = { live: [], system: [], endpoint: [] }
+  for (const s of filtered) groups[s.source]?.push(s)
+
+  return Object.entries(groups)
+    .filter(([, items]) => items.length > 0)
+    .map(([source, items]) => ({
+      label: SOURCE_LABEL[source],
+      options: items.map((s) => ({
+        value: s.name,
+        label: friendlyLabel(s.name),
+        suggestion: s,
+      })),
+    }))
+})
+
+function blankMetric(): AnomalyMetricConfig {
+  return {
+    name: '',
+    enabled: true,
+    methods: ['mad'],
+    threshold: 3.0,
+    windowSize: 120,
+    minConfidence: 0.7,
+    cooldownMs: 300_000,
+    seasonality: 'none',
+  }
+}
+
+const metricColumns: TableColumnType<AnomalyMetricConfig>[] = [
+  { title: 'Metric name', dataIndex: 'name', key: 'name', ellipsis: true },
+  { title: 'Enabled', key: 'enabled', width: 80 },
+  { title: 'Methods', key: 'methods', ellipsis: true },
+  { title: 'Threshold', dataIndex: 'threshold', key: 'threshold', width: 100 },
+  { title: 'Window', dataIndex: 'windowSize', key: 'windowSize', width: 90 },
+  { title: 'Seasonality', key: 'seasonality', width: 110 },
+  { title: '', key: 'actions', width: 100, fixed: 'right' },
+]
+
+async function loadConfig() {
+  configLoading.value = true
+  try {
+    config.value = await anomalyApi.getConfig()
+  } catch {
+    // non-fatal
+  } finally {
+    configLoading.value = false
+  }
+}
+
+async function saveConfig() {
+  if (!config.value) return
+  configSaving.value = true
+  try {
+    config.value = await anomalyApi.updateConfig(config.value)
+    message.success('Configuration saved')
+  } catch (err: unknown) {
+    const e = err as { message?: string }
+    message.error(e?.message ?? 'Save failed')
+  } finally {
+    configSaving.value = false
+  }
+}
+
+function openAddMetric() {
+  editingMetricIdx.value = null
+  metricForm.value = blankMetric()
+  hasExpectedRange.value = false
+  expectedMin.value = null
+  expectedMax.value = null
+  metricDrawerOpen.value = true
+  loadMetricSuggestions()
+}
+
+function openEditMetric(metric: AnomalyMetricConfig, idx: number) {
+  editingMetricIdx.value = idx
+  metricForm.value = { ...metric, methods: [...metric.methods] }
+  hasExpectedRange.value = Array.isArray(metric.expectedRange)
+  expectedMin.value = metric.expectedRange?.[0] ?? null
+  expectedMax.value = metric.expectedRange?.[1] ?? null
+  metricDrawerOpen.value = true
+  loadMetricSuggestions()
+}
+
+function saveMetric() {
+  if (!config.value) return
+  if (!metricForm.value.name.trim()) {
+    message.error('Metric name is required')
+    return
+  }
+  const entry: AnomalyMetricConfig = {
+    ...metricForm.value,
+    expectedRange:
+      hasExpectedRange.value && expectedMin.value != null && expectedMax.value != null
+        ? [expectedMin.value, expectedMax.value]
+        : undefined,
+  }
+  if (editingMetricIdx.value !== null) {
+    config.value.metrics[editingMetricIdx.value] = entry
+  } else {
+    config.value.metrics.push(entry)
+  }
+  metricDrawerOpen.value = false
+}
+
+function removeMetric(idx: number) {
+  if (!config.value) return
+  config.value.metrics.splice(idx, 1)
+}
+
+function toggleMetricEnabled(idx: number) {
+  if (!config.value) return
+  config.value.metrics[idx].enabled = !config.value.metrics[idx].enabled
+}
+
+// ── Baselines tab ──────────────────────────────────────────────────────────────
+const baselines = ref<AnomalyBaseline[]>([])
+const baselinesLoading = ref(false)
+const baselinesFilter = ref('')
+const savingBaselines = ref(false)
+
+const baselineColumns: TableColumnType<AnomalyBaseline>[] = [
+  { title: 'Metric', dataIndex: 'metric', key: 'metric', ellipsis: true },
+  { title: 'Device', dataIndex: 'device_id', key: 'device_id', width: 150, ellipsis: true },
+  { title: 'State', key: 'device_state', width: 90 },
+  { title: 'Slot', key: 'time_slot', width: 55 },
+  { title: 'Mean', key: 'mean', width: 90 },
+  { title: 'Std Dev', key: 'std_dev', width: 90 },
+  { title: 'Samples', dataIndex: 'sample_count', key: 'sample_count', width: 90 },
+  { title: 'Calculated', key: 'calculated_at', width: 160 },
+]
+
+async function loadBaselines() {
+  baselinesLoading.value = true
+  try {
+    const params: Record<string, unknown> = {}
+    if (baselinesFilter.value.trim()) params.metric = baselinesFilter.value.trim()
+    const data = await anomalyApi.getBaselines(params)
+    baselines.value = data.baselines
+  } catch {
+    // non-fatal
+  } finally {
+    baselinesLoading.value = false
+  }
+}
+
+async function triggerSaveBaselines() {
+  savingBaselines.value = true
+  try {
+    await anomalyApi.saveBaselines()
+    message.success('Baselines persisted to SQLite')
+    await loadBaselines()
+  } catch (err: unknown) {
+    const e = err as { message?: string }
+    message.error(e?.message ?? 'Save failed')
+  } finally {
+    savingBaselines.value = false
+  }
+}
+
+// ── Tab switching ──────────────────────────────────────────────────────────────
+function onTabChange(tab: string) {
+  activeTab.value = tab
+  if (tab === 'alerts') loadAlerts()
+  else if (tab === 'stats') loadStats()
+  else if (tab === 'config') { loadConfig(); loadMetricSuggestions() }
+  else if (tab === 'baselines') loadBaselines()
+}
+
+onMounted(loadAlerts)
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+})
+</script>
+
+<template>
+  <AppLayout title="Anomaly Detection">
+    <a-tabs :active-key="activeTab" @change="onTabChange">
+
+      <!-- ══ ALERTS ══════════════════════════════════════════════════════════ -->
+      <a-tab-pane key="alerts" tab="Alerts">
+        <div class="toolbar">
+          <a-space>
+            <a-select
+              v-model:value="filterSeverity"
+              placeholder="All severities"
+              allow-clear
+              style="width: 150px"
+              @change="loadAlerts"
+            >
+              <a-select-option value="critical">Critical</a-select-option>
+              <a-select-option value="warning">Warning</a-select-option>
+              <a-select-option value="info">Info</a-select-option>
+            </a-select>
+            <a-input
+              v-model:value="filterMetric"
+              placeholder="Filter by metric…"
+              allow-clear
+              style="width: 200px"
+              @pressEnter="loadAlerts"
+              @change="(e: Event) => { if (!(e.target as HTMLInputElement).value) loadAlerts() }"
+            />
+            <a-button :loading="alertsLoading" @click="loadAlerts">
+              <template #icon><ReloadOutlined /></template>
+            </a-button>
+            <a-button
+              :type="autoRefresh ? 'primary' : 'default'"
+              :title="autoRefresh ? 'Auto-refresh on (10s) — click to stop' : 'Enable auto-refresh'"
+              @click="toggleAutoRefresh"
+            >
+              <template #icon><SyncOutlined :spin="autoRefresh" /></template>
+              {{ autoRefresh ? '10s' : 'Auto' }}
+            </a-button>
+          </a-space>
+          <a-button danger :disabled="!alerts.length" @click="confirmClearAlerts">
+            <template #icon><DeleteOutlined /></template>
+            Clear all
+          </a-button>
+        </div>
+
+        <div v-if="!alerts.length && !alertsLoading" style="padding: 48px 0; text-align: center; color: #888">
+          No alerts{{ filterSeverity || filterMetric ? ' matching the current filters' : '' }}.
+        </div>
+
+        <a-table
+          v-else
+          :columns="alertColumns"
+          :data-source="alerts"
+          :loading="alertsLoading"
+          :pagination="{ pageSize: 50, showSizeChanger: false }"
+          row-key="id"
+          size="small"
+          :scroll="{ x: true }"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'severity'">
+              <a-badge
+                :status="SEVERITY_BADGE[record.severity]"
+                :text="record.severity"
+                :style="{ color: SEVERITY_COLOR[record.severity] }"
+              />
+            </template>
+
+            <template v-else-if="column.key === 'value'">
+              <span style="font-variant-numeric: tabular-nums">{{ fmtNum(record.value, 2) }}</span>
+            </template>
+
+            <template v-else-if="column.key === 'expectedRange'">
+              <span style="color: #888; font-size: 12px">
+                [{{ fmtNum(record.expectedRange?.[0], 2) }}, {{ fmtNum(record.expectedRange?.[1], 2) }}]
+              </span>
+            </template>
+
+            <template v-else-if="column.key === 'deviation'">
+              <span style="font-variant-numeric: tabular-nums">{{ fmtNum(record.deviation, 2) }}σ</span>
+            </template>
+
+            <template v-else-if="column.key === 'method'">
+              <a-tag :color="methodColor(record.detectionMethod)" style="font-size: 11px">{{ record.detectionMethod }}</a-tag>
+            </template>
+
+            <template v-else-if="column.key === 'confidence'">
+              <span style="font-size: 12px">{{ Math.round(record.confidence * 100) }}%</span>
+            </template>
+
+            <template v-else-if="column.key === 'timestamp'">
+              <span style="color: #888; font-size: 12px">{{ fmtTs(record.timestamp) }}</span>
+            </template>
+          </template>
+        </a-table>
+      </a-tab-pane>
+
+      <!-- ══ STATS ═══════════════════════════════════════════════════════════ -->
+      <a-tab-pane key="stats" tab="Statistics">
+        <a-button :loading="statsLoading" style="margin-bottom: 16px" @click="loadStats">
+          <template #icon><ReloadOutlined /></template>
+          Refresh
+        </a-button>
+
+        <a-spin :spinning="statsLoading">
+          <template v-if="stats">
+            <a-row :gutter="16" style="margin-bottom: 24px">
+              <a-col :span="4">
+                <a-statistic title="Metrics tracked" :value="stats.metricsTracked" />
+              </a-col>
+              <a-col :span="4">
+                <a-statistic title="State buckets" :value="stats.stateBucketsTracked" />
+              </a-col>
+              <a-col :span="4">
+                <a-statistic
+                  title="Critical"
+                  :value="stats.criticalAlerts"
+                  :value-style="stats.criticalAlerts ? { color: '#cf1322' } : {}"
+                />
+              </a-col>
+              <a-col :span="4">
+                <a-statistic
+                  title="Warning"
+                  :value="stats.warningAlerts"
+                  :value-style="stats.warningAlerts ? { color: '#fa8c16' } : {}"
+                />
+              </a-col>
+              <a-col :span="4">
+                <a-statistic title="Info" :value="stats.infoAlerts" />
+              </a-col>
+              <a-col :span="4">
+                <a-statistic
+                  title="Detection"
+                  :value="stats.enabled ? 'Active' : 'Disabled'"
+                  :value-style="{ color: stats.enabled ? '#52c41a' : '#888' }"
+                />
+              </a-col>
+            </a-row>
+
+            <a-divider orientation="left" style="font-size: 13px">Per-metric anomaly scores</a-divider>
+
+            <div v-if="!sortedScores.length" style="color: #888; margin-bottom: 16px">
+              No metrics tracked yet — scores appear once data starts flowing through configured metrics.
+            </div>
+            <div v-else class="scores-list">
+              <div v-for="[key, score] in sortedScores" :key="key" class="score-row">
+                <span class="score-label" :title="key">{{ key }}</span>
+                <a-progress
+                  :percent="scorePercent(score)"
+                  :stroke-color="scoreColor(score)"
+                  :show-info="false"
+                  size="small"
+                  style="flex: 1; margin: 0 12px"
+                />
+                <span class="score-value" :style="{ color: scoreColor(score) }">
+                  {{ fmtNum(score, 3) }}
+                </span>
+              </div>
+            </div>
+          </template>
+
+          <div v-else-if="!statsLoading" style="color: #888; padding: 48px 0; text-align: center">
+            No statistics available. Click Refresh to load.
+          </div>
+        </a-spin>
+      </a-tab-pane>
+
+      <!-- ══ CONFIG ══════════════════════════════════════════════════════════ -->
+      <a-tab-pane key="config" tab="Configuration">
+        <a-spin :spinning="configLoading">
+          <template v-if="config">
+            <!-- Global settings -->
+            <a-card title="Global settings" size="small" style="margin-bottom: 16px">
+              <a-row :gutter="24">
+                <a-col :span="4">
+                  <a-form-item label="Enabled">
+                    <a-switch v-model:checked="config.enabled" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="6">
+                  <a-form-item label="Sensitivity (1–10)">
+                    <a-slider
+                      v-model:value="config.sensitivity"
+                      :min="1"
+                      :max="10"
+                      :marks="{ 1: '1', 5: '5', 10: '10' }"
+                    />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="6">
+                  <a-form-item label="Warm-up period (ms)">
+                    <a-input-number
+                      v-model:value="config.warmupPeriodMs"
+                      :min="0"
+                      :step="60000"
+                      style="width: 100%"
+                      placeholder="900000"
+                    />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </a-card>
+
+            <!-- Alert routing -->
+            <a-card title="Alert routing" size="small" style="margin-bottom: 16px">
+              <a-row :gutter="24">
+                <a-col :span="4">
+                  <a-form-item label="MQTT alerts">
+                    <a-switch v-model:checked="config.alerts.mqtt" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="4">
+                  <a-form-item label="Cloud alerts">
+                    <a-switch v-model:checked="config.alerts.cloud" />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="6">
+                  <a-form-item label="Min confidence">
+                    <a-input-number
+                      v-model:value="config.alerts.minConfidence"
+                      :min="0"
+                      :max="1"
+                      :step="0.05"
+                      style="width: 100%"
+                    />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="6">
+                  <a-form-item label="Cooldown (ms)">
+                    <a-input-number
+                      v-model:value="config.alerts.cooldownMs"
+                      :min="0"
+                      :step="60000"
+                      style="width: 100%"
+                    />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="4">
+                  <a-form-item label="Max queue size">
+                    <a-input-number
+                      v-model:value="config.alerts.maxQueueSize"
+                      :min="1"
+                      style="width: 100%"
+                    />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </a-card>
+
+            <!-- Storage -->
+            <a-card title="Storage" size="small" style="margin-bottom: 16px">
+              <a-row :gutter="24">
+                <a-col :span="6">
+                  <a-form-item label="Retention (days)">
+                    <a-input-number
+                      :value="config.storage?.retention"
+                      :min="1"
+                      style="width: 100%"
+                      @change="(v: number) => { if (!config!.storage) config!.storage = { retention: v }; else config!.storage.retention = v }"
+                    />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="6">
+                  <a-form-item label="Baseline max age (days)">
+                    <a-input-number
+                      :value="config.storage?.baselineMaxAgeDays"
+                      :min="1"
+                      style="width: 100%"
+                      placeholder="7"
+                      @change="(v: number) => { if (!config!.storage) config!.storage = { retention: 30, baselineMaxAgeDays: v }; else config!.storage.baselineMaxAgeDays = v }"
+                    />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="6">
+                  <a-form-item label="Min samples for baseline">
+                    <a-input-number
+                      :value="config.storage?.minSamples"
+                      :min="1"
+                      style="width: 100%"
+                      placeholder="5"
+                      @change="(v: number) => { if (!config!.storage) config!.storage = { retention: 30, minSamples: v }; else config!.storage.minSamples = v }"
+                    />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+            </a-card>
+
+            <!-- Per-metric config -->
+            <div class="toolbar" style="margin-bottom: 8px">
+              <span style="font-size: 14px; font-weight: 500">Metric rules</span>
+              <a-button type="primary" ghost size="small" @click="openAddMetric">
+                <template #icon><PlusOutlined /></template>
+                Add metric
+              </a-button>
+            </div>
+
+            <a-table
+              :columns="metricColumns"
+              :data-source="config.metrics"
+              :pagination="false"
+              row-key="name"
+              size="small"
+            >
+              <template #bodyCell="{ column, record, index }">
+                <template v-if="column.key === 'enabled'">
+                  <a-switch
+                    :checked="record.enabled"
+                    size="small"
+                    @change="toggleMetricEnabled(index)"
+                  />
+                </template>
+
+                <template v-else-if="column.key === 'methods'">
+                  <a-tag
+                    v-for="m in record.methods"
+                    :key="m"
+                    :color="methodColor(m)"
+                    style="font-size: 11px; margin: 1px"
+                  >{{ m }}</a-tag>
+                </template>
+
+                <template v-else-if="column.key === 'seasonality'">
+                  <span style="color: #888; font-size: 12px">{{ record.seasonality || 'none' }}</span>
+                </template>
+
+                <template v-else-if="column.key === 'actions'">
+                  <a-space>
+                    <a-button size="small" @click="openEditMetric(record, index)">Edit</a-button>
+                    <a-button size="small" danger @click="removeMetric(index)">Del</a-button>
+                  </a-space>
+                </template>
+              </template>
+            </a-table>
+
+            <div style="margin-top: 20px; text-align: right">
+              <a-button type="primary" :loading="configSaving" @click="saveConfig">
+                <template #icon><SaveOutlined /></template>
+                Save configuration
+              </a-button>
+            </div>
+          </template>
+
+          <div v-else-if="!configLoading" style="color: #888; padding: 48px 0; text-align: center">
+            Configuration not available. Click the tab to load.
+          </div>
+        </a-spin>
+      </a-tab-pane>
+
+      <!-- ══ BASELINES ═══════════════════════════════════════════════════════ -->
+      <a-tab-pane key="baselines" tab="Baselines">
+        <div class="toolbar">
+          <a-space>
+            <a-input
+              v-model:value="baselinesFilter"
+              placeholder="Filter by metric…"
+              allow-clear
+              style="width: 220px"
+              @pressEnter="loadBaselines"
+              @change="(e: Event) => { if (!(e.target as HTMLInputElement).value) loadBaselines() }"
+            />
+            <a-button :loading="baselinesLoading" @click="loadBaselines">
+              <template #icon><ReloadOutlined /></template>
+            </a-button>
+          </a-space>
+          <a-button :loading="savingBaselines" @click="triggerSaveBaselines">
+            <template #icon><SaveOutlined /></template>
+            Save baselines now
+          </a-button>
+        </div>
+
+        <a-table
+          :columns="baselineColumns"
+          :data-source="baselines"
+          :loading="baselinesLoading"
+          :pagination="{ pageSize: 50, showSizeChanger: false }"
+          row-key="metric"
+          size="small"
+          :scroll="{ x: true }"
+        >
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'device_state'">
+              <a-tag>{{ record.device_state }}</a-tag>
+            </template>
+
+            <template v-else-if="column.key === 'time_slot'">
+              <span style="color: #888; font-size: 12px">
+                {{ record.time_slot === -1 ? 'all' : record.time_slot }}
+              </span>
+            </template>
+
+            <template v-else-if="column.key === 'mean'">
+              <span style="font-variant-numeric: tabular-nums; font-size: 12px">
+                {{ fmtNum(record.mean) }}
+              </span>
+            </template>
+
+            <template v-else-if="column.key === 'std_dev'">
+              <span style="font-variant-numeric: tabular-nums; font-size: 12px">
+                {{ fmtNum(record.std_dev) }}
+              </span>
+            </template>
+
+            <template v-else-if="column.key === 'calculated_at'">
+              <span style="color: #888; font-size: 12px">{{ fmtTs(record.calculated_at) }}</span>
+            </template>
+          </template>
+        </a-table>
+      </a-tab-pane>
+
+    </a-tabs>
+
+    <!-- ── Metric config drawer ─────────────────────────────────────────────── -->
+    <a-drawer
+      :open="metricDrawerOpen"
+      :title="editingMetricIdx !== null ? 'Edit metric rule' : 'Add metric rule'"
+      width="480"
+      @close="metricDrawerOpen = false"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="Metric name" required>
+          <a-auto-complete
+            v-model:value="metricForm.name"
+            :options="metricAutocompleteOptions"
+            placeholder="e.g. cpu_usage, temperature"
+            :filter-option="false"
+            allow-clear
+            style="width: 100%"
+          >
+            <template #option="{ value: val, suggestion }">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+                <span>{{ friendlyLabel(val) }}</span>
+                <span style="display: flex; align-items: center; gap: 6px; flex-shrink: 0">
+                  <a-tag
+                    v-if="suggestion?.source"
+                    :color="SOURCE_COLOR[suggestion.source]"
+                    style="font-size: 10px; line-height: 16px; padding: 0 4px; margin: 0"
+                  >{{ SOURCE_LABEL[suggestion.source] }}</a-tag>
+                  <span v-if="suggestion?.unit" style="font-size: 11px; color: #aaa; font-style: italic">
+                    {{ suggestion.unit }}
+                  </span>
+                  <span v-if="suggestion?.score != null" style="font-size: 11px; color: #888">
+                    score {{ suggestion.score.toFixed(2) }}
+                  </span>
+                  <span v-if="suggestion?.source === 'endpoint'" style="font-size: 11px; color: #888">
+                    {{ suggestion.endpointName }}
+                  </span>
+                  <a-tag
+                    v-if="suggestion?.configured"
+                    color="purple"
+                    style="font-size: 10px; line-height: 16px; padding: 0 4px; margin: 0"
+                  >configured</a-tag>
+                </span>
+              </div>
+            </template>
+          </a-auto-complete>
+          <div style="font-size: 11px; color: #888; margin-top: 4px">
+            <a-spin v-if="metricSuggestionsLoading" size="small" />
+            <template v-else-if="metricSuggestions.length">
+              {{ metricSuggestions.length }} metric{{ metricSuggestions.length !== 1 ? 's' : '' }} found —
+              type to filter, or enter a custom name
+            </template>
+            <template v-else>No metrics flowing yet — enter a name manually</template>
+          </div>
+        </a-form-item>
+
+        <a-form-item label="Device name (optional)" extra="Scopes this rule to a specific device. Leave empty to match all.">
+          <a-input v-model:value="metricForm.deviceName" placeholder="e.g. BACnet-Controller-1" />
+        </a-form-item>
+
+        <a-row :gutter="12">
+          <a-col :span="12">
+            <a-form-item label="Enabled">
+              <a-switch v-model:checked="metricForm.enabled" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="Seasonality">
+              <a-select v-model:value="metricForm.seasonality" style="width: 100%">
+                <a-select-option v-for="s in SEASONALITY_OPTIONS" :key="s" :value="s">
+                  {{ s }}
+                </a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-form-item label="Detection methods">
+          <a-checkbox-group v-model:value="metricForm.methods" style="display: flex; flex-wrap: wrap; gap: 8px">
+            <a-checkbox v-for="m in DETECTION_METHODS" :key="m" :value="m">{{ m }}</a-checkbox>
+          </a-checkbox-group>
+        </a-form-item>
+
+        <a-row :gutter="12">
+          <a-col :span="12">
+            <a-form-item label="Threshold (σ / MAD multiplier)">
+              <a-input-number
+                v-model:value="metricForm.threshold"
+                :min="0.1"
+                :step="0.5"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="Window size (samples)">
+              <a-input-number
+                v-model:value="metricForm.windowSize"
+                :min="5"
+                :step="10"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-row :gutter="12">
+          <a-col :span="12">
+            <a-form-item label="Min confidence (0–1)">
+              <a-input-number
+                v-model:value="metricForm.minConfidence"
+                :min="0"
+                :max="1"
+                :step="0.05"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="Cooldown (ms)">
+              <a-input-number
+                v-model:value="metricForm.cooldownMs"
+                :min="0"
+                :step="60000"
+                style="width: 100%"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-form-item label="Expected range">
+          <a-checkbox v-model:checked="hasExpectedRange" style="margin-bottom: 8px">
+            Set hard min/max bounds
+          </a-checkbox>
+          <a-row v-if="hasExpectedRange" :gutter="8">
+            <a-col :span="12">
+              <a-input-number
+                v-model:value="expectedMin"
+                placeholder="Min"
+                style="width: 100%"
+              />
+            </a-col>
+            <a-col :span="12">
+              <a-input-number
+                v-model:value="expectedMax"
+                placeholder="Max"
+                style="width: 100%"
+              />
+            </a-col>
+          </a-row>
+        </a-form-item>
+      </a-form>
+
+      <template #footer>
+        <a-space>
+          <a-button @click="metricDrawerOpen = false">Cancel</a-button>
+          <a-button type="primary" @click="saveMetric">
+            {{ editingMetricIdx !== null ? 'Update' : 'Add' }}
+          </a-button>
+        </a-space>
+      </template>
+    </a-drawer>
+  </AppLayout>
+</template>
+
+<style scoped>
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scores-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.score-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.score-label {
+  width: 280px;
+  min-width: 280px;
+  font-size: 12px;
+  color: #555;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.score-value {
+  width: 48px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+</style>

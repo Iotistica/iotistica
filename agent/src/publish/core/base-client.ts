@@ -46,7 +46,7 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 				this.connected = true;
 
 				if (!wasConnected) {
-					this.logger?.infoSync(`${this.providerName} MQTT connected`, {
+					this.logger?.infoSync(`${this.providerName} connected`, {
 						component: LogComponents.agent,
 						...this.getLogContext(),
 					});
@@ -65,7 +65,14 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 			};
 
 			const onCloseLike = () => {
+				const wasConnected = this.connected;
 				this.connected = false;
+				if (wasConnected) {
+					this.logger?.warnSync(`${this.providerName} connection lost`, {
+						component: LogComponents.agent,
+						...this.getLogContext(),
+					});
+				}
 			};
 
 			const onDisconnect = () => {
@@ -78,7 +85,7 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 			};
 
 			const onReconnect = () => {
-				this.logger?.debugSync(`${this.providerName} MQTT reconnecting`, {
+				this.logger?.infoSync(`${this.providerName} reconnecting`, {
 					component: LogComponents.agent,
 					...this.getLogContext(),
 				});
@@ -105,7 +112,7 @@ export abstract class BaseMqttClient extends EventEmitter implements MqttConnect
 
 			client.on('error', (err) => {
 				this.logger?.errorSync(
-					`${this.providerName} MQTT client error`,
+					`${this.providerName} client error`,
 					err instanceof Error ? err : new Error(String(err)),
 					{ component: LogComponents.agent, ...this.getLogContext() },
 				);

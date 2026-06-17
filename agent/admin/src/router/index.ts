@@ -22,7 +22,17 @@ const router = createRouter({
     {
       path: '/discovery-rules',
       component: () => import('@/views/DiscoveryRulesView.vue'),
-      meta: { title: 'Discovery Rules' },
+      meta: { title: 'Discovery' },
+    },
+    {
+      path: '/anomaly',
+      component: () => import('@/views/AnomalyView.vue'),
+      meta: { title: 'Anomaly Detection' },
+    },
+    {
+      path: '/settings',
+      component: () => import('@/views/SettingsView.vue'),
+      meta: { title: 'Settings' },
     },
   ],
 })

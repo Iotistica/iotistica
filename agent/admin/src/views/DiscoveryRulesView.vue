@@ -5,8 +5,10 @@ import { PlusOutlined, PlayCircleOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import DiscoveryRuleDrawer from '@/components/discovery/DiscoveryRuleDrawer.vue'
+import DiscoveryDrawer from '@/components/discovery/DiscoveryDrawer.vue'
 import type { DiscoveryRule } from '@/types'
 import { discoveryRulesApi } from '@/api/discovery'
+import { protocolColor, protocolLabel } from '@/utils/protocol'
 
 const STATUS_COLOR: Record<string, string> = {
   idle: 'default',
@@ -17,10 +19,11 @@ const STATUS_COLOR: Record<string, string> = {
 
 const rows = ref<DiscoveryRule[]>([])
 const loading = ref(false)
-const running = ref<Record<string, boolean>>({})
 const error = ref<string | null>(null)
 const drawerOpen = ref(false)
 const editing = ref<DiscoveryRule | null>(null)
+const scanDrawerOpen = ref(false)
+const scanRuleUuid = ref<string | undefined>()
 
 const columns: TableColumnType<DiscoveryRule>[] = [
   { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true },
@@ -75,18 +78,9 @@ async function toggleEnabled(row: DiscoveryRule) {
   }
 }
 
-async function runNow(row: DiscoveryRule) {
-  running.value[row.uuid] = true
-  try {
-    await discoveryRulesApi.run(row.uuid)
-    message.success(`Rule "${row.name}" completed`)
-    await load()
-  } catch (err: unknown) {
-    const e = err as { message?: string }
-    message.error(e?.message ?? 'Run failed')
-  } finally {
-    running.value[row.uuid] = false
-  }
+function openScanDrawer(row: DiscoveryRule) {
+  scanRuleUuid.value = row.uuid
+  scanDrawerOpen.value = true
 }
 
 function openCreate() {
@@ -145,7 +139,7 @@ onMounted(load)
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'protocol'">
-          <a-tag>{{ record.protocol }}</a-tag>
+          <a-tag :color="protocolColor(record.protocol)">{{ protocolLabel(record.protocol) }}</a-tag>
         </template>
 
         <template v-else-if="column.key === 'interval_seconds'">
@@ -180,9 +174,8 @@ onMounted(load)
           <a-space>
             <a-button
               size="small"
-              :loading="running[record.uuid]"
-              @click="runNow(record)"
-              title="Run now"
+              title="Run and review results"
+              @click="openScanDrawer(record)"
             >
               <template #icon><PlayCircleOutlined /></template>
             </a-button>
@@ -196,6 +189,12 @@ onMounted(load)
     <DiscoveryRuleDrawer
       v-model:open="drawerOpen"
       :editing="editing"
+      @saved="load"
+    />
+
+    <DiscoveryDrawer
+      v-model:open="scanDrawerOpen"
+      :pre-selected-rule-uuid="scanRuleUuid"
       @saved="load"
     />
   </AppLayout>
