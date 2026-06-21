@@ -693,7 +693,8 @@ export class SchemaDriftDetector {
 		}
 
 		const dominantExpectedType = this.getDominantType(freq);
-		if (!dominantExpectedType) {
+		// null dominant means the baseline was built while the device was offline — not meaningful drift
+		if (!dominantExpectedType || dominantExpectedType === 'null') {
 			return;
 		}
 
@@ -793,6 +794,11 @@ export class SchemaDriftDetector {
 			}
 
 			fields.add(field);
+
+			// null means "no reading yet" — don't let it define the expected type
+			if (value === null || value === undefined) {
+				return;
+			}
 
 			if (!this.canTrackInMap(typesByField, field)) {
 				return;

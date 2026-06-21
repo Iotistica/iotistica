@@ -353,10 +353,11 @@ export class FeatureInitializer {
 					addr: output.socket_path,
 					eomDelimiter: output.delimiter || '\n',
 					mqttTopic: output.protocol,
-					bufferCapacity: output.buffer_capacity || 1024 * 1024, // Default 1MB, configurable per protocol
+					bufferCapacity: output.buffer_capacity || 1024 * 1024,
 					bufferSize: 12,
 					bufferTimeMs: 60000,
 					enabled: true,
+					driftOptions: output.drift_options ?? undefined,
 				}));
 
 			if (devices.length === 0) {

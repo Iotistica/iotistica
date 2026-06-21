@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { settingsApi } from '@/api/settings'
+import { client as apiClient } from '@/api/client'
 import type { AgentSettings } from '@/types'
 
 const loading = ref(false)
@@ -116,6 +117,60 @@ function ensureRuntime() {
   if (!settings.value.runtime) settings.value.runtime = {}
   if (!settings.value.runtime.memory) settings.value.runtime.memory = {}
 }
+
+// ── Schema Drift ───────────────────────────────────────────────────────────────
+
+interface DriftOptions {
+  enabled?: boolean
+  warmupBatches?: number
+  consecutiveMissingThreshold?: number
+  alertCooldownMs?: number
+  minFieldPresenceRatio?: number
+}
+
+interface ProtocolOutput {
+  protocol: string
+  drift_options?: DriftOptions | null
+}
+
+const protocolOutputs = ref<ProtocolOutput[]>([])
+const driftSaving = ref<Record<string, boolean>>({})
+
+async function loadProtocolOutputs() {
+  try {
+    const { data } = await apiClient.get('/v1/protocol-outputs')
+    protocolOutputs.value = data.outputs ?? []
+  } catch {
+    // non-fatal
+  }
+}
+
+function getDrift(output: ProtocolOutput): DriftOptions {
+  return output.drift_options ?? {}
+}
+
+async function saveDrift(output: ProtocolOutput) {
+  driftSaving.value[output.protocol] = true
+  try {
+    const res = await apiClient.patch(`/v1/protocol-outputs/${output.protocol}/drift`, {
+      drift_options: output.drift_options,
+    })
+    const idx = protocolOutputs.value.findIndex(o => o.protocol === output.protocol)
+    if (idx >= 0) protocolOutputs.value[idx] = res.data.output
+    message.success(`Drift settings saved for ${output.protocol}`)
+  } catch (e: any) {
+    message.error(e?.message ?? 'Save failed')
+  } finally {
+    driftSaving.value[output.protocol] = false
+  }
+}
+
+function setDrift<K extends keyof DriftOptions>(output: ProtocolOutput, key: K, val: DriftOptions[K]) {
+  if (!output.drift_options) output.drift_options = {}
+  output.drift_options[key] = val
+}
+
+onMounted(loadProtocolOutputs)
 
 function setLogging<K extends keyof NonNullable<AgentSettings['logging']>>(
   key: K,
@@ -596,6 +651,99 @@ function setMemory<K extends keyof NonNullable<NonNullable<AgentSettings['runtim
           </a-button>
         </div>
       </a-spin>
+
+      <!-- ── Schema Drift Detection ──────────────────────────────────────── -->
+      <a-card style="margin-top: 24px">
+        <template #title>
+          <ControlOutlined style="margin-right: 8px" />
+          Schema Drift Detection
+        </template>
+        <p style="margin: 0 0 16px; font-size: 13px; color: #888">
+          Controls how the agent detects unexpected changes in the fields published by each protocol pipe.
+          Settings take effect after the agent restarts.
+        </p>
+
+        <div v-if="!protocolOutputs.length" style="color: #aaa; font-size: 13px">No protocol outputs configured.</div>
+
+        <div
+          v-for="output in protocolOutputs"
+          :key="output.protocol"
+          style="margin-bottom: 24px; padding: 16px; background: #fafafa; border: 1px solid #f0f0f0; border-radius: 8px"
+        >
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px">
+            <span style="font-weight: 600; font-size: 13px; text-transform: capitalize">{{ output.protocol }}</span>
+            <div style="display: flex; align-items: center; gap: 8px">
+              <span style="font-size: 12px; color: #888">Enabled</span>
+              <a-switch
+                :checked="getDrift(output).enabled !== false"
+                size="small"
+                @change="(v: boolean) => setDrift(output, 'enabled', v)"
+              />
+            </div>
+          </div>
+
+          <a-row :gutter="[16, 12]">
+            <a-col :span="12">
+              <a-form-item label="Warmup batches" style="margin-bottom: 0">
+                <a-input-number
+                  :value="getDrift(output).warmupBatches ?? 20"
+                  :min="1"
+                  :max="500"
+                  style="width: 100%"
+                  @change="(v: number) => setDrift(output, 'warmupBatches', v)"
+                />
+              </a-form-item>
+            </a-col>
+            <a-col :span="12">
+              <a-form-item label="Missing field threshold (batches)" style="margin-bottom: 0">
+                <a-input-number
+                  :value="getDrift(output).consecutiveMissingThreshold ?? 10"
+                  :min="1"
+                  :max="1000"
+                  style="width: 100%"
+                  @change="(v: number) => setDrift(output, 'consecutiveMissingThreshold', v)"
+                />
+              </a-form-item>
+            </a-col>
+            <a-col :span="12">
+              <a-form-item label="Alert cooldown (ms)" style="margin-bottom: 0">
+                <a-input-number
+                  :value="getDrift(output).alertCooldownMs ?? 1800000"
+                  :min="0"
+                  :step="60000"
+                  style="width: 100%"
+                  @change="(v: number) => setDrift(output, 'alertCooldownMs', v)"
+                />
+              </a-form-item>
+            </a-col>
+            <a-col :span="12">
+              <a-form-item label="Min field presence ratio (0–1)" style="margin-bottom: 0">
+                <a-input-number
+                  :value="getDrift(output).minFieldPresenceRatio ?? 0.5"
+                  :min="0"
+                  :max="1"
+                  :step="0.05"
+                  :precision="2"
+                  style="width: 100%"
+                  @change="(v: number) => setDrift(output, 'minFieldPresenceRatio', v)"
+                />
+              </a-form-item>
+            </a-col>
+          </a-row>
+
+          <div style="margin-top: 12px; display: flex; justify-content: flex-end">
+            <a-button
+              type="primary"
+              size="small"
+              :loading="driftSaving[output.protocol]"
+              @click="saveDrift(output)"
+            >
+              <template #icon><SaveOutlined /></template>
+              Save
+            </a-button>
+          </div>
+        </div>
+      </a-card>
     </div>
   </AppLayout>
 </template>

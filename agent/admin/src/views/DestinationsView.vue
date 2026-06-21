@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
@@ -14,6 +14,13 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const drawerOpen = ref(false)
 const editing = ref<Destination | null>(null)
+const activeType = ref('all')
+
+const availableTypes = computed(() => [...new Set(rows.value.map((r) => r.type))].sort())
+
+const filteredRows = computed(() =>
+  activeType.value === 'all' ? rows.value : rows.value.filter((r) => r.type === activeType.value),
+)
 
 const columns: TableColumnType<Destination>[] = [
   { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true },
@@ -76,6 +83,12 @@ onMounted(load)
 <template>
   <AppLayout title="Destinations">
     <div class="toolbar">
+      <a-radio-group v-model:value="activeType" button-style="solid" size="small">
+        <a-radio-button value="all">All</a-radio-button>
+        <a-radio-button v-for="t in availableTypes" :key="t" :value="t">
+          {{ t.charAt(0).toUpperCase() + t.slice(1) }}
+        </a-radio-button>
+      </a-radio-group>
       <a-button type="primary" @click="openCreate">
         <template #icon><PlusOutlined /></template>
         New Destination
@@ -92,7 +105,7 @@ onMounted(load)
 
     <a-table
       :columns="columns"
-      :data-source="rows"
+      :data-source="filteredRows"
       :loading="loading"
       :pagination="false"
       row-key="id"
@@ -144,7 +157,8 @@ onMounted(load)
 <style scoped>
 .toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 16px;
 }
 </style>

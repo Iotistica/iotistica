@@ -1351,6 +1351,45 @@ router.get('/v1/discovery-runs', async (req: Request, res: Response, next: NextF
 });
 
 /**
+ * GET /v1/protocol-outputs
+ * Return all protocol output configs (one per protocol: modbus, opcua, bacnet…).
+ */
+router.get('/v1/protocol-outputs', async (_req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { EndpointOutputModel } = await import('../db/models/endpoint-outputs.model.js');
+		const outputs = await EndpointOutputModel.getAll();
+		res.json({ outputs });
+	} catch (err) {
+		next(err);
+	}
+});
+
+/**
+ * PATCH /v1/protocol-outputs/:protocol/drift
+ * Update schema drift options for a single protocol pipe.
+ */
+router.patch('/v1/protocol-outputs/:protocol/drift', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { protocol } = req.params;
+		const { EndpointOutputModel } = await import('../db/models/endpoint-outputs.model.js');
+		const existing = await EndpointOutputModel.getOutput(protocol);
+		if (!existing) {
+			res.status(404).json({ error: `Protocol output not found: ${protocol}` });
+			return;
+		}
+		const body = req.body ?? {};
+		const drift_options = body.drift_options === null ? null : {
+			...existing.drift_options,
+			...body.drift_options,
+		};
+		const updated = await EndpointOutputModel.setOutput({ ...existing, drift_options });
+		res.json({ output: updated });
+	} catch (err) {
+		next(err);
+	}
+});
+
+/**
  * GET /v1/settings
  * Return the user-editable agent settings (logging, features, intervals, runtime,
  * anomalyDetection) plus read-only agent identity (uuid, name, version).

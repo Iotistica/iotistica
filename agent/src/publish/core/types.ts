@@ -13,20 +13,31 @@ export enum DeviceState {
 /**
  * Device Configuration Schema
  */
+export const DriftOptionsSchema = z.object({
+	enabled: z.boolean().optional(),
+	warmupBatches: z.number().int().min(1).optional(),
+	consecutiveMissingThreshold: z.number().int().min(1).optional(),
+	alertCooldownMs: z.number().min(0).optional(),
+	minFieldPresenceRatio: z.number().min(0).max(1).optional(),
+}).optional();
+
+export type DriftOptions = z.infer<typeof DriftOptionsSchema>;
+
 export const DeviceConfigSchema = z.object({
 	name: z.string().optional(),
 	protocol: z.string().optional(),
 	enabled: z.boolean().optional().default(true),
 	addr: z.string(),
 	addrPollSec: z.number().optional().default(10),
-	publishInterval: z.number().optional().default(30000), // Publish interval in milliseconds
+	publishInterval: z.number().optional().default(30000),
 	bufferTimeMs: z.number().optional().default(0),
 	bufferSize: z.number().optional().default(0),
-	bufferCapacity: z.number().optional().default(1024 * 1024), // 1MB default (increased from 128KB for large OPC UA messages)
+	bufferCapacity: z.number().optional().default(1024 * 1024),
 	eomDelimiter: z.string(),
 	mqttTopic: z.string(),
 	mqttHeartbeatTopic: z.string().optional(),
-	heartbeatTimeSec: z.number().optional().default(300)
+	heartbeatTimeSec: z.number().optional().default(300),
+	driftOptions: DriftOptionsSchema,
 });
 
 export type DeviceConfig = z.infer<typeof DeviceConfigSchema>;

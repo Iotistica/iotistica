@@ -6,6 +6,14 @@
 import type Database from 'better-sqlite3';
 import { getDatabase } from '../sqlite';
 
+export interface DriftOptions {
+  enabled?: boolean;
+  warmupBatches?: number;
+  consecutiveMissingThreshold?: number;
+  alertCooldownMs?: number;
+  minFieldPresenceRatio?: number;
+}
+
 export interface DeviceEndpointOutput {
   id?: number;
   protocol: 'modbus' | 'can' | 'opcua' | 'snmp';
@@ -14,16 +22,18 @@ export interface DeviceEndpointOutput {
   delimiter: string;
   include_timestamp: boolean;
   include_device_name: boolean;
-  buffer_capacity?: number; // Buffer capacity in bytes (default 1MB for large OPC UA messages)
+  buffer_capacity?: number;
+  drift_options?: DriftOptions | null;
   logging?: Record<string, any>;
   created_at?: Date;
   updated_at?: Date;
 }
 
-type EndpointOutputRow = Omit<DeviceEndpointOutput, 'include_timestamp' | 'include_device_name' | 'logging'> & {
+type EndpointOutputRow = Omit<DeviceEndpointOutput, 'include_timestamp' | 'include_device_name' | 'logging' | 'drift_options'> & {
   include_timestamp: number;
   include_device_name: number;
   logging?: string | null;
+  drift_options_json?: string | null;
 };
 
 export class EndpointOutputModel {
@@ -38,6 +48,7 @@ export class EndpointOutputModel {
 		'include_timestamp',
 		'include_device_name',
 		'buffer_capacity',
+		'drift_options_json',
 		'created_at',
 		'updated_at',
 	] as const;
@@ -47,12 +58,13 @@ export class EndpointOutputModel {
 	}
 
 	private static toModel(row: EndpointOutputRow): DeviceEndpointOutput {
-		const { logging: _logging, ...rest } = row;
+		const { logging: _logging, drift_options_json, ...rest } = row;
 
 		return {
 			...rest,
 			include_timestamp: !!row.include_timestamp,
 			include_device_name: !!row.include_device_name,
+			drift_options: drift_options_json ? JSON.parse(drift_options_json) : null,
 		};
 	}
 
@@ -85,6 +97,7 @@ export class EndpointOutputModel {
           include_timestamp,
           include_device_name,
           buffer_capacity,
+          drift_options_json,
           logging,
           updated_at
         ) VALUES (
@@ -95,6 +108,7 @@ export class EndpointOutputModel {
           @include_timestamp,
           @include_device_name,
           @buffer_capacity,
+          @drift_options_json,
           @logging,
           @updated_at
         )
@@ -105,6 +119,7 @@ export class EndpointOutputModel {
           include_timestamp = excluded.include_timestamp,
           include_device_name = excluded.include_device_name,
           buffer_capacity = excluded.buffer_capacity,
+          drift_options_json = excluded.drift_options_json,
           logging = excluded.logging,
           updated_at = excluded.updated_at
       `)
@@ -116,6 +131,7 @@ export class EndpointOutputModel {
 				include_timestamp: output.include_timestamp ? 1 : 0,
 				include_device_name: output.include_device_name ? 1 : 0,
 				buffer_capacity: output.buffer_capacity ?? null,
+				drift_options_json: output.drift_options ? JSON.stringify(output.drift_options) : null,
 				logging: output.logging ? JSON.stringify(output.logging) : null,
 				updated_at: now,
 			});

@@ -155,7 +155,7 @@ export class PublishManager extends EventEmitter {
 		this.schemaDriftDetector = new SchemaDriftDetector(
 			config.name || 'unknown',
 			logger,
-			undefined,
+			config.driftOptions ?? undefined,
 			SchemaDriftModel,
 		);
 
