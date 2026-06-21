@@ -17,6 +17,9 @@ client.interceptors.response.use(
     const status: number = err.response?.status ?? 0
     const message: string =
       err.response?.data?.message ?? err.response?.data?.error ?? err.message ?? 'Unknown error'
+    if (status === 401 && !err.config?.url?.includes('/auth/')) {
+      window.location.href = '/admin/login'
+    }
     return Promise.reject({ status, message } satisfies ApiError)
   },
 )

@@ -61,8 +61,12 @@ const isExternalDestination = computed(() =>
   !!selectedDestination.value && selectedDestination.value.type !== 'iotistica',
 )
 
+const isInfluxDbDestination = computed(() =>
+  selectedDestination.value?.type === 'influxdb',
+)
+
 const destinationTopicRules = computed(() =>
-  isExternalDestination.value
+  isExternalDestination.value && !isInfluxDbDestination.value
     ? [{ required: true, message: 'Destination topic is required for external destinations' }]
     : [],
 )
@@ -158,16 +162,19 @@ function close() {
         </a-select>
       </a-form-item>
 
-      <!-- Destination Topic -->
+      <!-- Destination Topic / Measurement -->
       <a-form-item
-        label="Destination Topic"
+        v-if="isExternalDestination"
+        :label="isInfluxDbDestination ? 'Measurement' : 'Destination Topic'"
         :name="['route_json', 'topic']"
         :rules="destinationTopicRules"
-        extra="MQTT topic to publish to on the external broker (e.g. sensors/bacnet/readings)"
+        :extra="isInfluxDbDestination
+          ? 'InfluxDB measurement name for this subscription (e.g. temperature). Defaults to \'metrics\' if empty.'
+          : 'MQTT topic to publish to on the external broker (e.g. sensors/bacnet/readings)'"
       >
         <a-input
           v-model:value="form.route_json!.topic"
-          placeholder="e.g. sensors/bacnet/readings"
+          :placeholder="isInfluxDbDestination ? 'e.g. temperature' : 'e.g. sensors/bacnet/readings'"
         />
       </a-form-item>
 

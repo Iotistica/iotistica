@@ -19,6 +19,7 @@ import { AzurePublishPlugin } from './plugins/azure.js';
 import { AwsPublishPlugin } from './plugins/aws.js';
 import { GcpPublishPlugin } from './plugins/gcp.js';
 import { MqttPublishPlugin } from './plugins/mqtt.js';
+import { InfluxDbPublishPlugin } from './plugins/influxdb.js';
 import { BasePublishPlugin } from './core/base-plugin.js';
 import type { IPublishPlugin, IPublishClient } from './core/types.js';
 
@@ -319,6 +320,7 @@ export class DevicePublish extends EventEmitter {
 			case 'aws': return AwsPublishPlugin.fromEnv(this.agentLogger, logger);
 			case 'gcp': return GcpPublishPlugin.fromEnv(this.agentLogger, logger);
 			case 'mqtt': return MqttPublishPlugin.fromConfig(config, this.agentLogger, logger, this.deviceUuid, endpointName, publisher.id);
+			case 'influxdb': return InfluxDbPublishPlugin.fromConfig(config, logger);
 			default: throw new Error(`Publish destination type not found: ${target}`);
 		}
 	}

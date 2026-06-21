@@ -8,6 +8,17 @@ import type { Request, Response, NextFunction } from 'express';
 import * as actions from './actions';
 import { ModbusAdapter } from '../plugins/modbus/adapter.js';
 import { getMemoryDiagnostics, getRestartPolicyStatus } from '../system/memory.js';
+import {
+	getCpuUsage,
+	getMemoryInfo,
+	getStorageInfo,
+	getUptime,
+	getHostname,
+	getNetworkBandwidth,
+} from '../system/metrics.js';
+import bcrypt from 'bcryptjs';
+import { UserModel } from '../db/models/admin-user.model.js';
+import { AdminSessionModel } from '../db/models/admin-session.model.js';
 
 export const router = express.Router();
 
@@ -1027,6 +1038,79 @@ router.get('/v1/publish/destinations', async (req: Request, res: Response, next:
 });
 
 /**
+ * POST /v1/publish/destinations/test
+ * Test connectivity for a destination config without saving it
+ */
+router.post('/v1/publish/destinations/test', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { type, config_json: cfg } = req.body as { type?: string; config_json?: Record<string, unknown> };
+		if (!type) return res.status(400).json({ ok: false, error: 'type is required' });
+
+		if (type === 'influxdb') {
+			const url = typeof cfg?.url === 'string' ? cfg.url.trim() : '';
+			const token = typeof cfg?.token === 'string' ? cfg.token.trim() : '';
+			const org = typeof cfg?.org === 'string' ? cfg.org.trim() : '';
+			const bucket = typeof cfg?.bucket === 'string' ? cfg.bucket.trim() : '';
+
+			if (!url) return res.status(200).json({ ok: false, error: 'URL is required' });
+			if (!token) return res.status(200).json({ ok: false, error: 'Token is required' });
+			if (!org) return res.status(200).json({ ok: false, error: 'Org is required' });
+			if (!bucket) return res.status(200).json({ ok: false, error: 'Bucket is required' });
+
+			const controller = new AbortController();
+			const timeout = setTimeout(() => controller.abort(), 8000);
+			try {
+				// Write a single test point — directly validates token + org + bucket write access
+				const testLine = `_connection_test value=1 ${Date.now()}`;
+				const r = await fetch(
+					`${url}/api/v2/write?org=${encodeURIComponent(org)}&bucket=${encodeURIComponent(bucket)}&precision=ms`,
+					{
+						method: 'POST',
+						headers: { Authorization: `Token ${token}`, 'Content-Type': 'text/plain; charset=utf-8' },
+						body: testLine,
+						signal: controller.signal,
+					}
+				);
+				clearTimeout(timeout);
+				if (r.status === 204) return res.status(200).json({ ok: true, message: `Connected — ${org}/${bucket}` });
+				if (r.status === 401) return res.status(200).json({ ok: false, error: 'Invalid or missing token' });
+				if (r.status === 403) return res.status(200).json({ ok: false, error: 'Token lacks write permission for this bucket' });
+				if (r.status === 404) return res.status(200).json({ ok: false, error: `Org "${org}" or bucket "${bucket}" not found` });
+				const body = await r.text().catch(() => '');
+				return res.status(200).json({ ok: false, error: `HTTP ${r.status}${body ? ': ' + body.slice(0, 120) : ''}` });
+			} catch (err: any) {
+				clearTimeout(timeout);
+				const msg = err?.name === 'AbortError' ? 'Connection timed out' : (err?.message ?? 'Connection failed');
+				return res.status(200).json({ ok: false, error: msg });
+			}
+		}
+
+		if (type === 'mqtt') {
+			const { createConnection } = await import('net');
+			const brokerUrl = typeof cfg?.brokerUrl === 'string' ? cfg.brokerUrl.trim() : '';
+			if (!brokerUrl) return res.status(200).json({ ok: false, error: 'Broker URL is required' });
+			try {
+				const u = new URL(brokerUrl);
+				const host = u.hostname;
+				const port = Number(u.port) || (u.protocol === 'mqtts:' ? 8883 : 1883);
+				await new Promise<void>((resolve, reject) => {
+					const sock = createConnection({ host, port, timeout: 5000 }, () => { sock.destroy(); resolve(); });
+					sock.on('error', reject);
+					sock.on('timeout', () => { sock.destroy(); reject(new Error('TCP connection timed out')); });
+				});
+				return res.status(200).json({ ok: true, message: `TCP reachable at ${host}:${port}` });
+			} catch (err: any) {
+				return res.status(200).json({ ok: false, error: err?.message ?? 'Connection failed' });
+			}
+		}
+
+		return res.status(200).json({ ok: false, error: `Connection test not supported for type "${type}"` });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
  * POST /v1/publish/destinations
  * Create an upstream publish destination
  */
@@ -1231,8 +1315,36 @@ router.delete('/v1/discovery-rules/:uuid', async (req: Request, res: Response, n
  */
 router.post('/v1/discovery-rules/:uuid/run', async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const rule = await actions.runDiscoveryRule(req.params.uuid);
-		return res.status(200).json({ rule });
+		const result = await actions.runDiscoveryRule(req.params.uuid);
+		return res.status(200).json(result);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/discovery-rules/:uuid/runs
+ * Run history for a specific rule
+ */
+router.get('/v1/discovery-rules/:uuid/runs', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+		const runs = await actions.listDiscoveryRuns(req.params.uuid, limit);
+		return res.status(200).json({ runs });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/discovery-runs
+ * Recent runs across all rules
+ */
+router.get('/v1/discovery-runs', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 20;
+		const runs = await actions.listRecentDiscoveryRuns(limit);
+		return res.status(200).json({ runs });
 	} catch (error) {
 		next(error);
 	}
@@ -1266,6 +1378,165 @@ router.patch('/v1/settings', async (req: Request, res: Response, next: NextFunct
 		await actions.updateSettings(req.body);
 		const settings = await actions.getSettings();
 		return res.status(200).json({ settings });
+	} catch (error) {
+		next(error);
+	}
+});
+
+// ── Dashboard stats ───────────────────────────────────────────────────────────
+
+router.get('/v1/dashboard/stats', async (_req: Request, res: Response, next: NextFunction) => {
+	try {
+		const [cpu, mem, storage, uptime, hostname, network] = await Promise.all([
+			getCpuUsage(),
+			getMemoryInfo(),
+			getStorageInfo(),
+			getUptime(),
+			getHostname(),
+			getNetworkBandwidth(),
+		]);
+		return res.status(200).json({
+			cpu_usage: cpu,
+			memory_percent: mem.percent,
+			memory_used: mem.used,
+			memory_total: mem.total,
+			storage_percent: storage.percent,
+			storage_used: storage.used,
+			storage_total: storage.total,
+			uptime,
+			hostname,
+			network,
+		});
+	} catch (error) {
+		next(error);
+	}
+});
+
+// ── Auth: login / logout / me ────────────────────────────────────────────────
+
+function parseCookie(header: string | undefined, name: string): string | undefined {
+	if (!header) return undefined;
+	for (const part of header.split(';')) {
+		const [k, v] = part.trim().split('=');
+		if (k === name) return v;
+	}
+	return undefined;
+}
+
+const SESSION_COOKIE = 'admin_session';
+const COOKIE_OPTS = 'HttpOnly; Path=/; SameSite=Strict; Max-Age=86400';
+
+router.post('/v1/auth/login', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { username, password } = req.body ?? {};
+		if (!username || !password) {
+			return res.status(400).json({ error: 'username and password are required' });
+		}
+		const user = UserModel.getByUsername(username);
+		if (!user || !user.is_active) {
+			return res.status(401).json({ error: 'Invalid credentials' });
+		}
+		const hash = UserModel.getPasswordHash(username);
+		if (!hash) return res.status(401).json({ error: 'Invalid credentials' });
+		const ok = await bcrypt.compare(password, hash);
+		if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+		const token = AdminSessionModel.create(username);
+		res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; ${COOKIE_OPTS}`);
+		return res.status(200).json({ username, is_superuser: user.is_superuser });
+	} catch (error) {
+		next(error);
+	}
+});
+
+router.post('/v1/auth/logout', (req: Request, res: Response) => {
+	const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
+	if (token) AdminSessionModel.delete(token);
+	res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0`);
+	return res.status(200).json({ ok: true });
+});
+
+router.get('/v1/auth/me', (req: Request, res: Response) => {
+	const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
+	if (!token) return res.status(401).json({ error: 'Not authenticated' });
+	const session = AdminSessionModel.find(token);
+	if (!session) return res.status(401).json({ error: 'Session expired' });
+	const user = UserModel.getByUsername(session.username);
+	if (!user) return res.status(401).json({ error: 'User not found' });
+	return res.status(200).json({ username: user.username, is_superuser: user.is_superuser });
+});
+
+// ── Session guard for all /v1/admin/* routes ─────────────────────────────────
+
+router.use('/v1/admin', (req: Request, res: Response, next: NextFunction) => {
+	const token = parseCookie(req.headers.cookie, SESSION_COOKIE);
+	if (!token) return res.status(401).json({ error: 'Not authenticated' });
+	const session = AdminSessionModel.find(token);
+	if (!session) return res.status(401).json({ error: 'Session expired' });
+	(req as any).adminUser = session.username;
+	next();
+});
+
+// ── Administration: Users ────────────────────────────────────────────────────
+
+router.get('/v1/admin/users', (_req: Request, res: Response, next: NextFunction) => {
+	try {
+		return res.status(200).json({ users: UserModel.getAll() });
+	} catch (error) {
+		next(error);
+	}
+});
+
+router.post('/v1/admin/users', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { username, password, is_superuser = false } = req.body ?? {};
+		if (!username || typeof username !== 'string' || !username.trim()) {
+			return res.status(400).json({ error: 'username is required' });
+		}
+		if (!password || typeof password !== 'string' || password.length < 6) {
+			return res.status(400).json({ error: 'password must be at least 6 characters' });
+		}
+		if (UserModel.existsByUsername(username.trim())) {
+			return res.status(409).json({ error: 'Username already exists' });
+		}
+		const hash = await bcrypt.hash(password, 10);
+		const user = UserModel.create(username.trim(), hash, Boolean(is_superuser));
+		return res.status(201).json({ user });
+	} catch (error) {
+		next(error);
+	}
+});
+
+router.patch('/v1/admin/users/:username', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { username } = req.params;
+		if (!UserModel.existsByUsername(username)) {
+			return res.status(404).json({ error: 'User not found' });
+		}
+		const { is_active, is_superuser, password } = req.body ?? {};
+		const fields: { is_active?: boolean; is_superuser?: boolean; password_hash?: string } = {};
+		if (is_active !== undefined) fields.is_active = Boolean(is_active);
+		if (is_superuser !== undefined) fields.is_superuser = Boolean(is_superuser);
+		if (password) {
+			if (typeof password !== 'string' || password.length < 6) {
+				return res.status(400).json({ error: 'password must be at least 6 characters' });
+			}
+			fields.password_hash = await bcrypt.hash(password, 10);
+		}
+		const user = UserModel.update(username, fields);
+		return res.status(200).json({ user });
+	} catch (error) {
+		next(error);
+	}
+});
+
+router.delete('/v1/admin/users/:username', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { username } = req.params;
+		if (!UserModel.existsByUsername(username)) {
+			return res.status(404).json({ error: 'User not found' });
+		}
+		UserModel.delete(username);
+		return res.status(200).json({ ok: true });
 	} catch (error) {
 		next(error);
 	}

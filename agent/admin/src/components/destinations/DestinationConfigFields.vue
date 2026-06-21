@@ -53,6 +53,56 @@ function set(key: string, value: unknown) {
     </a-form-item>
   </template>
 
+  <!-- InfluxDB 2.x destination -->
+  <template v-else-if="type === 'influxdb'">
+    <a-form-item label="URL" :name="['config_json', 'url']" :rules="[{ required: true, message: 'URL is required' }]">
+      <a-input :value="(cfg.url as string) ?? ''" placeholder="http://influx:8086" @update:value="set('url', $event)" />
+    </a-form-item>
+    <a-form-item label="Org" :name="['config_json', 'org']" :rules="[{ required: true, message: 'Org is required' }]">
+      <a-input :value="(cfg.org as string) ?? ''" placeholder="e.g. MyOrg" @update:value="set('org', $event)" />
+    </a-form-item>
+    <a-form-item label="Bucket" :name="['config_json', 'bucket']" :rules="[{ required: true, message: 'Bucket is required' }]">
+      <a-input :value="(cfg.bucket as string) ?? ''" placeholder="e.g. sensors" @update:value="set('bucket', $event)" />
+    </a-form-item>
+    <a-form-item label="Token" :name="['config_json', 'token']" :rules="[{ required: true, message: 'Token is required' }]">
+      <a-input-password :value="(cfg.token as string) ?? ''" autocomplete="new-password" @update:value="set('token', $event)" />
+    </a-form-item>
+    <a-form-item label="Batch size" :name="['config_json', 'batchSize']">
+      <a-input-number
+        :value="(cfg.batchSize as number) ?? 1000"
+        :min="1"
+        :max="10000"
+        style="width: 100%"
+        @update:value="set('batchSize', $event)"
+      />
+      <div style="color: #999; font-size: 12px; margin-top: 4px">Points buffered before auto-flush (default: 1000)</div>
+    </a-form-item>
+    <a-form-item label="Flush interval (ms)" :name="['config_json', 'flushInterval']">
+      <a-input-number
+        :value="(cfg.flushInterval as number) ?? 10000"
+        :min="1000"
+        :max="300000"
+        :step="1000"
+        style="width: 100%"
+        @update:value="set('flushInterval', $event)"
+      />
+      <div style="color: #999; font-size: 12px; margin-top: 4px">Max ms between flushes (default: 10 000)</div>
+    </a-form-item>
+    <a-form-item label="Timeout (ms)" :name="['config_json', 'timeout']">
+      <a-input-number
+        :value="(cfg.timeout as number) ?? 10000"
+        :min="1000"
+        :max="120000"
+        :step="1000"
+        style="width: 100%"
+        @update:value="set('timeout', $event)"
+      />
+    </a-form-item>
+    <a-form-item label="Verify TLS certificate" :name="['config_json', 'rejectUnauthorized']">
+      <a-switch :checked="(cfg.rejectUnauthorized as boolean) !== false" @change="set('rejectUnauthorized', $event)" />
+    </a-form-item>
+  </template>
+
   <!-- Azure / AWS / GCP — raw JSON for now -->
   <template v-else-if="['azure', 'aws', 'gcp'].includes(type)">
     <a-form-item label="Configuration (JSON)" name="config_json_raw">

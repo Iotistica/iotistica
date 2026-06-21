@@ -931,6 +931,10 @@ export class PublishManager extends EventEmitter {
 		const route = binding.subscription.route_json as PublishSubscriptionRoute | null;
 		const destinationTopic = typeof route?.topic === 'string' ? route.topic.trim() : '';
 		if (destinationTopic.length === 0) {
+			// InfluxDB uses an optional measurement name — empty topic is valid, plugin defaults to 'metrics'
+			if (binding.publisher.type === 'influxdb') {
+				return '';
+			}
 			this.logger?.warn('Skipping publish binding without route_json.topic destination', {
 				component: 'PublishManager',
 				protocol: this.protocol,
@@ -990,7 +994,7 @@ export class PublishManager extends EventEmitter {
 		const batchesByPlugin = new Map<IPublishPlugin, PublishBatchItem[]>();
 		for (const binding of this.bindings) {
 			const destinationTopic = this.resolveDestinationTopic(binding, sourceTopic);
-			if (!destinationTopic) {
+			if (destinationTopic === null) {
 				continue;
 			}
 

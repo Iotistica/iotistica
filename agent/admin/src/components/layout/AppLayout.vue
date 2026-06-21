@@ -1,7 +1,18 @@
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
+import { LogoutOutlined, UserOutlined } from '@ant-design/icons-vue'
 import AppSidebar from './AppSidebar.vue'
+import { useAuth } from '@/composables/useAuth'
 
 defineProps<{ title: string }>()
+
+const router = useRouter()
+const { currentUser, logout } = useAuth()
+
+async function handleLogout() {
+  await logout()
+  router.push('/login')
+}
 </script>
 
 <template>
@@ -10,6 +21,16 @@ defineProps<{ title: string }>()
     <a-layout>
       <a-layout-header class="page-header">
         <h2>{{ title }}</h2>
+        <div class="header-right">
+          <span class="header-user">
+            <UserOutlined style="margin-right: 6px; font-size: 13px" />
+            {{ currentUser?.username }}
+          </span>
+          <a-button type="text" size="small" class="logout-btn" @click="handleLogout">
+            <template #icon><LogoutOutlined /></template>
+            Sign out
+          </a-button>
+        </div>
       </a-layout-header>
       <a-layout-content class="page-content">
         <slot />
@@ -24,6 +45,7 @@ defineProps<{ title: string }>()
   padding: 0 24px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   border-bottom: 1px solid #f0f0f0;
   height: 52px;
   line-height: 52px;
@@ -33,6 +55,25 @@ defineProps<{ title: string }>()
   margin: 0;
   font-size: 18px;
   font-weight: 600;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-user {
+  font-size: 13px;
+  color: #666;
+}
+
+.logout-btn {
+  color: #888;
+}
+
+.logout-btn:hover {
+  color: #1677ff !important;
 }
 
 .page-content {

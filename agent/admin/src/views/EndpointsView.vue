@@ -46,9 +46,25 @@ function connSummary(ep: Endpoint): string {
   if (ep.protocol === 'modbus') {
     return c.type === 'rtu' ? String(c.serialPort ?? '') : `${c.host ?? ''}:${c.port ?? 502}`
   }
-  if (ep.protocol === 'opcua') return String(c.endpointUrl ?? '')
-  if (ep.protocol === 'mqtt') return String(c.host ?? c.url ?? '')
-  if (ep.protocol === 'bacnet') return `device ${c.deviceInstance ?? ''}`
+  if (ep.protocol === 'opcua') {
+    const raw = String(c.endpointUrl ?? '')
+    try {
+      const u = new URL(raw)
+      return `${u.hostname}:${u.port || 4840}`
+    } catch {
+      return raw
+    }
+  }
+  if (ep.protocol === 'mqtt') {
+    const host = String(c.host ?? c.url ?? '')
+    const port = c.port ? `:${c.port}` : ''
+    return `${host}${port}`
+  }
+  if (ep.protocol === 'bacnet') {
+    const ip = String(c.ipAddress ?? c.host ?? '')
+    const instance = c.deviceInstance != null ? ` · #${c.deviceInstance}` : ''
+    return `${ip}${instance}`
+  }
   return JSON.stringify(c).slice(0, 40)
 }
 

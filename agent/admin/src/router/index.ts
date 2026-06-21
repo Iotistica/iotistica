@@ -1,9 +1,16 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuth } from '@/composables/useAuth'
 
 const router = createRouter({
   history: createWebHistory('/admin/'),
   routes: [
-    { path: '/', redirect: '/endpoints' },
+    { path: '/login', component: () => import('@/views/LoginView.vue'), meta: { public: true } },
+    { path: '/', redirect: '/dashboard' },
+    {
+      path: '/dashboard',
+      component: () => import('@/views/DashboardView.vue'),
+      meta: { title: 'Dashboard' },
+    },
     {
       path: '/destinations',
       component: () => import('@/views/DestinationsView.vue'),
@@ -34,7 +41,26 @@ const router = createRouter({
       component: () => import('@/views/SettingsView.vue'),
       meta: { title: 'Settings' },
     },
+    {
+      path: '/admin/users',
+      component: () => import('@/views/UsersView.vue'),
+      meta: { title: 'Users' },
+    },
   ],
+})
+
+let authChecked = false
+
+router.beforeEach(async (to) => {
+  if (to.meta.public) return true
+  if (!authChecked) {
+    const { checkAuth } = useAuth()
+    await checkAuth()
+    authChecked = true
+  }
+  const { currentUser } = useAuth()
+  if (!currentUser.value) return { path: '/login' }
+  return true
 })
 
 export default router

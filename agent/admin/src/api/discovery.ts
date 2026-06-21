@@ -1,5 +1,5 @@
 import { client } from './client'
-import type { DiscoveredDevice, DiscoveryRule, DiscoveryRuleFormData } from '@/types'
+import type { DiscoveredDevice, DiscoveryRule, DiscoveryRuleFormData, DiscoveryRun } from '@/types'
 
 export interface DiscoveryOptions {
   protocols?: string[]
@@ -9,9 +9,9 @@ export interface DiscoveryOptions {
 }
 
 export const discoveryApi = {
-  run(options: DiscoveryOptions = {}): Promise<DiscoveredDevice[]> {
+  run(options: DiscoveryOptions = {}, signal?: AbortSignal): Promise<DiscoveredDevice[]> {
     return client
-      .post<{ devices: DiscoveredDevice[] }>('/v1/discover', options, { timeout: 60_000 })
+      .post<{ devices: DiscoveredDevice[] }>('/v1/discover', options, { timeout: 60_000, signal })
       .then((r) => r.data.devices)
   },
 }
@@ -35,7 +35,15 @@ export const discoveryRulesApi = {
     return client.delete(`${RULES_BASE}/${uuid}`).then(() => undefined)
   },
 
-  run(uuid: string): Promise<DiscoveryRule> {
-    return client.post<{ rule: DiscoveryRule }>(`${RULES_BASE}/${uuid}/run`, {}, { timeout: 120_000 }).then((r) => r.data.rule)
+  run(uuid: string, signal?: AbortSignal): Promise<{ rule: DiscoveryRule; devices: DiscoveredDevice[] }> {
+    return client.post<{ rule: DiscoveryRule; devices: DiscoveredDevice[] }>(`${RULES_BASE}/${uuid}/run`, {}, { timeout: 120_000, signal }).then((r) => r.data)
+  },
+
+  getRuns(uuid: string, limit = 50): Promise<DiscoveryRun[]> {
+    return client.get<{ runs: DiscoveryRun[] }>(`${RULES_BASE}/${uuid}/runs`, { params: { limit } }).then((r) => r.data.runs)
+  },
+
+  getRecentRuns(limit = 20): Promise<DiscoveryRun[]> {
+    return client.get<{ runs: DiscoveryRun[] }>('/v1/discovery-runs', { params: { limit } }).then((r) => r.data.runs)
   },
 }

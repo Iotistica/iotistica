@@ -745,6 +745,30 @@ export async function getSystemMetrics(): Promise<SystemMetrics> {
 
 	return metrics;
 }
+export interface NetworkBandwidth {
+	iface: string;
+	rx_sec: number;
+	tx_sec: number;
+	rx_bytes: number;
+	tx_bytes: number;
+}
+
+/** Get per-interface bandwidth stats (bytes/sec in and out). */
+export async function getNetworkBandwidth(): Promise<NetworkBandwidth[]> {
+	try {
+		const stats = await systeminformation.networkStats();
+		return stats.map((s) => ({
+			iface: s.iface,
+			rx_sec: Math.max(0, s.rx_sec ?? 0),
+			tx_sec: Math.max(0, s.tx_sec ?? 0),
+			rx_bytes: s.rx_bytes ?? 0,
+			tx_bytes: s.tx_bytes ?? 0,
+		}));
+	} catch {
+		return [];
+	}
+}
+
 /** Convert bytes to megabytes. */
 function bytesToMb(bytes: number): number {
 	return Math.floor(bytes / 1024 / 1024);

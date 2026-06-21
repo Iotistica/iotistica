@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
-import { SearchOutlined, CheckCircleOutlined, ThunderboltOutlined } from '@ant-design/icons-vue'
+import { SearchOutlined, CheckCircleOutlined, ThunderboltOutlined, StopOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import type { DiscoveredDevice, DiscoveryRule, Endpoint } from '@/types'
 import { discoveryApi, discoveryRulesApi } from '@/api/discovery'
@@ -27,7 +27,6 @@ const mode = ref<'custom' | 'rule'>('custom')
 // ── Custom scan ──────────────────────────────────────────────────────────────
 const activeProtocol = ref('all')
 const validate = ref(false)
-const opcuaUrl = ref('')
 
 // ── Rule-based scan ──────────────────────────────────────────────────────────
 const rules = ref<DiscoveryRule[]>([])
@@ -51,6 +50,13 @@ const results = ref<DiscoveredDevice[]>([])
 const hasRun = ref(false)
 const adding = ref<Set<string>>(new Set())
 const addedThisSession = ref<Set<string>>(new Set())
+let abortController: AbortController | null = null
+
+function stopScan() {
+  abortController?.abort()
+  abortController = null
+  running.value = false
+}
 
 function isAlreadyAdded(device: DiscoveredDevice): boolean {
   if (addedThisSession.value.has(device.fingerprint)) return true
@@ -78,31 +84,25 @@ function connSummary(d: DiscoveredDevice): string {
   return JSON.stringify(c).slice(0, 50)
 }
 
-const showOpcuaUrl = computed(
-  () => activeProtocol.value === 'opcua' || activeProtocol.value === 'all',
-)
-
 async function runCustomScan() {
+  abortController = new AbortController()
   running.value = true
   results.value = []
   hasRun.value = false
   addedThisSession.value = new Set()
-  const overrides: Record<string, Record<string, any>> = {}
-  if (opcuaUrl.value.trim()) {
-    overrides.opcua = { discoveryUrls: [opcuaUrl.value.trim()] }
-  }
   try {
     results.value = await discoveryApi.run({
       protocols: activeProtocol.value === 'all' ? [...PROTOCOLS] : [activeProtocol.value],
       validate: validate.value,
       forceRun: true,
-      ...(Object.keys(overrides).length ? { overrides } : {}),
-    })
+    }, abortController.signal)
     hasRun.value = true
   } catch (err: unknown) {
+    if ((err as any)?.code === 'ERR_CANCELED' || (err as any)?.name === 'AbortError') return
     const e = err as { message?: string }
     message.error(e?.message ?? 'Discovery failed')
   } finally {
+    abortController = null
     running.value = false
   }
 }
@@ -110,24 +110,27 @@ async function runCustomScan() {
 async function runRuleScan() {
   if (!selectedRule.value) return
   const rule = selectedRule.value
+  abortController = new AbortController()
   running.value = true
   results.value = []
   hasRun.value = false
   addedThisSession.value = new Set()
   try {
-    results.value = await discoveryApi.run({
-      protocols: [rule.protocol],
-      forceRun: true,
-      // OPC-UA discovery without validate returns no node IDs; always validate so Add gives usable endpoints
-      validate: rule.protocol === 'opcua',
-      // pass rule's params_json as per-protocol overrides (preview only, skipDbWrites=true server-side)
-      ...(rule.params_json ? { overrides: { [rule.protocol]: rule.params_json } } : {}),
-    })
+    // Use the rule-run endpoint so the scan is recorded in run history
+    const { devices } = await discoveryRulesApi.run(rule.uuid, abortController.signal)
+    results.value = devices
     hasRun.value = true
+    emit('saved')
   } catch (err: unknown) {
+    if ((err as any)?.code === 'ERR_CANCELED' || (err as any)?.name === 'AbortError') {
+      emit('saved')
+      return
+    }
     const e = err as { message?: string }
     message.error(e?.message ?? 'Discovery failed')
+    emit('saved')
   } finally {
+    abortController = null
     running.value = false
   }
 }
@@ -171,7 +174,7 @@ watch(
       await loadRules()
       mode.value = 'rule'
       selectedRuleUuid.value = props.preSelectedRuleUuid
-      runRuleScan()
+      await runRuleScan()
     }
   },
 )
@@ -186,7 +189,7 @@ onMounted(loadRules)
     <a-segmented
       v-model:value="mode"
       :options="[
-        { label: 'Custom scan', value: 'custom' },
+        { label: 'Default scan', value: 'custom' },
         { label: 'Run discovery rule', value: 'rule' },
       ]"
       style="margin-bottom: 16px; width: 100%"
@@ -207,24 +210,21 @@ onMounted(loadRules)
             Validate
           </a-checkbox>
         </div>
-        <a-input
-          v-if="showOpcuaUrl"
-          v-model:value="opcuaUrl"
-          placeholder="OPC-UA server URL (e.g. opc.tcp://sim-opcua:4840)"
-          allow-clear
-          style="margin-top: 8px"
-        >
-          <template #addonBefore>OPC-UA</template>
-        </a-input>
-        <a-button
-          type="primary"
-          :loading="running"
-          style="margin-top: 12px"
-          @click="runCustomScan"
-        >
-          <template #icon><SearchOutlined /></template>
-          {{ running ? 'Scanning…' : hasRun ? 'Scan Again' : 'Run Discovery' }}
-        </a-button>
+        <div style="display: flex; gap: 8px; margin-top: 12px">
+          <a-button
+            type="primary"
+            :loading="running"
+            :disabled="running"
+            @click="runCustomScan"
+          >
+            <template #icon><SearchOutlined /></template>
+            {{ running ? 'Scanning…' : hasRun ? 'Scan Again' : 'Run Discovery' }}
+          </a-button>
+          <a-button v-if="running" danger @click="stopScan">
+            <template #icon><StopOutlined /></template>
+            Stop
+          </a-button>
+        </div>
       </div>
     </template>
 
@@ -251,16 +251,21 @@ onMounted(loadRules)
           </div>
         </template>
 
-        <a-button
-          type="primary"
-          :loading="running"
-          :disabled="!selectedRuleUuid"
-          style="margin-top: 12px"
-          @click="runRuleScan"
-        >
-          <template #icon><ThunderboltOutlined /></template>
-          {{ running ? 'Scanning…' : hasRun ? 'Scan Again' : 'Run Rule Scan' }}
-        </a-button>
+        <div style="display: flex; gap: 8px; margin-top: 12px">
+          <a-button
+            type="primary"
+            :loading="running"
+            :disabled="!selectedRuleUuid || running"
+            @click="runRuleScan"
+          >
+            <template #icon><ThunderboltOutlined /></template>
+            {{ running ? 'Scanning…' : hasRun ? 'Scan Again' : 'Run Rule Scan' }}
+          </a-button>
+          <a-button v-if="running" danger @click="stopScan">
+            <template #icon><StopOutlined /></template>
+            Stop
+          </a-button>
+        </div>
         <p style="color: #888; font-size: 12px; margin: 4px 0 0">
           Scans using the rule's protocol and targets. Results are shown below for manual review — endpoints are not added automatically.
         </p>

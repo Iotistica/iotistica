@@ -17,7 +17,6 @@ import type {
   AnomalyConfig,
   AnomalyMetricConfig,
   AnomalyStats,
-  AnomalyBaseline,
   DetectionMethod,
 } from '@/types'
 
@@ -195,7 +194,8 @@ const SOURCE_COLOR: Record<string, string> = {
 // Strip leading UUID prefix from canonical metric names so they display readably.
 // e.g. "2c961ee4-42ca-4c73-a95f-6506a719a12d_system_cpu_usage" → "system_cpu_usage"
 const UUID_PREFIX_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i
-function friendlyLabel(name: string): string {
+function friendlyLabel(name: string | undefined | null): string {
+  if (!name) return ''
   return name.replace(UUID_PREFIX_RE, '')
 }
 
@@ -206,6 +206,7 @@ const metricAutocompleteOptions = computed(() => {
   // Filter empty names; search against both canonical name and friendly label
   const filtered = metricSuggestions.value.filter((s) => {
     if (!s.name.trim()) return false
+    if (!friendlyLabel(s.name).trim()) return false
     if (!q) return true
     return s.name.toLowerCase().includes(q) || friendlyLabel(s.name).toLowerCase().includes(q)
   })
@@ -293,7 +294,7 @@ function openEditMetric(metric: AnomalyMetricConfig, idx: number) {
   loadMetricSuggestions()
 }
 
-function saveMetric() {
+async function saveMetric() {
   if (!config.value) return
   if (!metricForm.value.name.trim()) {
     message.error('Metric name is required')
@@ -312,61 +313,19 @@ function saveMetric() {
     config.value.metrics.push(entry)
   }
   metricDrawerOpen.value = false
+  await saveConfig()
 }
 
-function removeMetric(idx: number) {
+async function removeMetric(idx: number) {
   if (!config.value) return
   config.value.metrics.splice(idx, 1)
+  await saveConfig()
 }
 
-function toggleMetricEnabled(idx: number) {
+async function toggleMetricEnabled(idx: number) {
   if (!config.value) return
   config.value.metrics[idx].enabled = !config.value.metrics[idx].enabled
-}
-
-// ── Baselines tab ──────────────────────────────────────────────────────────────
-const baselines = ref<AnomalyBaseline[]>([])
-const baselinesLoading = ref(false)
-const baselinesFilter = ref('')
-const savingBaselines = ref(false)
-
-const baselineColumns: TableColumnType<AnomalyBaseline>[] = [
-  { title: 'Metric', dataIndex: 'metric', key: 'metric', ellipsis: true },
-  { title: 'Device', dataIndex: 'device_id', key: 'device_id', width: 150, ellipsis: true },
-  { title: 'State', key: 'device_state', width: 90 },
-  { title: 'Slot', key: 'time_slot', width: 55 },
-  { title: 'Mean', key: 'mean', width: 90 },
-  { title: 'Std Dev', key: 'std_dev', width: 90 },
-  { title: 'Samples', dataIndex: 'sample_count', key: 'sample_count', width: 90 },
-  { title: 'Calculated', key: 'calculated_at', width: 160 },
-]
-
-async function loadBaselines() {
-  baselinesLoading.value = true
-  try {
-    const params: Record<string, unknown> = {}
-    if (baselinesFilter.value.trim()) params.metric = baselinesFilter.value.trim()
-    const data = await anomalyApi.getBaselines(params)
-    baselines.value = data.baselines
-  } catch {
-    // non-fatal
-  } finally {
-    baselinesLoading.value = false
-  }
-}
-
-async function triggerSaveBaselines() {
-  savingBaselines.value = true
-  try {
-    await anomalyApi.saveBaselines()
-    message.success('Baselines persisted to SQLite')
-    await loadBaselines()
-  } catch (err: unknown) {
-    const e = err as { message?: string }
-    message.error(e?.message ?? 'Save failed')
-  } finally {
-    savingBaselines.value = false
-  }
+  await saveConfig()
 }
 
 // ── Tab switching ──────────────────────────────────────────────────────────────
@@ -374,8 +333,8 @@ function onTabChange(tab: string) {
   activeTab.value = tab
   if (tab === 'alerts') loadAlerts()
   else if (tab === 'stats') loadStats()
-  else if (tab === 'config') { loadConfig(); loadMetricSuggestions() }
-  else if (tab === 'baselines') loadBaselines()
+  else if (tab === 'config') loadConfig()
+  else if (tab === 'rules') { loadConfig(); loadMetricSuggestions() }
 }
 
 onMounted(loadAlerts)
@@ -386,7 +345,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppLayout title="Anomaly Detection">
+  <AppLayout title="Alerts">
     <a-tabs :active-key="activeTab" @change="onTabChange">
 
       <!-- ══ ALERTS ══════════════════════════════════════════════════════════ -->
@@ -430,12 +389,7 @@ onUnmounted(() => {
           </a-button>
         </div>
 
-        <div v-if="!alerts.length && !alertsLoading" style="padding: 48px 0; text-align: center; color: #888">
-          No alerts{{ filterSeverity || filterMetric ? ' matching the current filters' : '' }}.
-        </div>
-
         <a-table
-          v-else
           :columns="alertColumns"
           :data-source="alerts"
           :loading="alertsLoading"
@@ -478,6 +432,11 @@ onUnmounted(() => {
             <template v-else-if="column.key === 'timestamp'">
               <span style="color: #888; font-size: 12px">{{ fmtTs(record.timestamp) }}</span>
             </template>
+          </template>
+          <template #emptyText>
+            <div style="padding: 24px 0; text-align: center; color: #aaa; font-size: 13px">
+              No alerts{{ filterSeverity || filterMetric ? ' matching the current filters' : '' }}.
+            </div>
           </template>
         </a-table>
       </a-tab-pane>
@@ -548,6 +507,70 @@ onUnmounted(() => {
 
           <div v-else-if="!statsLoading" style="color: #888; padding: 48px 0; text-align: center">
             No statistics available. Click Refresh to load.
+          </div>
+        </a-spin>
+      </a-tab-pane>
+
+      <!-- ══ RULES ══════════════════════════════════════════════════════════ -->
+      <a-tab-pane key="rules" tab="Anomaly Rules">
+        <a-spin :spinning="configLoading">
+          <template v-if="config">
+            <div class="toolbar">
+              <span style="color: #888; font-size: 13px">
+                Per-metric anomaly detection rules — thresholds, methods, and seasonality.
+              </span>
+              <a-button type="primary" @click="openAddMetric">
+                <template #icon><PlusOutlined /></template>
+                Add metric
+              </a-button>
+            </div>
+
+            <a-table
+              :columns="metricColumns"
+              :data-source="config.metrics"
+              :pagination="false"
+              row-key="name"
+              size="middle"
+            >
+              <template #bodyCell="{ column, record, index }">
+                <template v-if="column.key === 'enabled'">
+                  <a-switch
+                    :checked="record.enabled"
+                    size="small"
+                    @change="toggleMetricEnabled(index)"
+                  />
+                </template>
+
+                <template v-else-if="column.key === 'methods'">
+                  <a-tag
+                    v-for="m in record.methods"
+                    :key="m"
+                    :color="methodColor(m)"
+                    style="font-size: 11px; margin: 1px"
+                  >{{ m }}</a-tag>
+                </template>
+
+                <template v-else-if="column.key === 'seasonality'">
+                  <span style="color: #888; font-size: 12px">{{ record.seasonality || 'none' }}</span>
+                </template>
+
+                <template v-else-if="column.key === 'actions'">
+                  <a-space>
+                    <a-button size="small" @click="openEditMetric(record, index)">Edit</a-button>
+                    <a-button size="small" danger @click="removeMetric(index)">Del</a-button>
+                  </a-space>
+                </template>
+              </template>
+              <template #emptyText>
+                <div style="padding: 24px 0; text-align: center; color: #aaa; font-size: 13px">
+                  No metric rules yet — click "Add metric" to define anomaly detection for a metric.
+                </div>
+              </template>
+            </a-table>
+          </template>
+
+          <div v-else-if="!configLoading" style="padding: 48px 0; text-align: center; color: #aaa; font-size: 13px">
+            No configuration loaded — check the agent connection.
           </div>
         </a-spin>
       </a-tab-pane>
@@ -672,54 +695,7 @@ onUnmounted(() => {
               </a-row>
             </a-card>
 
-            <!-- Per-metric config -->
-            <div class="toolbar" style="margin-bottom: 8px">
-              <span style="font-size: 14px; font-weight: 500">Metric rules</span>
-              <a-button type="primary" ghost size="small" @click="openAddMetric">
-                <template #icon><PlusOutlined /></template>
-                Add metric
-              </a-button>
-            </div>
-
-            <a-table
-              :columns="metricColumns"
-              :data-source="config.metrics"
-              :pagination="false"
-              row-key="name"
-              size="small"
-            >
-              <template #bodyCell="{ column, record, index }">
-                <template v-if="column.key === 'enabled'">
-                  <a-switch
-                    :checked="record.enabled"
-                    size="small"
-                    @change="toggleMetricEnabled(index)"
-                  />
-                </template>
-
-                <template v-else-if="column.key === 'methods'">
-                  <a-tag
-                    v-for="m in record.methods"
-                    :key="m"
-                    :color="methodColor(m)"
-                    style="font-size: 11px; margin: 1px"
-                  >{{ m }}</a-tag>
-                </template>
-
-                <template v-else-if="column.key === 'seasonality'">
-                  <span style="color: #888; font-size: 12px">{{ record.seasonality || 'none' }}</span>
-                </template>
-
-                <template v-else-if="column.key === 'actions'">
-                  <a-space>
-                    <a-button size="small" @click="openEditMetric(record, index)">Edit</a-button>
-                    <a-button size="small" danger @click="removeMetric(index)">Del</a-button>
-                  </a-space>
-                </template>
-              </template>
-            </a-table>
-
-            <div style="margin-top: 20px; text-align: right">
+            <div style="text-align: right">
               <a-button type="primary" :loading="configSaving" @click="saveConfig">
                 <template #icon><SaveOutlined /></template>
                 Save configuration
@@ -731,67 +707,6 @@ onUnmounted(() => {
             Configuration not available. Click the tab to load.
           </div>
         </a-spin>
-      </a-tab-pane>
-
-      <!-- ══ BASELINES ═══════════════════════════════════════════════════════ -->
-      <a-tab-pane key="baselines" tab="Baselines">
-        <div class="toolbar">
-          <a-space>
-            <a-input
-              v-model:value="baselinesFilter"
-              placeholder="Filter by metric…"
-              allow-clear
-              style="width: 220px"
-              @pressEnter="loadBaselines"
-              @change="(e: Event) => { if (!(e.target as HTMLInputElement).value) loadBaselines() }"
-            />
-            <a-button :loading="baselinesLoading" @click="loadBaselines">
-              <template #icon><ReloadOutlined /></template>
-            </a-button>
-          </a-space>
-          <a-button :loading="savingBaselines" @click="triggerSaveBaselines">
-            <template #icon><SaveOutlined /></template>
-            Save baselines now
-          </a-button>
-        </div>
-
-        <a-table
-          :columns="baselineColumns"
-          :data-source="baselines"
-          :loading="baselinesLoading"
-          :pagination="{ pageSize: 50, showSizeChanger: false }"
-          row-key="metric"
-          size="small"
-          :scroll="{ x: true }"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'device_state'">
-              <a-tag>{{ record.device_state }}</a-tag>
-            </template>
-
-            <template v-else-if="column.key === 'time_slot'">
-              <span style="color: #888; font-size: 12px">
-                {{ record.time_slot === -1 ? 'all' : record.time_slot }}
-              </span>
-            </template>
-
-            <template v-else-if="column.key === 'mean'">
-              <span style="font-variant-numeric: tabular-nums; font-size: 12px">
-                {{ fmtNum(record.mean) }}
-              </span>
-            </template>
-
-            <template v-else-if="column.key === 'std_dev'">
-              <span style="font-variant-numeric: tabular-nums; font-size: 12px">
-                {{ fmtNum(record.std_dev) }}
-              </span>
-            </template>
-
-            <template v-else-if="column.key === 'calculated_at'">
-              <span style="color: #888; font-size: 12px">{{ fmtTs(record.calculated_at) }}</span>
-            </template>
-          </template>
-        </a-table>
       </a-tab-pane>
 
     </a-tabs>

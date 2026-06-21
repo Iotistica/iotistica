@@ -1502,12 +1502,36 @@ export const deleteDiscoveryRule = async (uuid: string) => {
 		throw Object.assign(new Error(`Discovery rule not found: ${uuid}`), { statusCode: 404 });
 	}
 
+	// Best-effort: clean up run history. Wrapped so a missing table doesn't fail the delete.
+	try {
+		const { DiscoveryRunModel } = await import('../db/models/discovery-run.model.js');
+		DiscoveryRunModel.deleteByRule(uuid);
+	} catch {
+		// ignore
+	}
+
 	logger?.infoSync('Discovery rule deleted', {
 		component: LogComponents.deviceApi,
 		ruleUuid: uuid,
 	});
 
 	return { deleted: true };
+};
+
+/**
+ * Discovery rules: get run history for a specific rule
+ */
+export const listDiscoveryRuns = async (ruleUuid: string, limit = 50) => {
+	const { DiscoveryRunModel } = await import('../db/models/discovery-run.model.js');
+	return DiscoveryRunModel.getByRule(ruleUuid, limit);
+};
+
+/**
+ * Discovery rules: get recent runs across all rules
+ */
+export const listRecentDiscoveryRuns = async (limit = 20) => {
+	const { DiscoveryRunModel } = await import('../db/models/discovery-run.model.js');
+	return DiscoveryRunModel.getRecent(limit);
 };
 
 /**

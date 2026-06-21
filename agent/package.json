@@ -39,7 +39,9 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
+    "@influxdata/influxdb-client": "~1.33.2",
     "bacstack": "^0.0.1-beta.14",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.4.1",
     "dockerode": "^4.0.2",
     "express": "^4.18.2",
@@ -57,6 +59,7 @@
     "zod": "^3.22.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/dockerode": "^3.3.28",
     "@types/events": "^3.0.3",

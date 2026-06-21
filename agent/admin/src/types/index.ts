@@ -206,6 +206,23 @@ export interface AnomalyBaseline {
   calculated_at: number
 }
 
+export interface DiscoveryRun {
+  id: number
+  rule_uuid: string
+  rule_name: string
+  protocol: string
+  trigger: 'scheduled' | 'manual'
+  started_at: string
+  finished_at: string | null
+  duration_ms: number | null
+  status: 'running' | 'ok' | 'error'
+  found: number
+  saved: number
+  skipped: number
+  error: string | null
+  created_at: string
+}
+
 export interface DiscoveredDevice {
   protocol: string
   name: string

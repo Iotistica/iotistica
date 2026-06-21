@@ -359,6 +359,24 @@ services:
             start_period: 10s
         networks:
             - iotistica-net
+    influxdb:
+        container_name: influxdb-agent
+        image: influxdb:alpine
+        restart: always
+        environment:
+            - DOCKER_INFLUXDB_INIT_MODE=setup
+            - DOCKER_INFLUXDB_INIT_USERNAME=${INFLUXDB_USERNAME:-admin}
+            - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUXDB_PASSWORD:-adminpassword}
+            - DOCKER_INFLUXDB_INIT_ORG=Iotistica
+            - DOCKER_INFLUXDB_INIT_BUCKET=Metrics
+            - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
+            - INFLUXDB_LOG_LEVEL=debug
+        ports:
+            - "${INFLUXDB_PORT_EXT:-8086}:8086"
+        volumes:
+            - ./influxdb:/var/lib/influxdb2
+        networks:
+           - iotistica-net
 
 
     # emqx:
@@ -486,6 +504,9 @@ services:
         # Bridge network: same iotistica-net as the agent so BACnet UDP broadcast
         # and unicast reads work within the bridge subnet.
         # Agent uses port 47809 to avoid collision with the simulator on 47808.
+        # Port published so the agent can reach the sim from WSL/host during dev.
+        ports:
+            - "47808:47808/udp"
         networks:
             - iotistica-net
         environment:
@@ -781,7 +802,7 @@ volumes:
         driver: local
     emqx-data:
         driver: local
- 
+
 networks:
   iotistica-net:
     driver: bridge

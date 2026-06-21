@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import type { FormInstance } from 'ant-design-vue'
 import type { Destination, DestinationFormData } from '@/types'
@@ -16,10 +16,15 @@ const emit = defineEmits<{
   saved: []
 }>()
 
-const DESTINATION_TYPES = ['iotistica', 'mqtt', 'azure', 'aws', 'gcp']
+const DESTINATION_TYPES = ['iotistica', 'mqtt', 'influxdb', 'azure', 'aws', 'gcp']
+const TESTABLE_TYPES = ['influxdb', 'mqtt']
 
 const formRef = ref<FormInstance>()
 const saving = ref(false)
+const testing = ref(false)
+const testResult = ref<{ ok: boolean; message?: string; error?: string } | null>(null)
+
+const canTest = computed(() => TESTABLE_TYPES.includes(form.value.type))
 
 const form = ref<DestinationFormData>({
   name: '',
@@ -32,6 +37,7 @@ watch(
   () => props.open,
   (open) => {
     if (!open) return
+    testResult.value = null
     if (props.editing) {
       form.value = {
         name: props.editing.name,
@@ -45,9 +51,27 @@ watch(
   },
 )
 
-// Reset config_json when type changes so stale fields don't carry over
+// Reset config_json and test result when type changes
 function onTypeChange() {
   form.value.config_json = {}
+  testResult.value = null
+}
+
+async function testConnection() {
+  testResult.value = null
+  testing.value = true
+  try {
+    const result = await destinationsApi.test({
+      type: form.value.type,
+      config_json: form.value.config_json ?? {},
+    })
+    testResult.value = result
+  } catch (err: unknown) {
+    const e = err as { message?: string }
+    testResult.value = { ok: false, error: e?.message ?? 'Test failed' }
+  } finally {
+    testing.value = false
+  }
 }
 
 async function submit() {
@@ -116,14 +140,32 @@ function close() {
       <a-form-item label="Enabled" name="enabled">
         <a-switch v-model:checked="form.enabled" />
       </a-form-item>
+
+      <a-alert
+        v-if="testResult"
+        :type="testResult.ok ? 'success' : 'error'"
+        :message="testResult.ok ? testResult.message : testResult.error"
+        show-icon
+        style="margin-top: 4px"
+      />
     </a-form>
 
     <template #footer>
-      <a-space>
-        <a-button @click="close">Cancel</a-button>
-        <a-button type="primary" :loading="saving" @click="submit">
-          {{ editing ? 'Save' : 'Create' }}
+      <a-space style="width: 100%; justify-content: space-between">
+        <a-button
+          v-if="canTest"
+          :loading="testing"
+          @click="testConnection"
+        >
+          Test Connection
         </a-button>
+        <span v-else />
+        <a-space>
+          <a-button @click="close">Cancel</a-button>
+          <a-button type="primary" :loading="saving" @click="submit">
+            {{ editing ? 'Save' : 'Create' }}
+          </a-button>
+        </a-space>
       </a-space>
     </template>
   </a-drawer>

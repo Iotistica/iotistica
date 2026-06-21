@@ -12,6 +12,9 @@ import { migration as addCompressionToPublishSubscriptions } from './migrations/
 import { migration as addGroupNameToEndpoints } from './migrations/20260601000000_add_group_name_to_endpoints.js';
 import { migration as addDiscoveryRules } from './migrations/20260614000000_add_discovery_rules.js';
 import { migration as addObservedMetrics } from './migrations/20260615000000_add_observed_metrics.js';
+import { migration as addDiscoveryRuns } from './migrations/20260617000000_add_discovery_runs.js';
+import { migration as addAdminSessions } from './migrations/20260620000000_add_admin_sessions.js';
+import { migration as addAdminUsers } from './migrations/20260620010000_add_admin_users.js';
 import type { NativeSqliteMigration } from './migration-types.js';
 
 export const nativeMigrations: NativeSqliteMigration[] = [
@@ -29,4 +32,7 @@ export const nativeMigrations: NativeSqliteMigration[] = [
 	addGroupNameToEndpoints,
 	addDiscoveryRules,
 	addObservedMetrics,
+	addDiscoveryRuns,
+	addAdminSessions,
+	addAdminUsers,
 ];

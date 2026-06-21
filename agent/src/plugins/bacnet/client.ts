@@ -216,8 +216,11 @@ export class BACnetClient implements IProtocolClient<BACnetObject[], Map<string,
 				);
 			});
 
-			// Extract present value from response
-			const presentValue = result.values?.[0]?.value;
+			// bacstack wraps decoded values as [{ value, type }] — unwrap to scalar
+			const rawValue = result.values?.[0]?.value;
+			const presentValue = Array.isArray(rawValue) && rawValue.length > 0
+				? rawValue[0]?.value
+				: rawValue;
 
 			return {
 				value: presentValue,

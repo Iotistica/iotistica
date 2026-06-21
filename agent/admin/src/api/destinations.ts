@@ -3,6 +3,12 @@ import type { Destination, DestinationFormData } from '@/types'
 
 const BASE = '/v1/publish/destinations'
 
+export interface TestResult {
+  ok: boolean
+  message?: string
+  error?: string
+}
+
 export const destinationsApi = {
   getAll(): Promise<Destination[]> {
     return client.get<{ publishers: Destination[] }>(BASE).then((r) => r.data.publishers)
@@ -18,5 +24,9 @@ export const destinationsApi = {
 
   delete(id: number): Promise<void> {
     return client.delete(`${BASE}/${id}`).then(() => undefined)
+  },
+
+  test(data: { type: string; config_json: Record<string, unknown> }): Promise<TestResult> {
+    return client.post<TestResult>(`${BASE}/test`, data).then((r) => r.data)
   },
 }
