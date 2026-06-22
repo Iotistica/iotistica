@@ -5,9 +5,9 @@ import type * as Preset from '@docusaurus/preset-classic';
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
 const config: Config = {
-  title: 'Iotistica Docs',
+  title: 'Iotistica',
   tagline: 'Documentation for the Iotistica IoT platform',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/favicon.svg',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
@@ -35,6 +35,18 @@ const config: Config = {
     locales: ['en'],
   },
 
+  themes: [
+    [
+      require.resolve('@easyops-cn/docusaurus-search-local'),
+      {
+        hashed: true,
+        language: ['en'],
+        highlightSearchTermsOnTargetPage: true,
+        explicitSearchResultPath: true,
+      },
+    ],
+  ],
+
   presets: [
     [
       'classic',
@@ -61,9 +73,9 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'Iotistica Docs',
+      title: 'Iotistica',
       logo: {
-        alt: 'Iotistica Logo',
+        alt: 'Iotistica',
         src: 'img/logo.svg',
       },
       items: [

@@ -2,28 +2,100 @@
 sidebar_position: 1
 ---
 
-# Product Overview
+import AgentArchDiagram from '@site/src/components/AgentArchDiagram';
 
-Neuron is an open-source, lightweight IIoT connectivity server that empowers industrial devices with the key IoT connectivity capabilities in the Industry 4.0 era. It translates diverse protocol data from industrial devices into standardized IoT MQTT messages, ensuring seamless interconnection between devices and the IoT system for remote control and information gathering.
+# Overview
 
-Supporting simultaneous access and MQTT conversion for varied communication protocols, Neuron is resource-efficient and deployable on physical machines with X86, ARM, RISC-V, and other architectures, either natively or through containers. Its web-based console allows easy configuration management. With robust performance, Neuron can connect hundreds of industrial devices and manage over 10,000 data points.
+The Iotistica Agent is a lightweight runtime that runs directly on your edge hardware — industrial PCs, gateways, Raspberry Pis, or any Linux device. It connects to your industrial equipment, collects data, and routes it to wherever you need it: a local MQTT broker, InfluxDB, Azure, AWS, or GCP.
 
-## Why Neuron
-Edge Native: Neuron is an advanced real-time asynchronous processing server designed to achieve response times as low as 100 milliseconds. It ensures rapid and efficient data processing by leveraging the benefits of edge computing and low-latency network architectures.
+The agent is designed to work **offline first**. If the network goes down, data keeps accumulating locally in SQLite and flushes automatically when connectivity is restored. You don't need to babysit it.
 
-Diverse Connectivity: Neuron offers many diverse pluggable connectivity and processing modules such as Modbus, OPCUA, Ethernet/IP, IEC104, BACnet, Siemens, Mitsubishi, and more. These modules would be classified into building automation, CNC machines, Robotics, Electricity, and various PLCs communication. For a complete list of supported plugin modules, please see Plugin List.
+## What the Agent Does
 
-Large-Scale Concurrency: Neuron is capable of establishing unlimited connections with a wide range of industrial devices concurrently because it adopts the modern decoupled modular Architecture design. Note: The actual number of simultaneous connections is contingent upon the processing resources allocated.
+**Collects data from industrial devices.** The agent speaks Modbus TCP/RTU, OPC-UA, BACnet, MQTT, SNMP, and CAN bus. You add an endpoint for each device, configure the connection and poll interval, and the agent handles the rest.
 
-Portable Deployment: Neuron has very low memory footprints, less than 7M at startup, suitable for running on low-profile architecture devices like x86, ARM, RISC-V, and so on. It also supports docker-like containerized deployment, running with other co-located containers in K8s environments. For details on how to install, see Installation.
+**Routes data to destinations.** Once data is coming in, you create subscriptions that send it to one or more destinations — a local MQTT broker, an InfluxDB instance, or a cloud IoT service. You can send the same data to multiple places simultaneously.
 
-Better Integration: Neuron has seamless integration with other industrial IoT applications, big data, and AI/ML analytic software into the platforms like private cloud, EMQX Cloud, AWS, Microsoft Azure, or on-premises servers via API and MQTT connection.
+**Discovers devices automatically.** The discovery engine scans your network for compatible devices and presents them for review. You can set up recurring discovery rules so new devices are found as they appear.
 
-Unified DataOps: Neuron assists the legacy industrial devices to deliver data messages in an asynchronous way as the edge node specified in Sparkplug standard. Sparkplug is an open, unified, interoperable standard for industrial data exchange between industrial information systems like ERP, MES, SCADA, and historian via an MQTT broker.
+**Detects anomalies at the edge.** The anomaly detection engine learns what "normal" looks like for each metric and raises alerts when readings drift outside the expected range. Alerts are evaluated locally — no cloud round-trip needed.
 
-Authentication and Security: Neuron supports TLS and HTTPS encryption for API services to ensure data security in transmission and use JWT authentication mechanism to verify the data owner.
+**Monitors its own health.** The dashboard shows CPU, memory, storage, and network bandwidth in real time. The agent also monitors schema changes in the data it receives and warns you if a device starts sending unexpected field names or types.
+
+## How It Works
+
+<AgentArchDiagram />
+
+Data flows left to right through four stages.
+
+### Endpoints: Data In
+
+Each endpoint is a connection to a single industrial device. The agent runs a dedicated protocol adapter per endpoint — Modbus, OPC-UA, BACnet, MQTT, and so on — that polls the device at the configured interval and emits a stream of readings. Each reading has a metric name, a value, and a timestamp.
+
+Multiple endpoints can use the same protocol independently. Ten Modbus devices run as ten separate adapters; a problem with one does not affect the others.
+
+### The Publish Pipeline
+
+The pipeline sits between endpoints and destinations. It is where readings are batched, anomaly detection runs, and schema drift is monitored. When a batch is ready it is forwarded to every destination that matches the subscription rules.
+
+**Offline buffering:** if a destination is unreachable, the batch is written to a SQLite queue and retried automatically when connectivity returns. No data is lost during outages.
+
+### Subscriptions: The Routing Rules
+
+A subscription connects a source protocol to a destination and defines:
+
+- Which **payload format** to use (raw JSON, field-name/value pairs for InfluxDB, or ECP for Sparkplug tooling)
+- Which **MQTT topic or InfluxDB measurement** to write to
+- Optional **device or metric filters** to include or exclude specific data
+
+You can have multiple subscriptions from the same source to different destinations, and multiple sources feeding the same destination simultaneously.
+
+### Destinations: Data Out
+
+A destination is a named, persistent connection to a service — an MQTT broker, InfluxDB, or a cloud IoT platform. The pipeline maintains one connection per destination and routes batches to it based on your subscriptions.
+
+### Anomaly Detection
+
+The anomaly detection engine runs inside the pipeline. As readings flow through, it updates per-metric statistical models (EWMA, z-score, rate-of-change, and others) and raises an alert when a reading falls outside the expected range. Everything is evaluated locally — no cloud round-trip.
+
+### Schema Drift Monitoring
+
+The pipeline learns what fields a device normally produces during a warmup period. After warmup it watches for:
+
+- **Missing fields** — a reading that used to appear has stopped showing up
+- **New fields** — the device is sending something it never sent before
+- **Type changes** — a field that was a number is now a string
+
+Sensitivity is tunable per protocol in **Settings → Schema Drift Detection**.
+
+### SQLite: The Local Store
+
+Everything persists in a single SQLite file on disk. This includes endpoint and destination config, subscription rules, discovery history, anomaly baselines, schema drift baselines, the offline message buffer, and admin sessions. No external database is required.
+
+## Standalone Mode
+
+Standalone mode means the agent runs independently — no cloud account required. You manage it entirely through a local web UI accessible on the device at port 48481. Everything lives on the device: configuration, historical data, anomaly models, and schema baselines.
+
+This is the recommended starting point. You can always add cloud sync later without changing anything on the device.
+
+## The Admin UI
+
+The web interface runs at `http://[device-ip]:48481/admin/`. It requires a username and password — the default is `admin` / `admin`, which you should change on first login.
+
+| Section | What it's for |
+|---|---|
+| Dashboard | System health at a glance |
+| Endpoints | The industrial devices you're collecting data from |
+| Destinations | Where data gets sent (MQTT, InfluxDB, cloud) |
+| Subscriptions | Rules that connect endpoints to destinations |
+| Discovery | Auto-scan your network for new devices |
+| Alerts | Anomaly alerts and detection rules |
+| Settings | Agent configuration |
+| Administration | User accounts |
 
 ## Related Docs
 
-- [Quickstart](../getting-started/quickstart.mdx)
-- [Kubernetes Deployment](../deployment/kubernetes.mdx)
+- [Quick Start](./quickstart.mdx)
+- [Endpoints](./endpoints.mdx)
+- [Destinations](./destinations.mdx)
+- [Subscriptions](./subscriptions.mdx)

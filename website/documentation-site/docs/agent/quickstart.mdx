@@ -1,0 +1,232 @@
+---
+sidebar_position: 2
+---
+
+# Quick Start
+
+This guide gets the Iotistica Agent running in standalone mode and walks you through connecting your first device.
+
+## Prerequisites
+
+- A Linux device (Raspberry Pi, industrial PC, or x86-64 server)
+- **Debian-based OS** for the install script: Ubuntu, Raspberry Pi OS, or Debian (Docker Compose works on any Linux)
+- A Modbus, OPC-UA, BACnet, or MQTT device on the same network
+
+---
+
+## Install with the Install Script
+
+The quickest path on a Debian-based device. The script sets up everything — system packages, Node.js, Docker, user accounts, and service registration. Run it with sudo:
+
+```bash
+curl -sfL https://get.iotistica.com/agent/install | sudo sh
+```
+
+The script runs interactively and will prompt for optional settings (cloud API endpoint, provisioning key, local Mosquitto broker). To skip all prompts for automated provisioning, pass environment variables before piping:
+
+```bash
+IOTISTICA_INSTALL_DOCKER=yes \
+IOTISTICA_DEVICE_PORT=48484 \
+IOTISTICA_API=https://api.iotistica.com \
+IOTISTICA_PROVISIONING_KEY=your-provisioning-key \
+curl -sfL https://get.iotistica.com/agent/install | sudo sh
+```
+
+### What the script does
+
+| Step | Action |
+|------|--------|
+| 1 | Installs system packages via `apt` (curl, git, sqlite3, networking tools) |
+| 2 | Installs **Node.js 20** if missing or below v18 |
+| 3 | Installs **Docker** if missing and `IOTISTICA_INSTALL_DOCKER=yes` |
+| 4 | Creates `iotistic` system user and adds it to the `docker` group |
+| 5 | Optionally installs and configures a local **Mosquitto** MQTT broker |
+| 6 | Downloads the pre-built agent for your architecture (x86_64, arm64, armhf) |
+| 7 | Writes `/etc/iotistic/agent.env` with configuration and secrets (mode 600) |
+| 8 | Creates and starts `iotistica-agent` as a **systemd** service — enabled on boot, auto-restarts on failure |
+| 9 | Installs the `iotctl` command-line tool |
+
+Once the script completes, the admin UI is available at:
+
+```
+http://[device-ip]:48484/admin/
+```
+
+Check service status and follow logs with:
+
+```bash
+systemctl status iotistica-agent
+journalctl -u iotistica-agent -f
+```
+
+---
+
+## Install with Docker Compose
+
+If you prefer full control over the configuration — ports, volumes, environment variables, memory limits — use Docker Compose directly. This is the recommended approach for production deployments.
+
+### Step 1 — Create a working directory
+
+```bash
+mkdir iotistica-agent && cd iotistica-agent
+```
+
+### Step 2 — Create `docker-compose.yml`
+
+```yaml
+services:
+  agent:
+    image: iotistica/agent:latest
+    container_name: iotistica-agent
+    restart: unless-stopped
+    mem_limit: 512m
+    mem_reservation: 256m
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "${AGENT_PORT:-48481}:48481"
+    volumes:
+      - agent-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Core
+      - NODE_ENV=production
+      - STANDALONE=true
+      - DEVICE_API_PORT=48481
+      - API_SECURITY_MODE=${API_SECURITY_MODE:-LOCAL_NETWORK}
+
+      # MQTT connectivity (optional — leave blank for fully offline/standalone)
+      - MQTT_BROKER_URL=${MQTT_BROKER_URL:-}
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+
+      # Remote shell security (generate a random string and keep it secret)
+      - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
+
+volumes:
+  agent-data:
+    driver: local
+```
+
+### Step 3 — Create `.env`
+
+Create a `.env` file in the same directory. Docker Compose reads this automatically.
+
+```bash
+# ── Required ──────────────────────────────────────────────────────────────────
+
+# Secret key for the remote shell — generate with: openssl rand -hex 32
+AGENT_SHELL_HMAC_KEY=replace-with-a-random-secret
+
+# ── Optional ──────────────────────────────────────────────────────────────────
+
+# Admin UI port (default 48481)
+AGENT_PORT=48481
+
+# Security mode: LOCAL_NETWORK (default) trusts requests from the local subnet.
+# Use STRICT to require authentication on all API calls.
+API_SECURITY_MODE=LOCAL_NETWORK
+
+# MQTT broker — fill in if you want the agent to sync with a broker or cloud.
+# Leave blank for fully standalone operation.
+MQTT_BROKER_URL=
+MQTT_USERNAME=
+MQTT_PASSWORD=
+```
+
+:::tip Generating a secret key
+```bash
+openssl rand -hex 32
+```
+:::
+
+### Step 4 — Start the agent
+
+```bash
+docker compose up -d
+```
+
+Docker pulls the image and starts the container. To follow the startup logs:
+
+```bash
+docker compose logs -f agent
+```
+
+You should see the agent initialise its database, start the protocol adapters, and open the admin API within a few seconds.
+
+---
+
+## Access the Admin UI
+
+Open a browser on your local network and navigate to:
+
+| Install method | Default URL |
+|---|---|
+| Install script (systemd) | `http://[device-ip]:48484/admin/` |
+| Docker Compose | `http://[device-ip]:48481/admin/` |
+
+Log in with the default credentials: **admin / admin**. Change the password immediately from **Administration → Users**.
+
+---
+
+## Check the Dashboard
+
+The Dashboard page gives you an immediate health check — CPU, memory, network bandwidth, and uptime. If you can see numbers here, the agent is running correctly.
+
+---
+
+## Add Your First Endpoint
+
+An endpoint is a connection to one of your industrial devices. To add one:
+
+1. Go to **Endpoints** in the sidebar.
+2. Click **Add Endpoint**.
+3. Fill in the connection details for your device (host, port, protocol).
+4. Set a poll interval — `5000` ms (5 seconds) is a good start.
+5. Click **Add Endpoint**.
+
+The endpoint appears in the list. If the device is reachable, it connects within a few seconds.
+
+Not sure of the connection details? Click **Discover** — the agent will scan your network and find compatible devices automatically.
+
+---
+
+## Send Data Somewhere
+
+Out of the box, data is collected but not forwarded anywhere. To send it to an MQTT broker or InfluxDB:
+
+1. Go to **Destinations** and click **New Destination**.
+2. Choose the type (MQTT or InfluxDB) and fill in the connection settings.
+3. Go to **Subscriptions** and click **New Subscription**.
+4. Select your destination and set the payload format — `tags` for InfluxDB, `custom` for MQTT.
+5. Save.
+
+Data from all your endpoints starts flowing to the destination immediately.
+
+---
+
+## Updating the Agent
+
+**Install script (systemd):** run the installer again — it replaces the agent binary and restarts the service, preserving `/etc/iotistic/agent.env` and the database in `/var/lib/iotistic/agent/`.
+
+```bash
+curl -sfL https://get.iotistica.com/agent/install | sudo sh
+```
+
+**Docker Compose:** pull the latest image and restart:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Your data volume (`agent-data`) is preserved across updates.
+
+---
+
+## Next Steps
+
+- [Endpoints](./endpoints.mdx) — supported protocols and connection settings in detail
+- [Destinations](./destinations.mdx) — MQTT, InfluxDB, and cloud options
+- [Subscriptions](./subscriptions.mdx) — routing and filtering data
+- [Discovery](./discovery.mdx) — auto-detect devices on your network
+- [Alerts](./alerts.mdx) — anomaly detection and alerting

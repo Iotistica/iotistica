@@ -35,6 +35,19 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
+            display: inline-flex;
+            align-items: center;
+            gap: 9px;
+        }
+        .nav-brand .logo::before {
+            content: '';
+            display: block;
+            width: 30px;
+            height: 30px;
+            background-image: url('images/logo.svg');
+            background-size: contain;
+            background-repeat: no-repeat;
+            flex-shrink: 0;
         }
 
         /* Page Container */

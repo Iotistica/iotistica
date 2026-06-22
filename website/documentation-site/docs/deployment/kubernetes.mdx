@@ -1,39 +1,386 @@
 ---
+sidebar_label: Kubernetes
 sidebar_position: 1
 ---
 
 # Kubernetes Deployment
 
-Use Kubernetes for multi-tenant SaaS deployments where each customer receives isolated runtime resources.
+The Iotistica cloud platform ships as a single Helm chart (`charts/iotistica`) that deploys every service needed to run the platform: the Cloud API, ingestion pipeline, MQTT broker, Redis, and optional dashboard and Node-RED instances.
 
-## Deployment Model
+## Services
 
-- Global services for billing and VPN
-- Per-customer namespaces with API, Dashboard, PostgreSQL, MQTT broker, and Redis
-- Helm chart-driven provisioning and upgrades
+| Service | Image | Port | Purpose |
+|---------|-------|------|---------|
+| `api` | `iotistic/api` | 3002 | REST + MQTT subscription, auth, device state |
+| `ingestion` | `iotistic/ingestion` | 3003 | Redis Streams consumer → TimescaleDB writer |
+| `mosquitto` | `iegomez/mosquitto-go-auth` | 1883 / 8883 / 9001 | MQTT broker with HTTP auth callback |
+| `redis` | `redis:7-alpine` | 6379 | Streams, pub/sub, cache, dedup |
+| `dashboard` | `iotistic/dashboard` | 80 | Web UI |
+| `nodered` *(optional)* | `iotistic/nodered` | configurable | Low-code automation |
 
-## Namespace Pattern
+Networking is handled by Envoy Gateway via `HTTPRoute` (HTTP) and `TLSRoute` (MQTT). TLS certificates are issued by cert-manager.
 
-```text
-customer-{12-char-hash}
-```
+---
 
-The namespace hash is deterministic from customer identity and avoids naming collisions.
+## Prerequisites
 
-## Helm Validation
+- Kubernetes 1.27+
+- [Helm 3](https://helm.sh/)
+- [Envoy Gateway](https://gateway.envoyproxy.io/) installed in the cluster
+- [cert-manager](https://cert-manager.io/) with a `letsencrypt-production` ClusterIssuer
+- TimescaleDB (external CNPG cluster or managed service)
+- [1Password Operator](https://developer.1password.com/docs/k8s/k8s-operator/) *(optional — required for managed secret injection)*
+- Prometheus + ServiceMonitor CRD *(optional — required for metrics scraping)*
+
+---
+
+## Quick Start
+
+### Lint and preview
 
 ```bash
 helm lint charts/iotistica
-helm template client-demo charts/iotistica -f charts/iotistica/values/demo/values.yaml --debug
+
+helm template client-demo charts/iotistica \
+  -f charts/iotistica/values/demo/values.yaml \
+  --debug
 ```
+
+### Install (demo)
+
+```bash
+helm upgrade --install client-demo charts/iotistica \
+  -n demo --create-namespace \
+  -f charts/iotistica/values/demo/values.yaml
+```
+
+### Install (production — standard tier)
+
+```bash
+helm upgrade --install iotistica charts/iotistica \
+  -n iotistica --create-namespace \
+  -f charts/iotistica/values/demo/values.yaml \
+  -f charts/iotistica/values/tiers/standard.yaml
+```
+
+Tier overlays are stacked on top of the base values — the rightmost `-f` wins for any key that appears in both files.
+
+---
+
+## Configuration Tiers
+
+Three tier overlays are provided under `values/tiers/`. Pick one based on fleet size.
+
+### Demo / Trial
+
+Default values. Single replica, minimal resources. Suitable for development and evaluation.
+
+| Resource | CPU request | Memory request | CPU limit | Memory limit |
+|----------|-------------|----------------|-----------|--------------|
+| API | 100m | 256Mi | 500m | 1Gi |
+| Ingestion | 300m | 256Mi | 1000m | 1Gi |
+| Redis | 100m | 1Gi | 250m | 2Gi |
+
+### Starter — up to 10 agents, ~200 r/s
+
+```bash
+-f charts/iotistica/values/tiers/starter.yaml
+```
+
+| Setting | Value |
+|---------|-------|
+| API CPU request | 250m |
+| API memory request | 256Mi |
+| API workers | 6 |
+| Redis max memory | 512 MB |
+| Ingestion workers | 6 |
+| Raw readings retention | 30 days |
+
+### Standard — up to 50 agents, ~2,000 r/s
+
+```bash
+-f charts/iotistica/values/tiers/standard.yaml
+```
+
+| Setting | Value |
+|---------|-------|
+| API replicas | 2 |
+| API CPU request | 1000m |
+| API memory request | 512Mi |
+| API HPA | enabled (min 2, max 4) |
+| Redis max memory | 2 GB |
+| Ingestion replicas | 2, workers 10 |
+| Ingestion HPA | enabled (min 2, max 8) |
+| Stream buffer (`REDIS_INGESTION_STREAM_MAXLEN`) | 600,000 messages |
+| Raw readings retention | 60 days |
+
+### Enterprise — up to 200 agents, ~50,000 r/s
+
+```bash
+-f charts/iotistica/values/tiers/enterprise.yaml
+```
+
+| Setting | Value |
+|---------|-------|
+| API replicas | 4 |
+| API CPU request | 2000m |
+| API memory limit | 4Gi |
+| API HPA | enabled (min 4, max 10), 65% CPU target |
+| Redis cluster | **required** — set `redis.cluster: true` |
+| Redis max memory | 8 GB |
+| Ingestion replicas | 4, workers 20 |
+| Ingestion HPA | enabled (min 4, max 20) |
+| Stream buffer | 1,200,000 messages |
+| Raw readings retention | 90 days |
+| Disk spool max | 5 GB |
+
+---
+
+## Services Reference
+
+### Cloud API (`api`)
+
+The API service does two things simultaneously:
+
+1. **Maintains a persistent MQTT subscription** to the broker and routes incoming agent messages (telemetry, state, events, jobs) to Redis Streams and TimescaleDB.
+2. **Serves the REST API** for the dashboard and agent provisioning.
+
+Key environment variables (set via `api.env` in values or per-tier override):
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `PORT` | `3002` | |
+| `DB_POOL_SIZE` | `20` | Increase for enterprise |
+| `DB_STATEMENT_TIMEOUT_MS` | `45000` | |
+| `MQTT_BROKER_URL` | *(from secret)* | e.g. `mqtt://mosquitto:1883` |
+| `MQTT_AUTH_CACHE_TTL_SECONDS` | `300` | Auth callback cache TTL |
+| `MQTT_PERSIST_TO_DB` | `true` | Persist MQTT messages to DB |
+| `JWT_ACCESS_TOKEN_EXPIRY` | `15m` | |
+| `JWT_REFRESH_TOKEN_EXPIRY` | `7d` | |
+| `DISK_SPOOL_ENABLED` | `true` | Local buffer on broker loss |
+| `DISK_SPOOL_MAX_SIZE_MB` | `1000` | |
+| `AI_PROVIDER` | `openai` | Used for anomaly summaries |
+| `CORS_ORIGINS` | `https://demo.iotistica.com,...` | Comma-separated allowed origins |
+
+**Probes:**
+
+- `startupProbe`: checks `/health` every 5 s, up to 36 failures (3-minute startup budget)
+- `livenessProbe`: every 10 s
+- `readinessProbe`: every 5 s
+
+**Rate limiting:** Envoy Gateway `BackendTrafficPolicy` limits the API to 1,000 requests per minute.
+
+**HPA (standard / enterprise):**
+
+| Setting | Standard | Enterprise |
+|---------|----------|------------|
+| Min replicas | 2 | 4 |
+| Max replicas | 4 | 10 |
+| CPU target | 70% | 65% |
+| Memory target | 80% | 75% |
+| Scale-up stabilization | 60 s | 60 s |
+| Scale-down stabilization | 5 min | 5 min |
+
+---
+
+### Ingestion (`ingestion`)
+
+The ingestion service is a stateless Redis Streams consumer. It reads from `tenant:{id}:agent:devices:ingestion`, batches records, and writes to TimescaleDB.
+
+Key environment variables:
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `INGESTION_PROFILE` | `batch` | `batch` / `balanced` / `streaming` |
+| `WORKER_COUNT` | per tier | Parallel write workers per pod |
+| `BATCH_SIZE` | per tier | Rows per INSERT |
+| `AUTOSCALE_MIN_WORKERS` | per tier | Internal worker autoscale lower bound |
+| `AUTOSCALE_MAX_WORKERS` | per tier | Internal worker autoscale upper bound |
+| `AUTOSCALE_LAG_SCALE_UP_MS` | `5000` | Scale up when stream lag exceeds this |
+| `AUTOSCALE_LAG_CRITICAL_MS` | `15000` | Critical lag threshold |
+| `REDIS_INGESTION_STREAM_MAXLEN` | per tier | Max messages retained in stream |
+| `DISK_SPOOL_ENABLED` | `true` | Fallback if Redis or DB is unreachable |
+| `DISK_SPOOL_PATH` | `/var/lib/iotistic/spool` | Mounted PVC if persistence enabled |
+
+**Ingestion profiles:**
+
+| Profile | Behaviour |
+|---------|-----------|
+| `batch` | Optimized for throughput — larger batches, higher latency |
+| `balanced` | Default balance of latency and throughput |
+| `streaming` | Low-latency, smaller batches, higher DB load |
+
+**Spool persistence:** If `ingestion.spoolPersistence.enabled: true`, a PVC is mounted at `/var/lib/iotistic/spool`. The deployment strategy switches to `Recreate` when a `ReadWriteOnce` PVC is used.
+
+**Stream key resolver job:** An ArgoCD-hook Job runs on every sync, extracts the `tenantId` from the license JWT, and writes it into a runtime Secret (`{release}-ingestion-runtime-env`):
+
+```
+INGESTION_TENANT_ID=<uuid>
+REDIS_INGESTION_STREAM_KEY=tenant:<uuid>:agent:devices:ingestion
+```
+
+---
+
+### Mosquitto MQTT Broker (`mosquitto`)
+
+Uses `iegomez/mosquitto-go-auth`, which adds an HTTP authentication backend plugin to Mosquitto.
+
+| Listener | Port | Protocol |
+|----------|------|----------|
+| Plain MQTT | 1883 | TCP |
+| TLS MQTT | 8883 | TLS (cert-manager certificate) |
+| WebSocket | 9001 | WS |
+
+Authentication is an HTTP callback to the Cloud API:
+
+```
+POST /mosquitto-auth/user       — credential validation
+POST /mosquitto-auth/superuser  — superuser check
+POST /mosquitto-auth/acl        — topic ACL check
+```
+
+Agents authenticate using their **API key as the MQTT username** and a provisioned password. Anonymous connections are rejected.
+
+TLS is issued by cert-manager via the `letsencrypt-production` ClusterIssuer. Configure the hostname via `mosquitto.tls.commonName`.
+
+---
+
+### Redis (`redis`)
+
+Single-instance Redis (or cluster for enterprise). Used for:
+
+- `tenant:{id}:agent:devices:ingestion` — ingestion stream
+- `tenant:{id}:*` — device state, pub/sub channels, dedup keys (24 hr TTL)
+
+| Setting | Demo | Starter | Standard | Enterprise |
+|---------|------|---------|----------|------------|
+| Max memory | 1,536 MB | 512 MB | 2 GB | 8 GB |
+| Max memory policy | `noeviction` | `noeviction` | `noeviction` | `noeviction` |
+| RDB / AOF | off | off | off | off |
+| Cluster | false | false | false | **true** (recommended) |
+
+:::caution No persistence
+Redis is intentionally configured without RDB snapshots or AOF. All durable state lives in TimescaleDB. On Redis restart, the ingestion stream and dedup keys are lost — this is expected and acceptable.
+:::
+
+---
+
+### Dashboard (`dashboard`)
+
+A static Vue 3 SPA served by Nginx. Runtime configuration is injected via a ConfigMap mounted as `config.js`:
+
+```js
+window.env = {
+  VITE_API_URL: 'https://demo-api.iotistica.com',
+  VITE_AUTH0_DOMAIN: 'auth.iotistica.com',
+  VITE_AUTH0_CLIENT_ID: '...',
+  VITE_AUTH0_AUDIENCE: 'https://api.iotistica.com',
+  VITE_AUTH0_CALLBACK_URL: 'https://demo.iotistica.com/auth/callback',
+  VITE_PROVISIONING_API_URL: 'https://api.iotistica.com/provisioning',
+  APP_VERSION: 'v0.0.22-rc.1'
+}
+```
+
+Update `dashboard.config.*` in values to override these per environment.
+
+---
+
+## Required Secrets
+
+The chart expects these Kubernetes Secrets to exist in the target namespace before install. If using the 1Password Operator, `OnePasswordItem` resources create them automatically from vault entries.
+
+| Secret name | Keys | Used by |
+|-------------|------|---------|
+| `sql-credentials-{namespace}` | `server`, `port`, `dbname`, `username`, `password` | API, Ingestion |
+| `mqtt-credentials-{namespace}` | `username`, `password` | API (MQTT connection to broker) |
+| `openai-credentials-master` | `key` | API (AI / anomaly summaries) |
+| `api-jwt-{namespace}` | `token` | API (JWT signing secret) |
+| `api-license-credentials-{namespace}` | `key` | API, Ingestion |
+| `api-license-public-key-master` | `key` | API |
+| `api-bootstrap-token-master` | `token` | API |
+| `internal-auth-token-master` | `token` | API |
+
+For Redis auth (`redis.auth.enabled: true`), the chart creates `{release}-redis-auth` automatically.
+
+---
+
+## Database Initialization
+
+An optional Job (`db-init`) creates the application role and database, grants permissions, and enables the TimescaleDB extension. It is disabled for demo environments where the role is created manually before GitOps.
+
+```yaml
+dbInit:
+  enabled: true
+  adminSecretName: pg-admin-credentials
+```
+
+The job connects as the admin user and:
+
+1. Creates or alters the application role
+2. Creates or alters the database
+3. Grants `CONNECT`, schema `USAGE/CREATE`, and table/sequence permissions
+4. Runs `CREATE EXTENSION IF NOT EXISTS timescaledb`
+
+---
+
+## TimescaleDB Lifecycle Policies
+
+A `timescaledb-policy` ArgoCD-hook Job (wave `"1"`) runs on every sync and idempotently applies compression and retention policies.
+
+| Table / View | Compress after | Retain |
+|-------------|---------------|--------|
+| `readings` (raw hypertable) | 2 days (demo) | 30d / 60d / 90d by tier |
+| `readings_1m` (continuous aggregate) | 7 days | 90 days |
+| `agent_metrics_5min` | — | 60 days (enterprise) |
+
+---
+
+## Fleet Namespaces
+
+When `fleetNamespaces.enabled: true`, the chart provisions isolated Kubernetes namespaces for agent fleets:
+
+```
+fleet-{release-namespace}-{name}
+```
+
+Each namespace receives a `ResourceQuota`, `LimitRange`, `RoleBinding`, and optional `NetworkPolicy`.
+
+Default resource quota per agent slot:
+
+| Resource | Per-agent allocation |
+|----------|---------------------|
+| CPU request | 300m |
+| Memory request | 480Mi |
+| CPU limit | up to 2000m shared |
+| Memory limit | up to 4Gi shared |
+
+---
+
+## Monitoring
+
+`ServiceMonitor` resources are created for the API and Ingestion services when `monitoring.enabled: true`:
+
+| Target | Path | Interval |
+|--------|------|----------|
+| `{release}-api:3002` | `/metrics` | 30s |
+| `{release}-ingestion:3003` | `/metrics` | 30s |
+
+---
 
 ## Operational Checks
 
 ```bash
-kubectl get namespaces | grep customer-
-kubectl get pods -n customer-<id>
+# List all pods
+kubectl get pods -n demo
+
+# API logs
+kubectl logs -n demo -l app=iotistic-api --tail=100 -f
+
+# Check ingestion stream depth (consumer lag)
+kubectl exec -n demo deploy/client-demo-redis -- \
+  redis-cli XLEN tenant:<uuid>:agent:devices:ingestion
+
+# Verify Mosquitto is accepting connections
+kubectl exec -n demo deploy/client-demo-mosquitto -- \
+  mosquitto_sub -h localhost -p 1883 -t '$SYS/#' -C 1
 ```
-
-## Recommended Follow-up
-
-Document your cluster prerequisites (Ingress, cert-manager, ServiceMonitor CRDs) for a complete production runbook.

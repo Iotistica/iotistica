@@ -40,7 +40,7 @@ export default function Home(): ReactNode {
           <div className={clsx('col col--4')}>
             <h3>Getting Started</h3>
             <p>Install the agent and connect your first edge device.</p>
-            <Link to="/docs/getting-started/quickstart">Quickstart guide</Link>
+            <Link to="/docs/agent/quickstart">Quickstart guide</Link>
           </div>
           <div className={clsx('col col--4')}>
             <h3>Agent</h3>

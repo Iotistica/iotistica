@@ -1,0 +1,285 @@
+---
+sidebar_position: 2
+---
+
+# REST Endpoints
+
+All endpoints are versioned under `/api/v1`. The base URL for a self-hosted deployment is `https://your-api-host:3002`.
+
+## Authentication
+
+Every request must include one of:
+
+| Method | Header | Used by |
+|--------|--------|---------|
+| Bearer JWT | `Authorization: Bearer <token>` | Dashboard users, operator scripts |
+| Device API key | `X-Device-API-Key: <key>` | Edge agents |
+
+See [Authentication](./authentication.mdx) for token acquisition.
+
+---
+
+## Health & Metrics
+
+```
+GET  /                  Service info and version
+GET  /health            Kubernetes liveness probe (200 = healthy)
+GET  /metrics           Prometheus metrics (scrape endpoint)
+```
+
+---
+
+## Auth & Users
+
+```
+POST   /api/v1/auth/register             Register a new user account
+POST   /api/v1/auth/login                Login — returns JWT access + refresh tokens
+POST   /api/v1/auth/refresh              Exchange a refresh token for a new access token
+POST   /api/v1/auth/logout               Invalidate the current session
+POST   /api/v1/auth/password/reset       Trigger a password reset email
+
+GET    /api/v1/users                     List users (admin only)
+PUT    /api/v1/users/:id                 Update user (admin only)
+DELETE /api/v1/users/:id                 Delete user (admin only)
+
+POST   /api/v1/auth/api-keys             Generate a long-lived API key
+```
+
+---
+
+## License & Billing
+
+```
+GET  /api/v1/license                     License details, feature flags, device limit, usage
+GET  /api/v1/billing/usage               Usage metrics for the current billing period
+```
+
+---
+
+## Agents (Devices)
+
+### List & Details
+
+```
+GET   /api/v1/agents                     List all registered agents
+GET   /api/v1/agents/:uuid               Agent details (version, state, fleet, tags)
+GET   /api/v1/agents/:uuid/metrics       System metrics — CPU, memory, temperature
+GET   /api/v1/agents/:uuid/logs          Paginated agent logs
+```
+
+### Target State
+
+The target state defines what Docker applications should be running on a device. The agent polls for changes and reconciles to reach the desired state.
+
+```
+GET    /api/v1/agents/:uuid/target-state         Get current target state
+POST   /api/v1/agents/:uuid/target-state         Create initial target state
+PUT    /api/v1/agents/:uuid/target-state         Replace target state
+DELETE /api/v1/agents/:uuid/target-state         Clear target state (agent goes idle)
+GET    /api/v1/agents/:uuid/current-state        Reported state from agent
+```
+
+### Device-Side Endpoints
+
+These are called by the edge agent itself, not by operators.
+
+:::info MQTT is the primary write path
+Agents publish telemetry and state over **MQTT** (topics `i/{tenant}/a/{agent}/endpoints/+`, `/state`, `/metrics`). The Mosquitto broker delivers messages to the Cloud API subscriber in real time. HTTP endpoints below cover control polling and log upload.
+:::
+
+```
+GET    /api/v1/device/:uuid/state        Agent polls for target state (ETag-cached)
+POST   /api/v1/device/:uuid/logs         Agent uploads compressed log batches (NDJSON)
+```
+
+---
+
+## Sensors & Endpoints
+
+Sensors are the industrial device connections configured on an agent (Modbus registers, OPC-UA nodes, MQTT topics, etc.).
+
+```
+GET    /api/v1/agents/:uuid/devices                          List sensors
+POST   /api/v1/agents/:uuid/devices                          Add sensor config
+PUT    /api/v1/agents/:uuid/devices/:name                    Update sensor config
+DELETE /api/v1/agents/:uuid/devices/:name                    Delete sensor config
+GET    /api/v1/agents/:uuid/device-health                    Sensor status overview
+GET    /api/v1/agents/:uuid/protocol-adapters/:protocol/:deviceName/history
+                                                             Protocol adapter read history
+```
+
+---
+
+## Telemetry (Readings)
+
+```
+GET  /api/v1/readings/:agent_uuid/latest       Latest reading per metric
+GET  /api/v1/readings/:agent_uuid/timeseries   Time-series data
+GET  /api/v1/readings/:agent_uuid/aggregate    Aggregated stats (hourly/daily)
+POST /api/v1/readings/query                    Custom query (PromQL-like DSL)
+POST /api/v1/readings                          Manual insert (testing)
+```
+
+### Query Parameters — `/timeseries`
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `start` | ISO 8601 | Start of time range |
+| `end` | ISO 8601 | End of time range (default: now) |
+| `metric` | string | Filter to one metric name |
+| `interval` | string | Bucket size: `1m`, `1h`, `1d` |
+
+### Query Parameters — `/aggregate`
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `start` | ISO 8601 | Start of time range |
+| `end` | ISO 8601 | End of time range |
+| `metric` | string | Filter to one metric name |
+| `granularity` | `hourly` \| `daily` | Aggregation level |
+
+---
+
+## Anomaly Detection
+
+```
+GET    /api/v1/anomaly/rules              List anomaly detection rules
+POST   /api/v1/anomaly/rules              Create rule (threshold, z-score, rate-of-change)
+PUT    /api/v1/anomaly/rules/:id          Update rule
+DELETE /api/v1/anomaly/rules/:id          Delete rule
+
+GET    /api/v1/anomaly/incidents          List detected anomaly incidents
+GET    /api/v1/anomaly/incidents/:id      Incident detail (sensor, score, duration)
+
+GET    /api/v1/anomaly/alerts             List alert rules
+POST   /api/v1/anomaly/alerts             Create alert (condition, notification target)
+PUT    /api/v1/anomaly/alerts/:id         Update alert
+```
+
+---
+
+## Provisioning
+
+```
+POST  /api/v1/provision/keys             Generate a device provisioning key
+GET   /api/v1/provision/keys             List active provisioning keys
+POST  /api/v1/provision/agent            Agent self-registration using a provisioning key
+```
+
+### Provisioning Flow
+
+1. Operator calls `POST /api/v1/provision/keys` → receives a one-time key.
+2. Key is passed to the edge device (via environment variable or install script).
+3. Agent calls `POST /api/v1/provision/agent` with the key → receives device credentials.
+4. Subsequent requests use the device API key in `X-Device-API-Key`.
+
+---
+
+## Jobs
+
+Scheduled or ad-hoc tasks dispatched to an agent (firmware update, config push, shell command).
+
+```
+GET   /api/v1/agents/:uuid/jobs               List job executions
+POST  /api/v1/agents/:uuid/jobs               Submit a job
+GET   /api/v1/agents/:uuid/jobs/:jobId        Job status and result
+POST  /api/v1/agents/:uuid/jobs/:jobId/cancel Cancel a pending job
+```
+
+---
+
+## Fleets
+
+Fleets are named groups of agents used for billing, tagging, and bulk operations.
+
+```
+GET    /api/v1/fleets                    List all fleets
+POST   /api/v1/fleets                    Create a fleet
+GET    /api/v1/fleets/:fleetId           Fleet details and member list
+PUT    /api/v1/fleets/:fleetId           Update fleet metadata
+DELETE /api/v1/fleets/:fleetId           Delete fleet
+POST   /api/v1/fleets/:fleetId/agents    Add an agent to a fleet
+```
+
+---
+
+## Dashboards
+
+Custom dashboard layout persistence.
+
+```
+GET    /api/v1/dashboard-layouts         List saved layouts
+POST   /api/v1/dashboard-layouts         Save a layout
+PUT    /api/v1/dashboard-layouts/:id     Update layout
+DELETE /api/v1/dashboard-layouts/:id     Delete layout
+```
+
+---
+
+## MQTT Broker Management
+
+The API manages users and ACLs for the Mosquitto broker sidecar.
+
+```
+POST    /mosquitto-auth/user                  Create MQTT user
+PUT     /mosquitto-auth/user/:username        Update MQTT user (password, roles)
+DELETE  /mosquitto-auth/user/:username        Delete MQTT user
+GET     /mosquitto-auth/acl                   List ACL rules
+```
+
+---
+
+## AI
+
+```
+POST  /api/v1/ai/chat                        Chat with AI assistant (Ollama or OpenAI backend)
+POST  /api/v1/dashboard/ai/suggestions       Get AI-generated dashboard widget suggestions
+```
+
+---
+
+## Grafana Integration
+
+```
+GET   /api/v1/grafana/dashboards              List Grafana dashboards
+GET   /api/v1/grafana/alert-rules             List Grafana alert rules
+POST  /api/v1/grafana/update-alert-threshold  Update an alert threshold
+```
+
+---
+
+## Admin
+
+```
+GET   /api/v1/admin/health           Admin-level health check (includes DB/Redis status)
+GET   /api/v1/admin/system-config    System configuration values
+PUT   /api/v1/admin/system-config    Update system configuration
+```
+
+---
+
+## Telemetry Profiles & Metrics Catalog
+
+```
+GET  /api/v1/profiles    Named metric profiles (pre-configured sensor mappings)
+GET  /api/v1/metrics     Catalog of all known metric names across all agents
+```
+
+---
+
+## Audit
+
+```
+GET  /api/v1/audit/events    Paginated audit log — API calls, state changes, provisioning
+```
+
+---
+
+## Rate Limits
+
+| Scope | Limit |
+|-------|-------|
+| Global | 1 000 req / min |
+| Auth endpoints | 10 req / min (brute-force protection) |
+| Device telemetry | 10 000 req / min |
+| Admin | 100 req / min |

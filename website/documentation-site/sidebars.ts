@@ -17,23 +17,30 @@ const sidebars: SidebarsConfig = {
     'intro',
     {
       type: 'category',
-      label: 'Getting Started',
-      items: ['getting-started/quickstart'],
-    },
-    {
-      type: 'category',
       label: 'Agent',
-      items: ['agent/overview', 'agent/architecture'],
+      items: [
+        'agent/overview',
+        'agent/quickstart',
+        'agent/dashboard',
+        'agent/endpoints',
+        'agent/destinations',
+        'agent/subscriptions',
+        'agent/discovery',
+        'agent/alerts',
+        'agent/settings',
+        'agent/cli',
+      ],
     },
     {
       type: 'category',
-      label: 'API',
-      items: ['api/overview'],
-    },
-    {
-      type: 'category',
-      label: 'Deployment',
-      items: ['deployment/kubernetes'],
+      label: 'Iotistica API',
+      items: [
+        'api/overview',
+        'api/authentication',
+        'api/endpoints',
+        'api/ingestion',
+        'deployment/kubernetes',
+      ],
     },
   ],
 };
