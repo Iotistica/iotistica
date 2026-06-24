@@ -17,7 +17,7 @@ on:
 jobs:
   build_and_deploy_job:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action != 'closed')
-    runs-on: [ubuntu-24.04]
+    runs-on: ubuntu-24.04
     name: Build and Deploy Job
     steps:
       - uses: actions/checkout@v4
@@ -25,28 +25,23 @@ jobs:
           submodules: true
           lfs: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install SWA CLI
-        run: npm install -g @azure/static-web-apps-cli
-
       - name: Deploy to Azure Static Web Apps
-        env:
-          SWA_CLI_DEPLOYMENT_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GENTLE_BAY_03A508210 }}
-        run: swa deploy ./website --deployment-token "$SWA_CLI_DEPLOYMENT_TOKEN" --env production
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GENTLE_BAY_03A508210 }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: website
+          output_location: ''
+          skip_app_build: true
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
-    runs-on: [ubuntu-24.04]
+    runs-on: ubuntu-24.04
     name: Close Pull Request Job
     steps:
       - name: Close Pull Request
-        id: closepullrequest
-        env:
-          SWA_CLI_DEPLOYMENT_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GENTLE_BAY_03A508210 }}
-        run: |
-          npm install -g @azure/static-web-apps-cli
-          swa deploy --deployment-token "$SWA_CLI_DEPLOYMENT_TOKEN" --env close
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_GENTLE_BAY_03A508210 }}
+          action: close
