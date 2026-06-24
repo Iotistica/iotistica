@@ -89,9 +89,10 @@ const config: Config = {
         {to: '/docs/agent/overview', label: 'Agent', position: 'left'},
         {to: '/docs/deployment/kubernetes', label: 'Deployment', position: 'left'},
         {
-          href: 'https://iotistica.com',
-          label: 'Main Website',
+          href: 'https://iotistica.com/#contact',
+          label: 'Contact Us',
           position: 'right',
+          className: 'navbar-contact-btn',
         },
         {
           href: 'https://github.com/iotistica/iotistica',

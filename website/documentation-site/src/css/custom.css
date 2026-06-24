@@ -106,6 +106,31 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
+.navbar-contact-btn {
+  background-color: #2563eb;
+  color: #ffffff !important;
+  border-radius: 6px;
+  padding: 0.4rem 1rem !important;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: background-color 0.2s ease;
+  margin-right: 0.5rem;
+}
+
+.navbar-contact-btn:hover {
+  background-color: #1d4ed8 !important;
+  color: #ffffff !important;
+}
+
+[data-theme='dark'] .navbar-contact-btn {
+  background-color: #2563eb;
+  color: #ffffff !important;
+}
+
+[data-theme='dark'] .navbar-contact-btn:hover {
+  background-color: #1d4ed8 !important;
+}
+
 .header-github-link::before {
   content: '';
   display: flex;
