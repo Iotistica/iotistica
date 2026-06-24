@@ -56,7 +56,7 @@ const config: Config = {
           showLastUpdateTime: true,
           showLastUpdateAuthor: false,
           editUrl:
-            'https://github.com/iotistica/iotistica/tree/main/website/documentation-site/',
+            'https://github.com/Iotistica/iotistic/tree/master/website/documentation-site/',
         },
         theme: {
           customCss: './src/css/custom.css',
