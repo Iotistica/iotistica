@@ -53,10 +53,7 @@ body {
 .nav-brand .logo {
     font-size: 1.5rem;
     font-weight: 700;
-    background: var(--accent-gradient);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: #ffffff;
     display: inline-flex;
     align-items: center;
     gap: 9px;
