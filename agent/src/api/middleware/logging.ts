@@ -14,7 +14,8 @@ function isHealthCheckPath(path: string): boolean {
 		|| path === '/healthz'
 		|| path === '/v1/healthy'
 		|| path === '/v1/readiness'
-		|| path === '/v1/health/report';
+		|| path === '/v1/health/report'
+		|| path.startsWith('/.well-known/');
 }
 
 function isSilentDebugPath(_path: string): boolean {

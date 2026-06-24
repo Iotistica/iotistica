@@ -353,6 +353,8 @@ export interface AnomalyConfig {
 		minConfidence: number;
 		cooldownMs: number;
 		maxQueueSize: number;
+		alertDestinationId?: number;  // MQTT destination ID from the destinations page
+		alertTopic?: string;          // Topic to publish to (default: iotistica/alerts/anomaly)
 	};
 	storage?: {
 		retention: number;       // Days to retain anomaly history

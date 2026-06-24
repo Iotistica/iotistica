@@ -23,6 +23,7 @@ const destMap = computed<Record<number, Destination>>(() =>
 
 const columns: TableColumnType<Subscription>[] = [
   { title: 'Destination', key: 'destination', width: 180 },
+  { title: 'Type', key: 'dest_type', width: 120 },
   { title: 'Topic', key: 'topic' },
   { title: 'Source Filter', dataIndex: 'topics', key: 'topics', width: 160 },
   { title: 'Format', dataIndex: 'payload_format', key: 'payload_format', width: 100 },
@@ -119,11 +120,18 @@ onMounted(load)
         <template v-if="column.key === 'destination'">
           <span v-if="destMap[record.publish_destination_id]">
             {{ destMap[record.publish_destination_id].name }}
-            <a-tag size="small" :color="destinationColor(destMap[record.publish_destination_id].type)" style="margin-left: 4px">
-              {{ destMap[record.publish_destination_id].type }}
-            </a-tag>
           </span>
           <span v-else style="color: #999">ID {{ record.publish_destination_id }}</span>
+        </template>
+
+        <template v-else-if="column.key === 'dest_type'">
+          <a-tag v-if="destMap[record.publish_destination_id]"
+            :color="destinationColor(destMap[record.publish_destination_id].type)"
+            style="margin: 0"
+          >
+            {{ destMap[record.publish_destination_id].type }}
+          </a-tag>
+          <span v-else style="color: #999">—</span>
         </template>
 
         <template v-else-if="column.key === 'topic'">

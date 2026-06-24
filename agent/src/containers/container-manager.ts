@@ -1162,6 +1162,11 @@ export class ContainerManager extends EventEmitter {
 	/**
 	* Get the Docker instance (for logging and advanced operations)
 	*/
+	public setDockerOptions(options: Docker.DockerOptions): void {
+		this.dockerManager = new DockerManager(options, this.logger);
+		this.healthCheckManager = new HealthCheckManager(this.dockerManager.getDockerInstance());
+	}
+
 	public getDocker(): Docker | undefined {
 		if (this.useRealDocker && this.dockerManager) {
 			return this.dockerManager.getDockerInstance();

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, PlayCircleOutlined, HistoryOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, PlayCircleOutlined, HistoryOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import DiscoveryRuleDrawer from '@/components/discovery/DiscoveryRuleDrawer.vue'
@@ -80,7 +80,7 @@ const columns: TableColumnType<DiscoveryRule>[] = [
   { title: 'Status', key: 'status', width: 95 },
   { title: 'Last run', key: 'last_run_at', width: 140, ellipsis: true },
   { title: 'Last result', key: 'last_result_json', width: 130, ellipsis: true },
-  { title: 'On', key: 'enabled', width: 60 },
+  { title: 'Enabled', key: 'enabled', width: 90 },
   { title: 'Actions', key: 'actions', width: 160, fixed: 'right' },
 ]
 
@@ -231,7 +231,9 @@ onMounted(load)
                   <template #icon><HistoryOutlined /></template>
                 </a-button>
                 <a-button size="small" @click="openEdit(record)">Edit</a-button>
-                <a-button size="small" danger @click="confirmDelete(record)">Del</a-button>
+                <a-button size="small" danger @click="confirmDelete(record)">
+                  <template #icon><DeleteOutlined /></template>
+                </a-button>
               </a-space>
             </template>
           </template>

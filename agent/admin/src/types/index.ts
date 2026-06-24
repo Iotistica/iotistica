@@ -56,6 +56,7 @@ export interface Endpoint {
   connection: Record<string, unknown>
   data_points?: unknown[]
   metadata?: Record<string, unknown>
+  fingerprint?: string
   created_at?: string
   updated_at?: string
   // enriched health fields from AdapterManager (may be absent)
@@ -174,6 +175,8 @@ export interface AnomalyConfig {
     minConfidence: number
     cooldownMs: number
     maxQueueSize: number
+    alertDestinationId?: number
+    alertTopic?: string
   }
   storage?: {
     retention: number

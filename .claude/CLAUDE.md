@@ -77,17 +77,17 @@ POST /containers/actions
 GET  /logs
 ```
 
-### Feature flags (env vars)
+### Key env vars
 ```
-ENABLE_ANOMALY_DETECTION=true
-ENABLE_SHADOW=true
-ENABLE_JOB_ENGINE=true
-ENABLE_SENSOR_PUBLISH=true
-ENABLE_PROTOCOL_ADAPTERS=true
-ENABLE_CLOUD_LOGGING=true
-CLOUD_API_ENDPOINT=<url>
-MQTT_BROKER=<url>
-PROVISIONING_API_KEY=<key>
+STANDALONE=true           # disable cloud sync, run fully offline
+IOTISTICA_API=<url>       # Iotistica Cloud API base URL
+MQTT_BROKER_URL=<url>     # cloud MQTT broker URL
+PROVISIONING_KEY=<key>    # one-time provisioning token
+DEVICE_API_PORT=48484     # local HTTP API port (default 48484)
+ANOMALY_DETECTION_ENABLED=true
+DATA_DIR=<path>           # writable data directory
+LOG_DIR=<path>
+LOG_LEVEL=info
 ```
 
 ### Industrial protocols supported

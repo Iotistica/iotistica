@@ -12,12 +12,14 @@ import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { methodColor } from '@/utils/protocol'
 import { anomalyApi } from '@/api/anomaly'
+import { destinationsApi } from '@/api/destinations'
 import type {
   AnomalyAlert,
   AnomalyConfig,
   AnomalyMetricConfig,
   AnomalyStats,
   DetectionMethod,
+  Destination,
 } from '@/types'
 
 // ── Shared ────────────────────────────────────────────────────────────────────
@@ -143,6 +145,7 @@ async function loadStats() {
 const config = ref<AnomalyConfig | null>(null)
 const configLoading = ref(false)
 const configSaving = ref(false)
+const mqttDestinations = ref<Destination[]>([])
 
 const metricDrawerOpen = ref(false)
 const editingMetricIdx = ref<number | null>(null)
@@ -252,7 +255,12 @@ const metricColumns: TableColumnType<AnomalyMetricConfig>[] = [
 async function loadConfig() {
   configLoading.value = true
   try {
-    config.value = await anomalyApi.getConfig()
+    const [cfg, dests] = await Promise.all([
+      anomalyApi.getConfig(),
+      destinationsApi.getAll(),
+    ])
+    config.value = cfg
+    mqttDestinations.value = dests.filter((d) => d.type === 'mqtt')
   } catch {
     // non-fatal
   } finally {
@@ -557,7 +565,9 @@ onUnmounted(() => {
                 <template v-else-if="column.key === 'actions'">
                   <a-space>
                     <a-button size="small" @click="openEditMetric(record, index)">Edit</a-button>
-                    <a-button size="small" danger @click="removeMetric(index)">Del</a-button>
+                    <a-button size="small" danger @click="removeMetric(index)">
+                      <template #icon><DeleteOutlined /></template>
+                    </a-button>
                   </a-space>
                 </template>
               </template>
@@ -613,44 +623,79 @@ onUnmounted(() => {
 
             <!-- Alert routing -->
             <a-card title="Alert routing" size="small" style="margin-bottom: 16px">
-              <a-row :gutter="24">
-                <a-col :span="4">
+              <a-row :gutter="16" align="bottom">
+                <a-col :flex="'80px'">
                   <a-form-item label="MQTT alerts">
                     <a-switch v-model:checked="config.alerts.mqtt" />
                   </a-form-item>
                 </a-col>
-                <a-col :span="4">
+                <a-col :flex="'90px'">
                   <a-form-item label="Cloud alerts">
                     <a-switch v-model:checked="config.alerts.cloud" />
                   </a-form-item>
                 </a-col>
-                <a-col :span="6">
+                <a-col :flex="'none'">
                   <a-form-item label="Min confidence">
                     <a-input-number
                       v-model:value="config.alerts.minConfidence"
                       :min="0"
                       :max="1"
                       :step="0.05"
-                      style="width: 100%"
+                      style="width: 110px"
                     />
                   </a-form-item>
                 </a-col>
-                <a-col :span="6">
+                <a-col :flex="'none'">
                   <a-form-item label="Cooldown (ms)">
                     <a-input-number
                       v-model:value="config.alerts.cooldownMs"
                       :min="0"
                       :step="60000"
-                      style="width: 100%"
+                      style="width: 140px"
                     />
                   </a-form-item>
                 </a-col>
-                <a-col :span="4">
+                <a-col :flex="'none'">
                   <a-form-item label="Max queue size">
                     <a-input-number
                       v-model:value="config.alerts.maxQueueSize"
                       :min="1"
+                      style="width: 110px"
+                    />
+                  </a-form-item>
+                </a-col>
+              </a-row>
+
+              <!-- MQTT destination (standalone / local broker) -->
+              <a-divider style="margin: 4px 0 16px" />
+              <a-row :gutter="16">
+                <a-col :flex="'280px'">
+                  <a-form-item
+                    label="MQTT destination"
+                    extra="Local broker from the Destinations page (standalone mode)."
+                  >
+                    <a-select
+                      :value="config.alerts.alertDestinationId ?? null"
+                      allow-clear
+                      placeholder="None (use cloud MQTT)"
                       style="width: 100%"
+                      @change="(v: number | null) => { config!.alerts.alertDestinationId = v ?? undefined }"
+                    >
+                      <a-select-option v-for="d in mqttDestinations" :key="d.id" :value="d.id">
+                        {{ d.name }}
+                      </a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </a-col>
+                <a-col :flex="'280px'">
+                  <a-form-item
+                    label="Alert topic"
+                    extra="Topic to publish to when a destination is selected."
+                  >
+                    <a-input
+                      :value="config.alerts.alertTopic ?? ''"
+                      placeholder="iotistica/alerts/anomaly"
+                      @change="(e: Event) => { config!.alerts.alertTopic = (e.target as HTMLInputElement).value || undefined }"
                     />
                   </a-form-item>
                 </a-col>

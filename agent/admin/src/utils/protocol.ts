@@ -40,6 +40,7 @@ export const DESTINATION_COLORS: Record<string, string> = {
   azure: 'blue',
   aws: 'orange',
   gcp: 'cyan',
+  influxdb: '#22ADF6',
 }
 
 export function destinationColor(type: string): string {

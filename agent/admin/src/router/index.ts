@@ -32,9 +32,19 @@ const router = createRouter({
       meta: { title: 'Discovery' },
     },
     {
+      path: '/applications',
+      component: () => import('@/views/ContainersView.vue'),
+      meta: { title: 'Applications' },
+    },
+    {
       path: '/anomaly',
       component: () => import('@/views/AnomalyView.vue'),
       meta: { title: 'Anomaly Detection' },
+    },
+    {
+      path: '/logs',
+      component: () => import('@/views/LogsView.vue'),
+      meta: { title: 'Logs' },
     },
     {
       path: '/settings',

@@ -8,10 +8,13 @@ import {
   ApartmentOutlined,
   RadarChartOutlined,
   AlertOutlined,
+  FileTextOutlined,
+  ContainerOutlined,
   SettingOutlined,
   TeamOutlined,
   SafetyOutlined,
 } from '@ant-design/icons-vue'
+import IotisticaLogo from '@/components/IotisticaLogo.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,7 +37,8 @@ function onMenuClick({ key }: { key: string }) {
     style="min-height: 100vh"
   >
     <div class="logo">
-      <span>Agent Admin</span>
+      <IotisticaLogo :size="24" />
+      <span>Iotistica</span>
     </div>
     <a-menu
       theme="dark"
@@ -68,9 +72,19 @@ function onMenuClick({ key }: { key: string }) {
         Discovery
       </a-menu-item>
 
+      <a-menu-item key="/applications">
+        <template #icon><ContainerOutlined /></template>
+        Applications
+      </a-menu-item>
+
       <a-menu-item key="/anomaly">
         <template #icon><AlertOutlined /></template>
         Alerts
+      </a-menu-item>
+
+      <a-menu-item key="/logs">
+        <template #icon><FileTextOutlined /></template>
+        Logs
       </a-menu-item>
 
       <a-menu-item key="/settings">
@@ -97,6 +111,7 @@ function onMenuClick({ key }: { key: string }) {
   height: 48px;
   display: flex;
   align-items: center;
+  gap: 10px;
   padding: 0 24px;
   color: rgba(255, 255, 255, 0.85);
   font-size: 16px;

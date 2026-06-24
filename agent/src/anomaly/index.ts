@@ -11,6 +11,8 @@ import { LogComponents } from '../logging/types';
 import type { CloudMqttClient } from '../mqtt/manager';
 import { createJsonPayload } from '../mqtt/manager';
 import { agentTopic } from '../mqtt/topics.js';
+import { ExternalMqttClient, createExternalMqttClientFromDestination } from '../publish/plugins/mqtt.js';
+import { PublishDestinationsModel } from '../db/models/publish-destinations.model.js';
 import type {
 	DataPoint,
 	AnomalyConfig,
@@ -80,6 +82,8 @@ export class AnomalyDetectionService {
 	private alertManager: AlertManager;
 	private logger?: AgentLogger;
 	private mqttManager?: CloudMqttClient;
+	private alertMqttClient?: ExternalMqttClient;
+	private alertDestinationId?: number;
 	private deviceUuid?: string;
 	private deviceName?: string;     // Monitored device name (e.g., 'COMAP-Main-Controller')
 	private deviceType?: Protocol; // Default protocol (overridden by dataPoint.protocol per metric)
@@ -174,9 +178,18 @@ export class AnomalyDetectionService {
 			this.startPeriodicBaselineSave();
 		}
 		
+		// Connect alert MQTT destination if configured
+		if (config.alerts.alertDestinationId) {
+			this.initAlertMqttClient(config.alerts.alertDestinationId).catch((err: unknown) => {
+				this.logger?.errorSync('Failed to init alert MQTT client', err as Error, {
+					component: LogComponents.anomaly,
+				});
+			});
+		}
+
 		// Buffers are created lazily when data is first received (more efficient)
 		// This ensures metricsTracked reflects only actively monitored metrics
-		
+
 		this.logger?.debugSync('Anomaly detection service initialized', {
 			component: LogComponents.anomaly,
 			metricsConfigured: config.metrics.filter(m => m.enabled).length,
@@ -618,42 +631,49 @@ export class AnomalyDetectionService {
 			suppressed: event.suppressed,
 		});
 		
-		// Publish to MQTT (iot/{tenantId}/agent/{uuid}/events/anomaly)
-		const mqttConnected = this.mqttManager?.isConnected();
-		const hasDeviceUuid = !!this.deviceUuid;
-		
-		if (!mqttConnected || !hasDeviceUuid || !this.mqttManager || !this.deviceUuid) {
-			this.logger?.infoSync('Cannot publish anomaly event to MQTT', {
-				component: LogComponents.anomaly,
-				metric: event.metric,
-				mqttConnected,
-				hasDeviceUuid,
-				hasMqttManager: !!this.mqttManager,
-				deviceUuid: this.deviceUuid,
-			});
-			return;
+		// Publish to MQTT destination (alerts.mqtt toggle + alertDestinationId)
+		if (this.config.alerts.mqtt && this.alertMqttClient?.isConnected()) {
+			const alertTopic = this.config.alerts.alertTopic || 'iotistica/alerts/anomaly';
+			const alertPayload = Buffer.from(JSON.stringify(event));
+			this.alertMqttClient.publish(alertTopic, alertPayload, { qos: 1, destinationTopic: alertTopic })
+				.then(() => {
+					this.logger?.infoSync('Published anomaly event to MQTT destination', {
+						component: LogComponents.anomaly,
+						metric: event.metric,
+						topic: alertTopic,
+						destinationId: this.alertDestinationId,
+					});
+				})
+				.catch((error: unknown) => {
+					this.logger?.errorSync('Failed to publish anomaly event to MQTT destination', error as Error, {
+						component: LogComponents.anomaly,
+						metric: event.metric,
+						topic: alertTopic,
+					});
+				});
 		}
-		
-		// TypeScript now knows this.deviceUuid is definitely a string
-		const topic = agentTopic(this.deviceUuid, 'events', 'anomaly');
-		const msgIdGen = this.mqttManager.getMessageIdGenerator();
-		const payload = createJsonPayload(event, msgIdGen);
-		
-		this.mqttManager.publish(topic, payload, { qos: 1, retain: false })
-			.then(() => {
-				this.logger?.infoSync('Published anomaly event to MQTT', {
-					component: LogComponents.anomaly,
-					metric: event.metric,
-					topic,
+
+		// Publish to cloud MQTT (alerts.cloud toggle)
+		if (this.config.alerts.cloud && this.mqttManager?.isConnected() && this.deviceUuid) {
+			const topic = agentTopic(this.deviceUuid, 'events', 'anomaly');
+			const msgIdGen = this.mqttManager.getMessageIdGenerator();
+			const payload = createJsonPayload(event, msgIdGen);
+			this.mqttManager.publish(topic, payload, { qos: 1, retain: false })
+				.then(() => {
+					this.logger?.infoSync('Published anomaly event to cloud MQTT', {
+						component: LogComponents.anomaly,
+						metric: event.metric,
+						topic,
+					});
+				})
+				.catch((error: unknown) => {
+					this.logger?.errorSync('Failed to publish anomaly event to cloud MQTT', error as Error, {
+						component: LogComponents.anomaly,
+						metric: event.metric,
+						topic,
+					});
 				});
-			})
-			.catch(error => {
-				this.logger?.errorSync('Failed to publish anomaly event to MQTT', error as Error, {
-					component: LogComponents.anomaly,
-					metric: event.metric,
-					topic,
-				});
-			});
+		}
 	}
 	
 	/**
@@ -1132,6 +1152,49 @@ export class AnomalyDetectionService {
 	}
 	
 	/**
+	 * Initialize (or reinitialize) the alert MQTT client from a destination record.
+	 */
+	private async initAlertMqttClient(destinationId: number): Promise<void> {
+		if (this.alertMqttClient) {
+			await this.alertMqttClient.disconnect().catch(() => undefined);
+			this.alertMqttClient = undefined;
+		}
+
+		const record = PublishDestinationsModel.getById(destinationId);
+		if (!record || record.type !== 'mqtt') {
+			this.logger?.warnSync('Alert destination not found or not MQTT type', {
+				component: LogComponents.anomaly,
+				destinationId,
+			});
+			return;
+		}
+
+		const client = createExternalMqttClientFromDestination(
+			record.config_json,
+			this.deviceUuid,
+			'anomaly-alerts',
+			this.logger,
+		);
+		if (!client) {
+			this.logger?.warnSync('Failed to create alert MQTT client — invalid destination config', {
+				component: LogComponents.anomaly,
+				destinationId,
+			});
+			return;
+		}
+
+		this.alertMqttClient = client;
+		this.alertDestinationId = destinationId;
+
+		await client.connect();
+		this.logger?.infoSync('Alert MQTT client connected', {
+			component: LogComponents.anomaly,
+			destinationId,
+			destination: record.name,
+		});
+	}
+
+	/**
 	* Stop and cleanup anomaly detection service
 	*/
 	stop(): void {
@@ -1153,7 +1216,13 @@ export class AnomalyDetectionService {
 			this.storage.stop();
 			this.storage = undefined;
 		}
-		
+
+		// Disconnect alert MQTT client if active
+		if (this.alertMqttClient) {
+			this.alertMqttClient.disconnect().catch(() => undefined);
+			this.alertMqttClient = undefined;
+		}
+
 		this.logger?.infoSync('Anomaly detection service stopped and cleaned up', {
 			component: LogComponents.anomaly,
 		});
@@ -1164,6 +1233,22 @@ export class AnomalyDetectionService {
 	*/
 	updateConfig(config: Partial<AnomalyConfig>): void {
 		this.config = { ...this.config, ...config };
+
+		// Reconnect alert MQTT client if the destination changed
+		const newDestId = config.alerts?.alertDestinationId;
+		if (newDestId !== undefined && newDestId !== this.alertDestinationId) {
+			if (newDestId) {
+				this.initAlertMqttClient(newDestId).catch((err: unknown) => {
+					this.logger?.errorSync('Failed to reinit alert MQTT client', err as Error, {
+						component: LogComponents.anomaly,
+					});
+				});
+			} else {
+				this.alertMqttClient?.disconnect().catch(() => undefined);
+				this.alertMqttClient = undefined;
+				this.alertDestinationId = undefined;
+			}
+		}
 
 		// Sync runtime detection flag so the UI "Enabled" toggle takes effect immediately.
 		// Without this, processDataPoint() always checks this.enabled (not this.config.enabled)

@@ -87,6 +87,9 @@ export class DeviceAPI {
 		// Ping endpoint
 		this.api.get('/ping', (_req, res) => res.send('OK'));
 
+		// Silence browser/tooling probes (Chrome DevTools, etc.)
+		this.api.get('/.well-known/*', (_req, res) => res.json({}));
+
 		// Authentication middleware:
 		// - Explicitly enabled with ENABLE_AUTH=true
 		// - Implicitly required when API_SECURITY_MODE=API_KEY

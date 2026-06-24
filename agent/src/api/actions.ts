@@ -9,6 +9,7 @@ import type ContainerManager from '../containers/container-manager';
 import type { AgentManager } from '../core/index.js';
 import type { CloudSync } from '../sync';
 import type { AgentLogger } from '../logging/agent-logger';
+import type { LocalLogBackend } from '../logging/local-backend';
 import type { AnomalyDetectionService } from '../anomaly';
 import type { SimulationOrchestrator } from '../anomaly/simulator';
 import type { AdapterManager } from '../plugins';
@@ -52,6 +53,7 @@ let agentUpdater: AgentUpdater | undefined;
 let tailscaleManager: TailscaleManager | null = null;
 let devicePublish: DevicePublish | undefined;
 let discoveryRulesScheduler: DiscoveryRulesScheduler | undefined;
+let localLogBackend: LocalLogBackend | undefined;
 
 export function setDevicePublish(dp: DevicePublish | undefined): void {
 	devicePublish = dp;
@@ -473,6 +475,14 @@ export function setUpdater(updater: AgentUpdater | undefined): void {
 	agentUpdater = updater;
 }
 
+export function setLocalLogBackend(backend: LocalLogBackend | undefined): void {
+	localLogBackend = backend;
+}
+
+export function getLocalLogBackend(): LocalLogBackend | undefined {
+	return localLogBackend;
+}
+
 export async function triggerUpdate(targetVersion: string, force = false): Promise<void> {
 	if (!agentUpdater) {
 		throw new Error('Agent updater not available');
@@ -670,6 +680,281 @@ export const purgeApp = async (appId: number, _force: boolean = false) => {
 		component: LogComponents.agent,
 		appId
 	});
+};
+
+/**
+ * Resolve the containerId for a named service — used by the log streaming route
+ */
+export const getServiceContainerId = async (appId: number, serviceName: string): Promise<string | undefined> => {
+	const currentState = await containerManager.getCurrentState();
+	const app = (currentState.apps as any)[appId];
+	const svc = (app?.services as any[] | undefined)?.find((s: any) => s.serviceName === serviceName);
+	return svc?.containerId;
+};
+
+/**
+ * Expose the Docker instance for streaming operations in routes
+ */
+export const getDockerInstance = () => containerManager.getDocker();
+
+/**
+ * List all apps merged from current + target state
+ * Used by: GET /v1/apps
+ */
+export const getAllApps = async () => {
+	const currentState = await containerManager.getCurrentState();
+	const targetState = containerManager.getTargetState();
+
+	const allIds = new Set([
+		...Object.keys(currentState.apps).map(String),
+		...Object.keys(targetState.apps ?? {}).map(String),
+	]);
+
+	const apps = [];
+	for (const id of allIds) {
+		const target = (targetState.apps ?? {} as Record<string, any>)[id as any];
+		const current = (currentState.apps ?? {} as Record<string, any>)[id as any];
+		const base = target ?? current;
+		if (!base) continue;
+
+		const services = (base.services as any[]).map((targetSvc: any) => {
+			const cur = (current?.services as any[] | undefined)?.find(
+				(s: any) => s.serviceName === targetSvc.serviceName,
+			);
+			return {
+				...targetSvc,
+				containerId: cur?.containerId ?? targetSvc.containerId,
+				state: cur?.state ?? targetSvc.state,
+				status: cur?.status ?? targetSvc.status,
+				serviceStatus: cur?.serviceStatus ?? targetSvc.serviceStatus,
+				error: cur?.error ?? targetSvc.error,
+			};
+		});
+
+		apps.push({ appId: base.appId, appName: base.appName, services });
+	}
+
+	return apps;
+};
+
+/**
+ * Deploy a new app (or update existing) by adding it to target state
+ * Used by: POST /v1/apps
+ */
+export const deployApp = async (body: {
+	appName: string;
+	services: Array<{
+		serviceName: string;
+		imageName: string;
+		state?: 'running' | 'stopped';
+		config: {
+			image: string;
+			ports?: string[];
+			environment?: Record<string, string>;
+			volumes?: string[];
+			restart?: string;
+			labels?: Record<string, string>;
+		};
+	}>;
+}) => {
+	const targetState = containerManager.getTargetState();
+
+	// Pick an appId: max existing + 1, or 1
+	const existing = Object.keys(targetState.apps ?? {}).map(Number).filter(n => !isNaN(n));
+	const appId = existing.length > 0 ? Math.max(...existing) + 1 : 1;
+
+	const services = body.services.map((svc, idx) => ({
+		serviceId: Date.now() + idx,
+		serviceName: svc.serviceName,
+		imageName: svc.imageName,
+		appId,
+		appName: body.appName,
+		state: svc.state ?? 'running',
+		config: { ...svc.config, image: svc.imageName },
+	}));
+
+	const newTargetState = {
+		...targetState,
+		apps: {
+			...targetState.apps,
+			[appId]: { appId, appName: body.appName, services },
+		},
+	};
+
+	await containerManager.setTarget(newTargetState as any);
+	return { appId, appName: body.appName };
+};
+
+/**
+ * Add a service to an existing app's target state
+ * Used by: POST /v1/apps/:appId/services
+ */
+export const addService = async (
+	appId: number,
+	svc: {
+		serviceName: string;
+		imageName: string;
+		state?: 'running' | 'stopped';
+		config: {
+			image: string;
+			ports?: string[];
+			environment?: Record<string, string>;
+			volumes?: string[];
+			restart?: string;
+		};
+	},
+) => {
+	const targetState = containerManager.getTargetState();
+	const app = (targetState.apps ?? {} as any)[appId];
+	if (!app) throw new Error(`App ${appId} not found`);
+
+	const newService = {
+		serviceId: Date.now(),
+		serviceName: svc.serviceName,
+		imageName: svc.imageName,
+		appId,
+		appName: app.appName,
+		state: svc.state ?? 'running',
+		config: { ...svc.config, image: svc.imageName },
+	};
+
+	const updatedApp = { ...app, services: [...app.services, newService] };
+	await containerManager.setTarget({
+		...targetState,
+		apps: { ...targetState.apps, [appId]: updatedApp },
+	} as any);
+
+	return newService;
+};
+
+/**
+ * Update an existing service's config in target state
+ * Used by: PUT /v1/apps/:appId/services/:serviceName
+ */
+export const updateService = async (
+	appId: number,
+	serviceName: string,
+	svc: {
+		serviceName?: string;
+		imageName: string;
+		state?: 'running' | 'stopped';
+		config: {
+			image: string;
+			ports?: string[];
+			environment?: Record<string, string>;
+			volumes?: string[];
+			restart?: string;
+		};
+	},
+) => {
+	const targetState = containerManager.getTargetState();
+	const app = (targetState.apps ?? {} as any)[appId];
+	if (!app) throw new Error(`App ${appId} not found`);
+
+	const idx = (app.services as any[]).findIndex((s: any) => s.serviceName === serviceName);
+	if (idx === -1) throw new Error(`Service "${serviceName}" not found in app ${appId}`);
+
+	const existing = app.services[idx];
+	const updated = {
+		...existing,
+		serviceName: svc.serviceName ?? existing.serviceName,
+		imageName: svc.imageName,
+		state: svc.state ?? existing.state,
+		config: { ...svc.config, image: svc.imageName },
+	};
+
+	const updatedServices = [...app.services];
+	updatedServices[idx] = updated;
+	const updatedApp = { ...app, services: updatedServices };
+
+	await containerManager.setTarget({
+		...targetState,
+		apps: { ...targetState.apps, [appId]: updatedApp },
+	} as any);
+
+	return updated;
+};
+
+/**
+ * Remove a single service from an app's target state (stops + removes its container)
+ * Used by: DELETE /v1/apps/:appId/services/:serviceName
+ */
+export const removeService = async (appId: number, serviceName: string) => {
+	const targetState = containerManager.getTargetState();
+	const app = (targetState.apps ?? {} as any)[appId];
+	if (!app) throw new Error(`App ${appId} not found`);
+
+	const idx = (app.services as any[]).findIndex((s: any) => s.serviceName === serviceName);
+	if (idx === -1) throw new Error(`Service "${serviceName}" not found in app ${appId}`);
+
+	const updatedServices = (app.services as any[]).filter((_: any, i: number) => i !== idx);
+	const updatedApp = { ...app, services: updatedServices };
+
+	await containerManager.setTarget({
+		...targetState,
+		apps: { ...targetState.apps, [appId]: updatedApp },
+	} as any);
+};
+
+/**
+ * Remove an app from target state (stops + removes containers)
+ * Used by: DELETE /v1/apps/:appId
+ */
+export const removeApp = async (appId: number) => {
+	const targetState = containerManager.getTargetState();
+	if (!(targetState.apps ?? {} as any)[appId]) {
+		throw new Error(`App ${appId} not found in target state`);
+	}
+
+	const newApps = { ...targetState.apps } as Record<string, any>;
+	delete newApps[appId];
+
+	await containerManager.setTarget({ ...targetState, apps: newApps } as any);
+};
+
+/**
+ * Start / stop / restart a specific service within an app
+ * Used by: POST /v1/apps/:appId/services/:serviceName/:action
+ */
+export const serviceAction = async (
+	appId: number,
+	serviceName: string,
+	action: 'start' | 'stop' | 'restart',
+) => {
+	const currentState = await containerManager.getCurrentState();
+	const targetState = containerManager.getTargetState();
+
+	// A freshly deployed app only exists in targetState until Docker creates the container
+	const currentApp = (currentState.apps as Record<string, any>)[appId];
+	const targetApp = (targetState.apps as Record<string, any>)[appId];
+	if (!currentApp && !targetApp) throw new Error(`App ${appId} not found`);
+
+	const currentSvc = currentApp
+		? (currentApp.services as any[]).find((s: any) => s.serviceName === serviceName)
+		: undefined;
+	const targetSvc = targetApp
+		? (targetApp.services as any[]).find((s: any) => s.serviceName === serviceName)
+		: undefined;
+
+	if (!currentSvc && !targetSvc) throw new Error(`Service "${serviceName}" not found in app ${appId}`);
+
+	const containerId: string | undefined = currentSvc?.containerId;
+
+	if (containerId) {
+		const docker = containerManager.getDocker();
+		if (!docker) throw new Error('Docker not available');
+		const container = docker.getContainer(containerId);
+		if (action === 'start') await container.start();
+		else if (action === 'stop') await container.stop();
+		else await container.restart();
+	} else {
+		// Container not created yet — reconcile to create/start it
+		if (action === 'start' || action === 'restart') {
+			await containerManager.applyTargetState();
+		}
+	}
+
+	return { appId, serviceName, action };
 };
 
 /**
@@ -1591,6 +1876,48 @@ export const updateSettings = async (patch: Record<string, any>): Promise<void> 
 			}
 		}
 	});
+};
+
+// ── Docker daemon configuration ───────────────────────────────────────────────
+
+export interface DockerConnectionConfig {
+	type: 'socket' | 'tcp' | 'tcp+tls';
+	socketPath?: string;
+	host?: string;
+	port?: number;
+	ca?: string;
+	cert?: string;
+	key?: string;
+}
+
+function buildDockerOptions(cfg: DockerConnectionConfig): import('dockerode').DockerOptions {
+	if (cfg.type === 'tcp') {
+		return { host: cfg.host || 'localhost', port: cfg.port || 2375, protocol: 'http' as const };
+	}
+	if (cfg.type === 'tcp+tls') {
+		return { host: cfg.host || 'localhost', port: cfg.port || 2376, ca: cfg.ca, cert: cfg.cert, key: cfg.key, protocol: 'https' as const };
+	}
+	// socket (default)
+	const defaultSocket = process.platform === 'win32' ? '//./pipe/docker_engine' : '/var/run/docker.sock';
+	return { socketPath: cfg.socketPath || defaultSocket };
+}
+
+export const getDockerConfig = async (): Promise<DockerConnectionConfig> => {
+	const config = configManager ? (configManager.getTargetConfig() as unknown as Record<string, any>) : {};
+	return (config.docker ?? { type: 'socket' }) as DockerConnectionConfig;
+};
+
+export const saveDockerConfig = async (cfg: DockerConnectionConfig): Promise<void> => {
+	await applyConfigUpdate((config) => { config.docker = cfg; });
+	containerManager.setDockerOptions(buildDockerOptions(cfg));
+};
+
+export const testDockerConnection = async (cfg: DockerConnectionConfig): Promise<{ version: string; containers: number }> => {
+	const { default: Docker } = await import('dockerode');
+	const docker = new Docker(buildDockerOptions(cfg));
+	await docker.ping();
+	const info = await docker.info();
+	return { version: info.ServerVersion as string, containers: info.Containers as number };
 };
 
 /**

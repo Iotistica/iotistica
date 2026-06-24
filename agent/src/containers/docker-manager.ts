@@ -335,6 +335,10 @@ export class DockerManager extends EventEmitter {
 	* 
 	* @throws Error if configuration violates security policy
 	*/
+	private sanitizeNamePart(s: string): string {
+		return s.replace(/[^a-zA-Z0-9_.-]/g, '_');
+	}
+
 	private validateSecurityConfig(service: ContainerService): void {
 		const violations: string[] = [];
 
@@ -560,7 +564,7 @@ export class DockerManager extends EventEmitter {
 			this.validateSecurityConfig(service);
 
 			// 0b. Check for existing container (idempotency)
-			const containerName = `${service.appName}_${service.serviceName}_${service.serviceId}`;
+			const containerName = `${this.sanitizeNamePart(service.appName)}_${this.sanitizeNamePart(service.serviceName)}_${service.serviceId}`;
 			const existing = await this.findContainerByName(containerName);
 			
 			if (existing) {
@@ -1059,7 +1063,7 @@ export class DockerManager extends EventEmitter {
 		service: ContainerService,
 		healthCheckTimeoutMs: number = 30000
 	): Promise<string> {
-		const finalName = `${service.appName}_${service.serviceName}_${service.serviceId}`;
+		const finalName = `${this.sanitizeNamePart(service.appName)}_${this.sanitizeNamePart(service.serviceName)}_${service.serviceId}`;
 		const tempName = `${finalName}_new_${Date.now()}`;
 		
 		this.logger?.infoSync('Starting zero-downtime container update', {

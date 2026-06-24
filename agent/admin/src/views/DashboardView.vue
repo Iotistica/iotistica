@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SparklineChart from '@/components/SparklineChart.vue'
 import { dashboardApi, type DashboardStats, type NetworkBandwidth } from '@/api/dashboard'
+
+const netColumns: TableColumnType<NetworkBandwidth>[] = [
+  { title: 'Interface', dataIndex: 'iface', key: 'iface', width: 120 },
+  { title: 'In (current)', key: 'rx_sec', width: 130 },
+  { title: 'Out (current)', key: 'tx_sec', width: 130 },
+  { title: 'Total In', key: 'rx_bytes', width: 110 },
+  { title: 'Total Out', key: 'tx_bytes', width: 110 },
+]
 
 const HISTORY = 60   // number of samples kept (~3 min at 3s interval)
 const POLL_MS = 3000
@@ -243,18 +252,6 @@ const netIface   = computed(() => stats.value ? (primaryNet(stats.value.network)
   </AppLayout>
 </template>
 
-<script lang="ts">
-import type { TableColumnType } from 'ant-design-vue'
-import type { NetworkBandwidth } from '@/api/dashboard'
-
-const netColumns: TableColumnType<NetworkBandwidth>[] = [
-  { title: 'Interface', dataIndex: 'iface', key: 'iface', width: 120 },
-  { title: 'In (current)', key: 'rx_sec', width: 130 },
-  { title: 'Out (current)', key: 'tx_sec', width: 130 },
-  { title: 'Total In', key: 'rx_bytes', width: 110 },
-  { title: 'Total Out', key: 'tx_bytes', width: 110 },
-]
-</script>
 
 <style scoped>
 .section-label {

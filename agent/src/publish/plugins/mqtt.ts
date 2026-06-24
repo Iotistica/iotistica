@@ -295,3 +295,19 @@ export class MqttPublishPlugin extends BasePublishPlugin {
 		return new MqttPublishPlugin(new ExternalMqttClient(resolved, agentLogger), logger, destinationId, agentLogger);
 	}
 }
+
+/**
+ * Build an ExternalMqttClient directly from a destination's config_json record.
+ * Returns null if the config is missing or invalid.
+ * Used by the anomaly alert publisher to connect to a user-defined MQTT broker.
+ */
+export function createExternalMqttClientFromDestination(
+	config: Record<string, unknown> | null | undefined,
+	fallbackDeviceId?: string,
+	fallbackName?: string,
+	logger?: AgentLogger,
+): ExternalMqttClient | null {
+	const resolved = loadExternalMqttConfigFromRecord(config, fallbackDeviceId, fallbackName);
+	if (!resolved) return null;
+	return new ExternalMqttClient(resolved, logger);
+}

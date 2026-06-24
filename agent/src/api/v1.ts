@@ -5,6 +5,7 @@
 
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
+import { PassThrough } from 'stream';
 import * as actions from './actions';
 import { ModbusAdapter } from '../plugins/modbus/adapter.js';
 import { getMemoryDiagnostics, getRestartPolicyStatus } from '../system/memory.js';
@@ -105,6 +106,219 @@ router.get('/v1/apps/:appId', async (req: Request, res: Response, next: NextFunc
 	} catch (error) {
 		next(error);
 	}
+});
+
+/**
+ * GET /v1/apps
+ * List all apps with current runtime state
+ */
+router.get('/v1/apps', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const apps = await actions.getAllApps();
+		return res.status(200).json({ apps });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/apps
+ * Deploy a new application (adds to target state and reconciles)
+ */
+router.post('/v1/apps', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const result = await actions.deployApp(req.body);
+		return res.status(201).json(result);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * DELETE /v1/apps/:appId
+ * Remove an application from target state (stops + removes containers)
+ */
+router.delete('/v1/apps/:appId', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const appId = parseInt(req.params.appId);
+		if (isNaN(appId)) return res.status(400).json({ error: 'Invalid app id' });
+		await actions.removeApp(appId);
+		return res.status(204).send();
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * POST /v1/apps/:appId/services
+ * Add a service to an existing application
+ */
+router.post('/v1/apps/:appId/services', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const appId = parseInt(req.params.appId);
+		if (isNaN(appId)) return res.status(400).json({ error: 'Invalid app id' });
+		const result = await actions.addService(appId, req.body);
+		return res.status(201).json(result);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * PUT /v1/apps/:appId/services/:serviceName
+ * Update a service's config; triggers reconciliation (container recreated if needed)
+ */
+router.put('/v1/apps/:appId/services/:serviceName', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const appId = parseInt(req.params.appId);
+		const { serviceName } = req.params;
+		if (isNaN(appId)) return res.status(400).json({ error: 'Invalid app id' });
+		const result = await actions.updateService(appId, serviceName, req.body);
+		return res.status(200).json(result);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * DELETE /v1/apps/:appId/services/:serviceName
+ * Remove a service from an app (stops + removes its container)
+ */
+router.delete('/v1/apps/:appId/services/:serviceName', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const appId = parseInt(req.params.appId);
+		const { serviceName } = req.params;
+		if (isNaN(appId)) return res.status(400).json({ error: 'Invalid app id' });
+		await actions.removeService(appId, serviceName);
+		return res.status(204).send();
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/apps/:appId/services/:serviceName/logs
+ * Stream container logs via SSE.
+ * ?tail=200   — how many historical lines to include
+ * ?follow=true — keep connection open and stream new lines
+ * ?timestamps=true — prefix each line with Docker timestamp
+ */
+router.get('/v1/apps/:appId/services/:serviceName/logs', async (req: Request, res: Response) => {
+	const appId = parseInt(req.params.appId);
+	const { serviceName } = req.params;
+	const tail = Math.min(parseInt(req.query.tail as string) || 200, 2000);
+	const follow = req.query.follow === 'true';
+	const timestamps = req.query.timestamps !== 'false';
+
+	res.setHeader('Content-Type', 'text/event-stream');
+	res.setHeader('Cache-Control', 'no-cache');
+	res.setHeader('Connection', 'keep-alive');
+	res.flushHeaders();
+
+	const send = (data: object) => {
+		try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {}
+	};
+
+	if (isNaN(appId)) { send({ error: 'Invalid app id' }); res.end(); return; }
+
+	try {
+		const containerId = await actions.getServiceContainerId(appId, serviceName);
+		if (!containerId) { send({ error: 'Container is not running' }); res.end(); return; }
+
+		const docker = actions.getDockerInstance();
+		if (!docker) { send({ error: 'Docker not available' }); res.end(); return; }
+
+		const container = docker.getContainer(containerId);
+
+		if (!follow) {
+			// One-shot: get buffer, parse multiplexed frames, close
+			const buf = await (container as any).logs({
+				follow: false, stdout: true, stderr: true, timestamps, tail,
+			}) as Buffer;
+			for (const line of parseMuxedLogs(buf)) send(line);
+			res.end();
+		} else {
+			// Live follow: demux stream into SSE events until client disconnects
+			const logStream = await (container as any).logs({
+				follow: true, stdout: true, stderr: true, timestamps, tail,
+			}) as NodeJS.ReadableStream;
+
+			const stdout = new PassThrough();
+			const stderr = new PassThrough();
+			(container as any).modem.demuxStream(logStream, stdout, stderr);
+
+			const writeLines = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
+				for (const line of chunk.toString('utf8').split('\n')) {
+					if (line) send({ msg: line, stream });
+				}
+			};
+
+			stdout.on('data', writeLines('stdout'));
+			stderr.on('data', writeLines('stderr'));
+			stdout.on('end', () => { try { res.end(); } catch {} });
+
+			req.on('close', () => {
+				try { (logStream as any).destroy(); } catch {}
+				stdout.destroy();
+				stderr.destroy();
+			});
+		}
+	} catch (e) {
+		send({ error: (e as Error).message });
+		try { res.end(); } catch {}
+	}
+});
+
+function parseMuxedLogs(buf: Buffer): Array<{ msg: string; stream: 'stdout' | 'stderr' }> {
+	const result: Array<{ msg: string; stream: 'stdout' | 'stderr' }> = [];
+	let offset = 0;
+	while (offset + 8 <= buf.length) {
+		const streamType = buf[offset];
+		const size = buf.readUInt32BE(offset + 4);
+		offset += 8;
+		if (offset + size > buf.length) break;
+		const text = buf.subarray(offset, offset + size).toString('utf8');
+		const stream: 'stdout' | 'stderr' = streamType === 2 ? 'stderr' : 'stdout';
+		for (const line of text.split('\n')) {
+			if (line.trim()) result.push({ msg: line, stream });
+		}
+		offset += size;
+	}
+	return result;
+}
+
+/**
+ * POST /v1/apps/:appId/services/:serviceName/start|stop|restart
+ * Perform an action on a specific service
+ */
+router.post('/v1/apps/:appId/services/:serviceName/:action', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const appId = parseInt(req.params.appId);
+		const { serviceName, action } = req.params;
+		if (isNaN(appId)) return res.status(400).json({ error: 'Invalid app id' });
+		if (!['start', 'stop', 'restart'].includes(action)) {
+			return res.status(400).json({ error: 'Invalid action — use start, stop, or restart' });
+		}
+		const result = await actions.serviceAction(appId, serviceName, action as 'start' | 'stop' | 'restart');
+		return res.status(200).json(result);
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/docker/config — read current Docker daemon config
+ * POST /v1/docker/config — save + reconnect
+ * POST /v1/docker/test  — test without saving
+ */
+router.get('/v1/docker/config', async (_req: Request, res: Response, next: NextFunction) => {
+	try { return res.json(await actions.getDockerConfig()); } catch (e) { next(e); }
+});
+router.post('/v1/docker/config', async (req: Request, res: Response, next: NextFunction) => {
+	try { await actions.saveDockerConfig(req.body); return res.json({ ok: true }); } catch (e) { next(e); }
+});
+router.post('/v1/docker/test', async (req: Request, res: Response, next: NextFunction) => {
+	try { return res.json(await actions.testDockerConnection(req.body)); } catch (e) { next(e); }
 });
 
 /**
@@ -398,6 +612,34 @@ router.patch('/v1/anomaly/config', async (req: Request, res: Response, next: Nex
 		//    change survives restarts in standalone mode.
 		await actions.persistAnomalyConfig(anomalyService.getConfig() as unknown as Record<string, unknown>);
 		return res.status(200).json({ config: anomalyService.getConfig() });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
+ * GET /v1/logs
+ * Return in-memory agent logs from LocalLogBackend.
+ * Query: ?level=info|warn|error|debug, ?source=system|container|manager,
+ *        ?since=<unixMs>, ?limit=<n> (default 200)
+ */
+router.get('/v1/logs', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const backend = actions.getLocalLogBackend();
+		if (!backend) {
+			return res.status(503).json({ error: 'Log backend not available' });
+		}
+		const filter: import('../logging/types.js').LogFilter = {
+			level: req.query.level as any,
+			sourceType: req.query.source as any,
+			since: req.query.since ? Number(req.query.since) : undefined,
+			limit: req.query.limit ? Math.min(Number(req.query.limit), 1000) : 200,
+		};
+		// Drop undefined keys so getLogs doesn't treat them as active filters
+		Object.keys(filter).forEach(k => (filter as any)[k] === undefined && delete (filter as any)[k]);
+		const logs = await backend.getLogs(filter);
+		const total = await backend.getLogCount();
+		return res.json({ logs, total });
 	} catch (error) {
 		next(error);
 	}

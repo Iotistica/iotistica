@@ -123,6 +123,8 @@ export function loadConfigFromEnv(): AnomalyConfig {
 			minConfidence: alertMinConfidence,
 			cooldownMs: alertCooldown,
 			maxQueueSize: alertMaxQueue,
+			alertDestinationId: undefined,
+			alertTopic: undefined,
 		},
 		storage: {
 			retention: historyDays,

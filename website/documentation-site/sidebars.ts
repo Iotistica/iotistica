@@ -21,14 +21,27 @@ const sidebars: SidebarsConfig = {
       items: [
         'agent/overview',
         'agent/quickstart',
+        'agent/configuration',
         'agent/dashboard',
         'agent/endpoints',
         'agent/destinations',
         'agent/subscriptions',
+        'agent/data-publishing',
         'agent/discovery',
+        'agent/applications',
+        'agent/audit',
         'agent/alerts',
         'agent/settings',
+        'agent/cloud-sync',
+        'agent/security',
         'agent/cli',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'References',
+      items: [
+        'references/agent-api',
       ],
     },
     {

@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { LockOutlined, UserOutlined } from '@ant-design/icons-vue'
+import IotisticaLogo from '@/components/IotisticaLogo.vue'
 import { authApi } from '@/api/auth'
 import { useAuth } from '@/composables/useAuth'
 
@@ -43,7 +44,10 @@ async function submit() {
   <div class="login-page">
     <div class="login-card">
       <div class="login-header">
-        <div class="login-logo">Agent Admin</div>
+        <div class="login-logo">
+          <IotisticaLogo :size="40" />
+          <span>Iotistica</span>
+        </div>
         <p class="login-sub">Sign in to continue</p>
       </div>
 
@@ -117,6 +121,10 @@ async function submit() {
 }
 
 .login-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   font-size: 22px;
   font-weight: 700;
   color: #1677ff;
