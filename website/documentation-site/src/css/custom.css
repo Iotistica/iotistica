@@ -9,7 +9,9 @@
   --ifm-color-primary-lighter: #007a77;
   --ifm-color-primary-lightest: #008b87;
   --ifm-background-color: #f8faf9;
-  --ifm-navbar-background-color: #ffffff;
+  --ifm-navbar-background-color: rgba(10, 10, 10, 0.97);
+  --ifm-navbar-link-color: #d1d5db;
+  --ifm-navbar-link-hover-color: #ffffff;
   --ifm-footer-background-color: #f1f6f4;
   --ifm-font-family-base: 'IBM Plex Sans', 'Segoe UI', Tahoma, sans-serif;
   --ifm-heading-font-family: 'IBM Plex Sans', 'Segoe UI', Tahoma, sans-serif;
@@ -20,18 +22,19 @@
 }
 
 .navbar {
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .navbar__title {
   font-weight: 700;
-  font-size: 1.1rem;
-  color: #111827;
+  font-size: 1.5rem;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   white-space: nowrap;
 }
 
 [data-theme='dark'] .navbar__title {
-  color: #f2f7f9;
+  color: #ffffff;
 }
 
 .menu__link {
@@ -87,7 +90,7 @@
 }
 
 [data-theme='dark'] .navbar {
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 [data-theme='dark'] .theme-doc-sidebar-container {
