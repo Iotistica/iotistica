@@ -1,6 +1,6 @@
-# Iotistica — IoT Fleet Management Platform
+# Iotistica
 
-Iotistica is an edge-first IoT fleet management platform. It runs a lightweight agent on hardware, manages Docker containerized applications, bridges industrial protocols (Modbus, OPC-UA, BACnet, SNMP, CAN), detects anomalies locally, and syncs state bidirectionally with the cloud — all designed to operate reliably in offline-first environments.
+Iotistica is an IoT fleet management platform built around a lightweight edge agent. The agent runs on industrial hardware, bridges field devices over Modbus, OPC-UA, BACnet, SNMP, and CAN, orchestrates Docker applications via cloud-pushed target state, streams telemetry to configurable upstream destinations, and performs on-device anomaly detection — all designed to operate reliably with intermittent or no cloud connectivity.
 
 ![Dashboard](website/documentation-site/static/img/agent/dashboard.png)
 
