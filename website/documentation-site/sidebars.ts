@@ -35,13 +35,7 @@ const sidebars: SidebarsConfig = {
         'agent/cloud-sync',
         'agent/security',
         'agent/cli',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'References',
-      items: [
-        'references/agent-api',
+        'agent/api',
       ],
     },
     {

@@ -1,0 +1,1859 @@
+---
+sidebar_position: 17
+---
+
+# API
+
+The Iotistica agent exposes a local HTTP API on **port 48484** (default). Every capability in the admin UI is backed by this API — you can drive the agent programmatically, integrate it with automation tools, or call it directly from other containers on the same host.
+
+---
+
+## Base URL
+
+```
+http://127.0.0.1:48484
+```
+
+All endpoints are versioned under `/v1`. The ping endpoint (`/ping`) and health endpoints (`/v1/healthy`, `/v1/readiness`) are unauthenticated regardless of security mode and are safe to call from probes and orchestrators.
+
+---
+
+## Authentication
+
+The API operates in one of two security modes, set via `API_SECURITY_MODE`:
+
+| Mode | Default | Behaviour |
+|---|---|---|
+| `LOCALHOST_ONLY` | Yes | API binds to `127.0.0.1`. Only processes on the same host can reach it. No API key required. |
+| `API_KEY` | No | API binds to `0.0.0.0`. Every request must include the `API_KEY` value in the `X-Api-Key` header or `?apiKey=` query parameter. |
+
+To enable `API_KEY` mode:
+
+```bash
+API_SECURITY_MODE=API_KEY
+API_KEY=your-secret-key
+```
+
+Or alternatively, set only `ENABLE_AUTH=true` (also requires `API_KEY`):
+
+```bash
+ENABLE_AUTH=true
+API_KEY=your-secret-key
+```
+
+**Header authentication:**
+```http
+GET /v1/device HTTP/1.1
+X-Api-Key: your-secret-key
+```
+
+**Query parameter authentication:**
+```http
+GET /v1/device?apiKey=your-secret-key HTTP/1.1
+```
+
+### Admin UI Session
+
+The admin UI (`/admin`) uses a separate cookie-based session. Log in via `POST /v1/auth/login` to receive an `admin_session` cookie. All `/v1/admin/*` endpoints require this session.
+
+---
+
+## Error Responses
+
+All errors return a JSON body with an `error` field:
+
+```json
+{ "error": "Description of what went wrong" }
+```
+
+| Status | Meaning |
+|---|---|
+| `400` | Bad request — missing or invalid parameter |
+| `401` | Unauthorized — missing or invalid API key / session |
+| `404` | Resource not found |
+| `409` | Conflict — operation not allowed in current state |
+| `500` | Internal server error |
+| `503` | Service not available — a required subsystem is not initialized |
+
+---
+
+## Health & Status
+
+### `GET /ping`
+
+Simple aliveness check. No authentication required.
+
+**Response:** `200 OK` with body `OK`
+
+---
+
+### `GET /v1/healthy`
+
+Liveness probe. Runs all registered health checks and reports aggregate health.
+
+**Response `200`** (healthy):
+```json
+{
+  "status": "healthy",
+  "ready": true,
+  "state": "RUNNING"
+}
+```
+
+**Response `500`** (unhealthy):
+```json
+{
+  "status": "unhealthy",
+  "ready": false,
+  "state": "INITIALIZING",
+  "criticalFailures": ["database connection lost"],
+  "unhealthySubsystems": ["mqtt"]
+}
+```
+
+---
+
+### `GET /v1/readiness`
+
+Readiness probe. Returns `200` when the agent has completed all 6 init phases and is fully operational.
+
+**Response `200`** (ready):
+```json
+{ "ready": true, "state": "RUNNING" }
+```
+
+**Response `503`** (not ready):
+```json
+{ "ready": false, "state": "INITIALIZING", "criticalFailures": [] }
+```
+
+---
+
+### `GET /v1/health/report`
+
+Detailed health report including per-subsystem status. Use this for debugging, not for probes.
+
+**Response `200`:**
+```json
+{
+  "overall": "healthy",
+  "ready": true,
+  "state": "RUNNING",
+  "report": {
+    "overall": true,
+    "subsystems": [
+      { "name": "database", "healthy": true },
+      { "name": "mqtt", "healthy": true }
+    ],
+    "unhealthySubsystems": [],
+    "criticalFailures": []
+  }
+}
+```
+
+---
+
+### `GET /v1/buffer/status`
+
+Reports the depth and health of all offline buffers — cloud sync queue, MQTT message buffer, and cloud log buffer.
+
+**Response `200`:**
+```json
+{
+  "mode": "provisioned-online",
+  "cloudReportQueueCount": 0,
+  "cloudReportOldestAge": null,
+  "transportPublishMode": "direct",
+  "mqttMessageBufferCount": 0,
+  "mqttBufferBytes": 0,
+  "lastFlushAttempt": "2024-01-15T10:30:00.000Z",
+  "lastFlushSuccess": "2024-01-15T10:30:00.000Z",
+  "agentLogBufferEnabled": true,
+  "agentLogBufferLogs": 0,
+  "agentLogBufferBytes": 0,
+  "agentLogPendingBatches": 0,
+  "agentLogDroppedTotal": 0,
+  "agentLogCircuitOpen": false
+}
+```
+
+| `mode` value | Meaning |
+|---|---|
+| `standalone` | Not provisioned, no cloud sync |
+| `provisioned-online` | Provisioned and cloud connection healthy |
+| `provisioned-degraded-offline` | Provisioned but cloud unreachable; buffering |
+
+---
+
+## Provisioning
+
+### `POST /v1/provision`
+
+Provision the agent with a one-time provisioning key. Runs the three-phase registration protocol and establishes the device identity with Iotistica Cloud.
+
+**Request body:**
+```json
+{
+  "provisioningApiKey": "your-provisioning-token",
+  "deviceName": "factory-sensor-01",
+  "deviceType": "standalone",
+  "apiEndpoint": "https://api.iotistica.io",
+  "applicationId": 42
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `provisioningApiKey` | Yes | One-time provisioning token |
+| `deviceName` | No | Human-readable name shown in the dashboard |
+| `deviceType` | No | Device class (`standalone`, `gateway`, etc.) |
+| `apiEndpoint` | No | Override the Iotistica Cloud API URL |
+| `applicationId` | No | Associate device with a specific application |
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "device": {
+    "uuid": "7f3e9a1b-2c4d-5e6f-8a9b-0c1d2e3f4a5b",
+    "deviceName": "factory-sensor-01",
+    "provisioned": true,
+    "mqttBrokerUrl": "mqtts://mqtt.iotistica.io:8883"
+  }
+}
+```
+
+---
+
+### `GET /v1/provision/status`
+
+Get current provisioning state without triggering any side effects.
+
+**Response `200`:**
+```json
+{
+  "provisioned": true,
+  "uuid": "7f3e9a1b-2c4d-5e6f-8a9b-0c1d2e3f4a5b",
+  "deviceName": "factory-sensor-01",
+  "apiEndpoint": "https://api.iotistica.io",
+  "hasProvisioningKey": false,
+  "mqttConfigured": true,
+  "mqttBrokerUrl": "mqtts://mqtt.iotistica.io:8883"
+}
+```
+
+---
+
+### `POST /v1/deprovision`
+
+Remove cloud registration while preserving the device UUID and device API key. The device can be reprovisioned with a new provisioning token afterward.
+
+**Response `200`:**
+```json
+{
+  "message": "Device deprovisioned successfully. UUID and deviceApiKey preserved for re-provisioning.",
+  "status": "deprovisioned"
+}
+```
+
+---
+
+### `POST /v1/factory-reset`
+
+Complete data wipe — deletes all apps, services, state, endpoints, and database contents. **Only the device UUID is preserved.** This is irreversible.
+
+**Response `200`:**
+```json
+{
+  "message": "Factory reset complete. All data deleted. Only UUID preserved.",
+  "status": "factory-reset"
+}
+```
+
+:::danger
+This action deletes all local configuration including deployed applications, protocol endpoints, publish destinations, and anomaly baselines. There is no undo.
+:::
+
+---
+
+## Device
+
+### `GET /v1/device`
+
+Get the current device state — identity, provisioning status, running app count, and cloud connection.
+
+**Response `200`:**
+```json
+{
+  "uuid": "7f3e9a1b-2c4d-5e6f-8a9b-0c1d2e3f4a5b",
+  "name": "factory-sensor-01",
+  "provisioned": true,
+  "apiEndpoint": "https://api.iotistica.io",
+  "apps": 3,
+  "is_online": true,
+  "status": "Idle"
+}
+```
+
+---
+
+## Applications
+
+Applications are groups of one or more Docker containers managed together. The agent reconciles the target state (what should run) against the current state (what Docker reports is actually running).
+
+### `GET /v1/apps`
+
+List all applications merged from current and target state.
+
+**Response `200`:**
+```json
+{
+  "apps": [
+    {
+      "appId": 1,
+      "appName": "modbus-bridge",
+      "services": [
+        {
+          "serviceId": 1700000000001,
+          "serviceName": "bridge",
+          "imageName": "iotistica/modbus-bridge:latest",
+          "state": "running",
+          "status": "Up 2 hours",
+          "containerId": "a1b2c3d4e5f6"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### `GET /v1/apps/:appId`
+
+Get a single application's state. For multi-service apps, returns the first service.
+
+**Path params:** `appId` (integer)
+
+**Response `200`:**
+```json
+{
+  "appId": 1,
+  "appName": "modbus-bridge",
+  "containerId": "a1b2c3d4e5f6",
+  "serviceName": "bridge",
+  "imageName": "iotistica/modbus-bridge:latest",
+  "status": "running",
+  "config": { "image": "iotistica/modbus-bridge:latest", "ports": ["5020:5020"] }
+}
+```
+
+---
+
+### `POST /v1/apps`
+
+Deploy a new application. Adds it to the target state and triggers reconciliation (containers are created and started automatically).
+
+**Request body:**
+```json
+{
+  "appName": "modbus-bridge",
+  "services": [
+    {
+      "serviceName": "bridge",
+      "imageName": "iotistica/modbus-bridge:latest",
+      "state": "running",
+      "config": {
+        "image": "iotistica/modbus-bridge:latest",
+        "ports": ["5020:5020"],
+        "environment": {
+          "MODBUS_HOST": "10.0.1.100"
+        },
+        "volumes": ["/data/bridge:/data"],
+        "restart": "unless-stopped"
+      }
+    }
+  ]
+}
+```
+
+**Response `201`:**
+```json
+{ "appId": 2, "appName": "modbus-bridge" }
+```
+
+---
+
+### `DELETE /v1/apps/:appId`
+
+Remove an application from target state. Stops and removes all its containers.
+
+**Response `204`** (no body)
+
+---
+
+### `POST /v1/restart`
+
+Restart an application by re-triggering reconciliation.
+
+**Request body:**
+```json
+{ "appId": 1, "force": false }
+```
+
+**Response `200`:** `OK`
+
+---
+
+### `POST /v1/apps/:appId/start`
+
+Start the first service in an application.
+
+**Request body (optional):** `{ "force": false }`
+
+**Response `200`:**
+```json
+{ "containerId": "a1b2c3d4e5f6", "status": "started" }
+```
+
+---
+
+### `POST /v1/apps/:appId/stop`
+
+Stop the first service in an application.
+
+**Response `200`:**
+```json
+{ "containerId": "a1b2c3d4e5f6", "status": "stopped" }
+```
+
+---
+
+### `POST /v1/apps/:appId/services`
+
+Add a new service to an existing application.
+
+**Request body:** Same shape as a single entry in the `services` array of `POST /v1/apps`.
+
+**Response `201`:** The new service object.
+
+---
+
+### `PUT /v1/apps/:appId/services/:serviceName`
+
+Update a service's configuration. If the image, ports, or environment change, the container is recreated using a blue-green swap.
+
+**Path params:** `appId` (integer), `serviceName` (string)
+
+**Request body:** Same as service creation body.
+
+**Response `200`:** Updated service object.
+
+---
+
+### `DELETE /v1/apps/:appId/services/:serviceName`
+
+Remove a service from an application and stop its container.
+
+**Response `204`** (no body)
+
+---
+
+### `POST /v1/apps/:appId/services/:serviceName/:action`
+
+Perform a lifecycle action on a specific service.
+
+**Path params:** `action` must be `start`, `stop`, or `restart`
+
+**Response `200`:**
+```json
+{ "appId": 1, "serviceName": "bridge", "action": "restart" }
+```
+
+---
+
+### `GET /v1/apps/:appId/services/:serviceName/logs`
+
+Stream container logs as [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events). Each event is a JSON object:
+
+```json
+{ "msg": "2024-01-15T10:30:00.000Z Connected to Modbus device", "stream": "stdout" }
+```
+
+**Query parameters:**
+
+| Param | Default | Description |
+|---|---|---|
+| `tail` | `200` | Number of historical lines to include (max `2000`) |
+| `follow` | `false` | If `true`, keep the connection open and stream new lines in real time |
+| `timestamps` | `true` | Prefix each line with the Docker timestamp |
+
+**Response headers:**
+```
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Connection: keep-alive
+```
+
+---
+
+### `POST /v1/purge`
+
+Purge the volumes for an application (removes data, not the container definition).
+
+**Request body:**
+```json
+{ "appId": 1, "force": false }
+```
+
+**Response `200`:** `OK`
+
+---
+
+## Protocol Endpoints
+
+Protocol endpoints represent physical or logical industrial devices the agent reads data from (Modbus controllers, OPC-UA servers, BACnet devices, etc.).
+
+### `GET /v1/endpoints`
+
+List all configured endpoints. If the protocol adapter is running, each endpoint includes live health information.
+
+**Query params:** `?protocol=modbus` (optional filter)
+
+**Response `200`:**
+```json
+{
+  "endpoints": [
+    {
+      "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "plc-line-1",
+      "protocol": "modbus",
+      "connection": { "host": "10.0.1.100", "port": 502, "unitId": 1 },
+      "poll_interval": 5000,
+      "enabled": true,
+      "health": {
+        "status": "connected",
+        "connected": true,
+        "communicationQuality": 98.5,
+        "lastSeen": "2024-01-15T10:30:00.000Z",
+        "lastPoll": "2024-01-15T10:30:00.000Z",
+        "lastError": null,
+        "responseTimeMs": 12
+      }
+    }
+  ]
+}
+```
+
+---
+
+### `POST /v1/endpoints`
+
+Add a new endpoint. The endpoint is written to both target state and the endpoints table so it is visible immediately without waiting for a reconciliation cycle.
+
+**Request body:**
+```json
+{
+  "name": "plc-line-1",
+  "protocol": "modbus",
+  "connection": {
+    "host": "10.0.1.100",
+    "port": 502,
+    "unitId": 1
+  },
+  "poll_interval": 5000,
+  "enabled": true,
+  "data_points": [
+    { "name": "conveyor_speed", "register": "holding:0", "type": "uint16", "scale": 0.1 },
+    { "name": "motor_temp", "register": "holding:1", "type": "int16", "scale": 0.1, "unit": "°C" }
+  ],
+  "metadata": { "location": "Assembly Line 1" }
+}
+```
+
+**Response `201`:**
+```json
+{
+  "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "name": "plc-line-1",
+  "protocol": "modbus",
+  "enabled": true
+}
+```
+
+For MQTT endpoints, if `connection.username` and `connection.password` are provided, the broker auth reconciler automatically creates a password-file entry on the next reconciliation cycle.
+
+---
+
+### `PATCH /v1/endpoints/:uuid`
+
+Enable/disable an endpoint or change its poll interval. Accepts the endpoint UUID or name.
+
+**Request body:**
+```json
+{ "enabled": false, "poll_interval": 10000 }
+```
+
+**Response `200`:**
+```json
+{ "uuid": "a1b2c3d4-...", "name": "plc-line-1", "enabled": false }
+```
+
+---
+
+### `DELETE /v1/endpoints/:uuid`
+
+Remove an endpoint by UUID. Stops polling immediately; the adapter tears down the connection on the next reconciliation cycle.
+
+**Response `200`:**
+```json
+{ "message": "Endpoint removed" }
+```
+
+---
+
+### `DELETE /v1/endpoints`
+
+Remove all endpoints.
+
+**Response `200`:**
+```json
+{ "message": "Removed 4 endpoint(s)", "removed": 4 }
+```
+
+---
+
+### `GET /v1/devices`
+
+List all physical/logical protocol devices discovered or configured. Unlike endpoints (which are configuration), devices represent discovered hardware.
+
+**Query params:** `?protocol=modbus` (optional filter)
+
+**Response `200`:**
+```json
+{ "devices": [ ... ] }
+```
+
+---
+
+## Protocol Adapters — Live State
+
+These endpoints query the running protocol adapter instances for live status. They are read-only and reflect what the adapter observes in real time.
+
+### `GET /v1/adapters/:protocol/devices`
+
+List all device statuses from the named protocol adapter.
+
+**Path params:** `protocol` — e.g., `modbus`, `opcua`, `bacnet`
+
+**Response `200`:**
+```json
+{
+  "devices": [
+    {
+      "deviceName": "plc-line-1",
+      "status": "connected",
+      "connected": true,
+      "lastSeen": "2024-01-15T10:30:00.000Z",
+      "communicationQuality": 98.5
+    }
+  ]
+}
+```
+
+---
+
+### `GET /v1/adapters/:protocol/devices/:deviceName`
+
+Get detailed status for a specific device. For Modbus adapters, returns an enriched status with register-level diagnostics.
+
+**Response `404`** if no adapter is running for that protocol or the device name is unknown.
+
+---
+
+### `GET /v1/adapters/:protocol/devices/:deviceName/metrics`
+
+Get a metrics summary for a specific device (read rates, error rates, poll latency). Only supported by adapters that expose `getDeviceMetricsSummary()`.
+
+**Response `501`** if the adapter does not support this operation.
+
+---
+
+### `GET /v1/adapters/:protocol/metrics`
+
+Get metrics summaries for all devices under a protocol adapter.
+
+**Response `501`** if not supported.
+
+---
+
+### `POST /v1/adapters/modbus/devices/:deviceName/write`
+
+Write a value to a Modbus register.
+
+**Request body:**
+```json
+{
+  "register": "holding:10",
+  "value": 1500
+}
+```
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "deviceName": "plc-line-1",
+  "register": "holding:10",
+  "value": 1500
+}
+```
+
+---
+
+## Data Publishing — Destinations
+
+Publish destinations are upstream brokers or databases that the agent forwards sensor data to.
+
+### `GET /v1/publish/destinations`
+
+List all configured publish destinations.
+
+**Query params:** `?includeDisabled=false` to exclude disabled destinations (default: `true`)
+
+**Response `200`:**
+```json
+{
+  "publishers": [
+    {
+      "id": 1,
+      "name": "Iotistica Cloud",
+      "type": "iotistica",
+      "config_json": null,
+      "enabled": true
+    },
+    {
+      "id": 2,
+      "name": "InfluxDB Local",
+      "type": "influxdb",
+      "config_json": {
+        "url": "http://influxdb:8086",
+        "org": "myorg",
+        "bucket": "sensors",
+        "token": "..."
+      },
+      "enabled": true
+    }
+  ]
+}
+```
+
+---
+
+### `POST /v1/publish/destinations`
+
+Create a new publish destination.
+
+**Request body:**
+```json
+{
+  "name": "InfluxDB Local",
+  "type": "influxdb",
+  "config_json": {
+    "url": "http://influxdb:8086",
+    "org": "myorg",
+    "bucket": "sensors",
+    "token": "your-influx-token"
+  },
+  "enabled": true
+}
+```
+
+Supported `type` values: `iotistica`, `mqtt`, `influxdb`, `azure-iot`, `aws-iot`, `gcp-iot`
+
+**Response `201`:** Created destination object.
+
+---
+
+### `POST /v1/publish/destinations/test`
+
+Test connectivity for a destination configuration without saving it. Useful for validating credentials before creating a destination.
+
+**Request body:**
+```json
+{
+  "type": "influxdb",
+  "config_json": {
+    "url": "http://influxdb:8086",
+    "org": "myorg",
+    "bucket": "sensors",
+    "token": "your-token"
+  }
+}
+```
+
+**Response `200`** (always 200 — `ok` field indicates result):
+```json
+{ "ok": true, "message": "Connected — myorg/sensors" }
+```
+
+```json
+{ "ok": false, "error": "Invalid or missing token" }
+```
+
+Supported `type` values for testing: `influxdb`, `mqtt`
+
+---
+
+### `PATCH /v1/publish/destinations/:id`
+
+Update a destination. Changes take effect immediately — the publish manager reloads all bindings.
+
+**Path params:** `id` (integer)
+
+**Request body:** Any subset of the creation body fields.
+
+**Response `200`:** Updated destination object.
+
+---
+
+### `DELETE /v1/publish/destinations/:id`
+
+Delete a destination. All subscriptions associated with this destination are also removed.
+
+**Response `200`:**
+```json
+{ "deleted": true }
+```
+
+---
+
+## Data Publishing — Subscriptions
+
+Subscriptions bind a set of MQTT topics (sensor data feeds) to a publish destination, with a specific payload format.
+
+### `GET /v1/publish/subscriptions`
+
+List all subscriptions.
+
+**Query params:**
+- `?publish_destination_id=1` — filter by destination
+- `?includeDisabled=false` — exclude disabled subscriptions (default: `true`)
+
+**Response `200`:**
+```json
+{
+  "subscriptions": [
+    {
+      "id": 1,
+      "publish_destination_id": 2,
+      "topics": ["sensors/#"],
+      "payload_format": "custom",
+      "compression": "json",
+      "enabled": true,
+      "route_json": { "topic": "iot/plant1/sensors" }
+    }
+  ]
+}
+```
+
+---
+
+### `POST /v1/publish/subscriptions`
+
+Create a subscription linking one or more source topics to a destination.
+
+**Request body:**
+```json
+{
+  "publish_destination_id": 2,
+  "topics": ["sensors/line-1/#", "sensors/line-2/#"],
+  "payload_format": "custom",
+  "compression": "json",
+  "enabled": true,
+  "route_json": {
+    "topic": "iot/plant1/sensors"
+  }
+}
+```
+
+| Field | Required | Options |
+|---|---|---|
+| `publish_destination_id` | Yes | Integer ID of an existing destination |
+| `topics` | No | MQTT topic filters (wildcards supported) |
+| `payload_format` | No | `custom` (default), `tags`, `ecp` |
+| `compression` | No | `json`, `msgpack`, `json+deflate`, `msgpack+deflate` |
+| `route_json.topic` | Yes (for non-Iotistica destinations) | Target topic on the upstream broker |
+
+**Response `201`:** Created subscription object.
+
+:::tip Payload formats
+- **`custom`** — Full batch envelope with endpoint metadata, msgId, and quality codes. Best for Iotistica and custom consumers.
+- **`tags`** — Flat tag list with Unix-millisecond timestamp. Good for generic MQTT consumers.
+- **`ecp`** — Typed tags with explicit type metadata; omits BAD-quality and null values. Best for typed time-series databases.
+:::
+
+---
+
+### `PATCH /v1/publish/subscriptions/:id`
+
+Update a subscription. Changes take effect immediately.
+
+**Response `200`:** Updated subscription object.
+
+---
+
+### `DELETE /v1/publish/subscriptions/:id`
+
+Delete a subscription.
+
+**Response `200`:**
+```json
+{ "deleted": true }
+```
+
+---
+
+## Protocol Outputs & Schema Drift
+
+Protocol outputs control how each protocol's data is serialized before publishing, including schema drift detection settings.
+
+### `GET /v1/protocol-outputs`
+
+List all protocol output configurations.
+
+**Response `200`:**
+```json
+{
+  "outputs": [
+    {
+      "protocol": "modbus",
+      "payload_format": "custom",
+      "drift_options": {
+        "enabled": true,
+        "windowMs": 300000,
+        "maxFieldCount": 200
+      }
+    }
+  ]
+}
+```
+
+---
+
+### `PATCH /v1/protocol-outputs/:protocol/drift`
+
+Update schema drift detection options for a protocol. Set `drift_options` to `null` to clear drift settings.
+
+**Path params:** `protocol` — e.g., `modbus`, `opcua`
+
+**Request body:**
+```json
+{
+  "drift_options": {
+    "enabled": true,
+    "windowMs": 600000,
+    "maxFieldCount": 500
+  }
+}
+```
+
+**Response `200`:** Updated output object.
+
+---
+
+## Discovery
+
+Device discovery scans the network for industrial devices using protocol-specific probes.
+
+### `POST /v1/discover`
+
+Run an immediate discovery scan. Results are returned in the response and are **not** written to the database.
+
+**Request body:**
+```json
+{
+  "protocols": ["modbus", "opcua"],
+  "validate": true,
+  "forceRun": false,
+  "overrides": {
+    "modbus": { "network": "10.0.1.0/24", "timeout": 2000 }
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `protocols` | Protocols to scan. Omit to scan all configured protocols. |
+| `validate` | Attempt to connect and read data from discovered devices |
+| `forceRun` | Run even if discovery ran recently |
+| `overrides` | Per-protocol option overrides |
+
+**Response `200`:**
+```json
+{
+  "devices": [
+    {
+      "protocol": "modbus",
+      "name": "Modbus Device at 10.0.1.100",
+      "connection": { "host": "10.0.1.100", "port": 502 },
+      "validated": true
+    }
+  ]
+}
+```
+
+---
+
+### `POST /v1/discover/opcua/browse`
+
+Browse an OPC-UA server's address space and return the full node tree. Used by the admin UI tag browser.
+
+**Request body:**
+```json
+{
+  "endpointUrl": "opc.tcp://10.0.1.50:4840",
+  "maxDepth": 5,
+  "securityMode": "None",
+  "securityPolicy": "None",
+  "username": "user",
+  "password": "pass"
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `endpointUrl` | Yes | OPC-UA server endpoint URL |
+| `maxDepth` | No | Max tree depth 1–20 (default: no limit) |
+| `securityMode` | No | `None`, `Sign`, `SignAndEncrypt` |
+| `securityPolicy` | No | `None`, `Basic256Sha256`, etc. |
+| `certificateTrustMode` | No | Certificate trust behavior |
+| `username` / `password` | No | User credentials if the server requires auth |
+
+**Response `200`:**
+```json
+{
+  "endpointUrl": "opc.tcp://10.0.1.50:4840",
+  "nodes": [ ... ]
+}
+```
+
+---
+
+### `GET /v1/discovery-rules`
+
+List all scheduled discovery rules.
+
+**Response `200`:**
+```json
+{
+  "rules": [
+    {
+      "uuid": "abc123",
+      "name": "Modbus Network Scan",
+      "protocol": "modbus",
+      "interval_seconds": 3600,
+      "enabled": true,
+      "auto_enable": false,
+      "params_json": { "network": "10.0.1.0/24" },
+      "target_json": null
+    }
+  ]
+}
+```
+
+---
+
+### `POST /v1/discovery-rules`
+
+Create a new scheduled discovery rule.
+
+**Request body:**
+```json
+{
+  "name": "Modbus Network Scan",
+  "protocol": "modbus",
+  "interval_seconds": 3600,
+  "enabled": true,
+  "auto_enable": false,
+  "params_json": {
+    "network": "10.0.1.0/24",
+    "timeout": 2000
+  },
+  "target_json": null
+}
+```
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `name` | Yes | — | Rule display name |
+| `protocol` | Yes | — | Protocol to scan |
+| `interval_seconds` | No | `3600` | How often to run (seconds) |
+| `enabled` | No | `true` | Whether the rule runs on schedule |
+| `auto_enable` | No | `false` | Automatically enable discovered endpoints |
+| `params_json` | No | `null` | Protocol-specific scan parameters |
+| `target_json` | No | `null` | Target state template for auto-created endpoints |
+
+**Response `201`:** Created rule object with `uuid`.
+
+---
+
+### `PATCH /v1/discovery-rules/:uuid`
+
+Update a discovery rule.
+
+**Response `200`:** Updated rule object.
+
+---
+
+### `DELETE /v1/discovery-rules/:uuid`
+
+Delete a discovery rule and its run history.
+
+**Response `204`** (no body)
+
+---
+
+### `POST /v1/discovery-rules/:uuid/run`
+
+Trigger a discovery rule immediately, outside its normal schedule.
+
+**Response `200`:** Discovery run result with discovered devices.
+
+---
+
+### `GET /v1/discovery-rules/:uuid/runs`
+
+Get the run history for a specific rule.
+
+**Query params:** `?limit=50` (default `50`)
+
+**Response `200`:**
+```json
+{ "runs": [ { "uuid": "...", "started_at": "...", "status": "success", "devices_found": 3 } ] }
+```
+
+---
+
+### `GET /v1/discovery-runs`
+
+List recent discovery runs across all rules.
+
+**Query params:** `?limit=20` (default `20`)
+
+**Response `200`:**
+```json
+{ "runs": [ ... ] }
+```
+
+---
+
+## Anomaly Detection
+
+### `GET /v1/anomaly/metrics`
+
+List all metric names available for anomaly rule configuration. Merges three sources: metrics observed in live data (from SQLite catalog), always-on system metrics, and data-point names from configured endpoints.
+
+**Response `200`:**
+```json
+{
+  "metrics": [
+    { "name": "cpu_usage", "source": "system", "score": 0.12, "configured": true },
+    { "name": "conveyor_speed", "source": "live", "score": 0.05, "endpointName": "plc-line-1", "configured": false },
+    { "name": "motor_temp", "source": "endpoint", "endpointName": "plc-line-1", "configured": false }
+  ]
+}
+```
+
+| `source` | Meaning |
+|---|---|
+| `live` | Seen in live telemetry data since agent started |
+| `system` | Built-in system metric (`cpu_usage`, `memory_percent`, `cpu_temp`, `disk_usage`) |
+| `endpoint` | Data-point name from a configured endpoint, not yet seen in live data |
+
+---
+
+### `GET /v1/anomaly/config`
+
+Get the current anomaly detection configuration.
+
+**Response `200`:**
+```json
+{
+  "config": {
+    "enabled": true,
+    "metrics": [
+      {
+        "name": "cpu_usage",
+        "threshold": 0.8,
+        "sensitivity": "medium",
+        "windowSize": 100
+      }
+    ]
+  }
+}
+```
+
+---
+
+### `PATCH /v1/anomaly/config`
+
+Hot-reload anomaly configuration without restarting the agent. The merged config is also persisted to SQLite so it survives restarts in standalone mode. When the agent is provisioned, the cloud target state takes precedence on the next reconciliation cycle.
+
+**Request body:** Partial config object — only provided fields are merged.
+
+```json
+{
+  "enabled": true,
+  "metrics": [
+    {
+      "name": "conveyor_speed",
+      "threshold": 0.75,
+      "sensitivity": "high"
+    }
+  ]
+}
+```
+
+**Response `200`:** Full merged config object.
+
+---
+
+### `GET /v1/anomaly/alerts`
+
+List in-memory anomaly alerts. Alerts are held in memory and reset on agent restart.
+
+**Query params:**
+
+| Param | Description |
+|---|---|
+| `since` | Unix timestamp (ms) — return only alerts after this time |
+| `severity` | Filter by `critical`, `warning`, or `info` |
+| `metric` | Filter by metric name |
+| `limit` | Maximum alerts to return (default `200`, max `500`) |
+
+**Response `200`:**
+```json
+{
+  "alerts": [
+    {
+      "id": "...",
+      "metric": "conveyor_speed",
+      "value": 245.5,
+      "threshold": 200.0,
+      "severity": "warning",
+      "timestamp": 1705312200000,
+      "anomaly_score": 0.89
+    }
+  ],
+  "total": 1
+}
+```
+
+---
+
+### `DELETE /v1/anomaly/alerts`
+
+Clear all in-memory anomaly alerts.
+
+**Response `200`:**
+```json
+{ "cleared": true }
+```
+
+---
+
+### `GET /v1/anomaly/stats`
+
+Get anomaly detection statistics, live per-metric anomaly scores, and next-value predictions.
+
+**Response `200`:**
+```json
+{
+  "stats": {
+    "totalDataPoints": 150000,
+    "totalAnomalies": 23,
+    "trackedMetrics": 8
+  },
+  "scores": {
+    "cpu_usage": 0.12,
+    "conveyor_speed": 0.89
+  },
+  "predictions": {
+    "cpu_usage": { "nextValue": 34.2, "confidence": 0.91 }
+  }
+}
+```
+
+---
+
+### `GET /v1/anomaly/baselines`
+
+Query persisted baseline statistics from SQLite. Baselines are statistical summaries (mean, std dev, median, MAD) computed over sliding windows.
+
+**Query params:** `?metric=cpu_usage&limit=100` (limit max `500`, default `100`)
+
+**Response `200`:**
+```json
+{
+  "baselines": [
+    {
+      "metric": "cpu_usage",
+      "device_id": null,
+      "time_slot": "10",
+      "mean": 32.5,
+      "std_dev": 4.2,
+      "median": 31.8,
+      "mad": 3.1,
+      "sample_count": 2880,
+      "calculated_at": "2024-01-15T06:00:00.000Z"
+    }
+  ],
+  "total": 1
+}
+```
+
+---
+
+### `POST /v1/anomaly/save-baselines`
+
+Manually trigger a baseline computation and save to SQLite. Normally baselines are saved on a schedule; use this to force an immediate save.
+
+**Response `200`:**
+```json
+{ "message": "Baseline save triggered", "stats": { ... } }
+```
+
+---
+
+### `POST /v1/test/anomaly`
+
+Inject synthetic data points into the anomaly detector to test alert thresholds without real sensor data. For development and validation only.
+
+**Request body:**
+```json
+{
+  "metric": "conveyor_speed",
+  "value": 350,
+  "count": 5
+}
+```
+
+**Response `200`:**
+```json
+{
+  "message": "Injected 5 test data point(s)",
+  "injectedPoints": [ ... ],
+  "currentStats": { ... },
+  "recentAlerts": [ ... ]
+}
+```
+
+---
+
+## Logs
+
+### `GET /v1/logs`
+
+Retrieve in-memory agent logs from the local log backend.
+
+**Query params:**
+
+| Param | Description |
+|---|---|
+| `level` | Filter by `debug`, `info`, `warn`, or `error` |
+| `source` | Filter by source type: `system`, `container`, `manager` |
+| `since` | Unix timestamp (ms) — return only logs after this time |
+| `limit` | Maximum entries to return (default `200`, max `1000`) |
+
+**Response `200`:**
+```json
+{
+  "logs": [
+    {
+      "level": "info",
+      "message": "Container started",
+      "timestamp": 1705312200000,
+      "component": "container-manager",
+      "appId": 1
+    }
+  ],
+  "total": 4821
+}
+```
+
+---
+
+## Settings
+
+Settings are the user-editable subset of the agent configuration. They exclude internal-only fields like `endpoints` and `apps`.
+
+### `GET /v1/settings`
+
+Get current agent settings plus read-only agent identity.
+
+**Response `200`:**
+```json
+{
+  "settings": {
+    "logging": { "level": "info", "cloudEnabled": true },
+    "features": { "anomalyDetection": true, "discovery": true },
+    "intervals": { "stateReportMs": 10000, "statePollMs": 60000 },
+    "runtime": { "maxMemoryMb": 512 },
+    "anomalyDetection": { "enabled": true, "metrics": [] },
+    "agent": {
+      "uuid": "7f3e9a1b-...",
+      "name": "factory-sensor-01",
+      "version": "1.0.508",
+      "provisioned": true,
+      "apiEndpoint": "https://api.iotistica.io",
+      "mqttBrokerUrl": "mqtts://mqtt.iotistica.io:8883"
+    }
+  }
+}
+```
+
+---
+
+### `PATCH /v1/settings`
+
+Merge a partial settings object. Only the keys `logging`, `features`, `intervals`, `runtime`, and `anomalyDetection` are accepted — all other keys are silently ignored. Changes are persisted to target state and trigger reconciliation.
+
+**Request body:**
+```json
+{
+  "logging": { "level": "debug" },
+  "intervals": { "stateReportMs": 30000 }
+}
+```
+
+**Response `200`:** Full settings object after merge.
+
+---
+
+## Docker Configuration
+
+### `GET /v1/docker/config`
+
+Read the current Docker daemon connection configuration.
+
+**Response `200`:**
+```json
+{ "type": "socket", "socketPath": "/var/run/docker.sock" }
+```
+
+---
+
+### `POST /v1/docker/config`
+
+Save a new Docker daemon configuration and reconnect immediately.
+
+**Request body:**
+```json
+{
+  "type": "tcp",
+  "host": "10.0.1.1",
+  "port": 2375
+}
+```
+
+| `type` | Fields |
+|---|---|
+| `socket` | `socketPath` (default `/var/run/docker.sock`) |
+| `tcp` | `host`, `port` (default `2375`) |
+| `tcp+tls` | `host`, `port` (default `2376`), `ca`, `cert`, `key` (PEM strings) |
+
+**Response `200`:**
+```json
+{ "ok": true }
+```
+
+---
+
+### `POST /v1/docker/test`
+
+Test a Docker connection configuration without saving it.
+
+**Request body:** Same as `POST /v1/docker/config`.
+
+**Response `200`:**
+```json
+{ "version": "24.0.5", "containers": 3 }
+```
+
+---
+
+## VPN — Tailscale
+
+### `POST /v1/vpn/tailscale/connect`
+
+Connect the agent to a Tailscale network.
+
+**Request body:**
+```json
+{
+  "authKey": "tskey-auth-...",
+  "tailnetName": "mycompany.ts.net",
+  "hostname": "factory-sensor-01",
+  "shieldsUp": true,
+  "acceptRoutes": false,
+  "acceptDNS": false
+}
+```
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `authKey` | Yes | — | Tailscale auth key |
+| `tailnetName` | Yes | — | Tailnet name |
+| `hostname` | No | Device hostname | Node hostname in the tailnet |
+| `shieldsUp` | No | `true` | Block all inbound connections |
+| `acceptRoutes` | No | `false` | Accept subnet routes |
+| `acceptDNS` | No | `false` | Use Tailscale DNS |
+
+**Response `200`:**
+```json
+{
+  "success": true,
+  "status": {
+    "connected": true,
+    "tailnetIP": "100.64.0.1",
+    "hostname": "factory-sensor-01"
+  }
+}
+```
+
+---
+
+### `POST /v1/vpn/tailscale/disconnect`
+
+Disconnect from Tailscale.
+
+**Response `200`:**
+```json
+{ "success": true }
+```
+
+---
+
+### `GET /v1/vpn/tailscale/status`
+
+Get current Tailscale connection status.
+
+---
+
+### `GET /v1/vpn/tailscale/ip`
+
+Get the device's Tailscale IP address.
+
+**Response `200`:**
+```json
+{ "ip": "100.64.0.1" }
+```
+
+---
+
+### `POST /v1/vpn/tailscale/ping`
+
+Ping another Tailscale node to test connectivity.
+
+**Request body:**
+```json
+{ "hostname": "other-device", "count": 3 }
+```
+
+**Response `200`:**
+```json
+{ "success": true, "hostname": "other-device" }
+```
+
+---
+
+## Agent Control
+
+### `POST /v1/reboot`
+
+Restart agent services (soft restart — keeps the API running). Returns immediately; the restart happens asynchronously.
+
+Only allowed when `state === "RUNNING"`.
+
+**Response `202`:**
+```json
+{ "Data": "Agent services restarting", "Error": null, "state": "RUNNING" }
+```
+
+**Response `409`** (wrong lifecycle state):
+```json
+{
+  "error": "Restart not allowed in current lifecycle state",
+  "state": "INITIALIZING",
+  "hint": "Wait for RUNNING state before requesting restart"
+}
+```
+
+---
+
+### `POST /v1/shutdown`
+
+Schedule a device shutdown. Returns immediately.
+
+**Response `202`:**
+```json
+{ "Data": "Shutdown scheduled", "Error": null }
+```
+
+---
+
+### `POST /v1/update`
+
+Trigger an OTA agent self-update.
+
+**Request body:**
+```json
+{ "version": "1.0.600", "force": false }
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `version` | Yes | Target version string or `"latest"` |
+| `force` | No | Skip same-version guard |
+
+**Response `202`:**
+```json
+{ "status": "update_triggered", "version": "1.0.600" }
+```
+
+**Response `503`** if the agent updater is not available.
+
+---
+
+### `POST /v1/sync/pull`
+
+Force an immediate target-state pull from the cloud API, bypassing the 60-second poll interval.
+
+**Response `200`:** Result of the pull operation. Returns an error object if not provisioned.
+
+---
+
+## System Diagnostics
+
+### `GET /v1/dashboard/stats`
+
+Snapshot of host system metrics used by the admin UI dashboard.
+
+**Response `200`:**
+```json
+{
+  "cpu_usage": 34.2,
+  "memory_percent": 52.1,
+  "memory_used": 1073741824,
+  "memory_total": 2147483648,
+  "storage_percent": 23.5,
+  "storage_used": 5368709120,
+  "storage_total": 21474836480,
+  "uptime": 86400,
+  "hostname": "factory-node-01",
+  "network": {
+    "rx_bytes_per_sec": 1024,
+    "tx_bytes_per_sec": 512
+  }
+}
+```
+
+---
+
+### `GET /v1/memory`
+
+Get agent process memory diagnostics and leak detection status.
+
+**Response `200`:**
+```json
+{
+  "diagnostics": {
+    "heapUsed": 52428800,
+    "heapTotal": 104857600,
+    "external": 1048576,
+    "rss": 157286400,
+    "leakSuspected": false,
+    "consecutiveGrowthCount": 0
+  },
+  "restartPolicy": {
+    "enabled": true,
+    "thresholdMb": 512,
+    "criticalThresholdMb": 768
+  }
+}
+```
+
+---
+
+### `GET /v1/db/stats`
+
+Get SQLite database file stats and table inventory.
+
+**Response `200`:**
+```json
+{
+  "path": "/data/agent.sqlite",
+  "exists": true,
+  "sizeBytes": 5242880,
+  "sizeMb": 5,
+  "tableCount": 18,
+  "tables": ["agents", "apps", "endpoints", "anomaly_baselines", "message_buffer", ...]
+}
+```
+
+---
+
+## Authentication — Admin UI
+
+These endpoints manage the admin UI session. The session is separate from the API key auth and scoped to the admin panel only.
+
+### `POST /v1/auth/login`
+
+Log in to the admin UI.
+
+**Request body:**
+```json
+{ "username": "admin", "password": "your-password" }
+```
+
+**Response `200`** (sets `admin_session` cookie):
+```json
+{ "username": "admin", "is_superuser": true }
+```
+
+The session cookie is `HttpOnly; SameSite=Strict; Max-Age=86400` (24 hours).
+
+---
+
+### `POST /v1/auth/logout`
+
+Log out and invalidate the current session.
+
+**Response `200`:**
+```json
+{ "ok": true }
+```
+
+---
+
+### `GET /v1/auth/me`
+
+Get the currently authenticated admin user.
+
+**Response `200`:**
+```json
+{ "username": "admin", "is_superuser": true }
+```
+
+**Response `401`** if not authenticated or session expired.
+
+---
+
+## User Management
+
+All `/v1/admin/*` endpoints require an active admin session (set via `POST /v1/auth/login`).
+
+### `GET /v1/admin/users`
+
+List all admin users.
+
+**Response `200`:**
+```json
+{
+  "users": [
+    { "username": "admin", "is_active": true, "is_superuser": true }
+  ]
+}
+```
+
+---
+
+### `POST /v1/admin/users`
+
+Create a new admin user.
+
+**Request body:**
+```json
+{
+  "username": "operator1",
+  "password": "secure-password-min-6-chars",
+  "is_superuser": false
+}
+```
+
+**Response `201`:** Created user object (no password hash).
+
+**Response `409`** if the username already exists.
+
+---
+
+### `PATCH /v1/admin/users/:username`
+
+Update an admin user's status, role, or password.
+
+**Request body (all fields optional):**
+```json
+{
+  "is_active": true,
+  "is_superuser": false,
+  "password": "new-password"
+}
+```
+
+Password must be at least 6 characters.
+
+**Response `200`:** Updated user object.
+
+---
+
+### `DELETE /v1/admin/users/:username`
+
+Delete an admin user.
+
+**Response `200`:**
+```json
+{ "ok": true }
+```
+
+---
+
+## Simulation (Development)
+
+Simulation endpoints are only available when `SIMULATION_MODE=true`. They inject synthetic sensor data into the agent for testing anomaly detection, alert rules, and data publishing without physical hardware.
+
+### `GET /v1/simulation/status`
+
+Get simulation orchestrator status. Returns `404` if simulation mode is not enabled.
+
+---
+
+### `POST /v1/simulation/scenarios/:scenario/start`
+
+Start a named simulation scenario.
+
+**Response `200`:**
+```json
+{ "message": "Scenario factory-fault started", "status": { ... } }
+```
+
+---
+
+### `POST /v1/simulation/scenarios/:scenario/stop`
+
+Stop a named simulation scenario.
+
+---
+
+### `POST /v1/simulation/stop-all`
+
+Stop all running simulation scenarios.
+
+---
+
+## Related Docs
+
+- [Security](../agent/security.mdx) — API authentication, firewall rules, and the remote shell
+- [Data Publishing](../agent/data-publishing.mdx) — payload formats, offline buffering, and compression
+- [Cloud Sync](../agent/cloud-sync.mdx) — provisioning, target state polling, and state reporting
+- [Endpoints](../agent/endpoints.mdx) — configuring protocol endpoints via the admin UI
