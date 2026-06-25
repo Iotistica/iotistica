@@ -103,7 +103,14 @@ const config: Config = {
       ],
     },
     footer: {
-      style: 'light',
+      style: 'dark',
+      logo: {
+        alt: 'Iotistica',
+        src: 'img/logo-256.png',
+        href: 'https://iotistica.com',
+        width: 36,
+        height: 36,
+      },
       links: [
         {
           title: 'Docs',
@@ -145,7 +152,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Iotistica.`,
+      copyright: `Copyright © ${new Date().getFullYear()} <span class="footer-brand">Iotistica</span>.`,
     },
     prism: {
       theme: prismThemes.github,

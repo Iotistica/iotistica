@@ -12,7 +12,7 @@
   --ifm-navbar-background-color: rgba(10, 10, 10, 0.97);
   --ifm-navbar-link-color: #d1d5db;
   --ifm-navbar-link-hover-color: #ffffff;
-  --ifm-footer-background-color: #f1f6f4;
+  --ifm-footer-background-color: rgba(10, 10, 10, 0.97);
   --ifm-font-family-base: 'IBM Plex Sans', 'Segoe UI', Tahoma, sans-serif;
   --ifm-heading-font-family: 'IBM Plex Sans', 'Segoe UI', Tahoma, sans-serif;
   --ifm-code-font-size: 92%;
@@ -82,7 +82,6 @@
   --ifm-color-primary-lightest: #70dfd2;
   --ifm-background-color: #0f1418;
   --ifm-navbar-background-color: #131a20;
-  --ifm-footer-background-color: #131a20;
   --ifm-font-color-base: #d7e0e5;
   --ifm-heading-color: #f2f7f9;
   --ifm-link-color: #76e8dc;
@@ -107,6 +106,25 @@
 
 [data-theme='dark'] .pagination-nav__link {
   border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.footer--dark {
+  background-color: rgba(10, 10, 10, 0.97);
+}
+
+.footer--dark .footer__logo {
+  margin-bottom: 0.5rem;
+}
+
+.footer--dark .footer__copyright {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.85rem;
+}
+
+.footer--dark .footer__copyright .footer-brand {
+  color: #ffffff;
+  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }
 
 .navbar-contact-btn {
