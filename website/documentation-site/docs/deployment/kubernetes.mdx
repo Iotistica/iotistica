@@ -5,7 +5,7 @@ sidebar_position: 2
 
 # Kubernetes Deployment
 
-The Iotistica cloud platform ships as a single Helm chart (`charts/iotistica`) that deploys every service needed to run the platform: the Cloud API, ingestion pipeline, MQTT broker, Redis, and optional dashboard and Node-RED instances.
+The Iotistica cloud platform ships as a single Helm chart (`charts/iotistica`) that deploys every service needed to run the platform: the Cloud API, ingestion pipeline, MQTT broker, and Redis.
 
 ## Services
 
@@ -13,10 +13,8 @@ The Iotistica cloud platform ships as a single Helm chart (`charts/iotistica`) t
 |---------|-------|------|---------|
 | `api` | `iotistic/api` | 3002 | REST + MQTT subscription, auth, device state |
 | `ingestion` | `iotistic/ingestion` | 3003 | Redis Streams consumer → TimescaleDB writer |
-| `mosquitto` | `iegomez/mosquitto-go-auth` | 1883 / 8883 / 9001 | MQTT broker with HTTP auth callback |
+| `mosquitto` | `iegomez/mosquitto-go-auth` | 1883 / 8883 / 9002 | MQTT broker with HTTP auth callback |
 | `redis` | `redis:7-alpine` | 6379 | Streams, pub/sub, cache, dedup |
-| `dashboard` | `iotistic/dashboard` | 80 | Web UI |
-| `nodered` *(optional)* | `iotistic/nodered` | configurable | Low-code automation |
 
 Networking is handled by Envoy Gateway via `HTTPRoute` (HTTP) and `TLSRoute` (MQTT). TLS certificates are issued by cert-manager.
 
@@ -143,7 +141,7 @@ Default values. Single replica, minimal resources. Suitable for development and 
 The API service does two things simultaneously:
 
 1. **Maintains a persistent MQTT subscription** to the broker and routes incoming agent messages (telemetry, state, events, jobs) to Redis Streams and TimescaleDB.
-2. **Serves the REST API** for the dashboard and agent provisioning.
+2. **Serves the REST API** for agent provisioning, fleet management, and data access.
 
 Key environment variables (set via `api.env` in values or per-tier override):
 
@@ -160,7 +158,6 @@ Key environment variables (set via `api.env` in values or per-tier override):
 | `DISK_SPOOL_ENABLED` | `true` | Local buffer on broker loss |
 | `DISK_SPOOL_MAX_SIZE_MB` | `1000` | |
 | `AI_PROVIDER` | `openai` | Used for anomaly summaries |
-| `CORS_ORIGINS` | `https://demo.iotistica.com,...` | Comma-separated allowed origins |
 
 **Probes:**
 
@@ -229,7 +226,7 @@ Uses `iegomez/mosquitto-go-auth`, which adds an HTTP authentication backend plug
 |----------|------|----------|
 | Plain MQTT | 1883 | TCP |
 | TLS MQTT | 8883 | TLS (cert-manager certificate) |
-| WebSocket | 9001 | WS |
+| WebSocket (WSS) | 9002 | WSS |
 
 Authentication is an HTTP callback to the Cloud API:
 
@@ -262,26 +259,6 @@ Single-instance Redis (or cluster for enterprise). Used for:
 :::caution No persistence
 Redis is intentionally configured without RDB snapshots or AOF. All durable state lives in TimescaleDB. On Redis restart, the ingestion stream and dedup keys are lost — this is expected and acceptable.
 :::
-
----
-
-### Dashboard (`dashboard`)
-
-A static Vue 3 SPA served by Nginx. Runtime configuration is injected via a ConfigMap mounted as `config.js`:
-
-```js
-window.env = {
-  VITE_API_URL: 'https://demo-api.iotistica.com',
-  VITE_AUTH0_DOMAIN: 'auth.iotistica.com',
-  VITE_AUTH0_CLIENT_ID: '...',
-  VITE_AUTH0_AUDIENCE: 'https://api.iotistica.com',
-  VITE_AUTH0_CALLBACK_URL: 'https://demo.iotistica.com/auth/callback',
-  VITE_PROVISIONING_API_URL: 'https://api.iotistica.com/provisioning',
-  APP_VERSION: 'v0.0.22-rc.1'
-}
-```
-
-Update `dashboard.config.*` in values to override these per environment.
 
 ---
 
