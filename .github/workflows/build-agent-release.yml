@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
@@ -34,7 +34,7 @@ jobs:
           echo "base_commit=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       - name: Azure login
-        uses: azure/login@v2
+        uses: azure/login@1384c340ab2dda50fed2bee3041d1d87018aa5e8 # v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 

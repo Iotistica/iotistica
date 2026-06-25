@@ -71,7 +71,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Free disk space on GitHub-hosted runner
         run: |
@@ -102,7 +102,7 @@ jobs:
       # restore-keys fall back to the most recent matching entry.
       - name: Restore downloads cache (DL_DIR)
         id: dl-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.DL_DIR }}
           key: yocto-dl-${{ runner.os }}-${{ env.YOCTO_VERSION }}-${{ env.MACHINE }}-${{ github.run_id }}
@@ -223,7 +223,7 @@ jobs:
         run: bash .github/workflows/scripts/package-artifacts.sh "$BUILD_DIR" "${{ github.workspace }}" "$MACHINE" "$YOCTO_VERSION" "${{ steps.version.outputs.agent_version }}"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: yocto-image-${{ env.MACHINE }}-${{ steps.version.outputs.agent_version }}
           path: yocto-artifacts/

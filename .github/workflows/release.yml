@@ -54,7 +54,7 @@ jobs:
       release_version: ${{ steps.set_version.outputs.release_version }}
     steps:
       - name: Checkout repository (full)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -214,7 +214,7 @@ jobs:
     if: needs.prepare.result == 'success'
     steps:
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
@@ -296,7 +296,7 @@ jobs:
           done
 
       - name: Checkout (for changelog + deploy)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
@@ -312,7 +312,7 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v1
         with:
           tag_name: ${{ needs.prepare.outputs.release_version }}
           name: Release ${{ needs.prepare.outputs.release_version }}
@@ -324,7 +324,7 @@ jobs:
 
       - name: Checkout iot-k8s repository
         if: github.event.inputs.deploy == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: Iotistica/iot-k8s
           ref: main
