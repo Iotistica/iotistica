@@ -15,7 +15,6 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 const sidebars: SidebarsConfig = {
   docsSidebar: [
     'intro',
-    'releases',
     {
       type: 'category',
       label: 'Agent',
@@ -59,6 +58,11 @@ const sidebars: SidebarsConfig = {
           ],
         },
       ],
+    },
+    {
+      type: 'category',
+      label: 'Appendix',
+      items: ['releases'],
     },
   ],
 };
