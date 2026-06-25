@@ -1,0 +1,316 @@
+---
+sidebar_label: Cloud API
+sidebar_position: 3
+---
+
+# Cloud API
+
+The Cloud API is a Fastify (Node.js) service that does two things simultaneously:
+
+1. **Maintains a persistent MQTT subscription** to Mosquitto, routes incoming agent telemetry into Redis Streams and TimescaleDB, and dispatches desired-state and job commands to agents.
+2. **Serves the REST API** for the dashboard, agent provisioning, fleet management, and all data access.
+
+All REST routes are prefixed with `/api/v1`.
+
+---
+
+## Authentication
+
+### Local JWT (default)
+
+```
+POST /api/v1/auth/login
+  Body: { "username": "...", "password": "..." }
+  Response: { "accessToken": "...", "refreshToken": "..." }
+```
+
+Include the access token in subsequent requests:
+```
+Authorization: Bearer <accessToken>
+```
+
+Access tokens expire after `JWT_ACCESS_TOKEN_EXPIRY` (default: 15 minutes). Refresh tokens expire after `JWT_REFRESH_TOKEN_EXPIRY` (default: 7 days).
+
+```
+POST /api/v1/auth/refresh
+  Body: { "refreshToken": "..." }
+  Response: { "accessToken": "..." }
+```
+
+### Auth0 (optional)
+
+When `AUTH0_ENABLED=true`, the API accepts Auth0 JWTs in addition to local tokens. Exchange an Auth0 access token for a local session:
+
+```
+POST /api/v1/auth/auth0-exchange
+  Authorization: Bearer <auth0-access-token>
+  Response: { "accessToken": "...", "refreshToken": "..." }
+```
+
+Auth0 configuration: `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `AUTH0_ISSUER`.
+
+### API Keys
+
+Long-lived API keys for programmatic access (CI/CD, integrations):
+
+```
+GET    /api/v1/api-keys       — list keys (hashed, plaintext not returned)
+POST   /api/v1/api-keys       — create key (plaintext returned once)
+DELETE /api/v1/api-keys/:id   — revoke key
+```
+
+Pass an API key as a Bearer token in the `Authorization` header.
+
+---
+
+## Endpoints
+
+### Auth & Users
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/auth/register` | Create a new dashboard user |
+| `POST` | `/auth/login` | Obtain access + refresh tokens |
+| `POST` | `/auth/auth0-exchange` | Exchange Auth0 token for local session |
+| `POST` | `/auth/bootstrap-admin` | Create the first admin (one-time, locked after use) |
+| `POST` | `/auth/refresh` | Refresh an expired access token |
+| `POST` | `/auth/logout` | Revoke refresh token |
+| `POST` | `/auth/change-password` | Change own password |
+| `POST` | `/auth/reset-password` | Admin-triggered password reset |
+| `GET` | `/auth/me` | Current user profile |
+| `GET` | `/users` | List all users (admin) |
+| `GET` | `/users/:id` | Get user by ID |
+| `POST` | `/users` | Create user (admin) |
+| `PUT` | `/users/:id` | Update user (admin) |
+| `DELETE` | `/users/:id` | Delete user (admin) |
+| `GET` | `/invites` | List pending invites |
+| `POST` | `/invites` | Send invite email |
+| `POST` | `/invites/accept` | Accept invite and set password |
+| `DELETE` | `/invites/:id` | Cancel invite |
+
+### MQTT Users & ACLs
+
+See [MQTT Broker — Managing Users via API](./mqtt#managing-users-via-api) for the full MQTT user management endpoint list.
+
+### Agent Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/agents` | List all agents with status |
+| `GET` | `/agents/:uuid` | Get agent by UUID |
+| `POST` | `/agents` | Register a new agent record |
+| `PATCH` | `/agents/:uuid` | Update agent metadata |
+| `PATCH` | `/agents/:uuid/active` | Enable / disable agent |
+| `DELETE` | `/agents/:uuid` | Remove agent |
+| `GET` | `/agents/:uuid/current-state` | Live reported state from agent |
+| `GET` | `/agents/:uuid/target-state` | Cloud desired state |
+| `POST` | `/agents/:uuid/target-state` | Push new desired state |
+| `GET` | `/agents/:uuid/metrics` | Latest system metrics (CPU, memory, storage) |
+| `GET` | `/agents/:uuid/logs` | Agent and service logs |
+| `GET` | `/agents/:uuid/devices` | Registered protocol devices on this agent |
+| `POST` | `/agents/:uuid/devices` | Add a protocol device |
+| `PUT` | `/agents/:uuid/devices/:name` | Update device config |
+| `DELETE` | `/agents/:uuid/devices/:name` | Remove device |
+| `GET` | `/agents/:uuid/tags` | Agent tags |
+| `POST` | `/agents/:uuid/tags` | Set tags |
+| `GET` | `/agents/locations` | Agent map locations |
+| `POST` | `/agents/query` | Query agents by tag filter |
+
+### Jobs
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/jobs/templates` | List job templates |
+| `POST` | `/jobs/templates` | Create template |
+| `PUT` | `/jobs/templates/:id` | Update template |
+| `DELETE` | `/jobs/templates/:id` | Delete template |
+| `GET` | `/jobs/executions` | List job executions |
+| `GET` | `/jobs/executions/:jobId` | Get execution detail |
+| `POST` | `/jobs/execute` | Dispatch a job immediately |
+| `POST` | `/jobs/executions/:jobId/cancel` | Cancel a running job |
+| `POST` | `/agents/:uuid/jobs` | Queue a job for an agent |
+| `GET` | `/agents/:uuid/jobs/next` | Agent polls for its next pending job |
+| `PATCH` | `/agents/:uuid/jobs/:jobId/status` | Agent reports job status |
+
+### Provisioning
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/provisioning/keys` | List provisioning keys |
+| `POST` | `/provisioning/keys` | Create a provisioning key |
+| `POST` | `/provisioning/keys/generate` | Generate a one-time key |
+| `DELETE` | `/provisioning/keys/:id` | Revoke a key |
+| `POST` | `/provisioning/register` | Agent self-registration (uses provisioning key) |
+
+### Telemetry & Readings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/readings/latest` | Latest value per metric per agent |
+| `GET` | `/readings/catalog` | Metric catalog (distinct metric names + metadata) |
+| `GET` | `/readings/hourly` | Hourly aggregates |
+| `GET` | `/readings/daily` | Daily aggregates |
+| `POST` | `/readings/query` | Flexible time-range query with filters |
+
+### Anomaly Detection
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/anomaly/summary` | Fleet-wide anomaly summary |
+| `GET` | `/anomaly/hourly` | Hourly anomaly counts |
+| `GET` | `/anomaly/daily` | Daily anomaly counts |
+| `GET` | `/anomaly/top-metrics` | Most anomalous metrics |
+| `GET` | `/anomaly-alerts` | Active anomaly alerts |
+| `GET` | `/anomaly-incidents` | Anomaly incidents |
+| `PATCH` | `/anomaly-incidents/:incidentId/resolve` | Resolve an incident |
+
+### Fleets
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/fleets` | List fleets |
+| `POST` | `/fleets` | Create fleet |
+| `PATCH` | `/fleets/:id` | Update fleet |
+| `DELETE` | `/fleets/:id` | Delete fleet |
+| `POST` | `/fleets/:id/start` | Start fleet |
+| `POST` | `/fleets/:id/stop` | Stop fleet |
+| `GET` | `/fleets/:id/usage-events` | Fleet usage timeline |
+
+### MQTT Broker Monitoring
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/broker/status` | Broker connection status |
+| `GET` | `/broker/metrics` | Live message rates, throughput |
+| `GET` | `/broker/stats` | Accumulated broker statistics |
+| `GET` | `/broker/topics` | Active topic tree |
+| `GET` | `/broker/topics/:topic/schema` | Inferred JSON schema for a topic |
+| `GET` | `/broker/system-stats` | `$SYS` broker statistics |
+| `GET` | `/broker/dashboard` | Aggregated broker dashboard data |
+
+### Events & Audit
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/events/recent` | Recent audit events |
+| `GET` | `/events/search` | Search events by filters |
+| `GET` | `/events/stats` | Event volume statistics |
+| `GET` | `/events/device/:deviceUuid` | Events for a specific device |
+| `GET` | `/events/device/:deviceUuid/timeline` | Chronological event timeline |
+| `POST` | `/events/device/:deviceUuid/compare` | Compare two event snapshots |
+| `POST` | `/events/device/:deviceUuid/replay` | Replay events into a target state |
+
+### Dashboard
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/dashboard-layouts/:deviceUuid` | Default layout for a device |
+| `GET` | `/dashboard-layouts/:deviceUuid/all` | All layouts for a device |
+| `POST` | `/dashboard-layouts/:deviceUuid` | Create a layout |
+| `PUT` | `/dashboard-layouts/:layoutId` | Update a layout |
+| `DELETE` | `/dashboard-layouts/:layoutId` | Delete a layout |
+| `POST` | `/ai/chat` | AI chat for device/fleet analysis |
+
+### License
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/license` | Current license info and feature flags |
+| `POST` | `/billing/refresh-license` | Re-validate license key |
+
+### Health
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | None | `{ status, uptime, db, redis, mqtt }` |
+| `GET` | `/metrics` | None | Prometheus scrape endpoint |
+| `GET` | `/metrics/ingestion-health` | JWT | Ingestion stream lag and spool status |
+
+---
+
+## MQTT Resilience
+
+The Cloud API maintains a single persistent MQTT connection to Mosquitto. All agent telemetry flows through this subscription into the processing pipeline.
+
+### Reconnect with Exponential Backoff
+
+When the broker connection drops, the API schedules reconnects with exponential backoff:
+
+| Attempt | Delay |
+|---------|-------|
+| 1 | 1 s |
+| 2 | 2 s |
+| 3 | 4 s |
+| 4+ | 8 s (cap) |
+
+After `MQTT_MAX_RECONNECT_ATTEMPTS` consecutive failures (default: 20), the client enters a fatal state. It automatically resets after `MQTT_FATAL_RECOVERY_COOLDOWN_MS` (default: 60 000 ms) and resumes reconnecting. Set `MQTT_MAX_RECONNECT_ATTEMPTS=0` for unlimited retries.
+
+### Pending Publish Queue
+
+Outbound MQTT messages (desired-state updates, job dispatches) that fail to send while the broker is unreachable are queued in memory:
+
+- Queue capacity: **1 000 messages**
+- On reconnect, queued messages are flushed in order before any new publishes
+- If the queue fills beyond capacity, the oldest messages are dropped and a warning is logged
+- QoS 1 (at-least-once delivery) is used by default — `MQTT_QOS` overrides this
+
+---
+
+## Disk Spool (Telemetry Offline Buffer)
+
+When the ingestion pipeline cannot write to Redis (Redis unreachable or circuit breaker open), the Cloud API's telemetry publisher falls back to a disk spool. The spool buffers NDJSON files locally and replays them once connectivity is restored.
+
+```
+Telemetry pipeline
+       │
+       ├─[Redis available]──▶ Redis Stream → Ingestion service
+       │
+       └─[Redis unavailable / circuit open]──▶ Disk spool
+                                                    │
+                                              spool-N.ndjson
+                                                    │
+                                    (circuit closes / Redis recovers)
+                                                    │
+                                               Replay to Redis
+```
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISK_SPOOL_ENABLED` | `false` | Enable disk spool fallback |
+| `DISK_SPOOL_PATH` | `/tmp/iotistic-spool` | Directory for spool files |
+| `DISK_SPOOL_MAX_SIZE_MB` | `500` | Max total spool size before oldest files are pruned |
+
+### Behavior
+
+- Each spool file is capped at 10 MB, then a new numbered file is created (`spool-1.ndjson`, `spool-2.ndjson`, …).
+- Files are replayed **in numeric order** (oldest first). After a restart, the file index is seeded from the highest existing file number so replay order is preserved.
+- When the total spool size exceeds `DISK_SPOOL_MAX_SIZE_MB`, the oldest file is deleted to make room for new data. A warning is logged.
+- Replay is non-blocking: spool files drain into Redis in the background while the API continues processing new telemetry.
+- Each spool entry is a JSON line: `{ "source": "mqtt", "data": [...] }`.
+
+### Circuit Breaker
+
+The circuit breaker monitors failures in the ingestion write path. If the error rate exceeds its threshold within a rolling window it **opens** — all new telemetry is routed to the disk spool. The breaker polls Redis in the background and **closes** automatically when connectivity recovers, at which point the spool replayer drains buffered data.
+
+```
+CLOSED ──errors exceed threshold──▶ OPEN
+  ▲                                    │
+  └──────── Redis recovers ────────────┘
+                (spool drains)
+```
+
+Monitor spool state:
+```
+GET /api/v1/metrics/ingestion-health
+```
+
+```json
+{
+  "redisConnected": true,
+  "circuitBreaker": "closed",
+  "spoolFileCount": 0,
+  "spoolSizeMb": 0
+}
+```

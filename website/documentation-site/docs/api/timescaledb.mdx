@@ -1,0 +1,183 @@
+---
+sidebar_label: TimescaleDB
+sidebar_position: 6
+---
+
+# TimescaleDB
+
+Iotistica uses [TimescaleDB](https://www.timescale.com/) on top of PostgreSQL 16 for all time-series storage. TimescaleDB provides automatic chunk partitioning, native compression, continuous aggregates, and data retention policies — all managed transparently by the database.
+
+All hypertables, compression settings, retention policies, and continuous aggregates are applied by the database migrations under `api/database/migrations/`.
+
+---
+
+## Hypertables
+
+Five tables are converted to TimescaleDB hypertables. Each is partitioned by time into fixed-size chunks that are compressed and eventually dropped automatically.
+
+| Hypertable | Time column | Chunk interval | Purpose |
+|-----------|-------------|---------------|---------|
+| `readings` | `time` | 1 day | Normalized sensor telemetry — the primary time-series table |
+| `agent_metrics` | `recorded_at` | 7 days | Agent system health: CPU, memory, storage, temperature |
+| `agent_logs` | `timestamp` | 1 day | Agent and service log events |
+| `mqtt_broker_stats` | `timestamp` | 1 day | Broker-level statistics: connected clients, message throughput |
+| `mqtt_topic_metrics` | `timestamp` | 1 day | Per-topic message counts, QoS distribution, byte rates |
+
+---
+
+## `readings` Schema
+
+The primary hypertable. Every sensor reading from every protocol (Modbus, OPC-UA, BACnet, MQTT, SNMP, CAN) lands here as a normalized row.
+
+```sql
+CREATE TABLE readings (
+  time              timestamptz     NOT NULL,
+  agent_uuid        uuid            NOT NULL,
+  metric_name       text            NOT NULL,   -- e.g. "plc-1.temperature"
+  value             double precision,
+  quality           text DEFAULT 'good',        -- good | bad | uncertain
+  unit              text,                       -- °C, %, V, hPa, …
+  protocol          text NOT NULL,              -- modbus | opcua | mqtt | …
+  extra             jsonb DEFAULT '{}',         -- deviceName, slave_id, nodeId, …
+  anomaly_score     double precision,           -- 0–1, NULL if not computed
+  anomaly_threshold double precision,
+  PRIMARY KEY (agent_uuid, metric_name, time)
+);
+```
+
+Key indexes:
+- `(agent_uuid, time DESC)` — device + time range queries
+- `(metric_name, time DESC)` — cross-agent metric queries
+- `(protocol, time DESC)` — filter by protocol
+- `GIN (extra)` — JSONB metadata queries
+
+---
+
+## Compression Policies
+
+All hypertables use LZ4-based column compression. Compression is applied automatically to chunks older than the threshold. Typical storage reduction is 85–95% for sensor data.
+
+| Hypertable | Compress after | Segment by | Order by |
+|-----------|---------------|------------|----------|
+| `readings` | 7 days | `agent_uuid, metric_name` | `time DESC` |
+| `agent_metrics` | 7 days | `agent_uuid` | `recorded_at DESC` |
+| `agent_logs` | 7 days | `agent_uuid, service_name` | `timestamp DESC` |
+| `mqtt_broker_stats` | 7 days | — | `timestamp DESC` |
+| `mqtt_topic_metrics` | 7 days | `topic` | `timestamp DESC` |
+
+`compress_segmentby` groups related rows together within each chunk before compression, improving both compression ratio and query performance on the segmented columns. Queries on compressed chunks are served without explicit decompression — TimescaleDB decompresses on the fly at the chunk level.
+
+---
+
+## Retention Policies
+
+Data older than the retention threshold is automatically deleted by a background TimescaleDB job. The job runs once per day.
+
+| Hypertable | Retention |
+|-----------|-----------|
+| `readings` | 730 days (2 years) |
+| `agent_metrics` | 90 days |
+| `agent_logs` | 90 days |
+| `mqtt_broker_stats` | 180 days |
+| `mqtt_topic_metrics` | 180 days |
+
+:::note
+Retention applies to raw hypertable chunks. Continuous aggregates have independent refresh and retention policies and are not deleted when raw data is dropped.
+:::
+
+---
+
+## Continuous Aggregates
+
+TimescaleDB continuous aggregates are materialized views that are refreshed incrementally in the background. They pre-aggregate raw data into coarser time buckets so dashboard queries hit the aggregate instead of scanning raw chunks.
+
+### `readings` aggregates
+
+| View | Bucket | Refresh schedule | Start offset | End offset | Columns |
+|------|--------|-----------------|--------------|------------|---------|
+| `readings_1m` | 1 minute | every 1 min | 1 hour | 1 minute | avg/min/max value, sample_count, quality_ratio, anomaly metrics |
+| `readings_1h` | 1 hour | every 1 hour | 1 day | 1 hour | avg/min/max/stddev value, sample_count, quality_ratio |
+| `readings_hourly` | 1 hour | every 1 hour | 3 hours | 1 hour | avg/min/max/stddev, first/last value + timestamp |
+| `readings_daily` | 1 day | every 1 day | 3 days | 1 day | avg/min/max/stddev value, sample_count |
+
+`readings_1m` and `readings_1h` materialize `extra->>'deviceName'` and `protocol` for per-device, per-protocol breakdown. `readings_hourly` and `readings_daily` aggregate at the `(agent_uuid, metric_name, protocol)` grain without device name (used by fleet-level dashboards).
+
+### `agent_metrics` aggregates
+
+| View | Bucket | Refresh schedule | Columns |
+|------|--------|-----------------|---------|
+| `agent_metrics_5min` | 5 minutes | every 5 min | avg/max/min cpu_usage, cpu_temp, memory/storage usage |
+| `agent_metrics_hourly` | 1 hour | every 1 hour | same |
+| `agent_metrics_daily` | 1 day | every 1 day | same |
+
+### `agent_logs` aggregates
+
+| View | Bucket | Refresh schedule | Columns |
+|------|--------|-----------------|---------|
+| `device_logs_5min` | 5 minutes | every 5 min | per-service error/warn/info/debug counts, error_samples |
+| `device_logs_hourly` | 1 hour | every 1 hour | same |
+
+### `mqtt_broker_stats` aggregates
+
+| View | Bucket | Refresh schedule | Columns |
+|------|--------|-----------------|---------|
+| `mqtt_broker_stats_5min` | 5 minutes | every 5 min | avg/max connected_clients, message rates, byte totals |
+| `mqtt_broker_stats_hourly` | 1 hour | every 1 hour | same |
+| `mqtt_broker_stats_daily` | 1 day | every 1 day | same |
+
+### `mqtt_topic_metrics` aggregates
+
+| View | Bucket | Refresh schedule | Columns |
+|------|--------|-----------------|---------|
+| `mqtt_topic_metrics_5min` | 5 minutes | every 5 min | per-topic message counts, byte totals, QoS distribution |
+| `mqtt_topic_metrics_hourly` | 1 hour | every 1 hour | same |
+| `mqtt_topic_metrics_daily` | 1 day | every 1 day | same |
+
+---
+
+## Operational Queries
+
+**Check hypertables:**
+```sql
+SELECT hypertable_name, num_chunks, compression_enabled
+FROM timescaledb_information.hypertables;
+```
+
+**Check compression and retention jobs:**
+```sql
+SELECT hypertable_name, proc_name, schedule_interval, next_start, last_run_status
+FROM timescaledb_information.jobs
+WHERE proc_name IN ('policy_compression', 'policy_retention')
+ORDER BY hypertable_name;
+```
+
+**Check continuous aggregate refresh policies:**
+```sql
+SELECT view_name, schedule_interval, next_start, last_run_status
+FROM timescaledb_information.jobs j
+JOIN timescaledb_information.continuous_aggregates ca
+  ON j.hypertable_id = ca.mat_hypertable_id
+ORDER BY view_name;
+```
+
+**Check storage savings:**
+```sql
+SELECT
+  hypertable_name,
+  pg_size_pretty(before_compression_total_bytes) AS before,
+  pg_size_pretty(after_compression_total_bytes) AS after,
+  ROUND(
+    (1 - after_compression_total_bytes::numeric / NULLIF(before_compression_total_bytes, 0)) * 100, 1
+  ) AS pct_saved
+FROM chunk_compression_stats('readings')
+ORDER BY chunk_name;
+```
+
+**Ingest stream depth (consumer lag check):**
+```sql
+SELECT chunk_name, range_start, range_end, is_compressed, num_rows
+FROM timescaledb_information.chunks
+WHERE hypertable_name = 'readings'
+ORDER BY range_end DESC
+LIMIT 10;
+```

@@ -1,0 +1,174 @@
+---
+sidebar_label: MQTT Broker
+sidebar_position: 5
+---
+
+# MQTT Broker
+
+Iotistica uses [Mosquitto](https://mosquitto.org/) extended with the [`mosquitto-go-auth`](https://github.com/iegomez/mosquitto-go-auth) plugin. The plugin adds an HTTP authentication and ACL backend so Mosquitto delegates all credential and permission checks to the Cloud API.
+
+---
+
+## Listeners
+
+| Listener | Port | Protocol | Notes |
+|----------|------|----------|-------|
+| Plain MQTT | 1883 | TCP | Suitable for internal / LAN traffic |
+| MQTTS | 8883 | TLS | TLS-terminated at Mosquitto; cert-manager or self-signed |
+| MQTT over WSS | 9002 | WebSocket TLS | Browser-based clients |
+
+Anonymous connections are rejected. All clients must present a username and password.
+
+---
+
+## Authentication Flow
+
+Every MQTT connection triggers three HTTP callbacks from Mosquitto to the Cloud API. The API handles them without requiring a client JWT — these are internal Mosquitto plugin calls only.
+
+```
+MQTT client connects
+    │
+    ▼
+Mosquitto (mosquitto-go-auth plugin)
+    │
+    ├─ POST /mosquitto-auth/user      ← credential validation
+    ├─ POST /mosquitto-auth/superuser ← superuser flag check
+    └─ POST /mosquitto-auth/acl       ← topic publish/subscribe check
+              │
+              ▼
+         Cloud API
+         └─ queries mqtt_users + mqtt_acls tables
+         └─ returns: { result: "allow" | "deny" }
+```
+
+### `POST /mosquitto-auth/user`
+
+Validates username and password.
+
+Request body (JSON or query string):
+```json
+{ "username": "agent-abc123", "password": "..." }
+```
+
+Logic:
+1. Lookup `mqtt_users WHERE username = $1 AND is_active = true`
+2. Verify password against stored scrypt hash via `crypto.scrypt`
+3. If hash format is old (bcrypt), verify and transparently upgrade to scrypt on success
+4. Return `{ result: "allow" }` or `{ result: "deny" }`
+
+### `POST /mosquitto-auth/superuser`
+
+Checks whether the authenticated user has superuser access (can publish/subscribe to any topic without ACL checks).
+
+```json
+{ "username": "admin" }
+```
+
+Returns `{ result: "allow" }` if `mqtt_users.is_superuser = true`.
+
+### `POST /mosquitto-auth/acl`
+
+Checks whether a user may publish or subscribe to a topic.
+
+```json
+{ "username": "agent-abc123", "topic": "i/default/a/abc123/endpoints/modbus", "acc": 2 }
+```
+
+`acc` values: `1` = subscribe, `2` = publish, `3` = subscribe + publish, `7` = all (used for superuser ACLs).
+
+Logic:
+1. Load all ACL rules for the username from `mqtt_acls`
+2. Match `topic` against each rule using MQTT wildcard expansion (`+` = single level, `#` = multi-level)
+3. Check that the requested `acc` is covered by the matched rule's `access` bitmask
+
+---
+
+## Database Tables
+
+### `mqtt_users`
+
+Stores broker credentials for agents and the admin user.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | serial | Primary key |
+| `username` | text | Unique MQTT username |
+| `password_hash` | text | scrypt hash (format: `scrypt$...`) |
+| `is_superuser` | boolean | Superuser bypasses ACL checks |
+| `is_active` | boolean | Soft-disable without deleting |
+| `created_at` | timestamptz | |
+| `updated_at` | timestamptz | |
+
+Password hashing uses Node.js native `crypto.scrypt` with parameters `N=16384, r=8, p=1`. The hash format is self-describing so the verifier can detect and upgrade bcrypt hashes transparently.
+
+### `mqtt_acls`
+
+Per-user topic permission rules.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | serial | Primary key |
+| `username` | text | FK to `mqtt_users.username` |
+| `topic` | text | MQTT topic pattern (supports `+` and `#` wildcards) |
+| `access` | integer | Bitmask: 1=sub, 2=pub, 3=sub+pub, 7=all |
+| `priority` | integer | Higher priority rules are evaluated first |
+
+---
+
+## Auth Cache
+
+Auth decisions are cached in Redis to avoid a database round-trip on every MQTT packet. The cache is read-through: a miss triggers a DB lookup and populates the cache.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MQTT_AUTH_CACHE_TTL_SECONDS` | `30` | Base cache TTL |
+| `MQTT_AUTH_USER_CACHE_TTL_SECONDS` | `300` | TTL for user allow decisions (longer — credentials rarely change) |
+| `MQTT_AUTH_DENY_CACHE_TTL_SECONDS` | `5` | TTL for deny decisions (short — failed auth shouldn't block re-auth) |
+| `MQTT_AUTH_CACHE_MAX_ENTRIES` | `5000` | Max in-memory cache entries |
+| `MQTT_AUTH_LOADER_TIMEOUT_MS` | `100` | Max time to wait for a DB lookup before denying |
+| `MQTT_AUTH_USER_LOADER_TIMEOUT_MS` | `500` | Loader timeout for user auth specifically |
+| `MQTT_AUTH_WARMUP_USER_LIMIT` | `100` | Users to pre-warm into cache on API startup |
+
+Cache keys are namespaced by username and decision type. Mutations to `mqtt_users` or `mqtt_acls` via the management API call `clearMqttAuthCaches()` to immediately invalidate affected entries.
+
+---
+
+## Admin and Agent Users
+
+**Admin user** — seeded automatically by the API on every startup via `initializeMqttAdmin()`. The username and password come from `MQTT_USERNAME` / `MQTT_PASSWORD` env vars. The admin user has `is_superuser = true` and a wildcard ACL (`#`, access 7). If the password env var changes and the API restarts, the stored hash is updated idempotently.
+
+**Agent users** — created during agent provisioning (`POST /provisioning/register`). Each agent gets a unique MQTT username (`agent-{uuid}`) with a randomly generated password and a scoped ACL limited to its own topic namespace.
+
+---
+
+## Managing Users via API
+
+All endpoints require `Authorization: Bearer <admin-token>` and admin role.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/mqtt-users` | List all users with their ACLs |
+| `POST` | `/api/v1/mqtt-users` | Create a new MQTT user |
+| `PUT` | `/api/v1/mqtt-users/:id` | Update password, superuser flag, or active status |
+| `DELETE` | `/api/v1/mqtt-users/:id` | Delete user and all associated ACLs |
+| `POST` | `/api/v1/mqtt-users/:id/acls` | Add an ACL rule to a user |
+| `PUT` | `/api/v1/mqtt-acls/:id` | Update an ACL rule |
+| `DELETE` | `/api/v1/mqtt-acls/:id` | Delete an ACL rule |
+
+Password updates are hashed server-side before storage. The raw password is never logged or persisted in plaintext.
+
+---
+
+## Agent Topic Namespace
+
+Agents publish and subscribe to topics under the `i/` prefix:
+
+```
+i/{tenantId}/a/{agentUuid}/endpoints/{protocol}   ← telemetry publish (agent → broker)
+i/{tenantId}/a/{agentUuid}/state/desired           ← desired state (cloud → agent)
+i/{tenantId}/a/{agentUuid}/state/reported          ← reported state (agent → cloud)
+i/{tenantId}/a/{agentUuid}/jobs                    ← job dispatch
+i/{tenantId}/a/{agentUuid}/events                  ← audit events
+```
+
+The Cloud API subscribes to all `i/#` topics via a persistent MQTT connection and routes incoming messages into Redis Streams and TimescaleDB.

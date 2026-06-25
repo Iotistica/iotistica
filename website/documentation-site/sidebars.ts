@@ -45,7 +45,10 @@ const sidebars: SidebarsConfig = {
         'api/overview',
         'api/authentication',
         'api/endpoints',
+        'api/cloud-api',
         'api/ingestion',
+        'api/mqtt',
+        'api/timescaledb',
         {
           type: 'category',
           label: 'Deployment',

@@ -15,6 +15,7 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { EventEmitter } from 'events';
 import { inflateSync } from 'zlib';
+import { monitorEventLoopDelay, type IntervalHistogram } from 'perf_hooks';
 import msgpack from 'msgpackr';
 import { MQTTDatabaseService } from './db';
 import logger from '../../utils/logger';
@@ -328,8 +329,8 @@ export class MQTTMonitorService extends EventEmitter {
   
   // Backpressure awareness
   private degradedMode = false;
-  private eventLoopLagInterval?: NodeJS.Timeout;
-  private lastEventLoopCheck = Date.now();
+  private eventLoopLagHistogram?: IntervalHistogram;
+  private eventLoopLagCheckInterval?: NodeJS.Timeout;
   private eventLoopLagThreshold = parseInt(process.env.MQTT_EVENT_LOOP_LAG_THRESHOLD || '100'); // ms
   private droppedPayloadsCount = 0;
   
@@ -948,8 +949,11 @@ export class MQTTMonitorService extends EventEmitter {
       clearInterval(this.dbSyncInterval);
     }
     
-    if (this.eventLoopLagInterval) {
-      clearInterval(this.eventLoopLagInterval);
+    if (this.eventLoopLagCheckInterval) {
+      clearInterval(this.eventLoopLagCheckInterval);
+    }
+    if (this.eventLoopLagHistogram) {
+      this.eventLoopLagHistogram.disable();
     }
 
     if (this.client) {
@@ -1422,25 +1426,29 @@ export class MQTTMonitorService extends EventEmitter {
   }
 
   private startEventLoopMonitoring(): void {
-    // Reset baseline to now so the first tick doesn't measure startup delay as lag
-    this.lastEventLoopCheck = Date.now();
-    this.eventLoopLagInterval = setInterval(() => {
-      const now = Date.now();
-      const lag = now - this.lastEventLoopCheck - 1000; // Expected 1s interval
-      this.lastEventLoopCheck = now;
-      
-      if (lag > this.eventLoopLagThreshold && !this.degradedMode) {
+    // Use perf_hooks native histogram — accurate regardless of timer resolution or
+    // container scheduling jitter, unlike setInterval drift measurement.
+    this.eventLoopLagHistogram = monitorEventLoopDelay({ resolution: 100 });
+    this.eventLoopLagHistogram.enable();
+
+    this.eventLoopLagCheckInterval = setInterval(() => {
+      const histogram = this.eventLoopLagHistogram!;
+      // p99 in nanoseconds → convert to ms
+      const lagMs = Math.round(histogram.percentile(99) / 1e6);
+      histogram.reset();
+
+      if (lagMs > this.eventLoopLagThreshold && !this.degradedMode) {
         this.degradedMode = true;
-        logger.warn('Entering degraded mode due to event loop lag', { 
-          lag, 
+        logger.warn('Entering degraded mode due to event loop lag', {
+          lag: lagMs,
           threshold: this.eventLoopLagThreshold,
-          droppedSoFar: this.droppedPayloadsCount 
+          droppedSoFar: this.droppedPayloadsCount,
         });
-      } else if (lag <= this.eventLoopLagThreshold / 2 && this.degradedMode) {
+      } else if (lagMs <= this.eventLoopLagThreshold / 2 && this.degradedMode) {
         this.degradedMode = false;
-        logger.info('Exiting degraded mode - event loop recovered', { 
-          lag,
-          totalDropped: this.droppedPayloadsCount 
+        logger.info('Exiting degraded mode - event loop recovered', {
+          lag: lagMs,
+          totalDropped: this.droppedPayloadsCount,
         });
       }
     }, 1000);
