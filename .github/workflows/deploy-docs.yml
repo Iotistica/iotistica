@@ -7,6 +7,8 @@ on:
     paths:
       - 'website/documentation-site/docs/**'
       - 'website/documentation-site/sidebars.ts'
+  release:
+    types: [published]
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, closed]
