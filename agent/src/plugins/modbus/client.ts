@@ -1205,6 +1205,7 @@ export class ModbusClient implements IProtocolClient<void, DeviceDataPoint[]> {
 	private async writeRawRegister(register: ModbusRegister, value: number | boolean | string): Promise<void> {
 		const writeFunctionCode = this.resolveWriteFunctionCode(register);
 
+		// eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
 		switch (writeFunctionCode) {
 			case ModbusFunctionCode.WRITE_SINGLE_COIL: {
 				const coilValue = this.serializeBooleanValue(register, value);
@@ -1285,6 +1286,7 @@ export class ModbusClient implements IProtocolClient<void, DeviceDataPoint[]> {
 	private serializeSingleRegisterValue(register: ModbusRegister, value: number | boolean | string): number {
 		const rawValue = this.toUnscaledNumeric(register, value);
 
+		// eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
 		switch (register.dataType) {
 			case ModbusDataType.INT16:
 				this.ensureInteger(register.name, rawValue);
@@ -1308,6 +1310,7 @@ export class ModbusClient implements IProtocolClient<void, DeviceDataPoint[]> {
 		const byteLength = registerCount * 2;
 		const buffer = Buffer.alloc(byteLength);
 
+		// eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
 		switch (register.dataType) {
 			case ModbusDataType.INT32: {
 				const rawValue = this.toUnscaledNumeric(register, value);

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { InfluxDB, Point, WriteApi } from '@influxdata/influxdb-client';
+import { InfluxDB, Point, type WriteApi } from '@influxdata/influxdb-client';
 import type { IPublishPlugin, IPublishClient, PublishBatchItem, Logger } from '../core/types.js';
 
 interface InfluxDbConfig {
@@ -101,7 +101,7 @@ export class InfluxDbPublishPlugin extends EventEmitter implements IPublishPlugi
 			flushInterval,
 			writeFailed: (error, lines, attempt, expires) => {
 				this.logger?.error(
-					`InfluxDB write failed (attempt ${attempt}, expires ${expires}): ${(error as Error).message}`,
+					`InfluxDB write failed (attempt ${attempt}, expires ${expires}): ${(error).message}`,
 					{ lines: lines.length }
 				);
 			},
@@ -148,7 +148,7 @@ export class InfluxDbPublishPlugin extends EventEmitter implements IPublishPlugi
 			try {
 				const text = Buffer.isBuffer(item.payload)
 					? item.payload.toString('utf-8')
-					: item.payload as string;
+					: item.payload;
 				const raw = JSON.parse(text);
 
 				const measurement = item.options?.destinationTopic?.trim() || 'metrics';
@@ -168,7 +168,7 @@ export class InfluxDbPublishPlugin extends EventEmitter implements IPublishPlugi
 			this.logger?.debug(`InfluxDB: queued ${queued} point(s) → ${this.config.org}/${this.config.bucket}`);
 		} else if (batch.length > 0) {
 			const sample = batch[0];
-			const text = Buffer.isBuffer(sample.payload) ? sample.payload.toString('utf-8') : sample.payload as string;
+			const text = Buffer.isBuffer(sample.payload) ? sample.payload.toString('utf-8') : sample.payload;
 			const raw = JSON.parse(text);
 			const isTagsFmt = isTagsPayload(raw);
 			const firstTags = isTagsFmt ? (raw as { tags?: unknown[] }).tags?.slice(0, 2) : null;

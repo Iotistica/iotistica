@@ -123,7 +123,7 @@ export class SocketConnection extends EventEmitter {
 
 	private onSocketError(err: Error): void {
 		this._state = DeviceState.ERROR;
-	// ENOENT means the adapter hasn't created the socket yet — normal transient state.
+		// ENOENT means the adapter hasn't created the socket yet — normal transient state.
 		const isNotReady = (err as NodeJS.ErrnoException).code === 'ENOENT';
 		if (isNotReady) {
 			this.logger?.debug(`Socket not ready for endpoint '${this.config.name || 'unknown'}' (adapter not started yet)`);

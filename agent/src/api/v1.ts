@@ -5,6 +5,7 @@
 
 import express from 'express';
 import type { Request, Response, NextFunction } from 'express';
+import type { LogFilter } from '../logging/types.js';
 import { PassThrough } from 'stream';
 import * as actions from './actions';
 import { ModbusAdapter } from '../plugins/modbus/adapter.js';
@@ -216,7 +217,7 @@ router.get('/v1/apps/:appId/services/:serviceName/logs', async (req: Request, re
 	res.flushHeaders();
 
 	const send = (data: object) => {
-		try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {}
+		try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* ignore closed connection */ }
 	};
 
 	if (isNaN(appId)) { send({ error: 'Invalid app id' }); res.end(); return; }
@@ -255,17 +256,17 @@ router.get('/v1/apps/:appId/services/:serviceName/logs', async (req: Request, re
 
 			stdout.on('data', writeLines('stdout'));
 			stderr.on('data', writeLines('stderr'));
-			stdout.on('end', () => { try { res.end(); } catch {} });
+			stdout.on('end', () => { try { res.end(); } catch { /* ignore */ } });
 
 			req.on('close', () => {
-				try { (logStream as any).destroy(); } catch {}
+				try { (logStream as any).destroy(); } catch { /* ignore */ }
 				stdout.destroy();
 				stderr.destroy();
 			});
 		}
 	} catch (e) {
 		send({ error: (e as Error).message });
-		try { res.end(); } catch {}
+		try { res.end(); } catch { /* ignore */ }
 	}
 });
 
@@ -629,7 +630,7 @@ router.get('/v1/logs', async (req: Request, res: Response, next: NextFunction) =
 		if (!backend) {
 			return res.status(503).json({ error: 'Log backend not available' });
 		}
-		const filter: import('../logging/types.js').LogFilter = {
+		const filter: LogFilter = {
 			level: req.query.level as any,
 			sourceType: req.query.source as any,
 			since: req.query.since ? Number(req.query.since) : undefined,
@@ -1714,7 +1715,7 @@ router.post('/v1/auth/login', async (req: Request, res: Response, next: NextFunc
 			return res.status(400).json({ error: 'username and password are required' });
 		}
 		const user = UserModel.getByUsername(username);
-		if (!user || !user.is_active) {
+		if (!user?.is_active) {
 			return res.status(401).json({ error: 'Invalid credentials' });
 		}
 		const hash = UserModel.getPasswordHash(username);

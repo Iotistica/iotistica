@@ -422,7 +422,7 @@ export class PublishManager extends EventEmitter {
 			const enriched = this.processAnomaly(messages, name);
 			if (this.needStop) return;
 
-			let { data, baselineSize, msgId } = this.buildPayload(name, enriched, this.payloadFormat);
+			const { data, baselineSize, msgId } = this.buildPayload(name, enriched, this.payloadFormat);
 			if (this.needStop) return;
 
 			const hasExternalBindings = this.bindings.some((b) => b.publisher.type !== 'iotistica');
@@ -965,7 +965,7 @@ export class PublishManager extends EventEmitter {
 		}
 
 		const results = await Promise.allSettled(entries.map(([plugin, batch]) => plugin.publishBatch(batch)));
-		const failures = results.filter((result) => result.status === 'rejected') as Array<PromiseRejectedResult>;
+		const failures = results.filter((result) => result.status === 'rejected');
 		if (failures.length === 0) {
 			return;
 		}
@@ -999,7 +999,7 @@ export class PublishManager extends EventEmitter {
 			}
 
 			const payloadFormat = this.resolvePayloadFormatForBinding(binding);
-			const subscriptionCompression = (binding.subscription.compression ?? null) as SubscriptionCompression | null;
+			const subscriptionCompression = (binding.subscription.compression ?? null);
 			const cacheKey = subscriptionCompression
 				? `${payloadFormat}::${subscriptionCompression}`
 				: `${payloadFormat}::global`;

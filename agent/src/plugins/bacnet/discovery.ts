@@ -21,7 +21,7 @@ import { createHash } from 'crypto';
 import BACnet from 'bacstack';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscovery } from '../base';
-import { type DiscoveredDevice, ValidationResult } from '../types';
+import { type DiscoveredDevice, type ValidationResult } from '../types';
 
 import { pLimit } from '../../lib/p-limit.js';
 
@@ -571,21 +571,21 @@ export class BACnetDiscovery extends BaseDiscovery {
 						client,
 						fullAddress,
 						{ type: 8, instance: deviceInstance },
-							BacnetPropertyId.VENDOR_NAME
+						BacnetPropertyId.VENDOR_NAME
 					);
 
 					const modelName = await this.readProperty(
 						client,
 						fullAddress,
 						{ type: 8, instance: deviceInstance },
-							BacnetPropertyId.MODEL_NAME
+						BacnetPropertyId.MODEL_NAME
 					);
 
 					const description = await this.readProperty(
 						client,
 						fullAddress,
 						{ type: 8, instance: deviceInstance },
-							BacnetPropertyId.DESCRIPTION
+						BacnetPropertyId.DESCRIPTION
 					);
 
 					// Update device info
@@ -717,7 +717,7 @@ export class BACnetDiscovery extends BaseDiscovery {
 				const limit = pLimit(concurrency);
 
 				this.logger?.debugSync(`Device has ${objectsToRead.length} objects`, {
-						...this.logContext,
+					...this.logContext,
 					deviceInstance,
 					objectCount: objectsToRead.length,
 					validationConcurrency: concurrency
@@ -798,13 +798,13 @@ export class BACnetDiscovery extends BaseDiscovery {
 			device.dataPoints = objects
 				.filter((obj: BACnetValidatedObject) => obj.presentValue !== undefined)
 				.map((obj: BACnetValidatedObject) => ({
-				name: obj.objectName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
-				objectType: obj.objectType,
-				objectInstance: obj.objectInstance,
-				presentValue: obj.presentValue,
-				units: obj.units,
-						propertyId: BacnetPropertyId.PRESENT_VALUE
-			}));
+					name: obj.objectName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+					objectType: obj.objectType,
+					objectInstance: obj.objectInstance,
+					presentValue: obj.presentValue,
+					units: obj.units,
+					propertyId: BacnetPropertyId.PRESENT_VALUE
+				}));
 
 			device.validated = true;
 			device.validationData = validationResult;

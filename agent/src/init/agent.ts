@@ -96,55 +96,55 @@ export async function initializeAgentManager(ctx: AgentInitContext): Promise<voi
 		agentInfo = ctx.agentManager.getAgentInfo();
 	} else {
 
-	const provisioningApiKey = normalizeOptionalEnvValue(process.env.PROVISIONING_KEY);
-	const cloudEndpoint = process.env.IOTISTICA_API || ctx.configManager!.getCloudApiEndpoint();
+		const provisioningApiKey = normalizeOptionalEnvValue(process.env.PROVISIONING_KEY);
+		const cloudEndpoint = process.env.IOTISTICA_API || ctx.configManager!.getCloudApiEndpoint();
 
-	if (!agentInfo.provisioned && provisioningApiKey && cloudEndpoint) {
-		try {
-			const macAddress = process.env.MAC_ADDRESS || (await getMacAddress());
-			const osVersion = process.env.OS_VERSION || (await getOsVersion());
+		if (!agentInfo.provisioned && provisioningApiKey && cloudEndpoint) {
+			try {
+				const macAddress = process.env.MAC_ADDRESS || (await getMacAddress());
+				const osVersion = process.env.OS_VERSION || (await getOsVersion());
 
-			await ctx.agentManager.provision({
-				provisioningApiKey,
-				name: process.env.DEVICE_NAME || `agent-${agentInfo.uuid.slice(0, 8)}`,
-				type: process.env.DEVICE_TYPE || 'standalone',
-				apiEndpoint: cloudEndpoint,
-				macAddress,
-				osVersion,
-				agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
+				await ctx.agentManager.provision({
+					provisioningApiKey,
+					name: process.env.DEVICE_NAME || `agent-${agentInfo.uuid.slice(0, 8)}`,
+					type: process.env.DEVICE_TYPE || 'standalone',
+					apiEndpoint: cloudEndpoint,
+					macAddress,
+					osVersion,
+					agentVersion: process.env.AGENT_VERSION || getPackageVersion(),
+				});
+				agentInfo = ctx.agentManager.getAgentInfo();
+				ctx.agentInfo = agentInfo;
+			} catch (error: any) {
+				ctx.agentLogger?.errorSync(
+					'Auto-provisioning failed',
+					error instanceof Error ? error : new Error(error.message),
+					{
+						componet: LogComponents.agent,
+						note: 'Device will remain unprovisioned. Check PROVISIONING_KEY or boot config file.',
+					}
+				);
+				agentInfo = ctx.agentManager.getAgentInfo();
+			}
+		} else if (!agentInfo.provisioned && cloudEndpoint && !provisioningApiKey) {
+			ctx.agentLogger?.warnSync('Device not provisioned', {
+				component: LogComponents.agent,
+				note: 'Set PROVISIONING_KEY environment variable or provide /data/iotistic/boot-config.json',
 			});
+		} else if (!agentInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
+			ctx.agentLogger?.infoSync('Running in local mode (no cloud connection)', {
+				component: LogComponents.agent,
+			});
+			await ctx.agentManager.markAsLocalMode();
 			agentInfo = ctx.agentManager.getAgentInfo();
-			ctx.agentInfo = agentInfo;
-		} catch (error: any) {
-			ctx.agentLogger?.errorSync(
-				'Auto-provisioning failed',
-				error instanceof Error ? error : new Error(error.message),
-				{
-					componet: LogComponents.agent,
-					note: 'Device will remain unprovisioned. Check PROVISIONING_KEY or boot config file.',
-				}
-			);
+		} else if (agentInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
+			ctx.agentLogger?.infoSync('Switching to local mode (no cloud connection)', {
+				component: LogComponents.agent,
+				note: 'Device was previously provisioned but IOTISTICA_API is not set',
+			});
+			await ctx.agentManager.markAsLocalMode();
 			agentInfo = ctx.agentManager.getAgentInfo();
 		}
-	} else if (!agentInfo.provisioned && cloudEndpoint && !provisioningApiKey) {
-		ctx.agentLogger?.warnSync('Device not provisioned', {
-			component: LogComponents.agent,
-			note: 'Set PROVISIONING_KEY environment variable or provide /data/iotistic/boot-config.json',
-		});
-	} else if (!agentInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
-		ctx.agentLogger?.infoSync('Running in local mode (no cloud connection)', {
-			component: LogComponents.agent,
-		});
-		await ctx.agentManager.markAsLocalMode();
-		agentInfo = ctx.agentManager.getAgentInfo();
-	} else if (agentInfo.provisioned && !ctx.configManager!.getCloudApiEndpoint()) {
-		ctx.agentLogger?.infoSync('Switching to local mode (no cloud connection)', {
-			component: LogComponents.agent,
-			note: 'Device was previously provisioned but IOTISTICA_API is not set',
-		});
-		await ctx.agentManager.markAsLocalMode();
-		agentInfo = ctx.agentManager.getAgentInfo();
-	}
 
 	} // end of !isStandaloneMode() block
 

@@ -62,19 +62,19 @@ export type PublishMode = 'direct' | 'buffer-only' | 'recovering';
 export type PublishTarget = 'iotistica' | 'azure' | 'aws' | 'gcp' | 'mqtt' | 'influxdb';
 
 export function normalizeTarget(target?: string): PublishTarget {
-  const value = target?.trim().toLowerCase() ?? '';
+	const value = target?.trim().toLowerCase() ?? '';
 
-  switch (value) {
-    case 'iotistica':
-    case 'azure':
-    case 'aws':
-    case 'gcp':
-    case 'mqtt':
-    case 'influxdb':
-      return value;
-    default:
-      return 'iotistica';
-  }
+	switch (value) {
+		case 'iotistica':
+		case 'azure':
+		case 'aws':
+		case 'gcp':
+		case 'mqtt':
+		case 'influxdb':
+			return value;
+		default:
+			return 'iotistica';
+	}
 }
 
 export interface PublishBatchItem {

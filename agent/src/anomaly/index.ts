@@ -11,7 +11,7 @@ import { LogComponents } from '../logging/types';
 import type { CloudMqttClient } from '../mqtt/manager';
 import { createJsonPayload } from '../mqtt/manager';
 import { agentTopic } from '../mqtt/topics.js';
-import { ExternalMqttClient, createExternalMqttClientFromDestination } from '../publish/plugins/mqtt.js';
+import { type ExternalMqttClient, createExternalMqttClientFromDestination } from '../publish/plugins/mqtt.js';
 import { PublishDestinationsModel } from '../db/models/publish-destinations.model.js';
 import type {
 	DataPoint,
@@ -1161,7 +1161,7 @@ export class AnomalyDetectionService {
 		}
 
 		const record = PublishDestinationsModel.getById(destinationId);
-		if (!record || record.type !== 'mqtt') {
+		if (record?.type !== 'mqtt') {
 			this.logger?.warnSync('Alert destination not found or not MQTT type', {
 				component: LogComponents.anomaly,
 				destinationId,

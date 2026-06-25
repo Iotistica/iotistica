@@ -110,13 +110,12 @@ export class SocketServer {
 						? "Windows Named Pipe"
 						: "Unix socket";
 					this.logger.info(
-					`IPC server started (${transportType}) with pub/sub routing at: ${this.config.socketPath}`,
-				);
+						`IPC server started (${transportType}) with pub/sub routing at: ${this.config.socketPath}`,
+					);
 
-				// Set restrictive permissions on Unix socket file (owner + group only)
-				// Prevents unauthorized local processes from connecting
-				if (!this.isWindowsNamedPipe) {
-					}
+					// Set restrictive permissions on Unix socket file (owner + group only)
+					// Prevents unauthorized local processes from connecting
+					if (!this.isWindowsNamedPipe) { /* chmod deferred */ }
 
 					this.started = true;
 					settled = true;
@@ -445,11 +444,11 @@ export class SocketServer {
 						}
 
 						subscriptionReceived = true;
-					// Clear the timeout - handshake complete!
-					if (timeoutHandle) {
-						clearTimeout(timeoutHandle);
-						timeoutHandle = null;
-					}
+						// Clear the timeout - handshake complete!
+						if (timeoutHandle) {
+							clearTimeout(timeoutHandle);
+							timeoutHandle = null;
+						}
 						// Move socket from pending → active subscriptions (handshake complete, only first time)
 						if (this.pendingSubscriptions.has(socket)) {
 							this.pendingSubscriptions.delete(socket);
@@ -474,7 +473,7 @@ export class SocketServer {
 
 						break;
 					}
-				} catch (parseError) {
+				} catch (_parseError) {
 					// Not valid JSON yet, wait for more data
 				}
 			}

@@ -868,7 +868,7 @@ export class SchemaDriftDetector {
 						continue;
 					}
 
-const fieldNameRaw = toFieldName(rr.metric) || toFieldName(rr.registerName) || toFieldName(rr.name);
+					const fieldNameRaw = toFieldName(rr.metric) || toFieldName(rr.registerName) || toFieldName(rr.name);
 
 					if (!fieldNameRaw) {
 						continue;

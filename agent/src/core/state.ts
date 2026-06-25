@@ -21,7 +21,7 @@ import type { AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents} from '../logging/types.js';
 import { ContainerManager } from '../containers/container-manager.js';
 import { ConfigManager } from './config.js';
-import { DeviceConfig } from './types.js';
+import { type DeviceConfig } from './types.js';
 import semver from 'semver';
 
 /**

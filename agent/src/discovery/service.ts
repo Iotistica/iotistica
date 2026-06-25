@@ -104,7 +104,7 @@ export class DiscoveryService extends EventEmitter {
 	}
 
 	public startPeriodicDiscovery(): void {
-			const enablePeriodicDiscovery = process.env.ENABLE_PERIODIC_DISCOVERY !== 'false';
+		const enablePeriodicDiscovery = process.env.ENABLE_PERIODIC_DISCOVERY !== 'false';
     
 		if (!enablePeriodicDiscovery) {
 			this.logger?.debugSync('Periodic discovery disabled', {

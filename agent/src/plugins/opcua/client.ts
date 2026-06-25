@@ -81,7 +81,7 @@ export interface OPCUADeviceClientOptions {
  * request serialization, and transient read retries.
  */
 export class OPCUADeviceClient
-	implements IProtocolClient<ReadValueIdOptions[], DataValue[]>
+implements IProtocolClient<ReadValueIdOptions[], DataValue[]>
 {
 	private readonly device: OPCUADeviceConfig;
 	private readonly logger: Logger;
@@ -327,6 +327,7 @@ export class OPCUADeviceClient
 		const transformedValue = this.applyWriteScaling(node, value);
 		const dataType = this.resolveWriteDataType(node, transformedValue);
 
+		// eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
 		switch (dataType) {
 			case DataType.Boolean:
 				return { dataType, value: this.toBoolean(node.name, transformedValue) };
@@ -368,6 +369,7 @@ export class OPCUADeviceClient
 	}
 
 	private resolveWriteDataType(node: OPCUADataPoint, value: number | boolean | string): DataType {
+		// eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
 		switch (node.writeDataType) {
 			case 'Boolean': return DataType.Boolean;
 			case 'SByte': return DataType.SByte;

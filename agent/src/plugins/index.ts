@@ -244,7 +244,7 @@ export class AdapterManager extends EventEmitter {
 
 	/** Determine effective group name: use explicit groupName or default to protocol. */
 	private getEffectiveGroupName(protocol: string, groupName?: string): string {
-		if (groupName && groupName.trim()) {
+		if (groupName?.trim()) {
 			return groupName.toLowerCase();
 		}
 		return protocol.toLowerCase();
@@ -444,7 +444,7 @@ export class AdapterManager extends EventEmitter {
 							name: d.name,
 							enabled: d.enabled,
 							slaveId: d.connection.slaveId || 1,
-							connection: d.connection as any,
+							connection: d.connection,
 							pollInterval: d.poll_interval,
 							registers: (d.data_points || []).map((dp: any) => {
 								let functionCode = dp.functionCode;

@@ -49,7 +49,7 @@ export class DiscoveryRuleModel {
 			target_json: row.target_json ? JSON.parse(row.target_json) : null,
 			params_json: row.params_json ? JSON.parse(row.params_json) : null,
 			auto_enable: !!row.auto_enable,
-			status: row.status as DiscoveryRule['status'],
+			status: row.status,
 			last_run_at: row.last_run_at,
 			next_run_at: row.next_run_at,
 			last_result_json: row.last_result_json ? JSON.parse(row.last_result_json) : null,

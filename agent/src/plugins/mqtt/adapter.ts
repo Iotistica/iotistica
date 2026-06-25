@@ -1,5 +1,5 @@
 import { BaseProtocolAdapter } from "../base.js";
-import * as mqtt from "mqtt";
+import type * as mqtt from "mqtt";
 import * as mqttPattern from "mqtt-pattern";
 import { type DeviceDataPoint, type IDeviceStatus, type Logger } from "../types.js";
 import { type MqttAdapterConfig, type MqttDevice, type MqttMetricConfig } from "./types.js";

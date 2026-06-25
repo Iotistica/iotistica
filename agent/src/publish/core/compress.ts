@@ -44,11 +44,11 @@ export type SubscriptionCompression = 'json' | 'msgpack' | 'json+deflate' | 'msg
 /** Convert a SubscriptionCompression string to CompressorOptions. Dictionary compaction is never
  *  requested at the per-subscription level (it requires a shared DictionaryManager). */
 export function compressionToOpts(c: SubscriptionCompression): CompressorOptions {
-  return {
-    useMsgpack: c === 'msgpack' || c === 'msgpack+deflate',
-    useKeyCompaction: false,
-    useDeflate: c === 'json+deflate' || c === 'msgpack+deflate',
-  };
+	return {
+		useMsgpack: c === 'msgpack' || c === 'msgpack+deflate',
+		useKeyCompaction: false,
+		useDeflate: c === 'json+deflate' || c === 'msgpack+deflate',
+	};
 }
 
 // Only compress when beneficial: payload > 4 KB AND CPU < 70 %

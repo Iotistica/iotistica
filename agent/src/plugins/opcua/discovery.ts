@@ -46,6 +46,7 @@ export class OPCUADiscovery extends BaseDiscovery {
 			case 'SignAndEncrypt':
 				return MessageSecurityMode.SignAndEncrypt;
 			case 'None':
+			case undefined:
 			default:
 				return MessageSecurityMode.None;
 		}
@@ -64,6 +65,7 @@ export class OPCUADiscovery extends BaseDiscovery {
 			case 'Aes256_Sha256_RsaPss':
 				return SecurityPolicy.Aes256_Sha256_RsaPss;
 			case 'None':
+			case undefined:
 			default:
 				return SecurityPolicy.None;
 		}
@@ -79,6 +81,7 @@ export class OPCUADiscovery extends BaseDiscovery {
 			case 32: return 'ReferenceType';
 			case 64: return 'DataType';
 			case 128: return 'View';
+			case undefined:
 			default: return 'Unknown';
 		}
 	}

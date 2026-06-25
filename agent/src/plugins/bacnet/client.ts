@@ -63,16 +63,16 @@ export class BACnetClient implements IProtocolClient<BACnetObject[], Map<string,
    * no-ops if the patch is already in place.
    */
 	private _applyTransportPatch(): void {
-		const xport = (this.client as any)?._transport;
+		const xport = (this.client)?._transport;
 		if (!xport) return;
 		const server = xport._server;
 		if (!server || typeof server.send !== 'function') return;
 		// Guard: don't double-patch
-		if ((xport as any)._portPatched) return;
+		if ((xport)._portPatched) return;
 		xport.send = (buffer: Buffer, offset: number, receiver: string) => {
 			server.send(buffer, 0, offset, 47808, receiver);
 		};
-		(xport as any)._portPatched = true;
+		(xport)._portPatched = true;
 	}
 
 	/**
@@ -87,8 +87,8 @@ export class BACnetClient implements IProtocolClient<BACnetObject[], Map<string,
 			await new Promise(resolve => setTimeout(resolve, 100));
 			this._applyTransportPatch();
 
-			const xport = (this.client as any)?._transport;
-			const patched = !!(xport as any)?._portPatched;
+			const xport = (this.client)?._transport;
+			const patched = !!(xport)?._portPatched;
 			const serverExists = !!xport?._server;
 			this.logger.debug(`BACnet transport state: xport=${!!xport} server=${serverExists} patched=${patched}`);
 

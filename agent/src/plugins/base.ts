@@ -5,7 +5,7 @@ import { type DeviceDataPoint, type IDeviceStatus, type Logger, type IProtocolAd
 import { type Endpoint } from '../db/models/endpoint.model.js';
 import { DeviceModel } from '../db/models/device.model.js';
 import type { AgentLogger } from "../logging/agent-logger";
-import { IDiscovery, DiscoveredDevice, PluginInfo} from './types.js';
+import { type IDiscovery, type DiscoveredDevice, type PluginInfo} from './types.js';
 
 
 export interface GenericDeviceConfig {

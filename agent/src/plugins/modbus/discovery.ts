@@ -15,7 +15,7 @@ import type { AgentLogger } from '../../logging/agent-logger';
 import { createHash } from 'crypto';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscovery } from '../base';
-import { type DiscoveredDevice, ValidationResult } from '../types';
+import { type DiscoveredDevice, type ValidationResult } from '../types';
 import type { ConfigManager } from '../../core/config.js';
 
 export interface ModbusDiscoveryOptions {

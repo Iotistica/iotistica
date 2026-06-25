@@ -1392,7 +1392,7 @@ export class OPCUAAdapter extends BaseProtocolAdapter  {
 		}
 
 		const runtimeClient = this.clients.get(deviceName);
-		if (!runtimeClient || !runtimeClient.isConnected()) {
+		if (!runtimeClient?.isConnected()) {
 			throw new Error(`Device ${deviceName} is not connected`);
 		}
 

@@ -30,6 +30,7 @@ import { TailscaleManager } from '../network/vpn/tailscale-manager';
 import type { TailscaleConfig, TailscaleStatus } from '../network/vpn/tailscale-manager';
 import type { DevicePublish } from '../publish/index.js';
 import type { DiscoveryRulesScheduler } from '../discovery/rules-scheduler.js';
+import type { DockerOptions } from 'dockerode';
 
 type AgentInstance = {
 	getLifecycleState: () => string;
@@ -1890,7 +1891,7 @@ export interface DockerConnectionConfig {
 	key?: string;
 }
 
-function buildDockerOptions(cfg: DockerConnectionConfig): import('dockerode').DockerOptions {
+function buildDockerOptions(cfg: DockerConnectionConfig): DockerOptions {
 	if (cfg.type === 'tcp') {
 		return { host: cfg.host || 'localhost', port: cfg.port || 2375, protocol: 'http' as const };
 	}
