@@ -526,10 +526,11 @@ section {
 .footer-brand .logo {
     font-size: 1.5rem;
     font-weight: 700;
-    background: var(--accent-gradient);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: #ffffff;
+    background: none;
+    -webkit-background-clip: unset;
+    -webkit-text-fill-color: unset;
+    background-clip: unset;
     display: inline-flex;
     align-items: center;
     gap: 9px;
