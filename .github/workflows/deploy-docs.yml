@@ -5,14 +5,16 @@ on:
     branches:
       - master
     paths:
-      - 'website/documentation-site/**'
+      - 'website/documentation-site/docs/**'
+      - 'website/documentation-site/sidebars.ts'
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, closed]
     branches:
       - master
     paths:
-      - 'website/documentation-site/**'
+      - 'website/documentation-site/docs/**'
+      - 'website/documentation-site/sidebars.ts'
 
 jobs:
   build_and_deploy:
