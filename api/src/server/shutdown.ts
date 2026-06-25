@@ -1,23 +1,10 @@
-/**
- * Graceful shutdown handler.
- *
- * Stops all services in reverse dependency order:
- *   WebSocket → workers → Redis → MQTT → HTTP servers → DB pool
- */
-
-import https from 'https';
 import type { FastifyInstance } from 'fastify';
 import logger from '../utils/logger';
 import { websocketManager } from '../services/websocket/manager';
 import { shutdownMqtt } from '../mqtt';
 import { close } from '../db/connection';
 
-export interface ShutdownContext {
-  fastify: FastifyInstance;
-  httpsServer: https.Server | null;
-}
-
-export function createGracefulShutdown(ctx: ShutdownContext) {
+export function createGracefulShutdown(fastify: FastifyInstance) {
   return async function gracefulShutdown(
     reason: string,
     timeoutMs = 10000,
@@ -28,12 +15,6 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
       logger.warn('Forcefully closing server after timeout');
       process.exit(1);
     }, timeoutMs);
-
-    if (ctx.httpsServer) {
-      try {
-        ctx.httpsServer.close(() => logger.info('HTTPS Server closed'));
-      } catch { /* ignore */ }
-    }
 
     try {
       websocketManager.shutdown();
@@ -46,7 +27,6 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
       logger.info('MQTT Jobs Handler stopped');
     } catch { /* ignore */ }
 
-    // Redis client
     try {
       const { redisClient } = await import('../redis/client');
       await redisClient.disconnect();
@@ -70,7 +50,6 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
       logger.error('Error stopping Redis log queue worker', { error });
     }
 
-    // Database pool
     try {
       await close();
       logger.info('Database connection closed');
@@ -78,7 +57,7 @@ export function createGracefulShutdown(ctx: ShutdownContext) {
       logger.error('Error closing database connection', { error });
     }
 
-    await ctx.fastify.close();
+    await fastify.close();
     logger.info('Server closed');
     clearTimeout(forceClose);
     process.exit(0);

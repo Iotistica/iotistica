@@ -46,7 +46,14 @@ const sidebars: SidebarsConfig = {
         'api/authentication',
         'api/endpoints',
         'api/ingestion',
-        'deployment/kubernetes',
+        {
+          type: 'category',
+          label: 'Deployment',
+          items: [
+            'deployment/docker',
+            'deployment/kubernetes',
+          ],
+        },
       ],
     },
   ],

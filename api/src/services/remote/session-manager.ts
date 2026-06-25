@@ -73,7 +73,7 @@ export class SessionManager {
         const oldestDetached = detachedSessions.sort((a, b) =>
           new Date(a.lastActivity).getTime() - new Date(b.lastActivity).getTime()
         )[0];
-        logger.info(`🐚 [SESSION] Auto-terminating oldest detached session ${oldestDetached.sessionId.substring(0, 8)}...`);
+        logger.info(`[session] Auto-terminating oldest detached session ${oldestDetached.sessionId.substring(0, 8)}...`);
         await this.terminateSession(oldestDetached.sessionId);
       } else {
         const params: any[] = [deviceUuid];
@@ -90,7 +90,7 @@ export class SessionManager {
         if (result.rows.length > 0) {
           const oldestDetachedId = result.rows[0].session_id as string;
           await this.loadSessionFromDatabase(oldestDetachedId);
-          logger.info(`🐚 [SESSION] Auto-terminating oldest detached session ${oldestDetachedId.substring(0, 8)}...`);
+          logger.info(`[session] Auto-terminating oldest detached session ${oldestDetachedId.substring(0, 8)}...`);
           await this.terminateSession(oldestDetachedId);
         }
       }
@@ -136,7 +136,7 @@ export class SessionManager {
 
     this.sessions.set(sessionId, activeSession);
 
-    logger.info(`🐚 [SESSION] Created session ${sessionId.substring(0, 8)}... for device ${deviceUuid.substring(0, 8)}...`);
+    logger.info(`[session] Created session ${sessionId.substring(0, 8)}... for device ${deviceUuid.substring(0, 8)}...`);
 
     return sessionInfo;
   }
@@ -171,7 +171,7 @@ export class SessionManager {
     // SECURITY: Validate session ownership
     // Allow if: (1) owner, (2) no owner set, or (3) admin (future: check role)
     if (session.info.userId && userId && session.info.userId !== userId) {
-      logger.warn(`🐚 [SESSION] ⚠️ User ${userId} attempted to attach to session owned by ${session.info.userId}`);
+      logger.warn(`[session] User ${userId} attempted to attach to session owned by ${session.info.userId}`);
       throw new Error(`Access denied: session belongs to another user`);
     }
 
@@ -186,7 +186,7 @@ export class SessionManager {
     // 2. OR PTY is not active after grace period
     // 3. OR session is new (creating status) and no output received yet
     if (currentPtySessionId && currentPtySessionId !== sessionId) {
-      logger.info(`🐚 [SESSION] Switching PTY from session ${currentPtySessionId.substring(0, 8)} to ${sessionId.substring(0, 8)}`);
+      logger.info(`[session] Switching PTY from session ${currentPtySessionId.substring(0, 8)} to ${sessionId.substring(0, 8)}`);
       needsPtyRestart = true;
       // Mark old session's PTY as inactive
       const oldSession = this.sessions.get(currentPtySessionId);
@@ -199,12 +199,12 @@ export class SessionManager {
       const graceTime = session.info.status === 'creating' ? 5000 : this.PTY_STARTUP_GRACE_PERIOD_MS;
       
       if (timeSinceCreation > graceTime) {
-        logger.warn(`🐚 [SESSION] PTY is not active for session ${sessionId.substring(0, 8)}... (${Math.round(timeSinceCreation/1000)}s since creation, status: ${session.info.status}) - will request ${session.info.status === 'creating' ? 'start' : 'restart'}`);
+        logger.warn(`[session] PTY is not active for session ${sessionId.substring(0, 8)}... (${Math.round(timeSinceCreation/1000)}s since creation, status: ${session.info.status}) - will request ${session.info.status === 'creating' ? 'start' : 'restart'}`);
         needsPtyRestart = true;
         // Reset PTY active flag so new output will be accepted
         session.devicePtyActive = false;
       } else {
-        logger.info(`🐚 [SESSION] PTY not active yet for session ${sessionId.substring(0, 8)}..., but within grace period (${Math.round(timeSinceCreation/1000)}s/${Math.round(graceTime/1000)}s) - waiting for output`);
+        logger.info(`[session] PTY not active yet for session ${sessionId.substring(0, 8)}..., but within grace period (${Math.round(timeSinceCreation/1000)}s/${Math.round(graceTime/1000)}s) - waiting for output`);
       }
     }
     
@@ -212,7 +212,7 @@ export class SessionManager {
     if (needsPtyRestart) {
       this.activePtySession.set(session.info.deviceUuid, sessionId);
       // Clear buffer when restarting PTY - old output is stale and will be duplicated
-      logger.info(`🐚 [SESSION] Clearing stale buffer for session ${sessionId.substring(0, 8)} due to PTY restart`);
+      logger.info(`[session] Clearing stale buffer for session ${sessionId.substring(0, 8)} due to PTY restart`);
       session.buffer = {
         chunks: [],
         totalBytes: 0,
@@ -233,7 +233,7 @@ export class SessionManager {
     // Update last activity (force immediate write on attach)
     await this.updateLastActivity(sessionId, true);
 
-    logger.info(`🐚 [SESSION] Client attached to session ${sessionId.substring(0, 8)}... (${session.attachedClients.size} clients)${needsPtyRestart ? ' - PTY restart needed' : ''}`);
+    logger.info(`[session] Client attached to session ${sessionId.substring(0, 8)}... (${session.attachedClients.size} clients)${needsPtyRestart ? ' - PTY restart needed' : ''}`);
 
     // Return buffered output (empty if PTY restarted, otherwise replay chunks)
     return {
@@ -250,18 +250,18 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
     
     if (!session) {
-      logger.warn(`🐚 [SESSION] Cannot detach - session ${sessionId} not found`);
+      logger.warn(`[session] Cannot detach - session ${sessionId} not found`);
       return;
     }
 
     // Remove client from attached set
     session.attachedClients.delete(ws);
 
-    logger.info(`🐚 [SESSION] Client detached from session ${sessionId.substring(0, 8)}... (${session.attachedClients.size} clients remaining, current status: ${session.info.status})`);
+    logger.info(`[session] Client detached from session ${sessionId.substring(0, 8)}... (${session.attachedClients.size} clients remaining, current status: ${session.info.status})`);
 
     // If no more clients attached, mark as detached (unless already terminated)
     if (session.attachedClients.size === 0 && session.info.status !== 'terminated') {
-      logger.info(`🐚 [SESSION] No more clients attached, updating status to detached for session ${sessionId.substring(0, 8)}...`);
+      logger.info(`[session] No more clients attached, updating status to detached for session ${sessionId.substring(0, 8)}...`);
       await this.updateSessionStatus(sessionId, 'detached');
     }
 
@@ -293,12 +293,12 @@ export class SessionManager {
       try {
         await this.detachSession(sessionId, ws);
       } catch (error) {
-        logger.error(`🐚 [SESSION] Error detaching client from session ${sessionId}:`, error);
+        logger.error(`[session] Error detaching client from session ${sessionId}:`, error);
       }
     }
 
     if (sessionsToDetach.length > 0) {
-      logger.info(`🐚 [SESSION] Client detached from ${sessionsToDetach.length} session(s) on disconnect`);
+      logger.info(`[session] Client detached from ${sessionsToDetach.length} session(s) on disconnect`);
     }
   }
 
@@ -306,52 +306,52 @@ export class SessionManager {
    * Terminate a session (kill PTY, cleanup resources)
    */
   async terminateSession(sessionId: string): Promise<void> {
-    logger.info(`🐚 [SESSION] 🗑️ terminateSession() called for ${sessionId.substring(0, 8)}...`);
+    logger.info(`[session] terminateSession() called for ${sessionId.substring(0, 8)}...`);
     
     // Load from database if not in memory (handles detached/stale sessions)
     let session = this.sessions.get(sessionId);
     if (!session) {
-      logger.warn(`🐚 [SESSION] 🗑️ Session ${sessionId.substring(0, 8)}... not in memory, loading from database`);
+      logger.warn(`[session] Session ${sessionId.substring(0, 8)}... not in memory, loading from database`);
       const loaded = await this.loadSessionFromDatabase(sessionId);
       if (!loaded) {
-        logger.warn(`🐚 [SESSION] 🗑️ Session ${sessionId.substring(0, 8)}... not found in database either`);
+        logger.warn(`[session] Session ${sessionId.substring(0, 8)}... not found in database either`);
         // Still update database in case it exists
         const now = new Date();
         const updateResult = await query(
           `UPDATE shell_sessions SET status = 'terminated', terminated_at = $1 WHERE session_id = $2`,
           [now, sessionId]
         );
-        logger.info(`🐚 [SESSION] 🗑️ Direct database UPDATE - rowCount: ${updateResult.rowCount}`);
+        logger.info(`[session] Direct database UPDATE - rowCount: ${updateResult.rowCount}`);
         return;
       }
       session = this.sessions.get(sessionId);
     }
 
     if (!session) {
-      logger.warn(`🐚 [SESSION] 🗑️ Cannot terminate - session ${sessionId} could not be loaded`);
+      logger.warn(`[session] Cannot terminate - session ${sessionId} could not be loaded`);
       return;
     }
 
-    logger.info(`🐚 [SESSION] 🗑️ Updating session status to 'terminated'`);
+    logger.info(`[session] Updating session status to 'terminated'`);
     // Update status
     await this.updateSessionStatus(sessionId, 'terminated');
     session.info.terminatedAt = new Date();
 
-    logger.info(`🐚 [SESSION] 🗑️ Updating database with terminated_at timestamp`);
+    logger.info(`[session] Updating database with terminated_at timestamp`);
     // Update database
     const updateResult = await query(
       `UPDATE shell_sessions SET terminated_at = $1 WHERE session_id = $2`,
       [session.info.terminatedAt, sessionId]
     );
-    logger.info(`🐚 [SESSION] 🗑️ Database UPDATE executed - rowCount: ${updateResult.rowCount}`);
+    logger.info(`[session] Database UPDATE executed - rowCount: ${updateResult.rowCount}`);
 
     const activeSessionId = this.activePtySession.get(session.info.deviceUuid);
     if (activeSessionId === sessionId) {
-      logger.info(`🐚 [SESSION] 🗑️ Clearing active PTY session for device`);
+      logger.info(`[session] Clearing active PTY session for device`);
       this.activePtySession.delete(session.info.deviceUuid);
     }
 
-    logger.info(`🐚 [SESSION] 🗑️ Closing ${session.attachedClients.size} attached client(s)`);
+    logger.info(`[session] Closing ${session.attachedClients.size} attached client(s)`);
     // Close all attached clients
     session.attachedClients.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -364,44 +364,44 @@ export class SessionManager {
     });
     session.attachedClients.clear();
 
-    logger.info(`🐚 [SESSION] 🗑️ Session ${sessionId.substring(0, 8)}... terminated successfully`);
+    logger.info(`[session] Session ${sessionId.substring(0, 8)}... terminated successfully`);
   }
 
   /**
    * Terminate all sessions for a user on a device (or all sessions if no userId specified)
    */
   async terminateAllSessions(deviceUuid: string, userId?: string): Promise<void> {
-    logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() called for device ${deviceUuid.substring(0, 8)}...${userId ? ' and user ' + userId : ''}`);
+    logger.info(`[session] terminateAllSessions() called for device ${deviceUuid.substring(0, 8)}...${userId ? ' and user ' + userId : ''}`);
     
     // Query database for all sessions (not just memory) to ensure we catch detached/stale sessions
     const allSessions = await this.listSessions(deviceUuid, true); // Include terminated to see full picture
-    logger.info(`🐚 [SESSION] 🗑️ Total device sessions in database: ${allSessions.length}`);
+    logger.info(`[session] Total device sessions in database: ${allSessions.length}`);
     
     const sessionsToTerminate = allSessions.filter(s => {
       const isTerminated = s.status === 'terminated';
       const userMatch = !userId || !s.userId || s.userId === userId;
       const shouldTerminate = !isTerminated && userMatch;
       
-      logger.info(`🐚 [SESSION] 🗑️   Session ${s.sessionId.substring(0, 8)}... status=${s.status} userId=${s.userId || 'none'} shouldTerminate=${shouldTerminate}`);
+      logger.info(`[session]   Session ${s.sessionId.substring(0, 8)}... status=${s.status} userId=${s.userId || 'none'} shouldTerminate=${shouldTerminate}`);
       
       return shouldTerminate;
     });
 
     if (sessionsToTerminate.length === 0) {
-      logger.info(`🐚 [SESSION] 🗑️ No sessions to terminate for device ${deviceUuid.substring(0, 8)}...${userId ? ' and user ' + userId : ''}`);
+      logger.info(`[session] No sessions to terminate for device ${deviceUuid.substring(0, 8)}...${userId ? ' and user ' + userId : ''}`);
       return;
     }
 
-    logger.info(`🐚 [SESSION] 🗑️ Will terminate ${sessionsToTerminate.length} session(s)`);
+    logger.info(`[session] Will terminate ${sessionsToTerminate.length} session(s)`);
 
     // Terminate all matching sessions (kept in DB for audit purposes)
     for (const session of sessionsToTerminate) {
-      logger.info(`🐚 [SESSION] 🗑️ Terminating session ${session.sessionId.substring(0, 8)}...`);
+      logger.info(`[session] Terminating session ${session.sessionId.substring(0, 8)}...`);
       await this.terminateSession(session.sessionId);
-      logger.info(`🐚 [SESSION] 🗑️ Session ${session.sessionId.substring(0, 8)}... terminated (kept in DB for audit)`);
+      logger.info(`[session] Session ${session.sessionId.substring(0, 8)}... terminated (kept in DB for audit)`);
     }
 
-    logger.info(`🐚 [SESSION] 🗑️ terminateAllSessions() completed - ${sessionsToTerminate.length} sessions marked as terminated`);
+    logger.info(`[session] terminateAllSessions() completed - ${sessionsToTerminate.length} sessions marked as terminated`);
   }
 
   /**
@@ -413,12 +413,12 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
     
     if (!session) {
-      logger.warn(`🐚 [SESSION] Cannot append - session ${sessionId} not found`);
+      logger.warn(`[session] Cannot append - session ${sessionId} not found`);
       return;
     }
 
     if (session.info.status === 'terminated') {
-      logger.debug(`🐚 [SESSION] Ignoring output for terminated session ${sessionId.substring(0, 8)}...`);
+      logger.debug(`[session] Ignoring output for terminated session ${sessionId.substring(0, 8)}...`);
       return;
     }
 
@@ -492,7 +492,7 @@ export class SessionManager {
       totalBytes += chunkBytes;
     }
 
-    logger.info(`🐚 [SESSION] Replay capped: ${chunks.length} chunks (${session.buffer.totalBytes} bytes) → ${result.length} chunks (${totalBytes} bytes)`);
+    logger.info(`[session] Replay capped: ${chunks.length} chunks (${session.buffer.totalBytes} bytes) → ${result.length} chunks (${totalBytes} bytes)`);
 
     return result;
   }
@@ -524,12 +524,12 @@ export class SessionManager {
 
     sqlQuery += ` ORDER BY last_activity DESC`;
 
-    logger.info(`🐚 [SESSION] 🗑️ Executing listSessions SQL: ${sqlQuery}`);
+    logger.info(`[session] Executing listSessions SQL: ${sqlQuery}`);
     const result = await query(sqlQuery, params);
-    logger.info(`🐚 [SESSION] 🗑️ listSessions returned ${result.rows.length} rows from database (includeTerminated=${includeTerminated})`);
+    logger.info(`[session] listSessions returned ${result.rows.length} rows from database (includeTerminated=${includeTerminated})`);
     
     const sessions = result.rows.map(row => {
-      logger.info(`🐚 [SESSION] 🗑️   - ${row.session_id.substring(0, 8)}... status=${row.status} terminated_at=${row.terminated_at}`);
+      logger.info(`[session]   - ${row.session_id.substring(0, 8)}... status=${row.status} terminated_at=${row.terminated_at}`);
       return {
         sessionId: row.session_id,
         deviceUuid: row.agent_uuid,
@@ -577,16 +577,16 @@ export class SessionManager {
       }
       if (active && !session.ptyStartedAt) {
         session.ptyStartedAt = new Date();
-        logger.info(`🐚 [SESSION] PTY started for session ${sessionId.substring(0, 8)}...`);
+        logger.info(`[session] PTY started for session ${sessionId.substring(0, 8)}...`);
 
         if (session.info.status !== 'active') {
           void this.updateSessionStatus(sessionId, 'active').catch(err => {
-            logger.error(`🐚 [SESSION] Failed to mark session active: ${err.message}`);
+            logger.error(`[session] Failed to mark session active: ${err.message}`);
           });
           this.notifyStatusChange(sessionId, 'active', 'Shell connected.');
         }
       } else if (!active) {
-        logger.warn(`🐚 [SESSION] PTY stopped for session ${sessionId.substring(0, 8)}...`);
+        logger.warn(`[session] PTY stopped for session ${sessionId.substring(0, 8)}...`);
       }
     }
   }
@@ -608,12 +608,12 @@ export class SessionManager {
       session.info.status = status;
     }
 
-    logger.info(`🐚 [SESSION] 🗑️ Executing SQL: UPDATE shell_sessions SET status = '${status}' WHERE session_id = '${sessionId.substring(0, 8)}...'`);
+    logger.info(`[session] Executing SQL: UPDATE shell_sessions SET status = '${status}' WHERE session_id = '${sessionId.substring(0, 8)}...'`);
     const updateResult = await query(
       `UPDATE shell_sessions SET status = $1 WHERE session_id = $2`,
       [status, sessionId]
     );
-    logger.info(`🐚 [SESSION] 🗑️ Status UPDATE executed - rowCount: ${updateResult.rowCount}`);
+    logger.info(`[session] Status UPDATE executed - rowCount: ${updateResult.rowCount}`);
   }
 
   /**
@@ -654,7 +654,7 @@ export class SessionManager {
       `UPDATE shell_sessions SET last_activity = $1 WHERE session_id = $2`,
       [timestamp, sessionId]
     ).catch(err => {
-      logger.error(`🐚 [SESSION] Failed to update last activity: ${err.message}`);
+      logger.error(`[session] Failed to update last activity: ${err.message}`);
     });
   }
 
@@ -698,7 +698,7 @@ export class SessionManager {
 
     this.sessions.set(sessionId, activeSession);
 
-    logger.info(`🐚 [SESSION] Loaded session ${sessionId.substring(0, 8)}... from database`);
+    logger.info(`[session] Loaded session ${sessionId.substring(0, 8)}... from database`);
 
     return true;
   }
@@ -715,7 +715,7 @@ export class SessionManager {
       this.runCleanup();
     }, this.CLEANUP_INTERVAL_MS);
 
-    logger.info(`🐚 [SESSION] Started cleanup job (interval: ${this.CLEANUP_INTERVAL_MS}ms, timeout: ${this.SESSION_TIMEOUT_MINUTES}min)`);
+    logger.info(`[session] Started cleanup job (interval: ${this.CLEANUP_INTERVAL_MS}ms, timeout: ${this.SESSION_TIMEOUT_MINUTES}min)`);
   }
 
   /**
@@ -741,7 +741,7 @@ export class SessionManager {
         if (!session.devicePtyActive && session.info.status === 'active') {
           const timeSinceCreation = now.getTime() - session.info.createdAt.getTime();
           if (timeSinceCreation > this.PTY_STARTUP_GRACE_PERIOD_MS) {
-            logger.warn(`🐚 [SESSION] PTY never started for ${sessionId.substring(0, 8)}... - terminating`);
+            logger.warn(`[session] PTY never started for ${sessionId.substring(0, 8)}... - terminating`);
             sessionsToTerminate.add(sessionId);
           }
         }
@@ -750,7 +750,7 @@ export class SessionManager {
 
     // Terminate inactive sessions
     for (const sessionId of sessionsToTerminate) {
-      logger.info(`🐚 [SESSION] Auto-terminating inactive session ${sessionId.substring(0, 8)}...`);
+      logger.info(`[session] Auto-terminating inactive session ${sessionId.substring(0, 8)}...`);
       await this.terminateSession(sessionId);
     }
 
@@ -771,11 +771,11 @@ export class SessionManager {
         this.sessions.delete(row.session_id);
       });
 
-      logger.info(`🐚 [SESSION] Deleted ${deleteResult.rows.length} old terminated sessions`);
+      logger.info(`[session] Deleted ${deleteResult.rows.length} old terminated sessions`);
     }
 
     if (sessionsToTerminate.size > 0 || deleteResult.rows.length > 0) {
-      logger.info(`🐚 [SESSION] Cleanup complete: ${sessionsToTerminate.size} terminated, ${deleteResult.rows.length} deleted`);
+      logger.info(`[session] Cleanup complete: ${sessionsToTerminate.size} terminated, ${deleteResult.rows.length} deleted`);
     }
   }
 
@@ -793,7 +793,7 @@ export class SessionManager {
   async markStartCommandSent(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) {
-      logger.warn(`🐚 [SESSION] Cannot mark start command sent - session ${sessionId.substring(0, 8)}... not found`);
+      logger.warn(`[session] Cannot mark start command sent - session ${sessionId.substring(0, 8)}... not found`);
       return;
     }
 
@@ -807,7 +807,7 @@ export class SessionManager {
         ['starting', sessionId]
       );
 
-      logger.info(`🐚 [SESSION] Session ${sessionId.substring(0, 8)}... status: creating → starting`);
+      logger.info(`[session] Session ${sessionId.substring(0, 8)}... status: creating → starting`);
 
       // Notify WebSocket clients
       this.notifyStatusChange(sessionId, 'starting', 'Connecting to agent...');
@@ -822,7 +822,7 @@ export class SessionManager {
       this.checkSessionHealth();
     }, 3000); // Check every 3 seconds
     
-    logger.info('🐚 [SESSION] Health check started');
+    logger.info('[session] Health check started');
   }
 
   /**
@@ -837,7 +837,7 @@ export class SessionManager {
         const elapsed = now - session.startCommandSentAt.getTime();
 
         if (elapsed > this.AGENT_RESPONSE_TIMEOUT_MS) {
-          logger.warn(`🐚 [SESSION] Agent timeout for session ${sessionId.substring(0, 8)}... (${Math.round(elapsed/1000)}s elapsed)`);
+          logger.warn(`[session] Agent timeout for session ${sessionId.substring(0, 8)}... (${Math.round(elapsed/1000)}s elapsed)`);
           
           session.info.status = 'agent-timeout';
           
@@ -889,7 +889,7 @@ export class SessionManager {
 
     this.sessions.clear();
 
-    logger.info('🐚 [SESSION] Shutdown complete');
+    logger.info('[session] Shutdown complete');
   }
 }
 

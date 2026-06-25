@@ -99,4 +99,5 @@ k8s/**/values-secret.yaml
 
 /.env.cloud
 /.env.bacnet-unicast
+/.env.self
 mosquitto-agent/auth/passwd

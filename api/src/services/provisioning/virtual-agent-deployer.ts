@@ -88,7 +88,7 @@ export class VirtualAgentDeployer {
       try {
         this.k8sConfig.loadFromCluster();
         const currentContext = this.k8sConfig.getCurrentContext();
-        logger.info('✅ VirtualAgentDeployer initialized with in-cluster K8s config', { currentContext });
+        logger.info('VirtualAgentDeployer initialized with in-cluster K8s config', { currentContext });
         configLoaded = true;
       } catch (error) {
         logger.warn('All service account files exist but loadFromCluster() failed', { 
@@ -108,14 +108,14 @@ export class VirtualAgentDeployer {
         this.k8sConfig.loadFromDefault();
         const currentContext = this.k8sConfig.getCurrentContext();
         const currentCluster = this.k8sConfig.getCurrentCluster();
-        logger.info('✅ VirtualAgentDeployer initialized with default kubeconfig', { 
+        logger.info('VirtualAgentDeployer initialized with default kubeconfig', { 
           currentContext,
           clusterServer: currentCluster?.server,
           kubeconfigPath: process.env.KUBECONFIG || '~/.kube/config'
         });
         configLoaded = true;
       } catch (fallbackError) {
-        logger.warn('⚠️ K8s config not available - Virtual agent deployment disabled', { 
+        logger.warn('K8s config not available - Virtual agent deployment disabled', { 
           serviceAccountFilesExist: allServiceAccountFilesExist,
           kubeconfigPath: process.env.KUBECONFIG || '~/.kube/config',
           error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),

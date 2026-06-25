@@ -598,7 +598,7 @@ export class WebSocketManager {
   }
 
   private handleGlobalConnection(ws: WebSocket, user: JWTPayload, tokenExpiryMs?: number): void {
-    logger.info(`✅ Global client connected: ${this.getUserIdentifier(user)}`);
+    logger.info(`Global client connected: ${this.getUserIdentifier(user)}`);
 
     const client: WebSocketClient = {
       ws,
@@ -1275,7 +1275,7 @@ export class WebSocketManager {
   }
 
   private handleDisconnect(client: WebSocketClient): void {
-    logger.info(`❌ Device disconnected: ${client.deviceUuid.substring(0, 8)}...`);
+    logger.info(`Device disconnected: ${client.deviceUuid.substring(0, 8)}...`);
 
     // 🔐 Clear token expiry timeout to prevent memory leaks
     if (client.tokenExpiryTimeout) {

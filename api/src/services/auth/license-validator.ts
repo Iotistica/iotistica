@@ -139,14 +139,15 @@ export class LicenseValidator {
 
   /**
    * Initialize license from environment variable.
-   * Throws if IOTISTIC_LICENSE_KEY is missing or validation fails.
-   * No fallback to unlicensed mode is permitted.
+   * Falls back to self-hosted community mode when IOTISTIC_LICENSE_KEY is not set.
    */
   async init(): Promise<void> {
     const licenseKey = process.env.IOTISTIC_LICENSE_KEY;
-    
+
     if (!licenseKey) {
-      throw new Error('IOTISTIC_LICENSE_KEY environment variable is not set. Service cannot start without a valid license.');
+      logger.info('IOTISTIC_LICENSE_KEY not set — running in self-hosted community mode');
+      this.licenseData = this.getSelfHostedCommunityMode();
+      return;
     }
 
     this.licenseKey = licenseKey;
@@ -246,6 +247,48 @@ export class LicenseValidator {
     } catch (error: any) {
       throw new Error(`License validation failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Self-hosted community mode — full access, no expiry.
+   * Used when IOTISTIC_LICENSE_KEY is not configured.
+   */
+  private getSelfHostedCommunityMode(): LicenseData {
+    const farFuture = new Date('2099-12-31T23:59:59Z');
+    const farFutureIso = farFuture.toISOString();
+    const farFutureEpoch = Math.floor(farFuture.getTime() / 1000);
+    return {
+      tenantId: 'self-hosted',
+      clientId: 'self-hosted',
+      customerId: 'self-hosted',
+      customerName: 'Self-Hosted Community',
+      plan: 'enterprise',
+      features: {
+        maxDevices: 999999,
+        canExecuteJobs: true,
+        canScheduleJobs: true,
+        canRemoteAccess: true,
+        canOtaUpdates: true,
+        canExportData: true,
+        hasAdvancedAlerts: true,
+        hasCustomDashboards: true,
+      },
+      limits: {
+        maxJobTemplates: 999999,
+        maxAlertRules: 999999,
+        maxUsers: 999999,
+      },
+      trial: {
+        isTrialMode: false,
+        gracePeriodDays: 0,
+      },
+      subscription: {
+        status: 'active',
+        currentPeriodEndsAt: farFutureIso,
+      },
+      issuedAt: Math.floor(Date.now() / 1000),
+      expiresAt: farFutureEpoch,
+    };
   }
 
   /**

@@ -1,14 +1,7 @@
-/**
- * Server lifecycle: starts HTTP + HTTPS listeners, WebSocket, and
- * registers graceful shutdown signal handlers.
- */
-
 import type { FastifyInstance } from 'fastify';
 import logger from '../utils/logger';
 import { websocketManager } from '../services/websocket/manager';
-import { startHttpsServer } from './https';
 import { createGracefulShutdown } from './shutdown';
-import type https from 'https';
 
 type NetworkError = NodeJS.ErrnoException & {
   address?: string;
@@ -40,11 +33,9 @@ export async function startServer(fastify: FastifyInstance): Promise<void> {
 
   logger.info('='.repeat(80));
   logger.info('[CLOUD] Iotistica API Server');
+  logger.info(`  HTTP : http://0.0.0.0:${PORT}`);
+  logger.info(`  TLS  : terminated at reverse proxy / ingress`);
   logger.info('='.repeat(80));
-  logger.info(`Server running on http://localhost:${PORT}`);
-  logger.info('='.repeat(80));
-
-  const httpsServer = await startHttpsServer(fastify);
 
   try {
     websocketManager.initialize(fastify.server);
@@ -61,7 +52,7 @@ export async function startServer(fastify: FastifyInstance): Promise<void> {
     }
   }
 
-  const gracefulShutdown = createGracefulShutdown({ fastify, httpsServer });
+  const gracefulShutdown = createGracefulShutdown(fastify);
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('disconnect', () => gracefulShutdown('Debugger disconnect', 3000));

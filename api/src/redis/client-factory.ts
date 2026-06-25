@@ -159,26 +159,26 @@ class RedisClientFactory {
 
     // Event handlers
     client.on('connect', () => {
-      logger.info(`✅ Redis ${clientType} TCP connection established`);
+      logger.info(`Redis ${clientType} TCP connection established`);
     });
 
     client.on('ready', () => {
-      logger.info(`✅ Redis ${clientType} ready and authenticated`);
+      logger.info(`Redis ${clientType} ready and authenticated`);
     });
 
     client.on('error', (err: Error) => {
-      logger.error(`❌ Redis ${clientType} error:`, {
+      logger.error(`Redis ${clientType} error`, {
         message: err.message,
         code: (err as any).code,
       });
     });
 
     client.on('close', () => {
-      logger.info(`🔌 Redis ${clientType} connection closed`);
+      logger.info(`Redis ${clientType} connection closed`);
     });
 
     client.on('reconnecting', () => {
-      logger.info(`⏳ Redis ${clientType} reconnecting...`);
+      logger.info(`Redis ${clientType} reconnecting...`);
     });
 
     client.on('end', () => {

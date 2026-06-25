@@ -1,0 +1,187 @@
+services:
+    postgres:
+        image: timescale/timescaledb:latest-pg16
+        restart: unless-stopped
+        environment:
+            - POSTGRES_DB=${POSTGRES_DB:-iotistica}
+            - POSTGRES_USER=${POSTGRES_USER:-postgres}
+            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+        volumes:
+            - iotistic-pg-data:/var/lib/postgresql/data
+        command: >
+            postgres
+            -c shared_preload_libraries=timescaledb
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        networks:
+            - iotistica-net
+
+    redis:
+        image: redis:7-alpine
+        restart: unless-stopped
+        environment:
+            - REDIS_PASSWORD=${REDIS_PASSWORD}
+        command: >
+            redis-server
+            --requirepass ${REDIS_PASSWORD}
+            --maxmemory 2gb
+            --maxmemory-policy noeviction
+            --save ""
+            --appendonly no
+        deploy:
+            resources:
+                limits:
+                    memory: 2560m
+                reservations:
+                    memory: 2048m
+        healthcheck:
+            test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping"]
+            interval: 10s
+            timeout: 3s
+            retries: 5
+        networks:
+            - iotistica-net
+
+    mosquitto:
+        image: iegomez/mosquitto-go-auth
+        restart: unless-stopped
+        ports:
+            - "${MOSQUITTO_TLS_PORT_EXT:-8883}:8883"
+            - "${MOSQUITTO_WSS_PORT_EXT:-9002}:9002"
+            - "${MOSQUITTO_PORT_EXT:-1883}:1883"
+        volumes:
+            - ./mosquitto/mosquitto-tls.conf:/etc/mosquitto/mosquitto.conf
+            - ./mosquitto/certs:/mosquitto/certs
+        healthcheck:
+            test: ["CMD-SHELL", "cat /proc/1/status > /dev/null || exit 1"]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 5s
+        networks:
+            - iotistica-net
+
+    api:
+        build:
+            context: ./api
+            dockerfile: Dockerfile
+        restart: always
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"
+        environment:
+            - PORT=${PORT:-3002}
+            - NODE_ENV=${NODE_ENV:-production}
+            - LOG_LEVEL=${LOG_LEVEL:-info}
+            # JWT
+            - JWT_SECRET=${JWT_SECRET}
+            - JWT_ACCESS_TOKEN_EXPIRY=${JWT_ACCESS_TOKEN_EXPIRY:-15m}
+            - JWT_REFRESH_TOKEN_EXPIRY=${JWT_REFRESH_TOKEN_EXPIRY:-7d}
+            # Auth0 (optional — set AUTH0_ENABLED=true to activate)
+            - AUTH0_ENABLED=${AUTH0_ENABLED:-false}
+            - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+            - AUTH0_AUDIENCE=${AUTH0_AUDIENCE}
+            - AUTH0_ISSUER=${AUTH0_ISSUER}
+            # Database
+            - DB_HOST=${DB_HOST:-postgres}
+            - DB_PORT=${DB_PORT:-5432}
+            - DB_NAME=${POSTGRES_DB:-iotistica}
+            - DB_USER=${POSTGRES_USER:-postgres}
+            - DB_PASSWORD=${POSTGRES_PASSWORD}
+            - DB_POOL_SIZE=${DB_POOL_SIZE:-20}
+            - DB_SSL=${DB_SSL:-false}
+            # MQTT
+            - MQTT_BROKER_URL=${MQTT_BROKER_URL:-mqtt://mosquitto:1883}
+            - MQTT_USERNAME=${MQTT_USERNAME:-admin}
+            - MQTT_PASSWORD=${MQTT_PASSWORD}
+            # Redis
+            - REDIS_HOST=${REDIS_HOST:-redis}
+            - REDIS_PORT=${REDIS_PORT:-6379}
+            - REDIS_PASSWORD=${REDIS_PASSWORD}
+            - REDIS_INGESTION_STREAM_KEY=${REDIS_INGESTION_STREAM_KEY:-tenant:{default}:agent:devices:ingestion}
+            # Remote access
+            - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
+        ports:
+            - "${API_PORT_EXT:-4002}:3002"
+        volumes:
+            - iotistic-api-spool:/var/lib/iotistic/spool
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+            mosquitto:
+                condition: service_started
+        networks:
+            - iotistica-net
+
+    ingestion:
+        build:
+            context: .
+            dockerfile: ingestion/Dockerfile
+        restart: always
+        logging:
+            driver: "json-file"
+            options:
+                max-size: "10m"
+                max-file: "3"
+        environment:
+            - PORT=${INGESTION_PORT:-3003}
+            - NODE_ENV=${NODE_ENV:-production}
+            - LOG_LEVEL=${LOG_LEVEL:-info}
+            - INGESTION_PROFILE=${INGESTION_PROFILE:-balanced}
+            # Database
+            - DB_HOST=${DB_HOST:-postgres}
+            - DB_PORT=${DB_PORT:-5432}
+            - DB_NAME=${POSTGRES_DB:-iotistica}
+            - DB_USER=${POSTGRES_USER:-postgres}
+            - DB_PASSWORD=${POSTGRES_PASSWORD}
+            - DB_POOL_SIZE=${INGESTION_DB_POOL_SIZE:-10}
+            - DB_SSL=${DB_SSL:-false}
+            # Redis
+            - REDIS_HOST=${REDIS_HOST:-redis}
+            - REDIS_PORT=${REDIS_PORT:-6379}
+            - REDIS_PASSWORD=${REDIS_PASSWORD}
+            - REDIS_INGESTION_STREAM_KEY=${REDIS_INGESTION_STREAM_KEY:-tenant:{default}:agent:devices:ingestion}
+            # Disk spool
+            - INGESTION_SPOOL_ENABLED=${INGESTION_SPOOL_ENABLED:-true}
+            - INGESTION_SPOOL_PATH=/var/lib/iotistic/spool
+            - INGESTION_SPOOL_MAX_SIZE_MB=${INGESTION_SPOOL_MAX_SIZE_MB:-1000}
+        volumes:
+            - iotistic-ingestion-spool:/var/lib/iotistic/spool
+        healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
+        depends_on:
+            postgres:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+        networks:
+            - iotistica-net
+
+volumes:
+    iotistic-pg-data:
+        driver: local
+    iotistic-api-spool:
+        driver: local
+    iotistic-ingestion-spool:
+        driver: local
+
+networks:
+    iotistica-net:
+        driver: bridge

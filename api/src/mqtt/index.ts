@@ -36,7 +36,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
   
   const mqttBrokerUrl = buildBrokerUrl(brokerConfig);
   
-  logger.info('🔍 MQTT INITIALIZATION STARTING', {
+  logger.info('MQTT initialization starting', {
     source: brokerConfig.id === 0 ? 'environment' : 'database',
     brokerName: brokerConfig.name,
     brokerUrl: mqttBrokerUrl,
@@ -80,7 +80,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
       qos: (parseInt(process.env.MQTT_QOS || '1') as 0 | 1 | 2)
     });
 
-    logger.info('🔌 MQTT CONFIG CREATED', {
+    logger.info('MQTT config created', {
       source: brokerConfig.id === 0 ? 'environment' : `database (${brokerConfig.name})`,
       brokerUrl: mqttBrokerUrl,
       clientId: process.env.MQTT_CLIENT_ID || `api-${process.env.HOSTNAME || 'server'}`,
@@ -232,7 +232,7 @@ export async function initializeMqtt(): Promise<MqttManager | null> {
     return mqttManager;
 
   } catch (error) {
-    logger.error('❌ FAILED TO INITIALIZE MQTT SERVICE', {
+    logger.error('Failed to initialize MQTT service', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
       brokerUrl: mqttBrokerUrl,

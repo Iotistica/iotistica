@@ -166,7 +166,7 @@ export class ShellHandler {
     const secret = process.env.AGENT_SHELL_HMAC_KEY;
 
     if (!secret) {
-      logger.warn('🐚 [SHELL] ⚠️ AGENT_SHELL_HMAC_KEY not set - sending unsigned command (INSECURE)', {
+      logger.warn('[shell] AGENT_SHELL_HMAC_KEY not set - sending unsigned command (INSECURE)', {
         action: command.action,
       });
       return command;
@@ -199,7 +199,7 @@ export class ShellHandler {
     const signature = createHmac('sha256', secret).update(canonicalString).digest('hex');
     signedCommand.signature = signature;
 
-    logger.debug('🐚 [SHELL] ✅ Command signed with HMAC', {
+    logger.debug('[shell] Command signed with HMAC', {
       action: command.action,
       issued_at: new Date(issuedAt).toISOString(),
       expires_at: new Date(expiresAt).toISOString(),
@@ -216,7 +216,7 @@ export class ShellHandler {
    */
   async handleShellCommand(deviceUuid: string, data: any): Promise<void> {
     if (!this.mqttManager) {
-      logger.error('🐚 [SHELL] ❌ MQTT Manager not set - cannot send shell command');
+      logger.error('[shell] MQTT Manager not set - cannot send shell command');
       return;
     }
 
@@ -242,7 +242,7 @@ export class ShellHandler {
       await this.mqttManager.publish(topic, payload, 1);
       logger.debug('SHELL: Command published to MQTT successfully');
     } catch (error) {
-      logger.error('🐚 [SHELL] ❌ Failed to send shell command:', error);
+      logger.error('[shell] Failed to send shell command:', error);
     }
   }
 
@@ -284,7 +284,7 @@ export class ShellHandler {
         }
       });
 
-      logger.debug(`🐚 [SHELL] Sent to ${sentCount}/${attachedClients.size} clients`);
+      logger.debug(`[shell] Sent to ${sentCount}/${attachedClients.size} clients`);
     } else {
       // Legacy non-session output: broadcast to all device clients
       logger.debug('SHELL: Broadcasting legacy output');
@@ -357,7 +357,7 @@ export class ShellHandler {
         data: session,
       });
 
-      logger.info(`🐚 SESSION created: ${session.sessionId.substring(0, 8)}... (user: ${userId})`);
+      logger.info(`[session] created: ${session.sessionId.substring(0, 8)}... (user: ${userId})`);
     } catch (error: any) {
       logger.error('SHELL: Failed to create session:', error);
       this.deps.send(client.ws, {
@@ -423,8 +423,8 @@ export class ShellHandler {
 
       logger.debug('SHELL: Client attached to session');
     } catch (error: any) {
-      logger.error('🐚 [SESSION] Failed to attach session:', error);
-      logger.error('🐚 [SESSION] Error stack:', error.stack);
+      logger.error('[session] Failed to attach session:', error);
+      logger.error('[session] Error stack:', error.stack);
       this.deps.send(client.ws, {
         type: 'error',
         message: `Failed to attach session: ${error.message}`,
@@ -436,7 +436,7 @@ export class ShellHandler {
     try {
       const userId = this.deps.getUserIdentifier(client.user);
       if (userId === 'unknown') {
-        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to detach from session');
+        logger.warn('[session] Rejected - unauthenticated user attempting to detach from session');
         return;
       }
 
@@ -447,7 +447,7 @@ export class ShellHandler {
       this.deps.send(client.ws, { type: 'session-detached', sessionId });
       logger.debug('SHELL: Client detached from session');
     } catch (error: any) {
-      logger.error('🐚 [SESSION] Failed to detach session:', error);
+      logger.error('[session] Failed to detach session:', error);
     }
   }
 
@@ -455,7 +455,7 @@ export class ShellHandler {
     try {
       const userId = this.deps.getUserIdentifier(client.user);
       if (userId === 'unknown') {
-        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to terminate session');
+        logger.warn('[session] Rejected - unauthenticated user attempting to terminate session');
         this.deps.send(client.ws, {
           type: 'error',
           message: 'Unauthorized: authentication required for shell access',
@@ -478,7 +478,7 @@ export class ShellHandler {
       }
 
       if (session.userId && session.userId !== userId) {
-        logger.warn(`🐚 [SESSION] Rejected - user ${userId} attempting to terminate session owned by ${session.userId}`);
+        logger.warn(`[session] Rejected - user ${userId} attempting to terminate session owned by ${session.userId}`);
         this.deps.send(client.ws, {
           type: 'error',
           message: 'Unauthorized: you do not own this session',
@@ -493,7 +493,7 @@ export class ShellHandler {
 
       logger.debug('SHELL: Terminated session');
     } catch (error: any) {
-      logger.error('🐚 [SESSION] Failed to terminate session:', error);
+      logger.error('[session] Failed to terminate session:', error);
       this.deps.send(client.ws, {
         type: 'error',
         message: `Failed to terminate session: ${error.message}`,
@@ -505,7 +505,7 @@ export class ShellHandler {
     try {
       const userId = this.deps.getUserIdentifier(client.user);
       if (userId === 'unknown') {
-        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to clear sessions');
+        logger.warn('[session] Rejected - unauthenticated user attempting to clear sessions');
         this.deps.send(client.ws, {
           type: 'error',
           message: 'Unauthorized: authentication required to clear sessions',
@@ -591,7 +591,7 @@ export class ShellHandler {
       console.log(`[SHELL] handleShellInput called: sessionId=${sessionId?.substring(0, 8)}, input=${JSON.stringify(input)}`);
       
       if (userId === 'unknown') {
-        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to send shell input');
+        logger.warn('[session] Rejected - unauthenticated user attempting to send shell input');
         this.deps.send(client.ws, {
           type: 'error',
           message: 'Unauthorized: authentication required for shell access',
@@ -613,7 +613,7 @@ export class ShellHandler {
       }
 
       if (session.userId && session.userId !== userId) {
-        logger.warn(`🐚 [SESSION] Rejected - user ${userId} attempting to access session owned by ${session.userId}`);
+        logger.warn(`[session] Rejected - user ${userId} attempting to access session owned by ${session.userId}`);
         this.deps.send(client.ws, {
           type: 'error',
           message: 'Unauthorized: you do not own this session',
@@ -628,7 +628,7 @@ export class ShellHandler {
         previousInput.input === input &&
         now - previousInput.timestamp <= this.duplicateInputWindowMs
       ) {
-        logger.debug(`🐚 [SESSION] Ignoring duplicate input for session ${sessionId.substring(0, 8)}...`);
+        logger.debug(`[session] Ignoring duplicate input for session ${sessionId.substring(0, 8)}...`);
         return;
       }
       this.recentInputBySession.set(sessionId, { input, timestamp: now });
@@ -641,9 +641,9 @@ export class ShellHandler {
         data: input,
       });
 
-      logger.debug(`🐚 [SESSION] Forwarded input to session ${sessionId.substring(0, 8)}...`);
+      logger.debug(`[session] Forwarded input to session ${sessionId.substring(0, 8)}...`);
     } catch (error: any) {
-      logger.error('🐚 [SESSION] Failed to handle shell input:', error);
+      logger.error('[session] Failed to handle shell input:', error);
       this.deps.send(client.ws, {
         type: 'error',
         message: `Failed to send input: ${error.message}`,
@@ -655,7 +655,7 @@ export class ShellHandler {
     try {
       const userId = this.deps.getUserIdentifier(client.user);
       if (userId === 'unknown') {
-        logger.warn('🐚 [SESSION] Rejected - unauthenticated user attempting to resize session');
+        logger.warn('[session] Rejected - unauthenticated user attempting to resize session');
         return;
       }
 
@@ -664,7 +664,7 @@ export class ShellHandler {
       const rows = message.data?.rows;
 
       if (!sessionId || !cols || !rows) {
-        logger.warn('🐚 [SESSION] Invalid resize request - missing sessionId, cols, or rows');
+        logger.warn('[session] Invalid resize request - missing sessionId, cols, or rows');
         return;
       }
 
@@ -672,12 +672,12 @@ export class ShellHandler {
       const session = sessions.find(s => s.sessionId === sessionId);
 
       if (!session) {
-        logger.warn(`🐚 [SESSION] Cannot resize - session ${sessionId.substring(0, 8)}... not found`);
+        logger.warn(`[session] Cannot resize - session ${sessionId.substring(0, 8)}... not found`);
         return;
       }
 
       if (session.userId && session.userId !== userId) {
-        logger.warn(`🐚 [SESSION] Rejected - user ${userId} attempting to resize session owned by ${session.userId}`);
+        logger.warn(`[session] Rejected - user ${userId} attempting to resize session owned by ${session.userId}`);
         return;
       }
 
@@ -688,9 +688,9 @@ export class ShellHandler {
         rows,
       });
 
-      logger.debug(`🐚 [SESSION] Forwarded resize (${cols}x${rows}) to session ${sessionId.substring(0, 8)}...`);
+      logger.debug(`[session] Forwarded resize (${cols}x${rows}) to session ${sessionId.substring(0, 8)}...`);
     } catch (error: any) {
-      logger.error('🐚 [SESSION] Failed to handle resize:', error);
+      logger.error('[session] Failed to handle resize:', error);
     }
   }
 

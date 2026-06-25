@@ -69,12 +69,17 @@ function createServiceProxy(
 }
 
 export async function mountProxies(fastify: FastifyInstance): Promise<void> {
-  const POSTOFFICE_URL = process.env.POSTOFFICE_URL || 'http://postoffice:3300';
-  const postofficeMountPath = `${API_BASE}/postoffice`;
-  await fastify.register(
-    createServiceProxy('Postoffice', `${POSTOFFICE_URL}/api/v1`, postofficeMountPath),
-    { prefix: postofficeMountPath },
-  );
+  const POSTOFFICE_URL = process.env.POSTOFFICE_URL;
+  if (POSTOFFICE_URL) {
+    const postofficeMountPath = `${API_BASE}/postoffice`;
+    await fastify.register(
+      createServiceProxy('Postoffice', `${POSTOFFICE_URL}/api/v1`, postofficeMountPath),
+      { prefix: postofficeMountPath },
+    );
+    logger.info(`Postoffice proxy mounted at ${postofficeMountPath} → ${POSTOFFICE_URL}`);
+  } else {
+    logger.info('POSTOFFICE_URL not set — postoffice proxy disabled');
+  }
 }
 
 

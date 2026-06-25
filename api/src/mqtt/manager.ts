@@ -379,7 +379,7 @@ export class MqttManager extends EventEmitter {
       }
 
       // Log comprehensive connection summary
-      logger.info('🔌 MQTT CONNECTION SUMMARY', {
+      logger.info('MQTT connection summary', {
         brokerUrl: this.config.brokerUrl,
         clientId: this.config.clientId,
         username: this.config.username,
@@ -411,7 +411,7 @@ export class MqttManager extends EventEmitter {
         }
 
         this.lastConnectionTimestamp = Date.now();
-        logger.info('MQTT CLIENT CONNECTED TO BROKER', { 
+        logger.info('MQTT client connected to broker', {
           brokerUrl: this.config.brokerUrl,
           clientId: this.config.clientId, 
           username: this.config.username,
@@ -693,7 +693,7 @@ export class MqttManager extends EventEmitter {
 
     // Wait for all subscriptions and log summary
     await Promise.all(subscriptionPromises);
-    logger.info('SUCCESSFULLY SUBSCRIBED TO ALL MQTT TOPICS', { 
+    logger.info('All MQTT topics subscribed', { 
       count: topicPatterns.length,
       topics: topicPatterns,
       clientId: this.config.clientId,
