@@ -834,40 +834,69 @@ section {
 }
 
 /* HubSpot embedded form — dark theme overrides */
-.hs-form-frame,
-.hs-form-frame iframe {
-    width: 100% !important;
-    border: none !important;
-    background: transparent !important;
+
+/* Hide the redundant form description HubSpot injects */
+.hbspt-form .hs-richtext,
+.hbspt-form .hs-richtext p {
+    display: none !important;
 }
 
-.hs-form input[type="text"],
-.hs-form input[type="email"],
-.hs-form textarea,
-.hs-form select {
-    background: var(--bg-primary) !important;
-    border: 1px solid rgba(255,255,255,0.12) !important;
+/* Inputs, textarea, select */
+.hbspt-form .hs-input,
+.hbspt-form input[type="text"],
+.hbspt-form input[type="email"],
+.hbspt-form input[type="tel"],
+.hbspt-form textarea,
+.hbspt-form select {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
     border-radius: 8px !important;
-    color: var(--text-primary) !important;
+    color: #ffffff !important;
     font-size: 0.95rem !important;
     padding: 0.85rem 1rem !important;
     width: 100% !important;
     box-sizing: border-box !important;
+    transition: border-color 0.2s ease !important;
 }
 
-.hs-form input::placeholder,
-.hs-form textarea::placeholder {
-    color: rgba(255,255,255,0.35) !important;
+.hbspt-form .hs-input:focus,
+.hbspt-form textarea:focus {
+    outline: none !important;
+    border-color: #3b82f6 !important;
 }
 
-.hs-form label {
-    color: var(--text-secondary) !important;
-    font-size: 0.875rem !important;
-    margin-bottom: 0.35rem !important;
+/* Labels */
+.hbspt-form label {
+    color: rgba(255, 255, 255, 0.65) !important;
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    margin-bottom: 0.4rem !important;
     display: block !important;
 }
 
-.hs-form .hs-button {
+/* Required asterisk */
+.hbspt-form .hs-form-required {
+    color: #f87171 !important;
+}
+
+/* Field spacing */
+.hbspt-form .hs-form-field {
+    margin-bottom: 1.25rem !important;
+}
+
+/* Two-column row (First / Last name) — stack on one column */
+.hbspt-form .hs-form .hs-form-field {
+    width: 100% !important;
+    float: none !important;
+}
+
+.hbspt-form fieldset {
+    max-width: 100% !important;
+}
+
+/* Submit button */
+.hbspt-form input[type="submit"],
+.hbspt-form .hs-button {
     background: linear-gradient(135deg, #006a67, #3b82f6) !important;
     color: #fff !important;
     border: none !important;
@@ -877,21 +906,29 @@ section {
     font-weight: 600 !important;
     cursor: pointer !important;
     width: 100% !important;
+    transition: opacity 0.2s ease !important;
 }
 
-.hs-form .hs-button:hover {
-    opacity: 0.9 !important;
+.hbspt-form input[type="submit"]:hover,
+.hbspt-form .hs-button:hover {
+    opacity: 0.85 !important;
 }
 
-.hs-form .hs-error-msgs {
+/* Validation errors */
+.hbspt-form .hs-error-msgs,
+.hbspt-form .hs-error-msg {
     color: #f87171 !important;
     font-size: 0.8rem !important;
-    margin-top: 0.25rem !important;
+    margin-top: 0.3rem !important;
+    list-style: none !important;
+    padding: 0 !important;
 }
 
-.hs-form .submitted-message {
+/* Success message */
+.hbspt-form .submitted-message,
+.hbspt-form .hs-form .submitted-message {
     color: #00d4aa !important;
     font-size: 1rem !important;
     text-align: center !important;
-    padding: 1.5rem !important;
+    padding: 2rem 1rem !important;
 }
