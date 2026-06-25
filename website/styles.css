@@ -932,3 +932,58 @@ section {
     text-align: center !important;
     padding: 2rem 1rem !important;
 }
+
+/* Contact form */
+#contactForm .cf-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+#contactForm .cf-field {
+    margin-bottom: 1.2rem;
+    display: flex;
+    flex-direction: column;
+}
+
+#contactForm label {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin-bottom: 0.4rem;
+}
+
+#contactForm input,
+#contactForm textarea {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 0.95rem;
+    font-family: inherit;
+    padding: 0.8rem 1rem;
+    width: 100%;
+    box-sizing: border-box;
+    transition: border-color 0.2s ease;
+}
+
+#contactForm input:focus,
+#contactForm textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+#contactForm input::placeholder,
+#contactForm textarea::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+#contactForm textarea {
+    resize: vertical;
+}
+
+@media (max-width: 600px) {
+    #contactForm .cf-row {
+        grid-template-columns: 1fr;
+    }
+}

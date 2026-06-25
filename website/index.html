@@ -6,7 +6,6 @@
     <title>Iotistica - IoT Cloud Ingestion & Fleet Management</title>
     <link rel="canonical" href="https://iotistica.com/">
     <link rel="stylesheet" href="styles.css">
-    <script src="https://js.hsforms.net/forms/embed/22522953.js" defer></script>
     <style>
         .solutions-hero {
             padding: 7rem 0 5rem;
@@ -451,11 +450,32 @@
     <!-- Contact -->
     <section id="contact" class="services" style="background: var(--bg-secondary);">
         <div class="container">
-            <div class="section-header">
+            <div class="section-header" style="margin-bottom: 1.5rem;">
                 <h2 class="section-title">Get in Touch</h2>
             </div>
             <div style="max-width: 600px; margin: 0 auto;">
-                <div class="hs-form-frame" data-region="na1" data-form-id="bf214b77-45da-48a2-8030-bef3601d7363" data-portal-id="22522953"></div>
+                <form id="contactForm">
+                    <div class="cf-row">
+                        <div class="cf-field">
+                            <label for="cf-firstname">First Name</label>
+                            <input type="text" id="cf-firstname" placeholder="First name" required>
+                        </div>
+                        <div class="cf-field">
+                            <label for="cf-lastname">Last Name</label>
+                            <input type="text" id="cf-lastname" placeholder="Last name">
+                        </div>
+                    </div>
+                    <div class="cf-field">
+                        <label for="cf-email">Work Email <span style="color:#f87171">*</span></label>
+                        <input type="email" id="cf-email" placeholder="you@company.com" required>
+                    </div>
+                    <div class="cf-field">
+                        <label for="cf-message">Message</label>
+                        <textarea id="cf-message" rows="5" placeholder="Tell us about your devices, fleet size, and what you're trying to accomplish"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width:100%;padding:0.9rem;font-size:1rem;margin-top:0.5rem;">Send Message</button>
+                    <p id="cf-status" style="display:none;margin-top:1rem;text-align:center;font-size:0.9rem;"></p>
+                </form>
             </div>
         </div>
     </section>
