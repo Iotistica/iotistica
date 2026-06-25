@@ -157,6 +157,166 @@ Worker count changes are gradual (±1 per cycle) to avoid thundering-herd on the
 
 ---
 
+## Ingestion Profiles
+
+The `INGESTION_PROFILE` environment variable selects a pre-tuned configuration bundle. Every value in a profile can be overridden by setting the individual environment variable directly — the profile is just the starting point.
+
+### Profile overview
+
+| Profile | Use case | Insert mode | Batch size | Flush interval | Workers (min / max) | Lag target |
+|---------|----------|-------------|-----------|----------------|---------------------|------------|
+| `batch` | Bulk / delay-tolerant, high throughput | COPY | 500 | 2 000 ms | 2 / 12 | 10 000 ms |
+| `balanced` | General production fleet *(default)* | COPY | 100 | 500 ms | 4 / 16 | 5 000 ms |
+| `streaming` | Near-real-time dashboards, low latency | realtime | 20 | 100 ms | 6 / 20 | 2 000 ms |
+| `benchmark` | Load / stress testing only | COPY | 1 000 | 200 ms | 8 / 24 | 8 000 ms |
+| `hp` | Large fleets, stable long-running | COPY | 300 | 100 ms | 8 / 20 | 5 000 ms |
+
+**Insert modes:**
+- `copy` — uses PostgreSQL `COPY FROM` via a binary stream. Fastest bulk insert, minimum DB overhead. Requires `READINGS_COPY_MIN_ROWS` to be met before switching from INSERT to COPY.
+- `realtime` — uses regular parameterized `INSERT` in small bursts. Lower per-row throughput but starts writing immediately without waiting for a large batch to accumulate.
+
+---
+
+### `batch`
+
+Optimized for maximum throughput at the cost of write latency. Accumulates large batches before flushing, keeps the connection pool small, and backs off aggressively on DB pressure. Best for fleets with bursty or asynchronous ingestion where a 2–15 second data delay is acceptable.
+
+| Parameter | Value |
+|-----------|-------|
+| `WORKER_COUNT` | 4 |
+| `BATCH_SIZE` | 500 |
+| `FLUSH_INTERVAL_MS` | 2 000 |
+| `READINGS_BULK_INSERT_MODE` | `copy` |
+| `READINGS_COPY_MIN_ROWS` | 1 000 |
+| `AUTOSCALE_MIN_WORKERS` | 2 |
+| `AUTOSCALE_MAX_WORKERS` | 12 |
+| `AUTOSCALE_LAG_TARGET_MS` | 10 000 |
+| `AUTOSCALE_LAG_SCALE_UP_MS` | 5 000 |
+| `AUTOSCALE_LAG_CRITICAL_MS` | 15 000 |
+| `AUTOSCALE_SCALE_DOWN_STABLE_CHECKS` | 12 |
+| `AUTOSCALE_COOLDOWN_MS` | 5 000 |
+| `AUTOSCALE_DB_BLOCK_PCT` | 80 |
+| `DB_POOL_SIZE` | 20 |
+| `DB_SATURATION_HIGH_WATERMARK_PCT` | 70 |
+| `DB_BACKPRESSURE_SLEEP_MS` | 500 |
+| `REDIS_INGESTION_STREAM_MAXLEN` | 10 000 |
+| `REDIS_PIPELINE_FLUSH_INTERVAL_MS` | 50 |
+
+---
+
+### `balanced`
+
+The default profile. Balances write latency and throughput for a typical production fleet. COPY inserts with moderate batch sizes, a 500 ms flush interval, and a wide autoscaling range give it headroom to handle traffic spikes without over-committing DB connections at idle.
+
+| Parameter | Value |
+|-----------|-------|
+| `WORKER_COUNT` | 6 |
+| `BATCH_SIZE` | 100 |
+| `FLUSH_INTERVAL_MS` | 500 |
+| `READINGS_BULK_INSERT_MODE` | `copy` |
+| `READINGS_COPY_MIN_ROWS` | 1 000 |
+| `AUTOSCALE_MIN_WORKERS` | 4 |
+| `AUTOSCALE_MAX_WORKERS` | 16 |
+| `AUTOSCALE_LAG_TARGET_MS` | 5 000 |
+| `AUTOSCALE_LAG_SCALE_UP_MS` | 2 000 |
+| `AUTOSCALE_LAG_CRITICAL_MS` | 10 000 |
+| `AUTOSCALE_SCALE_DOWN_STABLE_CHECKS` | 6 |
+| `AUTOSCALE_COOLDOWN_MS` | 3 000 |
+| `AUTOSCALE_DB_BLOCK_PCT` | 80 |
+| `DB_POOL_SIZE` | 24 |
+| `DB_SATURATION_HIGH_WATERMARK_PCT` | 80 |
+| `DB_BACKPRESSURE_SLEEP_MS` | 250 |
+| `REDIS_INGESTION_STREAM_MAXLEN` | 5 000 |
+| `REDIS_PIPELINE_FLUSH_INTERVAL_MS` | 10 |
+
+---
+
+### `streaming`
+
+Prioritizes low write latency over throughput. Uses `realtime` insert mode — small batches of 10–25 rows written every 100 ms without waiting for COPY thresholds. Worker count starts higher and autoscaling reacts faster. Increases DB connection usage and write IOPS; suitable when near-real-time visibility matters more than raw throughput.
+
+| Parameter | Value |
+|-----------|-------|
+| `WORKER_COUNT` | 8 |
+| `BATCH_SIZE` | 20 |
+| `FLUSH_INTERVAL_MS` | 100 |
+| `READINGS_BULK_INSERT_MODE` | `realtime` |
+| `READINGS_REALTIME_MAX_ROWS` | 100 |
+| `READINGS_REALTIME_ROWS_PER_INSERT` | 10 |
+| `AUTOSCALE_MIN_WORKERS` | 6 |
+| `AUTOSCALE_MAX_WORKERS` | 20 |
+| `AUTOSCALE_LAG_TARGET_MS` | 2 000 |
+| `AUTOSCALE_LAG_SCALE_UP_MS` | 1 000 |
+| `AUTOSCALE_LAG_CRITICAL_MS` | 5 000 |
+| `AUTOSCALE_SCALE_DOWN_STABLE_CHECKS` | 10 |
+| `AUTOSCALE_COOLDOWN_MS` | 2 000 |
+| `AUTOSCALE_DB_BLOCK_PCT` | 80 |
+| `DB_POOL_SIZE` | 30 |
+| `DB_SATURATION_HIGH_WATERMARK_PCT` | 85 |
+| `DB_BACKPRESSURE_SLEEP_MS` | 100 |
+| `REDIS_INGESTION_STREAM_MAXLEN` | 2 000 |
+| `REDIS_PIPELINE_FLUSH_INTERVAL_MS` | 0 |
+
+:::caution Higher DB load
+`streaming` keeps fewer messages buffered in Redis and writes much more frequently. Ensure your TimescaleDB instance has enough connection headroom and IOPS before switching to this profile in production.
+:::
+
+---
+
+### `benchmark`
+
+Stress-testing and capacity planning only. Maximizes raw throughput — very large batches (1 000 rows), high worker ceiling (24), a large Redis stream buffer (50 k messages), and aggressive DB saturation tolerance. Not intended for steady-state production use; scale-down is intentionally slow to maintain sustained pressure during tests.
+
+| Parameter | Value |
+|-----------|-------|
+| `WORKER_COUNT` | 12 |
+| `BATCH_SIZE` | 1 000 |
+| `FLUSH_INTERVAL_MS` | 200 |
+| `READINGS_BULK_INSERT_MODE` | `copy` |
+| `READINGS_COPY_MIN_ROWS` | 500 |
+| `AUTOSCALE_MIN_WORKERS` | 8 |
+| `AUTOSCALE_MAX_WORKERS` | 24 |
+| `AUTOSCALE_LAG_TARGET_MS` | 8 000 |
+| `AUTOSCALE_LAG_SCALE_UP_MS` | 2 000 |
+| `AUTOSCALE_LAG_CRITICAL_MS` | 12 000 |
+| `AUTOSCALE_SCALE_DOWN_STABLE_CHECKS` | 20 |
+| `AUTOSCALE_COOLDOWN_MS` | 1 000 |
+| `AUTOSCALE_DB_BLOCK_PCT` | 90 |
+| `DB_POOL_SIZE` | 40 |
+| `DB_SATURATION_HIGH_WATERMARK_PCT` | 92 |
+| `DB_BACKPRESSURE_SLEEP_MS` | 50 |
+| `REDIS_INGESTION_STREAM_MAXLEN` | 50 000 |
+| `REDIS_PIPELINE_FLUSH_INTERVAL_MS` | 5 |
+
+---
+
+### `hp`
+
+High-performance profile for large, stable fleets where message volume is high but consistent. Combines a large Redis stream buffer (100 k), medium batch size (300), a fast 100 ms flush, and a very conservative scale-down policy (30 stable checks before reducing workers). Avoids the oscillation of `streaming` while still writing faster than `balanced`. The long `AUTOSCALE_SCALE_DOWN_STABLE_CHECKS` keeps worker count stable during brief idle windows rather than spinning down and back up repeatedly.
+
+| Parameter | Value |
+|-----------|-------|
+| `WORKER_COUNT` | 10 |
+| `BATCH_SIZE` | 300 |
+| `FLUSH_INTERVAL_MS` | 100 |
+| `READINGS_BULK_INSERT_MODE` | `copy` |
+| `READINGS_COPY_MIN_ROWS` | 500 |
+| `AUTOSCALE_MIN_WORKERS` | 8 |
+| `AUTOSCALE_MAX_WORKERS` | 20 |
+| `AUTOSCALE_LAG_TARGET_MS` | 5 000 |
+| `AUTOSCALE_LAG_SCALE_UP_MS` | 2 000 |
+| `AUTOSCALE_LAG_CRITICAL_MS` | 10 000 |
+| `AUTOSCALE_SCALE_DOWN_STABLE_CHECKS` | 30 |
+| `AUTOSCALE_COOLDOWN_MS` | 2 000 |
+| `AUTOSCALE_DB_BLOCK_PCT` | 85 |
+| `DB_POOL_SIZE` | 30 |
+| `DB_SATURATION_HIGH_WATERMARK_PCT` | 85 |
+| `DB_BACKPRESSURE_SLEEP_MS` | 150 |
+| `REDIS_INGESTION_STREAM_MAXLEN` | 100 000 |
+| `REDIS_PIPELINE_FLUSH_INTERVAL_MS` | 5 |
+
+---
+
 ## Metrics
 
 The Ingestion service exposes Prometheus metrics at `GET /metrics` (port 3003):
