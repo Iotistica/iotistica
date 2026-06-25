@@ -11,6 +11,8 @@ services:
         command: >
             postgres
             -c shared_preload_libraries=timescaledb
+        ports:
+            - "${POSTGRES_PORT_EXT:-5432}:5432"
         healthcheck:
             test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
             interval: 10s
