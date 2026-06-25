@@ -110,8 +110,96 @@ Per-user topic permission rules.
 | `id` | serial | Primary key |
 | `username` | text | FK to `mqtt_users.username` |
 | `topic` | text | MQTT topic pattern (supports `+` and `#` wildcards) |
-| `access` | integer | Bitmask: 1=sub, 2=pub, 3=sub+pub, 7=all |
-| `priority` | integer | Higher priority rules are evaluated first |
+| `access` | integer | Permission bitmask (see below) |
+| `priority` | integer | Evaluation order — rules are checked highest priority first |
+
+---
+
+## ACL Permissions
+
+### Access bitmask
+
+The `access` column is a bitfield. Mosquitto sends the requested access level as a number; the ACL check computes `(rule.access & requested) === requested` to decide whether a rule covers the request.
+
+| Value | Binary | Meaning |
+|-------|--------|---------|
+| `1` | `001` | **Subscribe** — read messages from matching topics |
+| `2` | `010` | **Publish** — write messages to matching topics |
+| `3` | `011` | **Subscribe + Publish** — full read/write (1 \| 2) |
+| `4` | `100` | **Subscribe (retained)** — receive retained messages on subscribe |
+| `7` | `111` | **All** — subscribe, publish, and retained (1 \| 2 \| 4) |
+
+**Examples:**
+- A rule with `access = 3` allows subscribe (`3 & 1 = 1 ✓`) and publish (`3 & 2 = 2 ✓`) but not retained (`3 & 4 = 0 ✗`).
+- A rule with `access = 7` allows everything — subscribe, publish, and retained.
+- A rule with `access = 1` allows subscribe only — a publish attempt is denied (`1 & 2 = 0 ✗`).
+
+Agent users and the admin user are provisioned with `access = 7` on their topic scope.
+
+---
+
+### Topic wildcards
+
+MQTT topic patterns support two wildcard characters. The ACL engine compiles each pattern to a regex at cache-warm time so matching is O(1) per rule per check.
+
+| Wildcard | Matches | Example pattern | Matches | Does not match |
+|----------|---------|-----------------|---------|----------------|
+| `+` | Any single topic level (no `/`) | `i/+/a/+/endpoints/modbus` | `i/default/a/abc123/endpoints/modbus` | `i/default/a/abc123/sub/endpoints/modbus` |
+| `#` | Any number of levels including the current one (must be last) | `i/default/a/abc123/#` | `i/default/a/abc123/state/desired` | `i/other/a/abc123/state` |
+
+Wildcard compilation (from `auth-cache.ts`):
+```
++  →  [^/]+     (any chars except slash)
+#  →  .*        (any chars including slash)
+/  →  \/        (escaped for regex)
+```
+
+So the pattern `i/+/a/+/#` compiles to: `^i\/[^/]+\/a\/[^/]+\/.*$`
+
+**Exact matches** skip the regex path entirely for a fast-path equality check before regex evaluation.
+
+---
+
+### Evaluation order
+
+For each ACL check the engine follows this sequence:
+
+```
+1. Is the user a superuser?  ──YES──▶ allow (skip ACL rules entirely)
+       │
+       NO
+       │
+2. Load all ACL rules for username (from cache or DB)
+       │
+3. For each rule (in DB order, highest priority first):
+       │
+       ├─ Does the topic match the rule pattern?
+       │     NO  → next rule
+       │     YES → (rule.access & requested) === requested ?
+       │               YES → allow
+       │               NO  → next rule (insufficient permission level)
+       │
+4. No rule matched → deny
+```
+
+Key behaviours:
+- **Superusers bypass all ACL rules** — `is_superuser = true` means no topic check is ever made.
+- **First matching rule that grants sufficient access wins** — lower-priority rules are not evaluated once a grant is found.
+- **A matching rule with insufficient access does not deny immediately** — it falls through to the next rule, allowing a more permissive rule later in the list to grant access.
+- **No rules at all → deny** — a user with zero ACL rows can authenticate but cannot publish or subscribe to any topic.
+
+---
+
+### Default ACL assignments
+
+| User type | Topic pattern | Access |
+|-----------|--------------|--------|
+| Admin / API service | `#` | `7` (all) |
+| Agent | `i/{tenantId}/a/{agentUuid}/#` | `7` (all) |
+| Node-RED instance | `#` | `3` (pub + sub) |
+| Custom users | configured per row | any |
+
+Agents are scoped to their own namespace — `i/{tenant}/a/{uuid}/#` — so they can neither read other agents' state topics nor publish to topics outside their prefix. The `{tenantId}` and `{agentUuid}` values in the pattern are UUID-encoded at provisioning time.
 
 ---
 
