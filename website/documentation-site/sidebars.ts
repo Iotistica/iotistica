@@ -40,7 +40,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Iotistica API',
+      label: 'Iotistica Cloud',
       items: [
         'api/overview',
         'api/authentication',
