@@ -30,7 +30,7 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
 
 // Form submission
 const contactForm = document.getElementById('contactForm');
-contactForm.addEventListener('submit', (e) => {
+if (contactForm) contactForm.addEventListener('submit', (e) => {
     e.preventDefault();
     
     // Get form data
