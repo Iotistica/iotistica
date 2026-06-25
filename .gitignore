@@ -1,3 +1,6 @@
+# Private infrastructure — not for public repo
+vpn-server/
+
 # Node.js dependencies
 node_modules/
 **/node_modules/
