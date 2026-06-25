@@ -11,7 +11,7 @@ on:
 
 env:
   IMAGE_NAME: iotistic/iotistic-redirect
-  AZURE_RESOURCE_GROUP: rg-iotistica
+  AZURE_RESOURCE_GROUP: iotistic
   CONTAINER_APP_NAME: iotistica-install-redirect
   CONTAINER_APP_ENV: iotistica-env
 
