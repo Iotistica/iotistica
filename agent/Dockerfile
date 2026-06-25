@@ -88,7 +88,9 @@ FROM node:20-alpine3.22 AS production
 WORKDIR /app
 
 # Install runtime dependencies and tini in single layer
-RUN apk add --no-cache \
+# apk upgrade ensures patched versions of base packages (e.g. libcrypto3/libssl3)
+RUN apk upgrade --no-cache && \
+    apk add --no-cache \
     sqlite-libs \
     iptables \
     curl \
