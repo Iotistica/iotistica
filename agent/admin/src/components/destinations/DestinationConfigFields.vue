@@ -18,6 +18,15 @@ const cfg = computed({
 function set(key: string, value: unknown) {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 }
+
+function setIn(outer: string, key: string, value: unknown) {
+  const parent = (props.modelValue[outer] as Record<string, unknown>) ?? {}
+  emit('update:modelValue', { ...props.modelValue, [outer]: { ...parent, [key]: value } })
+}
+
+function auth(key: string): unknown {
+  return (props.modelValue.auth as Record<string, unknown>)?.[key]
+}
 </script>
 
 <template>
@@ -103,18 +112,157 @@ function set(key: string, value: unknown) {
     </a-form-item>
   </template>
 
-  <!-- Azure / AWS / GCP — raw JSON for now -->
-  <template v-else-if="['azure', 'aws', 'gcp'].includes(type)">
-    <a-form-item label="Configuration (JSON)" name="config_json_raw">
-      <a-textarea
-        :value="JSON.stringify(cfg, null, 2)"
-        :rows="8"
-        placeholder="{}"
-        @update:value="(v: string) => { try { emit('update:modelValue', JSON.parse(v)) } catch {} }"
+  <!-- Azure IoT Hub -->
+  <template v-else-if="type === 'azure'">
+    <a-form-item label="Hub Hostname" :rules="[{ required: true, message: 'Required' }]">
+      <a-input
+        :value="(cfg.hostName as string) ?? ''"
+        placeholder="your-hub.azure-devices.net"
+        @update:value="set('hostName', $event)"
       />
-      <div style="color: #999; font-size: 12px; margin-top: 4px">
-        Enter the connection configuration as a JSON object.
-      </div>
+    </a-form-item>
+    <a-form-item label="Device ID" :rules="[{ required: true, message: 'Required' }]">
+      <a-input
+        :value="(cfg.deviceId as string) ?? ''"
+        placeholder="your-device-id"
+        @update:value="set('deviceId', $event)"
+      />
+    </a-form-item>
+    <a-divider orientation="left" orientation-margin="0" style="font-size: 12px; color: #888">Authentication (SAS)</a-divider>
+    <a-form-item label="Shared Access Key" :rules="[{ required: true, message: 'Required' }]">
+      <a-input-password
+        :value="(auth('sharedAccessKey') as string) ?? ''"
+        placeholder="Base64-encoded primary key from Azure portal"
+        autocomplete="new-password"
+        @update:value="setIn('auth', 'sharedAccessKey', $event)"
+      />
+    </a-form-item>
+    <a-form-item label="Token TTL (seconds)">
+      <a-input-number
+        :value="(auth('tokenTtlSeconds') as number) ?? 3600"
+        :min="300"
+        :max="86400"
+        :step="300"
+        style="width: 100%"
+        @update:value="setIn('auth', 'tokenTtlSeconds', $event)"
+      />
+      <div style="color: #999; font-size: 12px; margin-top: 4px">SAS token lifetime — agent auto-renews at 80% (default: 3600s)</div>
+    </a-form-item>
+  </template>
+
+  <!-- AWS IoT Core -->
+  <template v-else-if="type === 'aws'">
+    <a-form-item label="Device Data Endpoint" :rules="[{ required: true, message: 'Required' }]">
+      <a-input
+        :value="(cfg.endpoint as string) ?? ''"
+        placeholder="xxxxxxxxxxxx.iot.us-east-1.amazonaws.com"
+        @update:value="set('endpoint', $event)"
+      />
+    </a-form-item>
+    <a-form-item label="Port">
+      <a-input-number
+        :value="(cfg.port as number) ?? 8883"
+        :min="1"
+        :max="65535"
+        style="width: 100%"
+        @update:value="set('port', $event)"
+      />
+    </a-form-item>
+    <a-form-item label="Device ID">
+      <a-input
+        :value="(cfg.deviceId as string) ?? ''"
+        placeholder="Leave blank to use the agent UUID"
+        @update:value="set('deviceId', $event)"
+      />
+    </a-form-item>
+    <a-form-item label="Topic Template">
+      <a-input
+        :value="(cfg.topicTemplate as string) ?? 'devices/{deviceId}/messages/events/{endpoint}'"
+        @update:value="set('topicTemplate', $event)"
+      />
+      <div style="color: #999; font-size: 12px; margin-top: 4px">Supports <code>{deviceId}</code> and <code>{endpoint}</code> placeholders</div>
+    </a-form-item>
+    <a-divider orientation="left" orientation-margin="0" style="font-size: 12px; color: #888">Authentication (mTLS)</a-divider>
+    <a-form-item label="Client Certificate (PEM)" :rules="[{ required: true, message: 'Required' }]">
+      <a-textarea
+        :value="(auth('cert') as string) ?? ''"
+        :rows="5"
+        style="font-family: monospace; font-size: 11px"
+        placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+        @update:value="setIn('auth', 'cert', $event)"
+      />
+    </a-form-item>
+    <a-form-item label="Private Key (PEM)" :rules="[{ required: true, message: 'Required' }]">
+      <a-textarea
+        :value="(auth('key') as string) ?? ''"
+        :rows="5"
+        style="font-family: monospace; font-size: 11px"
+        placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
+        @update:value="setIn('auth', 'key', $event)"
+      />
+    </a-form-item>
+    <a-form-item label="CA Certificate (PEM)">
+      <a-textarea
+        :value="(auth('ca') as string) ?? ''"
+        :rows="4"
+        style="font-family: monospace; font-size: 11px"
+        placeholder="Optional — Amazon Root CA (leave blank to use system roots)"
+        @update:value="setIn('auth', 'ca', $event)"
+      />
+    </a-form-item>
+  </template>
+
+  <!-- GCP IoT Core -->
+  <template v-else-if="type === 'gcp'">
+    <a-form-item label="MQTT Endpoint">
+      <a-input
+        :value="(cfg.endpoint as string) ?? 'mqtt.googleapis.com'"
+        @update:value="set('endpoint', $event)"
+      />
+    </a-form-item>
+    <a-form-item label="Port">
+      <a-input-number
+        :value="(cfg.port as number) ?? 8883"
+        :min="1"
+        :max="65535"
+        style="width: 100%"
+        @update:value="set('port', $event)"
+      />
+    </a-form-item>
+    <a-form-item label="Client ID" :rules="[{ required: true, message: 'Required' }]">
+      <a-input
+        :value="(cfg.clientId as string) ?? ''"
+        placeholder="projects/{project}/locations/{region}/registries/{registry}/devices/{deviceId}"
+        @update:value="set('clientId', $event)"
+      />
+      <div style="color: #999; font-size: 12px; margin-top: 4px">Full GCP resource path for the device</div>
+    </a-form-item>
+    <a-form-item label="Topic Template">
+      <a-input
+        :value="(cfg.topicTemplate as string) ?? '/devices/{deviceId}/events/{endpoint}'"
+        @update:value="set('topicTemplate', $event)"
+      />
+      <div style="color: #999; font-size: 12px; margin-top: 4px">Supports <code>{deviceId}</code> and <code>{endpoint}</code> placeholders</div>
+    </a-form-item>
+    <a-divider orientation="left" orientation-margin="0" style="font-size: 12px; color: #888">Authentication (JWT)</a-divider>
+    <a-form-item label="JWT Token" :rules="[{ required: true, message: 'Required' }]">
+      <a-textarea
+        :value="(auth('jwt') as string) ?? ''"
+        :rows="4"
+        style="font-family: monospace; font-size: 11px"
+        placeholder="eyJ..."
+        @update:value="setIn('auth', 'jwt', $event)"
+      />
+      <div style="color: #999; font-size: 12px; margin-top: 4px">RS256 or ES256 signed JWT — must be renewed manually when it expires</div>
+    </a-form-item>
+    <a-form-item label="CA Certificate (PEM)">
+      <a-textarea
+        :value="(cfg.ca as string) ?? ''"
+        :rows="4"
+        style="font-family: monospace; font-size: 11px"
+        placeholder="Optional — GCP root CA (leave blank to use system roots)"
+        @update:value="set('ca', $event)"
+      />
     </a-form-item>
   </template>
 

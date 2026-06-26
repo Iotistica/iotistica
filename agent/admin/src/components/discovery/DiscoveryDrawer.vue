@@ -159,7 +159,7 @@ watch(
         endpointsApi.getAll().catch(() => [] as Endpoint[]),
       ])
       existingEndpoints.value = endpoints
-      selectedRuleUuid.value = props.preSelectedRuleUuid ?? null
+      selectedRuleUuid.value = props.preSelectedRuleUuid ?? (rules.value.length === 1 ? rules.value[0].uuid : null)
       results.value = []
       hasRun.value = false
       addedThisSession.value = new Set()
@@ -171,12 +171,40 @@ watch(
 <template>
   <a-drawer
     :open="open"
-    :title="selectedRule ? selectedRule.name : 'Run Discovery Rule'"
+    title="Run Discovery"
     width="640"
     @close="close"
   >
 
-    <!-- Rule details -->
+    <!-- Rule picker -->
+    <div style="margin-bottom: 20px">
+      <div style="font-size: 12px; color: #888; margin-bottom: 6px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em">
+        Discovery Rule
+      </div>
+      <a-select
+        v-model:value="selectedRuleUuid"
+        placeholder="Select a rule to run…"
+        style="width: 100%"
+        :disabled="running"
+        :options="rules.map(r => ({ value: r.uuid, label: r.name }))"
+        :not-found-content="rules.length === 0 ? 'No rules configured — create one on the Discovery page' : undefined"
+        allow-clear
+      >
+        <template #option="{ value: val, label }">
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <span>{{ label }}</span>
+            <a-tag
+              :color="protocolColor(rules.find(r => r.uuid === val)?.protocol ?? '')"
+              style="font-size: 11px; margin: 0"
+            >
+              {{ protocolLabel(rules.find(r => r.uuid === val)?.protocol ?? '') }}
+            </a-tag>
+          </div>
+        </template>
+      </a-select>
+    </div>
+
+    <!-- Rule details + run controls -->
     <template v-if="selectedRule">
       <a-descriptions :column="2" size="small" style="margin-bottom: 16px">
         <a-descriptions-item label="Protocol">
@@ -221,8 +249,16 @@ watch(
       </div>
     </template>
 
-    <!-- Fallback if no rule resolved -->
-    <a-empty v-else description="No rule selected" style="margin: 40px 0" />
+    <!-- No rule selected yet -->
+    <a-empty
+      v-else-if="rules.length === 0"
+      description="No discovery rules configured"
+      style="margin: 40px 0"
+    >
+      <template #extra>
+        <span style="color: #888; font-size: 13px">Go to the Discovery page to create a rule first.</span>
+      </template>
+    </a-empty>
 
     <!-- ── Results ───────────────────────────────────────────────────── -->
     <template v-if="hasRun">

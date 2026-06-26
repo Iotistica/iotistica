@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { PlusOutlined, EditOutlined, DeleteOutlined, RadarChartOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import EndpointDrawer from '@/components/endpoints/EndpointDrawer.vue'
 import DiscoveryDrawer from '@/components/discovery/DiscoveryDrawer.vue'
-import type { Endpoint, EndpointCreateData } from '@/types'
+import type { Endpoint, EndpointCommunicationQuality, EndpointCreateData } from '@/types'
 import { endpointsApi } from '@/api/endpoints'
 import { protocolColor } from '@/utils/protocol'
 
@@ -19,6 +19,8 @@ const discoveryOpen = ref(false)
 const editing = ref<Endpoint | null>(null)
 const prefill = ref<EndpointCreateData | null>(null)
 
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+
 const filteredRows = computed(() =>
   activeProtocol.value === 'all'
     ? rows.value
@@ -28,11 +30,49 @@ const filteredRows = computed(() =>
 const columns: TableColumnType<Endpoint>[] = [
   { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true },
   { title: 'Protocol', key: 'protocol', width: 110 },
+  { title: 'Status', key: 'status', width: 160 },
   { title: 'Connection', key: 'connection', ellipsis: true },
   { title: 'Enabled', key: 'enabled', width: 90 },
   { title: 'Poll', key: 'poll_interval', width: 80 },
   { title: 'Actions', key: 'actions', width: 100, fixed: 'right' },
 ]
+
+// ── Health helpers ────────────────────────────────────────────────────────────
+
+type QualityMeta = { color: string; dotColor: string; label: string }
+
+const qualityMap: Record<EndpointCommunicationQuality | 'unknown', QualityMeta> = {
+  good:     { color: '#52c41a', dotColor: '#52c41a', label: 'Connected'  },
+  degraded: { color: '#faad14', dotColor: '#faad14', label: 'Degraded'   },
+  poor:     { color: '#ff7a45', dotColor: '#ff7a45', label: 'Poor'       },
+  offline:  { color: '#8c8c8c', dotColor: '#8c8c8c', label: 'Offline'    },
+  unknown:  { color: '#8c8c8c', dotColor: '#434343', label: 'No data'    },
+}
+
+function qualityMeta(ep: Endpoint): QualityMeta {
+  if (!ep.enabled) return { color: '#595959', dotColor: '#434343', label: 'Disabled' }
+  const q = ep.health?.communicationQuality
+  return qualityMap[q ?? 'unknown']
+}
+
+function fmtResponseTime(ms: number | null | undefined): string {
+  if (ms == null) return ''
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.round(ms)}ms`
+}
+
+function timeSince(ts: string | number | null | undefined): string {
+  if (!ts) return ''
+  const ms = typeof ts === 'string' ? new Date(ts).getTime() : ts
+  if (isNaN(ms)) return ''
+  const diff = Math.floor((Date.now() - ms) / 1000)
+  if (diff < 5)  return 'just now'
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  return `${Math.floor(diff / 3600)}h ago`
+}
+
+// ── Connection summary ────────────────────────────────────────────────────────
 
 function fmtInterval(ms: number): string {
   if (ms >= 60_000) return `${ms / 60_000}m`
@@ -68,8 +108,10 @@ function connSummary(ep: Endpoint): string {
   return JSON.stringify(c).slice(0, 40)
 }
 
-async function load() {
-  loading.value = true
+// ── Data loading ──────────────────────────────────────────────────────────────
+
+async function load(showLoader = true) {
+  if (showLoader) loading.value = true
   error.value = null
   try {
     rows.value = await endpointsApi.getAll()
@@ -84,7 +126,7 @@ async function load() {
 async function toggleEnabled(row: Endpoint) {
   try {
     await endpointsApi.update(row.uuid, { enabled: !row.enabled })
-    await load()
+    await load(false)
   } catch {
     message.error('Failed to update')
   }
@@ -116,10 +158,16 @@ function confirmDelete(row: Endpoint) {
   })
 }
 
-// Reload the list whenever the discovery drawer closes so newly added endpoints always appear
 watch(discoveryOpen, (isOpen) => { if (!isOpen) load() })
 
-onMounted(load)
+onMounted(() => {
+  load()
+  refreshTimer = setInterval(() => load(false), 10_000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+})
 </script>
 
 <template>
@@ -170,6 +218,30 @@ onMounted(load)
           <a-tag :color="protocolColor(record.protocol)">
             {{ record.protocol === 'opcua' ? 'OPC-UA' : record.protocol }}
           </a-tag>
+        </template>
+
+        <template v-else-if="column.key === 'status'">
+          <a-tooltip
+            :title="record.health?.lastError || undefined"
+            :color="record.health?.lastError ? '#ff4d4f' : undefined"
+          >
+            <div class="status-cell">
+              <span
+                class="status-dot"
+                :style="{ background: qualityMeta(record).dotColor }"
+                :class="{ 'status-dot--pulse': record.health?.communicationQuality === 'good' }"
+              />
+              <span class="status-label" :style="{ color: qualityMeta(record).color }">
+                {{ qualityMeta(record).label }}
+              </span>
+              <span v-if="record.health?.responseTimeMs != null" class="status-rtt">
+                {{ fmtResponseTime(record.health.responseTimeMs) }}
+              </span>
+            </div>
+          </a-tooltip>
+          <div v-if="record.health?.lastSeen" class="status-lastseen">
+            {{ timeSince(record.health.lastSeen) }}
+          </div>
         </template>
 
         <template v-else-if="column.key === 'connection'">
@@ -224,5 +296,47 @@ onMounted(load)
   margin-bottom: 16px;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.status-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot--pulse {
+  box-shadow: 0 0 0 0 currentColor;
+  animation: pulse 2.5s ease-out infinite;
+}
+
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.6); }
+  70%  { box-shadow: 0 0 0 6px rgba(82, 196, 26, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(82, 196, 26, 0); }
+}
+
+.status-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.status-rtt {
+  font-size: 11px;
+  color: #888;
+  margin-left: 2px;
+}
+
+.status-lastseen {
+  font-size: 11px;
+  color: #666;
+  margin-top: 2px;
+  padding-left: 14px;
 }
 </style>

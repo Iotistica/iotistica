@@ -47,6 +47,18 @@ export type SubscriptionFormData = Omit<Subscription, 'id' | 'created_at' | 'upd
 // Mirrors agent/src/db/models/endpoints.model.ts
 export type EndpointProtocol = 'modbus' | 'opcua' | 'mqtt' | 'bacnet'
 
+export type EndpointCommunicationQuality = 'good' | 'degraded' | 'poor' | 'offline'
+
+export interface EndpointHealth {
+  connected: boolean
+  communicationQuality: EndpointCommunicationQuality
+  lastSeen: string | null
+  lastPoll: string | null
+  lastError: string | null
+  responseTimeMs: number | null
+  status?: string
+}
+
 export interface Endpoint {
   uuid: string
   name: string
@@ -59,12 +71,7 @@ export interface Endpoint {
   fingerprint?: string
   created_at?: string
   updated_at?: string
-  // enriched health fields from AdapterManager (may be absent)
-  status?: string
-  connected?: boolean
-  lastError?: string | null
-  lastSeen?: string | null
-  responseTimeMs?: number | null
+  health?: EndpointHealth
 }
 
 export type DiscoveryRuleStatus = 'idle' | 'running' | 'ok' | 'error'

@@ -19,6 +19,49 @@ const emit = defineEmits<{
 const DESTINATION_TYPES = ['iotistica', 'mqtt', 'influxdb', 'azure', 'aws', 'gcp']
 const TESTABLE_TYPES = ['influxdb', 'mqtt']
 
+const CONFIG_TEMPLATES: Record<string, Record<string, unknown>> = {
+  azure: {
+    provider: 'azure',
+    hostName: 'your-hub.azure-devices.net',
+    deviceId: 'your-device-id',
+    auth: {
+      type: 'sas',
+      sharedAccessKey: '',
+      tokenTtlSeconds: 3600,
+    },
+  },
+  aws: {
+    provider: 'aws',
+    endpoint: 'xxxxxxxxxxxx.iot.us-east-1.amazonaws.com',
+    port: 8883,
+    deviceId: 'your-device-id',
+    topicTemplate: 'devices/{deviceId}/messages/events/{endpoint}',
+    auth: {
+      type: 'mtls',
+      cert: '-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----',
+      key: '-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----',
+      ca: '-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----',
+    },
+  },
+  gcp: {
+    provider: 'gcp',
+    endpoint: 'mqtt.googleapis.com',
+    port: 8883,
+    clientId: 'projects/{project}/locations/{region}/registries/{registry}/devices/{deviceId}',
+    username: 'unused',
+    topicTemplate: '/devices/{deviceId}/events/{endpoint}',
+    auth: {
+      type: 'jwt',
+      jwt: '',
+    },
+    ca: '',
+  },
+}
+
+function templateFor(type: string): Record<string, unknown> {
+  return CONFIG_TEMPLATES[type] ? structuredClone(CONFIG_TEMPLATES[type]) : {}
+}
+
 const formRef = ref<FormInstance>()
 const saving = ref(false)
 const testing = ref(false)
@@ -46,14 +89,13 @@ watch(
         enabled: props.editing.enabled,
       }
     } else {
-      form.value = { name: '', type: 'iotistica', config_json: {}, enabled: true }
+      form.value = { name: '', type: 'iotistica', config_json: templateFor('iotistica'), enabled: true }
     }
   },
 )
 
-// Reset config_json and test result when type changes
-function onTypeChange() {
-  form.value.config_json = {}
+function onTypeChange(newType: string) {
+  form.value.config_json = templateFor(newType)
   testResult.value = null
 }
 
@@ -104,7 +146,7 @@ function close() {
   <a-drawer
     :open="open"
     :title="editing ? 'Edit Destination' : 'New Destination'"
-    width="480"
+    width="560"
     @close="close"
   >
     <a-form

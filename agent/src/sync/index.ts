@@ -337,11 +337,9 @@ export class CloudSync extends EventEmitter {
 		if (withinGrace) return true;
 
 		const state = this.connectionMonitor.getState();
-		return (
-			state.successfulPolls > 0 &&
-			state.successfulReports > 0 &&
-			this.connectionMonitor.isOnline()
-		);
+		// In report-only mode the poller never runs, so successfulPolls stays 0 — don't require it.
+		const pollsOk = !this.pollerStarted || state.successfulPolls > 0;
+		return pollsOk && state.successfulReports > 0 && this.connectionMonitor.isOnline();
 	}
 
 	public async getBufferStatus(): Promise<{
