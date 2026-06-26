@@ -192,13 +192,14 @@ body {
 }
 
 .btn-primary {
-    background: var(--accent-gradient);
+    background: #1677ff;
     color: white;
 }
 
 .btn-primary:hover {
+    background: #0e5fd8;
     transform: translateY(-2px);
-    box-shadow: 0 10px 30px rgba(59, 130, 246, 0.3);
+    box-shadow: 0 10px 30px rgba(22, 119, 255, 0.3);
 }
 
 .btn-secondary {
@@ -897,7 +898,7 @@ section {
 /* Submit button */
 .hbspt-form input[type="submit"],
 .hbspt-form .hs-button {
-    background: linear-gradient(135deg, #006a67, #3b82f6) !important;
+    background: #1677ff !important;
     color: #fff !important;
     border: none !important;
     border-radius: 8px !important;
@@ -911,7 +912,8 @@ section {
 
 .hbspt-form input[type="submit"]:hover,
 .hbspt-form .hs-button:hover {
-    opacity: 0.85 !important;
+    background: #0e5fd8 !important;
+    opacity: 1 !important;
 }
 
 /* Validation errors */
