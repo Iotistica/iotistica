@@ -2,10 +2,453 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="0; url=index.html">
-    <link rel="canonical" href="https://iotistica.com/">
-    <title>Iotistica — Redirecting…</title>
-    <script>window.location.replace("index.html");</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solutions — Iotistica</title>
+    <link rel="canonical" href="https://iotistica.com/solutions.html">
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .offering-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+        .offering-card {
+            background: var(--bg-secondary);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 14px;
+            padding: 2.5rem;
+        }
+        .offering-card .card-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--accent-gradient);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.25rem;
+            font-size: 1.4rem;
+        }
+        .offering-card h3 { font-size: 1.35rem; margin-bottom: 0.75rem; }
+        .offering-card p { color: var(--text-secondary); line-height: 1.7; margin-bottom: 1.5rem; }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1.5rem;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 3rem 0;
+        }
+        .stat-cell { text-align: center; }
+        .stat-cell .stat-value {
+            font-size: 2.2rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #00d4aa, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .stat-cell .stat-label { color: #8b949e; font-size: 0.82rem; margin-top: 0.2rem; }
+
+        .feature-list { list-style: none; padding: 0; margin: 0 0 1.5rem; }
+        .feature-list li {
+            display: flex;
+            gap: 0.6rem;
+            align-items: flex-start;
+            padding: 0.45rem 0;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.55;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .feature-list li:last-child { border-bottom: none; }
+        .feature-list li::before { content: "✓"; color: #00d4aa; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+        .feature-list strong { color: var(--text-primary); }
+
+        .proto-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.25rem; }
+        .proto-badge {
+            background: rgba(59,130,246,0.12);
+            border: 1px solid rgba(59,130,246,0.3);
+            color: #93c5fd;
+            border-radius: 6px;
+            padding: 3px 10px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .arch-flow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 0;
+            margin: 2.5rem 0;
+        }
+        .arch-node {
+            background: var(--bg-secondary);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 1rem 1.4rem;
+            text-align: center;
+            min-width: 130px;
+        }
+        .arch-node .arch-icon { font-size: 1.5rem; margin-bottom: 0.3rem; }
+        .arch-node .arch-label { font-size: 0.78rem; font-weight: 600; color: var(--text-primary); }
+        .arch-node .arch-sub { font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.2rem; }
+        .arch-arrow { color: #3b82f6; font-size: 1.3rem; padding: 0 0.5rem; flex-shrink: 0; }
+
+        .deploy-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2.5rem;
+        }
+        .deploy-card { border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; padding: 2rem; position: relative; }
+        .deploy-card.featured { border-color: #3b82f6; background: rgba(59,130,246,0.05); }
+        .deploy-card .badge-featured {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #3b82f6;
+            color: #fff;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 2px 12px;
+            border-radius: 20px;
+            white-space: nowrap;
+        }
+        .deploy-card h4 { font-size: 1.1rem; margin-bottom: 0.6rem; }
+        .deploy-card p { color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; margin-bottom: 1.2rem; }
+
+        .page-cta { text-align: center; padding: 5rem 0; }
+        .page-cta h2 { font-size: 2rem; margin-bottom: 1rem; }
+        .page-cta p { color: var(--text-secondary); max-width: 540px; margin: 0 auto 2rem; font-size: 1.05rem; }
+        .cta-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    </style>
 </head>
-<body></body>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" class="logo">Iotistica</a>
+            </div>
+            <div class="nav-menu" id="navMenu">
+                <a href="solutions.html" class="nav-link">Solutions</a>
+                <a href="https://docs.iotistica.com/docs/intro" class="nav-link" target="_blank">Documentation</a>
+                <a href="about.html" class="nav-link">About</a>
+                <a href="contact.html" class="nav-link">Contact</a>
+            </div>
+            <button class="nav-toggle" id="navToggle">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Page header -->
+    <section style="padding: 8rem 0 4rem; text-align: center; background: var(--bg-primary);">
+        <div class="container">
+            <h1 class="section-title" style="font-size: clamp(2rem, 5vw, 3rem); margin-bottom: 1rem;">What We Offer</h1>
+            <p class="section-subtitle" style="max-width: 640px; margin: 0 auto;">Two tightly integrated products that work together — or independently.</p>
+        </div>
+    </section>
+
+    <!-- Core offerings -->
+    <section class="services" style="padding-top: 2rem;">
+        <div class="container">
+            <div class="offering-grid">
+                <div class="offering-card">
+                    <div class="card-icon">☁️</div>
+                    <h3>Cloud IoT Ingestion Hosting</h3>
+                    <p>
+                        We host the entire telemetry stack — MQTT broker, ingestion pipeline, and time-series database —
+                        so your devices have a reliable, scalable endpoint in the cloud from day one.
+                        You get a REST API to query your data, set up alerts, and manage agents without
+                        running any infrastructure yourself.
+                    </p>
+                    <ul class="feature-list">
+                        <li><strong>Managed MQTT broker</strong> with per-device authentication and topic-level ACLs</li>
+                        <li><strong>20,000+ readings / second</strong> sustained ingestion with 0.0% verified data loss</li>
+                        <li><strong>TimescaleDB storage</strong> — 85–95% compression, 2-year retention, 14 pre-built aggregates</li>
+                        <li><strong>Offline resilience</strong> — disk spool buffers data when connectivity drops; replays on reconnect</li>
+                        <li><strong>REST API</strong> for telemetry queries, anomaly data, agent state, jobs, and fleet events</li>
+                        <li><strong>Self-hosted option</strong> — deploy on your own infra with Docker Compose or Kubernetes</li>
+                    </ul>
+                    <div class="proto-grid">
+                        <span class="proto-badge">MQTT</span>
+                        <span class="proto-badge">TimescaleDB</span>
+                        <span class="proto-badge">Redis Streams</span>
+                        <span class="proto-badge">REST API</span>
+                        <span class="proto-badge">Kubernetes</span>
+                    </div>
+                </div>
+
+                <div class="offering-card">
+                    <div class="card-icon">🖧</div>
+                    <h3>IoT Fleet Management</h3>
+                    <p>
+                        Deploy the Iotistica Agent on any edge device — Raspberry Pi, industrial gateway, ARM SBC, x86 server.
+                        The agent connects to your cloud, streams live telemetry, and lets you deploy, update, and
+                        monitor applications across your entire fleet remotely.
+                    </p>
+                    <ul class="feature-list">
+                        <li><strong>Multi-protocol data collection</strong> — Modbus TCP/RTU, OPC-UA, BACnet, SNMP, MQTT, CAN bus</li>
+                        <li><strong>Remote container management</strong> — deploy and update Docker workloads over MQTT</li>
+                        <li><strong>Edge anomaly detection</strong> — on-device ML identifies abnormal readings before they reach the cloud</li>
+                        <li><strong>Desired-state reconciliation</strong> — cloud pushes target config; agent applies and reports back</li>
+                        <li><strong>Remote access</strong> — SSH tunnel and interactive shell directly to any device from the dashboard</li>
+                        <li><strong>Offline-first</strong> — SQLite buffer keeps data safe during cloud outages; syncs automatically</li>
+                    </ul>
+                    <div class="proto-grid">
+                        <span class="proto-badge">Modbus</span>
+                        <span class="proto-badge">OPC-UA</span>
+                        <span class="proto-badge">BACnet</span>
+                        <span class="proto-badge">SNMP</span>
+                        <span class="proto-badge">CAN</span>
+                        <span class="proto-badge">ARM / x86</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats -->
+    <section class="services" style="background: var(--bg-secondary); padding-top: 3rem; padding-bottom: 3rem;">
+        <div class="container">
+            <div class="stats-row">
+                <div class="stat-cell"><div class="stat-value">20K+</div><div class="stat-label">Readings / Second</div></div>
+                <div class="stat-cell"><div class="stat-value">0.0%</div><div class="stat-label">Data Loss</div></div>
+                <div class="stat-cell"><div class="stat-value">6</div><div class="stat-label">Industrial Protocols</div></div>
+                <div class="stat-cell"><div class="stat-value">90%</div><div class="stat-label">Storage Compression</div></div>
+                <div class="stat-cell"><div class="stat-value">2yr</div><div class="stat-label">Data Retention</div></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="services">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">How It Works</h2>
+                <p class="section-subtitle">
+                    Data flows from your field devices to the cloud in milliseconds — through a secure,
+                    loss-proof pipeline you don't have to build or maintain.
+                </p>
+            </div>
+
+            <div class="arch-flow">
+                <div class="arch-node">
+                    <div class="arch-icon">🏭</div>
+                    <div class="arch-label">Field Devices</div>
+                    <div class="arch-sub">Modbus · OPC-UA · BACnet</div>
+                </div>
+                <div class="arch-arrow">→</div>
+                <div class="arch-node">
+                    <div class="arch-icon">📦</div>
+                    <div class="arch-label">Iotistica Agent</div>
+                    <div class="arch-sub">Edge · Offline-first</div>
+                </div>
+                <div class="arch-arrow">→</div>
+                <div class="arch-node">
+                    <div class="arch-icon">📡</div>
+                    <div class="arch-label">Cloud MQTT Broker</div>
+                    <div class="arch-sub">Auth · ACL · TLS</div>
+                </div>
+                <div class="arch-arrow">→</div>
+                <div class="arch-node">
+                    <div class="arch-icon">⚡</div>
+                    <div class="arch-label">Ingestion Pipeline</div>
+                    <div class="arch-sub">Redis Streams · Workers</div>
+                </div>
+                <div class="arch-arrow">→</div>
+                <div class="arch-node">
+                    <div class="arch-icon">🗄️</div>
+                    <div class="arch-label">TimescaleDB</div>
+                    <div class="arch-sub">Aggregates · Compression</div>
+                </div>
+                <div class="arch-arrow">→</div>
+                <div class="arch-node">
+                    <div class="arch-icon">🔌</div>
+                    <div class="arch-label">REST API</div>
+                    <div class="arch-sub">Your apps · Dashboards</div>
+                </div>
+            </div>
+
+            <div class="solutions-list" style="margin-top: 3rem;">
+                <div class="solution-item" style="border-bottom: 1px solid rgba(255,255,255,0.06);">
+                    <div class="solution-content">
+                        <h3>Zero-Loss Ingestion Pipeline</h3>
+                        <p class="solution-benefit">
+                            Agent telemetry arrives over MQTT and lands in a Redis Stream before touching the database.
+                            This decouples broker throughput from write latency — bursts are absorbed, workers
+                            drain the stream in parallel, and data is committed to TimescaleDB using PostgreSQL
+                            COPY for near-native write speeds.
+                        </p>
+                        <ul class="solution-features">
+                            <li><strong>Redis Stream buffer:</strong> absorbs traffic spikes without backpressure to the broker</li>
+                            <li><strong>Parallel workers:</strong> configurable pool drains the stream concurrently with no shared locks</li>
+                            <li><strong>COPY-based bulk insert:</strong> batches bypass row-by-row INSERT for near-disk-speed writes</li>
+                            <li><strong>Disk spool fallback:</strong> if Redis is unreachable, data spools to disk and replays automatically</li>
+                            <li><strong>Ingestion profiles:</strong> choose batch, balanced, streaming, or high-performance to match your load</li>
+                        </ul>
+                    </div>
+                    <div class="solution-content">
+                        <h3>Time-Series Storage &amp; Queries</h3>
+                        <p class="solution-benefit">
+                            All readings land in TimescaleDB hypertables — automatically partitioned, compressed after
+                            7 days, and pre-aggregated by 14 continuous aggregate views so your dashboards
+                            query summaries instead of raw chunks.
+                        </p>
+                        <ul class="solution-features">
+                            <li><strong>5 hypertables:</strong> readings, agent metrics, logs, broker stats, topic metrics</li>
+                            <li><strong>14 continuous aggregates:</strong> 1-minute to daily rollups, refreshed in the background</li>
+                            <li><strong>LZ4 compression:</strong> 85–95% storage reduction on sensor data after 7 days</li>
+                            <li><strong>Configurable retention:</strong> raw readings kept up to 2 years; aggregates independently managed</li>
+                            <li><strong>REST query API:</strong> latest values, hourly/daily rollups, and flexible time-range queries</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="solution-item" style="border-bottom: none;">
+                    <div class="solution-content">
+                        <h3>Device Fleet Management</h3>
+                        <p class="solution-benefit">
+                            The cloud API maintains a desired state for every device in your fleet.
+                            When an agent connects, it receives its target configuration and reconciles
+                            — deploying containers, applying settings, or starting protocol adapters —
+                            without any manual intervention.
+                        </p>
+                        <ul class="solution-features">
+                            <li><strong>Desired-state model:</strong> push config to the cloud; agents pull and apply automatically</li>
+                            <li><strong>Container orchestration:</strong> deploy, update, and remove Docker workloads on any device</li>
+                            <li><strong>Jobs:</strong> dispatch one-off commands, scripts, or firmware updates to individual devices or fleets</li>
+                            <li><strong>Remote access:</strong> SSH tunnel and interactive shell to any online device, no port-forwarding needed</li>
+                            <li><strong>Provisioning:</strong> one-time key flow registers a new device, issues MQTT credentials, and enrolls it in the fleet automatically</li>
+                        </ul>
+                    </div>
+                    <div class="solution-content">
+                        <h3>Edge Intelligence</h3>
+                        <p class="solution-benefit">
+                            Processing at the edge reduces cloud bandwidth, catches anomalies before
+                            they reach storage, and keeps devices operational even when connectivity drops.
+                        </p>
+                        <ul class="solution-features">
+                            <li><strong>On-device anomaly detection:</strong> ML models score each reading locally and flag outliers in real time</li>
+                            <li><strong>Protocol discovery:</strong> agent scans the local network for Modbus, OPC-UA, and BACnet devices automatically</li>
+                            <li><strong>Offline buffer:</strong> SQLite queue holds readings during outages; drains to cloud on reconnect with QoS 1</li>
+                            <li><strong>Health watchdog:</strong> systemd integration and memory leak detection restart the agent if it drifts</li>
+                            <li><strong>Multi-architecture:</strong> single image runs on ARM64, ARM32, and x86-64 hardware</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Deployment options -->
+    <section class="services" style="background: var(--bg-secondary);">
+        <div class="container">
+            <div class="section-header">
+                <h2 class="section-title">Deployment Options</h2>
+                <p class="section-subtitle">Run on our infrastructure, yours, or a mix of both.</p>
+            </div>
+            <div class="deploy-grid">
+                <div class="deploy-card featured">
+                    <div class="badge-featured">Most Popular</div>
+                    <h4>☁️ Cloud-Hosted</h4>
+                    <p>We manage the MQTT broker, ingestion pipeline, TimescaleDB, and REST API on our infrastructure. You connect your devices and query your data. No servers to run.</p>
+                    <ul class="feature-list">
+                        <li>Fully managed, zero-ops</li>
+                        <li>Multi-tenant namespace isolation</li>
+                        <li>Automatic scaling by tier</li>
+                        <li>Kubernetes + Helm, GitOps managed</li>
+                    </ul>
+                    <a href="contact.html" class="btn btn-primary" style="display:block;text-align:center;margin-top:1.5rem;">Contact Us</a>
+                </div>
+                <div class="deploy-card">
+                    <h4>🏢 Self-Hosted</h4>
+                    <p>Deploy the full stack on your own hardware or private cloud using Docker Compose or the Helm chart. You own the infrastructure; we provide the software.</p>
+                    <ul class="feature-list">
+                        <li>Docker Compose for single-node setups</li>
+                        <li>Kubernetes Helm chart for production</li>
+                        <li>All services included: API, ingestion, MQTT, Redis, TimescaleDB</li>
+                        <li>Air-gapped environments supported</li>
+                    </ul>
+                    <a href="https://docs.iotistica.com/docs/intro" target="_blank" class="btn btn-secondary" style="display:block;text-align:center;margin-top:1.5rem;">Read the Docs</a>
+                </div>
+                <div class="deploy-card">
+                    <h4>🔀 Hybrid</h4>
+                    <p>Agents run on your edge devices and connect to our cloud — or your private cloud. Mix and match: cloud ingestion with on-premise agents, or vice versa.</p>
+                    <ul class="feature-list">
+                        <li>Edge agents on your hardware</li>
+                        <li>Cloud or private MQTT endpoint</li>
+                        <li>Tailscale VPN for secure device access</li>
+                        <li>Configurable per customer or site</li>
+                    </ul>
+                    <a href="contact.html" class="btn btn-primary" style="display:block;text-align:center;margin-top:1.5rem;">Contact Us</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section style="background: var(--bg-primary);">
+        <div class="page-cta">
+            <h2>Ready to connect your devices?</h2>
+            <p>Tell us about your project and we'll put together the right setup for your fleet.</p>
+            <div class="cta-actions">
+                <a href="contact.html" class="btn btn-primary">Talk to Us</a>
+                <a href="https://docs.iotistica.com/docs/intro" target="_blank" class="btn btn-secondary">Read the Docs</a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <span class="logo">Iotistica</span>
+                    <p>Custom IoT solutions that scale with your business</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-column">
+                        <h4>Company</h4>
+                        <a href="about.html">About Us</a>
+                        <a href="contact.html">Contact</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Products</h4>
+                        <a href="agent.html">Iotistica Agent</a>
+                        <a href="solutions.html">Platform Capabilities</a>
+                        <a href="https://docs.iotistica.com/docs/intro" target="_blank">Documentation</a>
+                    </div>
+                    <div class="footer-column">
+                        <h4>Connect</h4>
+                        <div class="social-links">
+                            <a href="https://github.com/iotistica" target="_blank" aria-label="GitHub">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                                </svg>
+                            </a>
+                            <a href="https://www.linkedin.com/company/iotisticanada" target="_blank" aria-label="LinkedIn">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                                </svg>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 Iotistica.com. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
 </html>
