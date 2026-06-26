@@ -6,20 +6,20 @@
    --bg-card:      #1a1a1a   code blocks / cards
    --text-primary: #ffffff
    --text-secondary: #a0a0a0
-   --accent-primary:   #3b82f6  (blue)
+   --accent-primary:   #1677ff  (blue)
    --accent-secondary: #8b5cf6  (purple)
    --border-color: #2a2a2a
 ──────────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Docusaurus primary colour ramp — derived from #3b82f6 */
-  --ifm-color-primary: #3b82f6;
-  --ifm-color-primary-dark: #1a70f4;
-  --ifm-color-primary-darker: #0d66f3;
-  --ifm-color-primary-darkest: #0549cc;
-  --ifm-color-primary-light: #5c95f7;
-  --ifm-color-primary-lighter: #6c9ff8;
-  --ifm-color-primary-lightest: #94bbfa;
+  /* Docusaurus primary colour ramp — derived from #1677ff (logo blue) */
+  --ifm-color-primary: #1677ff;
+  --ifm-color-primary-dark: #0e69e8;
+  --ifm-color-primary-darker: #0a60d9;
+  --ifm-color-primary-darkest: #084db0;
+  --ifm-color-primary-light: #3d8fff;
+  --ifm-color-primary-lighter: #5499ff;
+  --ifm-color-primary-lightest: #7db3ff;
 
   /* Force dark backgrounds everywhere — no light-mode fallback */
   --ifm-background-color: #0a0a0a;
@@ -30,8 +30,8 @@
   /* Text */
   --ifm-font-color-base: #d4d4d4;
   --ifm-heading-color: #ffffff;
-  --ifm-link-color: #60a5fa;
-  --ifm-link-hover-color: #93c5fd;
+  --ifm-link-color: #4d9fff;
+  --ifm-link-hover-color: #7db3ff;
 
   /* Borders & dividers */
   --ifm-toc-border-color: #2a2a2a;
@@ -52,13 +52,13 @@
   /* Sidebar */
   --ifm-menu-color: #a0a0a0;
   --ifm-menu-color-active: #ffffff;
-  --ifm-menu-color-background-active: rgba(59, 130, 246, 0.12);
+  --ifm-menu-color-background-active: rgba(22, 119, 255, 0.12);
   --ifm-menu-color-background-hover: rgba(255, 255, 255, 0.05);
 
   /* Code */
   --ifm-code-background: #1a1a1a;
   --ifm-pre-background: #111111;
-  --docusaurus-highlighted-code-line-bg: rgba(59, 130, 246, 0.15);
+  --docusaurus-highlighted-code-line-bg: rgba(22, 119, 255, 0.15);
 
   /* Cards / admonitions */
   --ifm-card-background-color: #111111;
@@ -131,11 +131,11 @@ body {
 .menu__link--active {
   color: #ffffff;
   font-weight: 600;
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(22, 119, 255, 0.12);
 }
 
 .menu__link--active:hover {
-  background: rgba(59, 130, 246, 0.18);
+  background: rgba(22, 119, 255, 0.18);
 }
 
 .menu__caret::before {
@@ -179,11 +179,11 @@ article {
 }
 
 .theme-doc-markdown a {
-  color: #60a5fa;
+  color: #4d9fff;
 }
 
 .theme-doc-markdown a:hover {
-  color: #93c5fd;
+  color: #7db3ff;
 }
 
 /* ─── Code blocks ─────────────────────────────────────────────────────────── */
@@ -238,12 +238,12 @@ table tr:nth-child(even) td {
   border-radius: 8px;
 }
 
-.alert--info    { border-left-color: #3b82f6; }
+.alert--info    { border-left-color: #1677ff; }
 .alert--success { border-left-color: #22c55e; }
 .alert--warning { border-left-color: #f59e0b; }
 .alert--danger  { border-left-color: #ef4444; }
 
-.alert--info    .alert__heading { color: #60a5fa; }
+.alert--info    .alert__heading { color: #4d9fff; }
 .alert--success .alert__heading { color: #4ade80; }
 .alert--warning .alert__heading { color: #fbbf24; }
 .alert--danger  .alert__heading { color: #f87171; }
@@ -260,7 +260,7 @@ table tr:nth-child(even) td {
 
 .table-of-contents__link:hover,
 .table-of-contents__link--active {
-  color: #3b82f6;
+  color: #1677ff;
 }
 
 /* ─── Pagination ──────────────────────────────────────────────────────────── */
@@ -273,7 +273,7 @@ table tr:nth-child(even) td {
 }
 
 .pagination-nav__link:hover {
-  border-color: #3b82f6;
+  border-color: #1677ff;
 }
 
 .pagination-nav__label {
@@ -337,7 +337,7 @@ table tr:nth-child(even) td {
 /* ─── Navbar contact button ───────────────────────────────────────────────── */
 
 .navbar-contact-btn {
-  background-color: #2563eb;
+  background-color: #1677ff;
   color: #ffffff !important;
   border-radius: 6px;
   padding: 0.4rem 1rem !important;
@@ -348,7 +348,7 @@ table tr:nth-child(even) td {
 }
 
 .navbar-contact-btn:hover {
-  background-color: #1d4ed8 !important;
+  background-color: #0e5fd8 !important;
   color: #ffffff !important;
 }
 
