@@ -7,6 +7,9 @@ on:
     paths:
       - 'website/documentation-site/docs/**'
       - 'website/documentation-site/sidebars.ts'
+      - 'website/documentation-site/src/**'
+      - 'website/documentation-site/static/**'
+      - 'website/documentation-site/docusaurus.config.ts'
   release:
     types: [published]
   workflow_dispatch:
@@ -17,6 +20,9 @@ on:
     paths:
       - 'website/documentation-site/docs/**'
       - 'website/documentation-site/sidebars.ts'
+      - 'website/documentation-site/src/**'
+      - 'website/documentation-site/static/**'
+      - 'website/documentation-site/docusaurus.config.ts'
 
 jobs:
   build_and_deploy:
