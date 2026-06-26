@@ -280,10 +280,19 @@ export interface AgentSettingsRuntime {
 export interface AgentSettingsInfo {
   uuid: string | null
   name: string | null
+  type: string | null
   version: string | null
   provisioned: boolean
+  tenantId?: string | null
   apiEndpoint?: string | null
+  registeredAt?: number | null
   mqttBrokerUrl?: string | null
+  mqttUsername?: string | null
+  mqttClientIdPrefix?: string | null
+  mqttUseTls?: boolean | null
+  macAddress?: string | null
+  osVersion?: string | null
+  targetSyncEnabled?: boolean
 }
 
 export interface AgentSettings {

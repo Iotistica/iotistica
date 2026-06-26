@@ -36,6 +36,7 @@ export interface Agent {
   mqttBrokerUrl?: string | null;
   mqttBrokerConfig?: string | null; // JSON string of MqttBrokerConfig
   apiTlsConfig?: string | null;     // JSON string of ApiTlsConfig
+  targetSyncEnabled?: boolean | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -68,6 +69,7 @@ export class AgentModel {
 		'mqttBrokerUrl',
 		'mqttBrokerConfig',
 		'apiTlsConfig',
+		'targetSyncEnabled',
 	];
 
 	private static getDb(): Database.Database {
@@ -78,6 +80,7 @@ export class AgentModel {
 		const decryptedDevice: Agent = {
 			...row,
 			provisioned: !!row.provisioned,
+			targetSyncEnabled: (row as any).target_sync_enabled == null ? true : !!(row as any).target_sync_enabled,
 		};
 
 		if (this.encryptionEnabled) {
@@ -112,7 +115,12 @@ export class AgentModel {
 				continue;
 			}
 
-			createData[column] = column === 'provisioned' ? (value ? 1 : 0) : value;
+			if (column === 'provisioned' || column === 'targetSyncEnabled') {
+				const colName = column === 'targetSyncEnabled' ? 'target_sync_enabled' : column;
+				createData[colName] = value ? 1 : 0;
+			} else {
+				createData[column] = value;
+			}
 		}
 
 		return createData;
@@ -129,7 +137,12 @@ export class AgentModel {
 				continue;
 			}
 
-			updateData[column] = column === 'provisioned' ? (value ? 1 : 0) : value;
+			if (column === 'provisioned' || column === 'targetSyncEnabled') {
+				const colName = column === 'targetSyncEnabled' ? 'target_sync_enabled' : column;
+				updateData[colName] = value ? 1 : 0;
+			} else {
+				updateData[column] = value;
+			}
 		}
 
 		if (this.encryptionEnabled) {

@@ -294,6 +294,8 @@ export class AgentManager {
 
 				mqttBrokerConfig: record.mqttBrokerConfig ? JSON.parse(record.mqttBrokerConfig) : undefined,
 				apiTlsConfig: record.apiTlsConfig ? JSON.parse(record.apiTlsConfig) : undefined,
+				// null/undefined in DB means existing record before migration → default true (full sync)
+				targetSyncEnabled: record.targetSyncEnabled == null ? true : !!record.targetSyncEnabled,
 			};
 		
 		}
@@ -324,6 +326,7 @@ export class AgentManager {
 			agentVersion: this.agentInfo.agentVersion || null,
 			mqttBrokerConfig: this.agentInfo.mqttBrokerConfig ? JSON.stringify(this.agentInfo.mqttBrokerConfig) : null,
 			apiTlsConfig: this.agentInfo.apiTlsConfig ? JSON.stringify(this.agentInfo.apiTlsConfig) : null,
+			targetSyncEnabled: this.agentInfo.targetSyncEnabled ?? true,
 			updatedAt: new Date().toISOString(),
 		};
 		
@@ -339,6 +342,14 @@ export class AgentManager {
 		}
 
 		this.agentInfo.tenantId = tenantId;
+		await this.saveAgentInfo();
+	}
+
+	async setTargetSyncEnabled(enabled: boolean): Promise<void> {
+		if (!this.agentInfo) {
+			throw new Error('Agent manager not initialized');
+		}
+		this.agentInfo.targetSyncEnabled = enabled;
 		await this.saveAgentInfo();
 	}
 
@@ -401,7 +412,13 @@ export class AgentManager {
 		}
 
 		return this.provisioningService.provision(this.agentInfo, config, {
-			saveAgentInfo: () => this.saveAgentInfo(),
+			saveAgentInfo: async () => {
+				// Newly provisioned agents start in report-only mode.
+				// The operator enables target-state pull from the admin UI once
+				// the cloud target has been configured.
+				this.agentInfo!.targetSyncEnabled = false;
+				return this.saveAgentInfo();
+			},
 			setTenantIdCache: async (tenantId: string) => {
 				const { setTenantId } = await import('../mqtt/topics.js');
 				setTenantId(tenantId);

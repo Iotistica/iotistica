@@ -1665,6 +1665,20 @@ router.patch('/v1/settings', async (req: Request, res: Response, next: NextFunct
 	}
 });
 
+router.patch('/v1/settings/target-sync', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { enabled } = req.body ?? {};
+		if (typeof enabled !== 'boolean') {
+			return res.status(400).json({ error: '"enabled" (boolean) is required' });
+		}
+		await actions.setTargetSyncEnabled(enabled);
+		const settings = await actions.getSettings();
+		return res.status(200).json({ settings });
+	} catch (error) {
+		next(error);
+	}
+});
+
 // ── Dashboard stats ───────────────────────────────────────────────────────────
 
 router.get('/v1/dashboard/stats', async (_req: Request, res: Response, next: NextFunction) => {

@@ -87,7 +87,13 @@ export async function initAgentSync(ctx: AgentInitContext): Promise<void> {
 	);
 
 	ctx.featureInitializer?.setCloudSync(ctx.cloudSync);
-	await ctx.cloudSync.startPoll();
+
+	const targetSyncEnabled = ctx.agentInfo?.targetSyncEnabled !== false;
+	if (targetSyncEnabled) {
+		await ctx.cloudSync.startPoll();
+	} else {
+		await ctx.cloudSync.startReportOnly();
+	}
 
 	// Root-cause fix for delayed cloud log flushes: when CloudSync confirms the cloud API
 	// is online again, immediately nudge the CloudLogBackend to flush buffered logs.

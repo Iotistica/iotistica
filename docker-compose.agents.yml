@@ -34,7 +34,8 @@ services:
       - MQTT_USERNAME=admin
       - MQTT_PASSWORD=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
-      - STANDALONE=true
+      - STANDALONE=false
+      - IOTISTICA_API=http://host.docker.internal:4003
       - API_SECURITY_MODE=LOCAL_NETWORK
       - FIREWALL_ENABLED=false
       - FIREWALL_MODE=off

@@ -44,6 +44,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'api/overview',
         'api/authentication',
+        'api/provisioning',
         'api/endpoints',
         'api/cloud-api',
         'api/ingestion',

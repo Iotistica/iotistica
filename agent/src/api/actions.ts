@@ -1849,15 +1849,24 @@ export const getSettings = async (): Promise<Record<string, any>> => {
 		settings.agent = {
 			uuid: agent?.uuid ?? null,
 			name: agent?.name ?? null,
+			type: agent?.type ?? null,
 			version: agent?.agentVersion ?? null,
 			provisioned: agentInfo.provisioned ?? false,
+			tenantId: agentInfo.tenantId ?? null,
 			apiEndpoint: agentInfo.apiEndpoint ?? null,
+			registeredAt: agent?.registeredAt ?? null,
 			mqttBrokerUrl: mqttCfg
 				? `${mqttCfg.protocol}://${mqttCfg.host}:${mqttCfg.port}`
 				: null,
+			mqttUsername: mqttCfg?.username ?? null,
+			mqttClientIdPrefix: mqttCfg?.clientIdPrefix ?? null,
+			mqttUseTls: mqttCfg?.useTls ?? null,
+			macAddress: agent?.macAddress ?? null,
+			osVersion: agent?.osVersion ?? null,
+			targetSyncEnabled: agentInfo.targetSyncEnabled !== false,
 		};
 	} catch {
-		settings.agent = { uuid: null, name: null, version: null, provisioned: false, apiEndpoint: null, mqttBrokerUrl: null };
+		settings.agent = { uuid: null, name: null, type: null, version: null, provisioned: false, tenantId: null, apiEndpoint: null, registeredAt: null, mqttBrokerUrl: null, mqttUsername: null, mqttClientIdPrefix: null, mqttUseTls: null, macAddress: null, osVersion: null, targetSyncEnabled: true };
 	}
 
 	return settings;
@@ -1877,6 +1886,13 @@ export const updateSettings = async (patch: Record<string, any>): Promise<void> 
 			}
 		}
 	});
+};
+
+export const setTargetSyncEnabled = async (enabled: boolean): Promise<void> => {
+	await agentManager.setTargetSyncEnabled(enabled);
+	if (enabled && cloudSync) {
+		await cloudSync.enablePoller();
+	}
 };
 
 // ── Docker daemon configuration ───────────────────────────────────────────────

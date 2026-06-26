@@ -36,6 +36,7 @@ export interface AgentInfo {
 	agentVersion?: string;
 	mqttBrokerConfig?: MqttBrokerConfig; // TLS configuration from provisioning
 	apiTlsConfig?: ApiTlsConfig;         // API HTTPS TLS configuration
+	targetSyncEnabled?: boolean;         // When false: report-only mode (no target state pull)
 }
 
 export interface MqttBrokerConfig {

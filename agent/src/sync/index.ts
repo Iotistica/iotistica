@@ -24,6 +24,7 @@ export class CloudSync extends EventEmitter {
 	private readonly reporter: StateReporter;
 
 	private isStarted = false;
+	private pollerStarted = false;
 	private startedAt = 0;
 	private static readonly STARTUP_GRACE_MS = 30_000; // allow first poll + report to complete
 	private endpointsRef?: any;
@@ -240,7 +241,51 @@ export class CloudSync extends EventEmitter {
 
 		// Start sequentially so a failure in one doesn't leave the other dangling.
 		await this.poller.start();
+		this.pollerStarted = true;
 		await this.reporter.start();
+	}
+
+	/** Report-only mode: starts the reporter but not the state poller.
+	 *  Call enablePoller() later to begin pulling target state from the cloud. */
+	public async startReportOnly(): Promise<void> {
+		if (this.isStarted) {
+			this.logger?.warnSync('CloudSync already started', { component: LogComponents.cloudSync });
+			return;
+		}
+		this.isStarted = true;
+		this.startedAt = Date.now();
+
+		await this.transport.initQueue();
+		this.setupConnectionEventListeners();
+
+		this.stateManager.removeListener('reconciliation-complete', this.reconciliationCompleteHandler);
+		this.stateManager.on('reconciliation-complete', this.reconciliationCompleteHandler);
+
+		this.logger?.infoSync('Starting CloudSync in report-only mode (target-state pull disabled)', {
+			component: LogComponents.cloudSync,
+			endpoint: this.config.cloudApiEndpoint,
+			reportIntervalMs: this.config.reportInterval,
+			note: 'Enable target sync from the admin UI to begin pulling cloud target state',
+		});
+
+		await this.reporter.start();
+	}
+
+	/** Enable the state poller after running in report-only mode. */
+	public async enablePoller(): Promise<void> {
+		if (!this.isStarted) {
+			this.logger?.warnSync('CloudSync not started — call startReportOnly() or startPoll() first', {
+				component: LogComponents.cloudSync,
+			});
+			return;
+		}
+		if (this.pollerStarted) {
+			this.logger?.warnSync('State poller already running', { component: LogComponents.cloudSync });
+			return;
+		}
+		this.logger?.infoSync('Enabling target-state poller', { component: LogComponents.cloudSync });
+		await this.poller.start();
+		this.pollerStarted = true;
 	}
 
 	public async stop(): Promise<void> {

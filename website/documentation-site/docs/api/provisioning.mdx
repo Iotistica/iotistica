@@ -1,0 +1,295 @@
+---
+sidebar_position: 2
+---
+
+# Agent Provisioning
+
+Provisioning is the one-time handshake that establishes trust between an Iotistica Agent and the Iotistica Cloud. After provisioning, the agent has a permanent identity — a UUID and a signed API key — and the cloud knows which fleet the device belongs to, what MQTT credentials to assign it, and which tenant owns it.
+
+---
+
+## Overview
+
+```
+Agent                                      Cloud API
+  │                                            │
+  │── POST /api/v1/agent/register ────────────►│
+  │   {uuid, agentApiKey, publicKey,           │
+  │    provisioningKey, name, type}            │
+  │                                            │── Validate provisioning key
+  │                                            │── Verify proof-of-possession
+  │                                            │── Create agent record
+  │                                            │── Assign MQTT credentials
+  │                                            │── Assign tenant & fleet
+  │◄── 200 OK ─────────────────────────────────│
+  │   {uuid, name, tenantId,                   │
+  │    mqtt: {brokerConfig, credentials},      │
+  │    vpn?, challenge}                        │
+  │                                            │
+  │── POST /api/v1/agent/exchange-keys ───────►│  (proof-of-possession)
+  │   {uuid, publicKey, signature, challenge}  │
+  │◄── 200 OK ─────────────────────────────────│
+  │                                            │
+  ▼ Save to SQLite, enter report-only mode
+```
+
+---
+
+## Prerequisites
+
+### Provisioning Key
+
+A **provisioning key** is a single-use token that authorises one agent registration. It must be created in advance in the Iotistica Cloud (or self-hosted equivalent) before the agent can register.
+
+Each key has:
+
+| Property | Description |
+|---|---|
+| `max_agents` | How many agents may use this key (typically `1`) |
+| `expires_at` | Key expires after this timestamp (default: 30 days) |
+| `fleet_uuid` | Which fleet newly registered agents are assigned to |
+
+Once a key reaches its `max_agents` limit it is permanently invalidated. A failed or retried registration attempt does **not** consume the key — only a fully completed registration does.
+
+### API Endpoint
+
+The agent must be able to reach the Iotistica Cloud REST API. Set `IOTISTICA_API` in the agent's environment or provide it when provisioning via the admin UI.
+
+---
+
+## Detailed Flow
+
+### Step 1 — Identity Generation
+
+On first boot the agent creates its local identity:
+
+- Generates a **UUID** (or uses one assigned via `DEVICE_UUID` env var for virtual agents).
+- Generates a **versioned API key** using a cryptographically random byte sequence.
+- Generates an **Ed25519 key pair** for proof-of-possession (PoP). The private key never leaves the device.
+
+All three are written to the local SQLite database. The UUID is fixed for the lifetime of the device.
+
+### Step 2 — Trigger Provisioning
+
+Provisioning can be started in two ways:
+
+| Method | How |
+|---|---|
+| **Environment variable** | Set `PROVISIONING_KEY` — the agent auto-provisions on startup if not already provisioned |
+| **Admin UI** | Settings → Agent → paste the provisioning key and optionally override the API endpoint and device name |
+
+Either path calls the same internal `provision()` function.
+
+### Step 3 — Registration Request
+
+The agent sends a `POST /api/v1/agent/register` request with:
+
+```json
+{
+  "uuid": "2c961ee4-42ca-4c73-a95f-6506a719a12d",
+  "agentName": "agent-2c961ee4",
+  "agentType": "standalone",
+  "agentApiKey": "<device-api-key>",
+  "agentPublicKey": "<ed25519-public-key-pem>",
+  "provisioningApiKey": "<provisioning-key>",
+  "macAddress": "aa:bb:cc:dd:ee:ff",
+  "osVersion": "Ubuntu 22.04",
+  "agentVersion": "1.0.508",
+  "idempotencyKey": "register-2c961ee4-42ca-4c73-a95f-6506a719a12d"
+}
+```
+
+The `idempotencyKey` is derived from the agent UUID. If the request is retried (the agent uses exponential backoff with up to 6 attempts), the cloud uses this key to detect and deduplicate replays.
+
+### Step 4 — Cloud Validation
+
+The cloud validates the request in this order:
+
+1. **Provisioning key check** — the HMAC-SHA256 hash of the supplied key is computed and compared against the stored hash. The key must not be expired and must have remaining `max_agents` capacity.
+
+2. **Duplicate check** — if an agent with this UUID already exists in the database and its `provisioning_state` is `registered`, the request is rejected with `409 Agent already registered`. If the existing record is in a `pending` state (incomplete previous attempt), registration continues and the existing record is updated.
+
+3. **Proof-of-possession** — the cloud generates a random challenge and expects the agent to sign it with the private key corresponding to the Ed25519 public key in the registration request. This proves the agent physically holds the key, not just that it knows the key fingerprint.
+
+4. **API key hash** — the `agentApiKey` is hashed (HMAC-SHA256) and stored. The plaintext key never persists on the cloud side; all subsequent authentication uses the hash comparison.
+
+### Step 5 — Cloud Record Creation
+
+On success the cloud:
+
+- Creates (or updates) the agent row in the `agents` table with `provisioning_state = 'registered'` and `provisioned_at = NOW()`.
+- Assigns the agent to the fleet associated with the provisioning key.
+- Creates or retrieves **MQTT credentials** for this agent (username derived from tenant + UUID, password randomly generated and hashed).
+- Records the registration attempt in `provisioning_attempts`.
+- Increments the provisioning key's usage counter; invalidates it if `max_agents` reached.
+
+### Step 6 — Registration Response
+
+The cloud responds with everything the agent needs to operate:
+
+```json
+{
+  "uuid": "2c961ee4-42ca-4c73-a95f-6506a719a12d",
+  "name": "agent-2c961ee4",
+  "tenantId": "self-hosted",
+  "applicationId": null,
+  "mqtt": {
+    "brokerConfig": {
+      "protocol": "mqtt",
+      "host": "broker.iotistica.com",
+      "port": 1883,
+      "username": "self-hosted/2c961ee4",
+      "password": "<mqtt-password>",
+      "useTls": false,
+      "clientIdPrefix": "agent-2c961ee4",
+      "keepAlive": 60,
+      "cleanSession": true,
+      "verifyCertificate": true,
+      "reconnectPeriod": 5000,
+      "connectTimeout": 30000
+    }
+  },
+  "vpn": null,
+  "challenge": "<base64-challenge>"
+}
+```
+
+### Step 7 — Proof-of-Possession Exchange
+
+If a `challenge` is present in the response, the agent immediately makes a second call to `POST /api/v1/agent/exchange-keys`:
+
+```json
+{
+  "uuid": "2c961ee4-42ca-4c73-a95f-6506a719a12d",
+  "publicKey": "<ed25519-public-key-pem>",
+  "signature": "<base64-ed25519-signature-of-challenge>",
+  "challenge": "<base64-challenge>"
+}
+```
+
+The cloud verifies the signature. If it passes, `pop_verified = true` is set on the agent record, unlocking PoP-only features (mTLS, hardware attestation).
+
+### Step 8 — Local Persistence
+
+After a successful registration (with or without PoP), the agent writes to its local SQLite database:
+
+| Field | Value |
+|---|---|
+| `provisioned` | `true` |
+| `provisioningState` | `provisioned` |
+| `tenantId` | From response |
+| `mqttBrokerConfig` | Encrypted JSON of the broker config from response |
+| `apiEndpoint` | Cloud API base URL |
+| `registeredAt` | Timestamp |
+| `targetSyncEnabled` | **`false`** — report-only mode (see below) |
+
+The MQTT broker config is encrypted at rest using the agent's local master key.
+
+---
+
+## Post-Provisioning Behaviour
+
+### Report-Only Mode
+
+Immediately after provisioning the agent enters **report-only mode**:
+
+- The **State Reporter** starts — the agent begins sending its current status (running containers, endpoint health, system metrics) to the cloud every 10 seconds.
+- The **State Poller is not started** — the agent does not pull the cloud's target state.
+
+This gives the cloud operator a chance to review the agent's current state and configure the desired target (applications, endpoints, settings) **before** the agent begins reconciling against it. Without this safeguard, an empty cloud target state would immediately remove all locally-configured containers and endpoints.
+
+```
+After provisioning:
+
+Agent ──── reports current state ────► Cloud  ✓
+Agent  ✗  pulls target state  ◄──── Cloud
+```
+
+### Enabling Target Sync
+
+Once the cloud target state has been configured for the device, enable full sync from the agent admin UI:
+
+**Settings → Agent → Cloud Target Sync → ON**
+
+This persists `targetSyncEnabled = true` to SQLite and immediately starts the State Poller. The agent then begins reconciling its local state against the cloud's desired state on each poll cycle.
+
+```
+After enabling target sync:
+
+Agent ──── reports current state ────► Cloud  ✓
+Agent ◄─── pulls target state  ──────  Cloud  ✓
+```
+
+The `targetSyncEnabled` flag survives agent restarts — once enabled it stays enabled until explicitly turned off.
+
+:::warning
+Enabling target sync before configuring the cloud target state will cause the agent to reconcile against an empty configuration. This will remove locally-managed applications and reset protocol configuration to defaults. Always configure the desired state in the cloud dashboard first.
+:::
+
+---
+
+## Provisioning Key Generation
+
+### Iotistica Cloud (hosted)
+
+Provisioning keys are created in the Iotistica Cloud dashboard under **Fleet → Provisioning Keys → New Key**.
+
+### Self-Hosted Stack
+
+Use the bundled PowerShell script to generate a key directly against the PostgreSQL database:
+
+```powershell
+.\scripts\generate-provisioning-key.ps1 -DbPassword "your-password"
+```
+
+The script:
+1. Resolves the target fleet (creates a default fleet if none exists).
+2. Generates 32 cryptographically random bytes as the raw key.
+3. Computes `HMAC-SHA256("provisioning-key:<rawKey>", SECRET_DIGEST_PEPPER)` — reads the pepper from the `.env.self` file or `SECRET_DIGEST_PEPPER` / `JWT_SECRET` environment variables.
+4. Inserts the hashed key into the `provisioning_keys` table with `max_agents = 1` and a 30-day expiry.
+5. Prints **only the raw key** to stdout — copy it into the agent admin UI or set it as `PROVISIONING_KEY`.
+
+The raw key is never stored. If you lose it, generate a new one.
+
+---
+
+## Re-Provisioning
+
+If the agent's local database is wiped or `provisioned = false` is reset, the agent can be re-provisioned. However, the cloud record created during the original provisioning will block re-registration with a `409` unless the existing record is reset first.
+
+To allow re-registration of an existing UUID, clear the provisioning state in the cloud database:
+
+```sql
+UPDATE agents
+SET provisioned_at = NULL,
+    provisioning_state = 'pending',
+    provisioned_by_key_id = NULL
+WHERE uuid = '<agent-uuid>';
+```
+
+Then generate a new provisioning key and provision normally.
+
+:::note
+Re-provisioning creates a **new** device API key and new MQTT credentials. The previous credentials are invalidated. The agent UUID remains the same.
+:::
+
+---
+
+## Security Notes
+
+| Mechanism | Purpose |
+|---|---|
+| **HMAC-SHA256 provisioning key** | Prevents brute-force key guessing — the cloud never stores the raw key |
+| **Ed25519 PoP** | Proves the agent physically holds the private key, not just the public fingerprint |
+| **Encrypted SQLite fields** | MQTT password and API key never stored plaintext on device |
+| **Single-use keys** | Each provisioning key registers at most `max_agents` devices |
+| **Short key expiry** | Default 30-day expiry limits the window for stolen keys |
+| **Idempotency key** | Safe to retry registration — duplicate requests are detected and deduplicated |
+
+---
+
+## Related Docs
+
+- [Cloud Sync](../agent/cloud-sync.mdx) — how the agent stays in sync with the cloud after provisioning
+- [Security](../agent/security.mdx) — encryption, key management, and the PoP protocol in detail
+- [Self-Hosted Deployment](../deployment/docker.mdx) — running Iotistica Cloud on your own infrastructure

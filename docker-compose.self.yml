@@ -67,6 +67,7 @@ services:
             - iotistica-net
 
     api:
+        container_name: iotistica-self-api
         build:
             context: ./api
             dockerfile: Dockerfile
@@ -186,4 +187,4 @@ volumes:
 
 networks:
     iotistica-net:
-        driver: bridge
+        external: true

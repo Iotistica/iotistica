@@ -59,6 +59,24 @@ function discard() {
   message.info('Changes discarded')
 }
 
+// ── target sync toggle ────────────────────────────────────────────────────────
+
+const targetSyncSaving = ref(false)
+
+async function setTargetSync(enabled: boolean) {
+  targetSyncSaving.value = true
+  try {
+    const { data } = await apiClient.patch('/v1/settings/target-sync', { enabled })
+    settings.value = data.settings
+    lastSaved = JSON.parse(JSON.stringify(settings.value))
+    message.success(enabled ? 'Target sync enabled — agent will now pull cloud state' : 'Target sync disabled — agent reports only')
+  } catch (e: any) {
+    message.error(e?.message ?? 'Failed to update target sync')
+  } finally {
+    targetSyncSaving.value = false
+  }
+}
+
 // ── provisioning ───────────────────────────────────────────────────────────────
 
 const provisioning = ref(false)
@@ -290,29 +308,74 @@ function setMemory<K extends keyof NonNullable<NonNullable<AgentSettings['runtim
         <!-- ══ AGENT ══════════════════════════════════════════════════════════ -->
         <a-tab-pane key="agent" tab="Agent">
           <a-card size="small">
-            <a-descriptions :column="2" size="small">
-              <a-descriptions-item label="UUID">
+            <a-descriptions :column="2" size="small" bordered>
+              <a-descriptions-item label="UUID" :span="2">
                 <a-typography-text copyable :content="settings.agent?.uuid ?? '—'">
                   {{ settings.agent?.uuid ?? '—' }}
                 </a-typography-text>
               </a-descriptions-item>
               <a-descriptions-item label="Name">{{ settings.agent?.name ?? '—' }}</a-descriptions-item>
+              <a-descriptions-item label="Type">{{ settings.agent?.type ?? '—' }}</a-descriptions-item>
               <a-descriptions-item label="Version">
                 <a-tag v-if="settings.agent?.version" color="blue">v{{ settings.agent.version }}</a-tag>
                 <span v-else>—</span>
               </a-descriptions-item>
-              <a-descriptions-item label="Provisioned">
+              <a-descriptions-item label="Status">
                 <a-badge
                   :status="settings.agent?.provisioned ? 'success' : 'default'"
-                  :text="settings.agent?.provisioned ? 'Yes' : 'No'"
+                  :text="settings.agent?.provisioned ? 'Provisioned' : 'Not provisioned'"
                 />
               </a-descriptions-item>
+              <a-descriptions-item label="Tenant ID">{{ settings.agent?.tenantId ?? '—' }}</a-descriptions-item>
+              <a-descriptions-item label="Registered at">
+                {{ settings.agent?.registeredAt ? new Date(settings.agent.registeredAt).toLocaleString() : '—' }}
+              </a-descriptions-item>
+              <template v-if="settings.agent?.macAddress">
+                <a-descriptions-item label="MAC address">{{ settings.agent.macAddress }}</a-descriptions-item>
+              </template>
+              <template v-if="settings.agent?.osVersion">
+                <a-descriptions-item label="OS version">{{ settings.agent.osVersion }}</a-descriptions-item>
+              </template>
               <template v-if="settings.agent?.provisioned">
                 <a-descriptions-item label="API endpoint" :span="2">
-                  {{ settings.agent.apiEndpoint ?? '—' }}
+                  <a-typography-text copyable :content="settings.agent.apiEndpoint ?? '—'">
+                    {{ settings.agent.apiEndpoint ?? '—' }}
+                  </a-typography-text>
                 </a-descriptions-item>
                 <a-descriptions-item label="MQTT broker" :span="2">
-                  {{ settings.agent.mqttBrokerUrl ?? '—' }}
+                  <a-typography-text copyable :content="settings.agent.mqttBrokerUrl ?? '—'">
+                    {{ settings.agent.mqttBrokerUrl ?? '—' }}
+                  </a-typography-text>
+                </a-descriptions-item>
+                <a-descriptions-item label="MQTT username">
+                  <a-typography-text copyable :content="settings.agent.mqttUsername ?? '—'">
+                    {{ settings.agent.mqttUsername ?? '—' }}
+                  </a-typography-text>
+                </a-descriptions-item>
+                <a-descriptions-item label="MQTT TLS">
+                  <a-badge
+                    :status="settings.agent.mqttUseTls ? 'success' : 'default'"
+                    :text="settings.agent.mqttUseTls === null ? '—' : settings.agent.mqttUseTls ? 'Enabled' : 'Disabled'"
+                  />
+                </a-descriptions-item>
+                <a-descriptions-item label="MQTT client ID prefix" :span="2">
+                  <a-typography-text copyable :content="settings.agent.mqttClientIdPrefix ?? '—'">
+                    {{ settings.agent.mqttClientIdPrefix ?? '—' }}
+                  </a-typography-text>
+                </a-descriptions-item>
+                <a-descriptions-item label="Cloud target sync" :span="2">
+                  <div style="display: flex; align-items: center; gap: 12px">
+                    <a-switch
+                      :checked="settings.agent.targetSyncEnabled !== false"
+                      :loading="targetSyncSaving"
+                      @change="(v: boolean) => setTargetSync(v)"
+                    />
+                    <span style="font-size: 12px; color: rgba(0,0,0,.45)">
+                      {{ settings.agent.targetSyncEnabled !== false
+                        ? 'Pulling target state from cloud'
+                        : 'Report-only — cloud cannot push config changes' }}
+                    </span>
+                  </div>
                 </a-descriptions-item>
               </template>
             </a-descriptions>
