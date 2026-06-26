@@ -96,7 +96,9 @@ export class DiscoveryStore {
 					const existingProfile = existing.metadata?.profile || 'Generic';
 					const newProfile = device.metadata?.profile || 'Generic';
 					const profileChanged = existingProfile !== newProfile;
-					const dataPointsChanged = JSON.stringify(existing.data_points) !== JSON.stringify(device.dataPoints);
+					// Don't overwrite existing populated data_points with an empty validation result
+					const wouldClearDataPoints = (existing.data_points?.length ?? 0) > 0 && (device.dataPoints?.length ?? 0) === 0;
+					const dataPointsChanged = !wouldClearDataPoints && JSON.stringify(existing.data_points) !== JSON.stringify(device.dataPoints);
 					const validationChanged = device.validated && !existing.metadata?.validated;
 
 					this.logger?.debugSync(`Configuration comparison for "${device.name}"`, {

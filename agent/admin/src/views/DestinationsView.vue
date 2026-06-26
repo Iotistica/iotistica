@@ -7,6 +7,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import DestinationDrawer from '@/components/destinations/DestinationDrawer.vue'
 import type { Destination } from '@/types'
 import { destinationsApi } from '@/api/destinations'
+import { settingsApi } from '@/api/settings'
 import { destinationColor } from '@/utils/protocol'
 
 const rows = ref<Destination[]>([])
@@ -15,6 +16,7 @@ const error = ref<string | null>(null)
 const drawerOpen = ref(false)
 const editing = ref<Destination | null>(null)
 const activeType = ref('all')
+const provisioned = ref(false)
 
 const availableTypes = computed(() => [...new Set(rows.value.map((r) => r.type))].sort())
 
@@ -77,7 +79,12 @@ function confirmDelete(row: Destination) {
   })
 }
 
-onMounted(load)
+onMounted(async () => {
+  const [, settings] = await Promise.allSettled([load(), settingsApi.get()])
+  if (settings.status === 'fulfilled') {
+    provisioned.value = settings.value.agent?.provisioned ?? false
+  }
+})
 </script>
 
 <template>
@@ -149,6 +156,7 @@ onMounted(load)
     <DestinationDrawer
       v-model:open="drawerOpen"
       :editing="editing"
+      :provisioned="provisioned"
       @saved="load"
     />
   </AppLayout>

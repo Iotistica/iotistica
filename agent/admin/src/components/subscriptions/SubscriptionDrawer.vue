@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import type { FormInstance } from 'ant-design-vue'
 import type { Destination, Subscription, SubscriptionFormData, SubscriptionRoute } from '@/types'
@@ -9,6 +9,7 @@ const props = defineProps<{
   open: boolean
   editing: Subscription | null
   destinations: Destination[]
+  iotisticaTopicBase?: string
 }>()
 
 const emit = defineEmits<{
@@ -17,7 +18,11 @@ const emit = defineEmits<{
 }>()
 
 const SOURCE_PROTOCOLS = ['bacnet', 'modbus', 'opcua', 'mqtt', 'system']
-const PAYLOAD_FORMATS = ['custom', 'tags', 'ecp']
+const PAYLOAD_FORMATS = [
+  { value: 'custom', label: 'Iotistica' },
+  { value: 'tags',   label: 'Tags' },
+  { value: 'ecp',    label: 'ECP' },
+]
 const COMPRESSIONS = [
   { label: 'None', value: null },
   { label: 'JSON', value: 'json' },
@@ -57,19 +62,36 @@ const selectedDestination = computed(() =>
   props.destinations.find((d) => d.id === form.value.publish_destination_id) ?? null,
 )
 
-const isExternalDestination = computed(() =>
-  !!selectedDestination.value && selectedDestination.value.type !== 'iotistica',
-)
-
-const isInfluxDbDestination = computed(() =>
-  selectedDestination.value?.type === 'influxdb',
-)
+const isIotisticaDestination = computed(() => selectedDestination.value?.type === 'iotistica')
+const isExternalDestination = computed(() => !!selectedDestination.value && !isIotisticaDestination.value)
+const isInfluxDbDestination = computed(() => selectedDestination.value?.type === 'influxdb')
 
 const destinationTopicRules = computed(() =>
   isExternalDestination.value && !isInfluxDbDestination.value
     ? [{ required: true, message: 'Destination topic is required for external destinations' }]
     : [],
 )
+
+function buildIotisticaTopic(): string {
+  const base = props.iotisticaTopicBase ?? ''
+  const protocols = form.value.topics
+  return protocols.length === 1 ? `${base}/${protocols[0]}` : `${base}/+`
+}
+
+function syncIotisticaTopic() {
+  if (!isIotisticaDestination.value || !props.iotisticaTopicBase) return
+  form.value.route_json!.topic = buildIotisticaTopic()
+}
+
+watch(isIotisticaDestination, (yes) => {
+  if (!yes) return
+  form.value.payload_format = 'custom'
+  nextTick(syncIotisticaTopic)
+})
+
+watch(() => form.value.topics, () => {
+  syncIotisticaTopic()
+})
 
 watch(
   () => props.open,
@@ -87,6 +109,12 @@ watch(
       }
     } else {
       form.value = blankForm()
+      nextTick(() => {
+        if (isIotisticaDestination.value) {
+          form.value.payload_format = 'custom'
+          syncIotisticaTopic()
+        }
+      })
     }
   },
 )
@@ -162,6 +190,15 @@ function close() {
         </a-select>
       </a-form-item>
 
+      <!-- Iotistica native topic (read-only) -->
+      <a-form-item
+        v-if="isIotisticaDestination && form.route_json?.topic"
+        label="MQTT Topic"
+        extra="Agent publishes on this topic structure — one sub-topic per endpoint"
+      >
+        <a-input :value="form.route_json.topic" disabled style="font-family: monospace; font-size: 12px" />
+      </a-form-item>
+
       <!-- Destination Topic / Measurement -->
       <a-form-item
         v-if="isExternalDestination"
@@ -198,7 +235,7 @@ function close() {
       <!-- Payload Format -->
       <a-form-item label="Payload Format" name="payload_format">
         <a-select v-model:value="form.payload_format">
-          <a-select-option v-for="f in PAYLOAD_FORMATS" :key="f" :value="f">{{ f }}</a-select-option>
+          <a-select-option v-for="f in PAYLOAD_FORMATS" :key="f.value" :value="f.value">{{ f.label }}</a-select-option>
         </a-select>
       </a-form-item>
 

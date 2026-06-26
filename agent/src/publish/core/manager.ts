@@ -928,6 +928,11 @@ export class PublishManager extends EventEmitter {
 			return sourceTopic;
 		}
 
+		// Iotistica always publishes on the agent's structured MQTT topic regardless of what's stored
+		if (binding.publisher.type === 'iotistica') {
+			return agentTopic(this.deviceUuid, 'endpoints', this.config.mqttTopic);
+		}
+
 		const route = binding.subscription.route_json as PublishSubscriptionRoute | null;
 		const destinationTopic = typeof route?.topic === 'string' ? route.topic.trim() : '';
 		if (destinationTopic.length === 0) {

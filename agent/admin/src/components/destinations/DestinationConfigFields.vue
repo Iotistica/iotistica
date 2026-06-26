@@ -52,14 +52,15 @@ function auth(key: string): unknown {
     </a-form-item>
   </template>
 
-  <!-- Iotistica cloud destination -->
+  <!-- Iotistica cloud destination — uses provisioned credentials, no extra config needed -->
   <template v-else-if="type === 'iotistica'">
-    <a-form-item label="API URL" :name="['config_json', 'apiUrl']">
-      <a-input :value="(cfg.apiUrl as string) ?? ''" placeholder="https://api.iotistica.com" @update:value="set('apiUrl', $event)" />
-    </a-form-item>
-    <a-form-item label="API Key" :name="['config_json', 'apiKey']">
-      <a-input-password :value="(cfg.apiKey as string) ?? ''" autocomplete="new-password" @update:value="set('apiKey', $event)" />
-    </a-form-item>
+    <a-alert
+      type="info"
+      show-icon
+      message="No configuration required"
+      description="This destination publishes to Iotistica Cloud using the credentials established during provisioning. No additional fields are needed."
+      style="margin-bottom: 8px"
+    />
   </template>
 
   <!-- InfluxDB 2.x destination -->

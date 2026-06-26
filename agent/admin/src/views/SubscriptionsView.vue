@@ -8,7 +8,9 @@ import SubscriptionDrawer from '@/components/subscriptions/SubscriptionDrawer.vu
 import type { Destination, Subscription } from '@/types'
 import { subscriptionsApi } from '@/api/subscriptions'
 import { destinationsApi } from '@/api/destinations'
+import { settingsApi } from '@/api/settings'
 import { protocolColor, destinationColor } from '@/utils/protocol'
+import { buildIotisticaTopicBase } from '@/utils/mqtt'
 
 const rows = ref<Subscription[]>([])
 const destinations = ref<Destination[]>([])
@@ -16,6 +18,7 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const drawerOpen = ref(false)
 const editing = ref<Subscription | null>(null)
+const iotisticaTopicBase = ref<string | null>(null)
 
 const destMap = computed<Record<number, Destination>>(() =>
   Object.fromEntries(destinations.value.map((d) => [d.id, d])),
@@ -36,10 +39,15 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    ;[rows.value, destinations.value] = await Promise.all([
+    const [subs, dests, settings] = await Promise.all([
       subscriptionsApi.getAll(),
       destinationsApi.getAll(),
+      settingsApi.get(),
     ])
+    rows.value = subs
+    destinations.value = dests
+    const { uuid, tenantId } = settings.agent ?? {}
+    if (uuid && tenantId) iotisticaTopicBase.value = buildIotisticaTopicBase(uuid, tenantId)
   } catch (err: unknown) {
     const e = err as { message?: string }
     error.value = e?.message ?? 'Failed to load'
@@ -148,6 +156,10 @@ onMounted(load)
           <span v-else style="color: #999">all</span>
         </template>
 
+        <template v-else-if="column.key === 'payload_format'">
+          {{ record.payload_format === 'custom' ? 'Iotistica' : record.payload_format }}
+        </template>
+
         <template v-else-if="column.key === 'compression'">
           <span v-if="record.compression">{{ record.compression }}</span>
           <span v-else style="color: #999">none</span>
@@ -178,6 +190,7 @@ onMounted(load)
       v-model:open="drawerOpen"
       :editing="editing"
       :destinations="destinations"
+      :iotistica-topic-base="iotisticaTopicBase ?? undefined"
       @saved="load"
     />
   </AppLayout>

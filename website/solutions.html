@@ -10,128 +10,219 @@
     <link rel="apple-touch-icon" href="images/logo-256.png">
     <link rel="stylesheet" href="styles.css">
     <style>
-        .offering-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
-            gap: 2rem;
-            margin-top: 3rem;
+        .page-hero {
+            padding: 8rem 0 5rem;
+            text-align: center;
+            background: var(--bg-primary);
         }
-        .offering-card {
-            background: var(--bg-secondary);
-            border: 1px solid rgba(255,255,255,0.07);
-            border-radius: 14px;
-            padding: 2.5rem;
-        }
-        .offering-card .card-icon {
-            width: 48px;
-            height: 48px;
-            background: var(--accent-gradient);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        .page-hero h1 {
+            font-size: clamp(2rem, 5vw, 3rem);
             margin-bottom: 1.25rem;
-            font-size: 1.4rem;
         }
-        .offering-card h3 { font-size: 1.35rem; margin-bottom: 0.75rem; }
-        .offering-card p { color: var(--text-secondary); line-height: 1.7; margin-bottom: 1.5rem; }
-
-        .stats-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 1.5rem;
-            background: #0d1117;
-            border: 1px solid #30363d;
-            border-radius: 12px;
-            padding: 2rem;
-            margin: 3rem 0;
-        }
-        .stat-cell { text-align: center; }
-        .stat-cell .stat-value {
-            font-size: 2.2rem;
-            font-weight: 800;
-            background: linear-gradient(135deg, #00d4aa, #7c3aed);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .stat-cell .stat-label { color: #8b949e; font-size: 0.82rem; margin-top: 0.2rem; }
-
-        .feature-list { list-style: none; padding: 0; margin: 0 0 1.5rem; }
-        .feature-list li {
-            display: flex;
-            gap: 0.6rem;
-            align-items: flex-start;
-            padding: 0.45rem 0;
+        .page-hero p {
             color: var(--text-secondary);
-            font-size: 0.95rem;
+            font-size: 1.1rem;
+            max-width: 580px;
+            margin: 0 auto;
+            line-height: 1.75;
+        }
+
+        /* Offering sections */
+        .offering-section {
+            padding: 5rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .offering-section:last-of-type { border-bottom: none; }
+        .offering-section.alt { background: var(--bg-secondary); }
+
+        .offering-label {
+            display: inline-block;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #00d4aa;
+            margin-bottom: 1rem;
+        }
+        .offering-section h2 {
+            font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+            margin-bottom: 1.25rem;
+        }
+        .offering-section .lead {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            line-height: 1.8;
+            max-width: 680px;
+            margin-bottom: 3rem;
+        }
+
+        /* Edition cards */
+        .edition-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.75rem;
+            margin-top: 2.5rem;
+        }
+        .edition-card {
+            border: 1px solid rgba(255,255,255,0.09);
+            border-radius: 14px;
+            padding: 2.25rem;
+            position: relative;
+        }
+        .edition-card.highlighted {
+            border-color: rgba(0,212,170,0.35);
+            background: rgba(0,212,170,0.04);
+        }
+        .edition-card .edition-name {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 0.6rem;
+        }
+        .edition-card.highlighted .edition-name { color: #00d4aa; }
+        .edition-card h3 {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+        }
+        .edition-card .edition-desc {
+            color: var(--text-secondary);
+            line-height: 1.75;
+            margin-bottom: 1.75rem;
+            font-size: 0.97rem;
+        }
+        .edition-card .feature-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 2rem;
+        }
+        .edition-card .feature-list li {
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-start;
+            padding: 0.5rem 0;
+            color: var(--text-secondary);
+            font-size: 0.93rem;
             line-height: 1.55;
             border-bottom: 1px solid rgba(255,255,255,0.05);
         }
-        .feature-list li:last-child { border-bottom: none; }
-        .feature-list li::before { content: "✓"; color: #00d4aa; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
-        .feature-list strong { color: var(--text-primary); }
+        .edition-card .feature-list li:last-child { border-bottom: none; }
+        .edition-card .feature-list li::before {
+            content: "";
+            display: block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #00d4aa;
+            flex-shrink: 0;
+            margin-top: 6px;
+        }
+        .edition-card .feature-list strong { color: var(--text-primary); }
 
-        .proto-grid { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1.25rem; }
-        .proto-badge {
-            background: rgba(59,130,246,0.12);
-            border: 1px solid rgba(59,130,246,0.3);
-            color: #93c5fd;
-            border-radius: 6px;
-            padding: 3px 10px;
-            font-size: 0.8rem;
-            font-weight: 600;
+        /* Install block */
+        .install-block {
+            margin: 2.5rem 0;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 1.5rem 1.75rem;
+        }
+        .install-block .install-label {
+            font-size: 0.78rem;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.75rem;
+        }
+        .install-block code {
+            display: block;
+            font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+            font-size: 0.9rem;
+            color: #e6edf3;
+            word-break: break-all;
+        }
+        .install-block code span.prompt { color: #8b949e; user-select: none; }
+        .install-block code span.cmd { color: #79c0ff; }
+        .install-block code span.url { color: #7ee787; }
+
+        /* Cloud section */
+        .cloud-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-top: 3rem;
+        }
+        .cloud-detail-item {
+            padding: 1.75rem;
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 12px;
+        }
+        .cloud-detail-item h4 {
+            font-size: 1rem;
+            margin-bottom: 0.6rem;
+        }
+        .cloud-detail-item p {
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            line-height: 1.7;
+            margin: 0;
         }
 
-        .arch-flow {
+        /* Comparison table */
+        .compare-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 3rem;
+            font-size: 0.93rem;
+        }
+        .compare-table th {
+            text-align: left;
+            padding: 0.85rem 1.25rem;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .compare-table th:not(:first-child) { text-align: center; }
+        .compare-table td {
+            padding: 0.85rem 1.25rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            color: var(--text-secondary);
+            vertical-align: middle;
+        }
+        .compare-table td:not(:first-child) { text-align: center; }
+        .compare-table td:first-child { color: var(--text-primary); font-weight: 500; }
+        .compare-table tbody tr:last-child td { border-bottom: none; }
+        .compare-table .check { color: #00d4aa; font-weight: 700; }
+        .compare-table .dash { color: rgba(255,255,255,0.2); }
+        .compare-table .col-pro { color: var(--text-primary); font-weight: 700; }
+        .compare-table .col-community { color: var(--text-secondary); font-weight: 600; }
+        .compare-table .col-cloud { color: #7c3aed; font-weight: 700; }
+
+        /* CTA section */
+        .page-cta {
+            text-align: center;
+            padding: 6rem 0;
+        }
+        .page-cta h2 {
+            font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+            margin-bottom: 1.1rem;
+        }
+        .page-cta p {
+            color: var(--text-secondary);
+            max-width: 500px;
+            margin: 0 auto 2.5rem;
+            line-height: 1.75;
+        }
+        .cta-actions {
             display: flex;
-            align-items: center;
+            gap: 1rem;
             justify-content: center;
             flex-wrap: wrap;
-            gap: 0;
-            margin: 2.5rem 0;
         }
-        .arch-node {
-            background: var(--bg-secondary);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 10px;
-            padding: 1rem 1.4rem;
-            text-align: center;
-            min-width: 130px;
-        }
-        .arch-node .arch-icon { font-size: 1.5rem; margin-bottom: 0.3rem; }
-        .arch-node .arch-label { font-size: 0.78rem; font-weight: 600; color: var(--text-primary); }
-        .arch-node .arch-sub { font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.2rem; }
-        .arch-arrow { color: #3b82f6; font-size: 1.3rem; padding: 0 0.5rem; flex-shrink: 0; }
-
-        .deploy-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 1.5rem;
-            margin-top: 2.5rem;
-        }
-        .deploy-card { border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; padding: 2rem; position: relative; }
-        .deploy-card.featured { border-color: #3b82f6; background: rgba(59,130,246,0.05); }
-        .deploy-card .badge-featured {
-            position: absolute;
-            top: -12px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #3b82f6;
-            color: #fff;
-            font-size: 0.72rem;
-            font-weight: 700;
-            padding: 2px 12px;
-            border-radius: 20px;
-            white-space: nowrap;
-        }
-        .deploy-card h4 { font-size: 1.1rem; margin-bottom: 0.6rem; }
-        .deploy-card p { color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; margin-bottom: 1.2rem; }
-
-        .page-cta { text-align: center; padding: 5rem 0; }
-        .page-cta h2 { font-size: 2rem; margin-bottom: 1rem; }
-        .page-cta p { color: var(--text-secondary); max-width: 540px; margin: 0 auto 2rem; font-size: 1.05rem; }
-        .cta-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
     </style>
 </head>
 <body>
@@ -154,259 +245,266 @@
     </nav>
 
     <!-- Page header -->
-    <section style="padding: 8rem 0 4rem; text-align: center; background: var(--bg-primary);">
+    <section class="page-hero">
         <div class="container">
-            <h1 class="section-title" style="font-size: clamp(2rem, 5vw, 3rem); margin-bottom: 1rem;">What We Offer</h1>
-            <p class="section-subtitle" style="max-width: 640px; margin: 0 auto;">Two tightly integrated products that work together — or independently.</p>
+            <h1 class="section-title">Solutions</h1>
+            <p>
+                Three purpose-built offerings that cover the full range — from open source
+                self-hosted deployments to fully managed cloud infrastructure.
+            </p>
         </div>
     </section>
 
-    <!-- Core offerings -->
-    <section class="services" style="padding-top: 2rem;">
+    <!-- Agent section -->
+    <section class="offering-section">
         <div class="container">
-            <div class="offering-grid">
-                <div class="offering-card">
-                    <div class="card-icon">☁️</div>
-                    <h3>Cloud IoT Ingestion Hosting</h3>
-                    <p>
-                        We host the entire telemetry stack — MQTT broker, ingestion pipeline, and time-series database —
-                        so your devices have a reliable, scalable endpoint in the cloud from day one.
-                        You get a REST API to query your data, set up alerts, and manage agents without
-                        running any infrastructure yourself.
+            <span class="offering-label">Edge Software</span>
+            <h2>Iotistica Agent</h2>
+            <p class="lead">
+                The Iotistica Agent is the software you install on any Linux gateway, Raspberry Pi,
+                industrial PC, or ARM single-board computer. It collects data from local devices
+                and equipment, runs autonomously without a cloud connection, and publishes readings
+                to any MQTT broker or cloud destination.
+            </p>
+            <p class="lead" style="margin-top: -1.5rem;">
+                Available in two editions. Both ship from the same installer.
+            </p>
+
+            <div class="install-block">
+                <div class="install-label">Install</div>
+                <code>
+                    <span class="prompt">$ </span><span class="cmd">curl</span> -sfL <span class="url">https://get.iotistica.com/agent</span> | sudo sh
+                </code>
+            </div>
+
+            <div class="edition-grid">
+                <!-- Community -->
+                <div class="edition-card">
+                    <div class="edition-name">Open Source</div>
+                    <h3>Community Edition</h3>
+                    <p class="edition-desc">
+                        Free to use, self-hosted, no account required. Runs fully offline or connects
+                        to any MQTT broker of your choice. The complete agent codebase is publicly
+                        available on GitHub.
                     </p>
                     <ul class="feature-list">
-                        <li><strong>Managed MQTT broker</strong> with per-device authentication and topic-level ACLs</li>
-                        <li><strong>20,000+ readings / second</strong> sustained ingestion with 0.0% verified data loss</li>
-                        <li><strong>TimescaleDB storage</strong> — 85–95% compression, 2-year retention, 14 pre-built aggregates</li>
-                        <li><strong>Offline resilience</strong> — disk spool buffers data when connectivity drops; replays on reconnect</li>
-                        <li><strong>REST API</strong> for telemetry queries, anomaly data, agent state, jobs, and fleet events</li>
-                        <li><strong>Self-hosted option</strong> — deploy on your own infra with Docker Compose or Kubernetes</li>
+                        <li>Industrial protocol adapters — <strong>Modbus TCP/RTU, OPC-UA, BACnet, SNMP, MQTT, CAN</strong></li>
+                        <li>Device and equipment discovery on the local network</li>
+                        <li>Local admin interface for configuration and monitoring</li>
+                        <li>Publish to any MQTT broker, InfluxDB, or custom destination</li>
+                        <li>Offline-first — data buffered locally during connectivity gaps</li>
+                        <li>Runs on ARM64, ARM32, and x86-64</li>
+                        <li>Docker container orchestration on the device</li>
+                        <li>Apache 2.0 license — use freely in commercial and private deployments</li>
                     </ul>
-                    <div class="proto-grid">
-                        <span class="proto-badge">MQTT</span>
-                        <span class="proto-badge">TimescaleDB</span>
-                        <span class="proto-badge">Redis Streams</span>
-                        <span class="proto-badge">REST API</span>
-                        <span class="proto-badge">Kubernetes</span>
-                    </div>
+                    <a href="https://github.com/Iotistica/iotistic" target="_blank" class="btn btn-secondary" style="display:block;text-align:center;">View on GitHub</a>
                 </div>
 
-                <div class="offering-card">
-                    <div class="card-icon">🖧</div>
-                    <h3>IoT Fleet Management</h3>
-                    <p>
-                        Deploy the Iotistica Agent on any edge device — Raspberry Pi, industrial gateway, ARM SBC, x86 server.
-                        The agent connects to your cloud, streams live telemetry, and lets you deploy, update, and
-                        monitor applications across your entire fleet remotely.
+                <!-- Pro -->
+                <div class="edition-card highlighted">
+                    <div class="edition-name">Pro Edition</div>
+                    <h3>Iotistica Agent Pro</h3>
+                    <p class="edition-desc">
+                        Everything in the Community Edition, plus cloud fleet management features.
+                        Devices enroll with a provisioning key, receive their configuration from
+                        the cloud, and report back automatically.
                     </p>
                     <ul class="feature-list">
-                        <li><strong>Multi-protocol data collection</strong> — Modbus TCP/RTU, OPC-UA, BACnet, SNMP, MQTT, CAN bus</li>
-                        <li><strong>Remote container management</strong> — deploy and update Docker workloads over MQTT</li>
-                        <li><strong>Edge anomaly detection</strong> — on-device ML identifies abnormal readings before they reach the cloud</li>
-                        <li><strong>Desired-state reconciliation</strong> — cloud pushes target config; agent applies and reports back</li>
-                        <li><strong>Remote access</strong> — SSH tunnel and interactive shell directly to any device from the dashboard</li>
-                        <li><strong>Offline-first</strong> — SQLite buffer keeps data safe during cloud outages; syncs automatically</li>
+                        <li>All Community Edition capabilities included</li>
+                        <li>Cloud-managed desired-state configuration — push settings from the platform, agents apply automatically</li>
+                        <li>Remote access — SSH tunnel and interactive shell to any device without port-forwarding</li>
+                        <li>Remote container management — deploy, update, and remove Docker workloads over MQTT</li>
+                        <li>Fleet jobs — dispatch commands, scripts, or firmware updates across devices</li>
+                        <li>On-device anomaly detection — readings scored locally before reaching the cloud</li>
+                        <li>Automatic provisioning — one key enrolls a device, issues credentials, and registers it in the fleet</li>
+                        <li>Connects to Iotistica Cloud or your own self-hosted ingestion endpoint</li>
                     </ul>
-                    <div class="proto-grid">
-                        <span class="proto-badge">Modbus</span>
-                        <span class="proto-badge">OPC-UA</span>
-                        <span class="proto-badge">BACnet</span>
-                        <span class="proto-badge">SNMP</span>
-                        <span class="proto-badge">CAN</span>
-                        <span class="proto-badge">ARM / x86</span>
-                    </div>
+                    <a href="contact.html" class="btn btn-primary" style="display:block;text-align:center;">Get in Touch</a>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Stats -->
-    <section class="services" style="background: var(--bg-secondary); padding-top: 3rem; padding-bottom: 3rem;">
+    <!-- Cloud ingestion section -->
+    <section class="offering-section alt">
         <div class="container">
-            <div class="stats-row">
-                <div class="stat-cell"><div class="stat-value">20K+</div><div class="stat-label">Readings / Second</div></div>
-                <div class="stat-cell"><div class="stat-value">0.0%</div><div class="stat-label">Data Loss</div></div>
-                <div class="stat-cell"><div class="stat-value">6</div><div class="stat-label">Industrial Protocols</div></div>
-                <div class="stat-cell"><div class="stat-value">90%</div><div class="stat-label">Storage Compression</div></div>
-                <div class="stat-cell"><div class="stat-value">2yr</div><div class="stat-label">Data Retention</div></div>
-            </div>
-        </div>
-    </section>
+            <span class="offering-label">Cloud Infrastructure</span>
+            <h2>Managed Cloud Ingestion</h2>
+            <p class="lead">
+                For teams that want a complete, hosted IoT backend built on the Iotistica platform.
+                We operate the ingestion stack on your behalf — MQTT broker, data pipeline, and
+                time-series storage — and provide an API your applications can query directly.
+            </p>
+            <p class="lead" style="margin-top: -1.5rem;">
+                Iotistica Agent Pro devices connect and begin publishing immediately. The same
+                platform is also available as a self-hosted deployment on your own infrastructure.
+            </p>
 
-    <!-- How it works -->
-    <section class="services">
-        <div class="container">
-            <div class="section-header">
-                <h2 class="section-title">How It Works</h2>
-                <p class="section-subtitle">
-                    Data flows from your field devices to the cloud in milliseconds — through a secure,
-                    loss-proof pipeline you don't have to build or maintain.
-                </p>
-            </div>
-
-            <div class="arch-flow">
-                <div class="arch-node">
-                    <div class="arch-icon">🏭</div>
-                    <div class="arch-label">Field Devices</div>
-                    <div class="arch-sub">Modbus · OPC-UA · BACnet</div>
+            <div class="cloud-detail-grid">
+                <div class="cloud-detail-item">
+                    <h4>Hosted MQTT Broker</h4>
+                    <p>
+                        A managed broker with per-device authentication and topic-level access control.
+                        Agents authenticate on connection; each device is isolated to its own namespace.
+                    </p>
                 </div>
-                <div class="arch-arrow">→</div>
-                <div class="arch-node">
-                    <div class="arch-icon">📦</div>
-                    <div class="arch-label">Iotistica Agent</div>
-                    <div class="arch-sub">Edge · Offline-first</div>
+                <div class="cloud-detail-item">
+                    <h4>Telemetry Ingestion</h4>
+                    <p>
+                        A high-throughput ingestion pipeline processes incoming readings in real time.
+                        Built for sustained load with no data loss, even during traffic spikes.
+                    </p>
                 </div>
-                <div class="arch-arrow">→</div>
-                <div class="arch-node">
-                    <div class="arch-icon">📡</div>
-                    <div class="arch-label">Cloud MQTT Broker</div>
-                    <div class="arch-sub">Auth · ACL · TLS</div>
+                <div class="cloud-detail-item">
+                    <h4>Time-Series Storage</h4>
+                    <p>
+                        Readings are stored in a compressed time-series database with pre-built
+                        aggregates for hourly and daily rollups. Raw data retained up to two years.
+                    </p>
                 </div>
-                <div class="arch-arrow">→</div>
-                <div class="arch-node">
-                    <div class="arch-icon">⚡</div>
-                    <div class="arch-label">Ingestion Pipeline</div>
-                    <div class="arch-sub">Redis Streams · Workers</div>
+                <div class="cloud-detail-item">
+                    <h4>REST API</h4>
+                    <p>
+                        Query telemetry, retrieve device status, manage fleet configuration, and
+                        access anomaly data — all through a single REST API your team can build against.
+                    </p>
                 </div>
-                <div class="arch-arrow">→</div>
-                <div class="arch-node">
-                    <div class="arch-icon">🗄️</div>
-                    <div class="arch-label">TimescaleDB</div>
-                    <div class="arch-sub">Aggregates · Compression</div>
+                <div class="cloud-detail-item">
+                    <h4>Fleet Management</h4>
+                    <p>
+                        Push configuration changes, monitor device health, dispatch jobs, and
+                        access devices remotely through the same platform your agents connect to.
+                    </p>
                 </div>
-                <div class="arch-arrow">→</div>
-                <div class="arch-node">
-                    <div class="arch-icon">🔌</div>
-                    <div class="arch-label">REST API</div>
-                    <div class="arch-sub">Your apps · Dashboards</div>
-                </div>
-            </div>
-
-            <div class="solutions-list" style="margin-top: 3rem;">
-                <div class="solution-item" style="border-bottom: 1px solid rgba(255,255,255,0.06);">
-                    <div class="solution-content">
-                        <h3>Zero-Loss Ingestion Pipeline</h3>
-                        <p class="solution-benefit">
-                            Agent telemetry arrives over MQTT and lands in a Redis Stream before touching the database.
-                            This decouples broker throughput from write latency — bursts are absorbed, workers
-                            drain the stream in parallel, and data is committed to TimescaleDB using PostgreSQL
-                            COPY for near-native write speeds.
-                        </p>
-                        <ul class="solution-features">
-                            <li><strong>Redis Stream buffer:</strong> absorbs traffic spikes without backpressure to the broker</li>
-                            <li><strong>Parallel workers:</strong> configurable pool drains the stream concurrently with no shared locks</li>
-                            <li><strong>COPY-based bulk insert:</strong> batches bypass row-by-row INSERT for near-disk-speed writes</li>
-                            <li><strong>Disk spool fallback:</strong> if Redis is unreachable, data spools to disk and replays automatically</li>
-                            <li><strong>Ingestion profiles:</strong> choose batch, balanced, streaming, or high-performance to match your load</li>
-                        </ul>
-                    </div>
-                    <div class="solution-content">
-                        <h3>Time-Series Storage &amp; Queries</h3>
-                        <p class="solution-benefit">
-                            All readings land in TimescaleDB hypertables — automatically partitioned, compressed after
-                            7 days, and pre-aggregated by 14 continuous aggregate views so your dashboards
-                            query summaries instead of raw chunks.
-                        </p>
-                        <ul class="solution-features">
-                            <li><strong>5 hypertables:</strong> readings, agent metrics, logs, broker stats, topic metrics</li>
-                            <li><strong>14 continuous aggregates:</strong> 1-minute to daily rollups, refreshed in the background</li>
-                            <li><strong>LZ4 compression:</strong> 85–95% storage reduction on sensor data after 7 days</li>
-                            <li><strong>Configurable retention:</strong> raw readings kept up to 2 years; aggregates independently managed</li>
-                            <li><strong>REST query API:</strong> latest values, hourly/daily rollups, and flexible time-range queries</li>
-                        </ul>
-                    </div>
-                </div>
-
-                <div class="solution-item" style="border-bottom: none;">
-                    <div class="solution-content">
-                        <h3>Device Fleet Management</h3>
-                        <p class="solution-benefit">
-                            The cloud API maintains a desired state for every device in your fleet.
-                            When an agent connects, it receives its target configuration and reconciles
-                            — deploying containers, applying settings, or starting protocol adapters —
-                            without any manual intervention.
-                        </p>
-                        <ul class="solution-features">
-                            <li><strong>Desired-state model:</strong> push config to the cloud; agents pull and apply automatically</li>
-                            <li><strong>Container orchestration:</strong> deploy, update, and remove Docker workloads on any device</li>
-                            <li><strong>Jobs:</strong> dispatch one-off commands, scripts, or firmware updates to individual devices or fleets</li>
-                            <li><strong>Remote access:</strong> SSH tunnel and interactive shell to any online device, no port-forwarding needed</li>
-                            <li><strong>Provisioning:</strong> one-time key flow registers a new device, issues MQTT credentials, and enrolls it in the fleet automatically</li>
-                        </ul>
-                    </div>
-                    <div class="solution-content">
-                        <h3>Edge Intelligence</h3>
-                        <p class="solution-benefit">
-                            Processing at the edge reduces cloud bandwidth, catches anomalies before
-                            they reach storage, and keeps devices operational even when connectivity drops.
-                        </p>
-                        <ul class="solution-features">
-                            <li><strong>On-device anomaly detection:</strong> ML models score each reading locally and flag outliers in real time</li>
-                            <li><strong>Protocol discovery:</strong> agent scans the local network for Modbus, OPC-UA, and BACnet devices automatically</li>
-                            <li><strong>Offline buffer:</strong> SQLite queue holds readings during outages; drains to cloud on reconnect with QoS 1</li>
-                            <li><strong>Health watchdog:</strong> systemd integration and memory leak detection restart the agent if it drifts</li>
-                            <li><strong>Multi-architecture:</strong> single image runs on ARM64, ARM32, and x86-64 hardware</li>
-                        </ul>
-                    </div>
+                <div class="cloud-detail-item">
+                    <h4>Self-Hosted Option</h4>
+                    <p>
+                        Deploy the full ingestion stack on your own infrastructure — on-premise,
+                        private cloud, or air-gapped environments. Docker Compose and Kubernetes
+                        deployments supported.
+                    </p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Deployment options -->
-    <section class="services" style="background: var(--bg-secondary);">
+    <!-- Comparison -->
+    <section class="offering-section">
         <div class="container">
-            <div class="section-header">
-                <h2 class="section-title">Deployment Options</h2>
-                <p class="section-subtitle">Run on our infrastructure, yours, or a mix of both.</p>
-            </div>
-            <div class="deploy-grid">
-                <div class="deploy-card featured">
-                    <div class="badge-featured">Most Popular</div>
-                    <h4>☁️ Cloud-Hosted</h4>
-                    <p>We manage the MQTT broker, ingestion pipeline, TimescaleDB, and REST API on our infrastructure. You connect your devices and query your data. No servers to run.</p>
-                    <ul class="feature-list">
-                        <li>Fully managed, zero-ops</li>
-                        <li>Multi-tenant namespace isolation</li>
-                        <li>Automatic scaling by tier</li>
-                        <li>Kubernetes + Helm, GitOps managed</li>
-                    </ul>
-                    <a href="contact.html" class="btn btn-primary" style="display:block;text-align:center;margin-top:1.5rem;">Contact Us</a>
-                </div>
-                <div class="deploy-card">
-                    <h4>🏢 Self-Hosted</h4>
-                    <p>Deploy the full stack on your own hardware or private cloud using Docker Compose or the Helm chart. You own the infrastructure; we provide the software.</p>
-                    <ul class="feature-list">
-                        <li>Docker Compose for single-node setups</li>
-                        <li>Kubernetes Helm chart for production</li>
-                        <li>All services included: API, ingestion, MQTT, Redis, TimescaleDB</li>
-                        <li>Air-gapped environments supported</li>
-                    </ul>
-                    <a href="https://docs.iotistica.com/docs/intro" target="_blank" class="btn btn-secondary" style="display:block;text-align:center;margin-top:1.5rem;">Read the Docs</a>
-                </div>
-                <div class="deploy-card">
-                    <h4>🔀 Hybrid</h4>
-                    <p>Agents run on your edge devices and connect to our cloud — or your private cloud. Mix and match: cloud ingestion with on-premise agents, or vice versa.</p>
-                    <ul class="feature-list">
-                        <li>Edge agents on your hardware</li>
-                        <li>Cloud or private MQTT endpoint</li>
-                        <li>Tailscale VPN for secure device access</li>
-                        <li>Configurable per customer or site</li>
-                    </ul>
-                    <a href="contact.html" class="btn btn-primary" style="display:block;text-align:center;margin-top:1.5rem;">Contact Us</a>
-                </div>
+            <span class="offering-label">At a Glance</span>
+            <h2>Which offering fits your project?</h2>
+            <p class="lead">
+                All three options can be used independently or together. A common setup runs
+                Community Edition agents publishing to your own broker, while teams wanting
+                fleet management and a hosted backend opt for Agent Pro with Cloud Ingestion.
+            </p>
+
+            <div style="overflow-x: auto;">
+                <table class="compare-table">
+                    <thead>
+                        <tr>
+                            <th>Capability</th>
+                            <th class="col-community">Community</th>
+                            <th class="col-pro">Agent Pro</th>
+                            <th class="col-cloud">Cloud Ingestion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Industrial protocol data collection</td>
+                            <td class="check">Yes</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                        </tr>
+                        <tr>
+                            <td>Publish to any MQTT broker</td>
+                            <td class="check">Yes</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                        </tr>
+                        <tr>
+                            <td>Local device discovery</td>
+                            <td class="check">Yes</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                        </tr>
+                        <tr>
+                            <td>Offline buffering</td>
+                            <td class="check">Yes</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                        </tr>
+                        <tr>
+                            <td>Cloud-managed configuration</td>
+                            <td class="dash">—</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                        </tr>
+                        <tr>
+                            <td>Remote device access</td>
+                            <td class="dash">—</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                        </tr>
+                        <tr>
+                            <td>Fleet job dispatch</td>
+                            <td class="dash">—</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                        </tr>
+                        <tr>
+                            <td>On-device anomaly detection</td>
+                            <td class="dash">—</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                        </tr>
+                        <tr>
+                            <td>Hosted MQTT broker</td>
+                            <td class="dash">—</td>
+                            <td class="dash">—</td>
+                            <td class="check">Yes</td>
+                        </tr>
+                        <tr>
+                            <td>Managed ingestion pipeline</td>
+                            <td class="dash">—</td>
+                            <td class="dash">—</td>
+                            <td class="check">Yes</td>
+                        </tr>
+                        <tr>
+                            <td>Time-series storage and API</td>
+                            <td class="dash">—</td>
+                            <td class="dash">—</td>
+                            <td class="check">Yes</td>
+                        </tr>
+                        <tr>
+                            <td>Self-hostable</td>
+                            <td class="check">Yes</td>
+                            <td class="check">Yes</td>
+                            <td class="check">Yes</td>
+                        </tr>
+                        <tr>
+                            <td>Open source</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                            <td class="dash">—</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </section>
 
     <!-- CTA -->
-    <section style="background: var(--bg-primary);">
+    <section style="background: var(--bg-secondary);">
         <div class="page-cta">
-            <h2>Ready to connect your devices?</h2>
-            <p>Tell us about your project and we'll put together the right setup for your fleet.</p>
+            <h2>Ready to get started?</h2>
+            <p>
+                Install the agent on any Linux device in under two minutes, or reach out
+                to discuss fleet management and cloud ingestion for your project.
+            </p>
             <div class="cta-actions">
-                <a href="contact.html" class="btn btn-primary">Talk to Us</a>
-                <a href="https://docs.iotistica.com/docs/intro" target="_blank" class="btn btn-secondary">Read the Docs</a>
+                <a href="https://docs.iotistica.com/docs/intro" target="_blank" class="btn btn-primary">Read the Docs</a>
+                <a href="contact.html" class="btn btn-secondary">Contact Us</a>
             </div>
         </div>
     </section>
@@ -427,7 +525,7 @@
                     <div class="footer-column">
                         <h4>Products</h4>
                         <a href="agent.html">Iotistica Agent</a>
-                        <a href="solutions.html">Platform Capabilities</a>
+                        <a href="solutions.html">Solutions</a>
                         <a href="https://docs.iotistica.com/docs/intro" target="_blank">Documentation</a>
                     </div>
                     <div class="footer-column">

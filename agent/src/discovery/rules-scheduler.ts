@@ -84,7 +84,7 @@ export class DiscoveryRulesScheduler {
 		let devices: DiscoveredDevice[] = [];
 		try {
 			devices = await this.discoveryService.runDiscovery({
-				trigger: 'scheduled',
+				trigger: trigger === 'manual' ? 'manual' : 'scheduled',
 				protocols: [rule.protocol as any],
 				forceRun: true,
 				skipDbWrites: !rule.auto_enable,

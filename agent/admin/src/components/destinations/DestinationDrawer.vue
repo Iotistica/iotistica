@@ -9,6 +9,7 @@ import DestinationConfigFields from './DestinationConfigFields.vue'
 const props = defineProps<{
   open: boolean
   editing: Destination | null
+  provisioned?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -16,7 +17,10 @@ const emit = defineEmits<{
   saved: []
 }>()
 
-const DESTINATION_TYPES = ['iotistica', 'mqtt', 'influxdb', 'azure', 'aws', 'gcp']
+const ALL_DESTINATION_TYPES = ['iotistica', 'mqtt', 'influxdb', 'azure', 'aws', 'gcp']
+const DESTINATION_TYPES = computed(() =>
+  props.provisioned ? ALL_DESTINATION_TYPES : ALL_DESTINATION_TYPES.filter((t) => t !== 'iotistica'),
+)
 const TESTABLE_TYPES = ['influxdb', 'mqtt']
 
 const CONFIG_TEMPLATES: Record<string, Record<string, unknown>> = {
@@ -69,9 +73,11 @@ const testResult = ref<{ ok: boolean; message?: string; error?: string } | null>
 
 const canTest = computed(() => TESTABLE_TYPES.includes(form.value.type))
 
+const defaultType = computed(() => props.provisioned ? 'iotistica' : 'mqtt')
+
 const form = ref<DestinationFormData>({
   name: '',
-  type: 'iotistica',
+  type: defaultType.value,
   config_json: {},
   enabled: true,
 })
@@ -89,7 +95,7 @@ watch(
         enabled: props.editing.enabled,
       }
     } else {
-      form.value = { name: '', type: 'iotistica', config_json: templateFor('iotistica'), enabled: true }
+      form.value = { name: '', type: defaultType.value, config_json: templateFor(defaultType.value), enabled: true }
     }
   },
 )
