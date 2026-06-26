@@ -61,10 +61,18 @@ Keep this string safe — it is the only credential you'll need on the agent sid
 
 1. In the agent admin UI, go to **Destinations** → **New Destination**.
 2. Select type **Azure IoT Hub**.
-3. Paste the **Device Connection String** from Step 2.
-4. Click **Save**.
+3. Fill in the fields:
 
-That's all. The agent parses the connection string and derives all other settings automatically.
+![Azure IoT Hub destination form showing Hub Hostname, Device ID, Shared Access Key, and Token TTL fields](/img/agent/destinations-drawer-azure.png)
+
+| Field | Value |
+|---|---|
+| **Hub Hostname** | From the connection string: `HostName=` value (e.g. `myhub.azure-devices.net`) |
+| **Device ID** | From the connection string: `DeviceId=` value |
+| **Shared Access Key** | From the connection string: `SharedAccessKey=` value (Base64) |
+| **Token TTL (seconds)** | How long each SAS token is valid — default 3600 s (1 hour) |
+
+4. Click **Save**.
 
 | Connection string field | Used as |
 |---|---|

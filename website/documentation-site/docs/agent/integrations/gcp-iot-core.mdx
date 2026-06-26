@@ -120,14 +120,16 @@ You will need to regenerate and update the token before it expires.
 2. Select type **GCP IoT Core**.
 3. Fill in the fields:
 
+![GCP IoT Core destination form showing MQTT Endpoint, Port, Client ID, Topic Template, JWT Token, and CA Certificate fields](/img/agent/destinations-drawer-gcp.png)
+
 | Field | Value |
 |---|---|
-| **Endpoint** | `mqtt.googleapis.com` (or your replacement broker host) |
+| **MQTT Endpoint** | `mqtt.googleapis.com` (or your replacement broker host) |
 | **Port** | `8883` (default) |
 | **Client ID** | Full GCP device path: `projects/<project>/locations/<region>/registries/<registry>/devices/<device>` |
-| **JWT / Password** | The JWT token generated in Step 4 |
-| **Root CA** | (Optional) Google's root CA PEM — paste if TLS verification fails |
-| **Topic template** | `/devices/{deviceId}/events/{endpoint}` (default) |
+| **Topic Template** | `/devices/{deviceId}/events/{endpoint}` (default) |
+| **JWT Token** | The JWT generated in Step 4 (RS256 or ES256 signed) |
+| **CA Certificate (PEM)** | (Optional) Google root CA — paste if TLS verification fails |
 
 4. Click **Save**.
 

@@ -112,15 +112,17 @@ Replace `<region>` and `<account-id>` with your values (visible in the top-right
 2. Select type **AWS IoT Core**.
 3. Fill in the fields:
 
+![AWS IoT Core destination form showing Endpoint, Port, Device ID, Topic Template, and PEM certificate fields for mTLS authentication](/img/agent/destinations-drawer-aws.png)
+
 | Field | Value |
 |---|---|
-| **Endpoint** | Device data endpoint from Step 4 |
-| **Device ID** | Thing name from Step 1 (used as MQTT client ID and in topic) |
-| **Client Certificate** | Paste the full contents of `device.pem.crt` |
-| **Private Key** | Paste the full contents of `device.private.key` |
-| **Root CA** | Paste the full contents of the Amazon Root CA 1 file (optional but recommended) |
+| **Device Data Endpoint** | Endpoint from Step 4 (e.g. `xxxx.iot.us-east-1.amazonaws.com`) |
 | **Port** | `8883` (default) |
-| **Topic template** | `devices/{deviceId}/messages/events/{endpoint}` (default) |
+| **Device ID** | Thing name from Step 1 — used as MQTT client ID and in the topic |
+| **Topic Template** | `devices/{deviceId}/messages/events/{endpoint}` (default) |
+| **Client Certificate (PEM)** | Full contents of `device.pem.crt` |
+| **Private Key (PEM)** | Full contents of `device.private.key` |
+| **CA Certificate (PEM)** | Full contents of Amazon Root CA 1 (optional but recommended) |
 
 4. Click **Save**.
 
