@@ -36,6 +36,15 @@ const sidebars: SidebarsConfig = {
         'agent/security',
         'agent/cli',
         'agent/api',
+        {
+          type: 'category',
+          label: 'Integrations',
+          items: [
+            'agent/integrations/azure-iot-hub',
+            'agent/integrations/aws-iot-core',
+            'agent/integrations/gcp-iot-core',
+          ],
+        },
       ],
     },
     {
