@@ -7,50 +7,79 @@
     <link rel="stylesheet" href="styles.css">
     <style>
         .about-hero {
-            padding: 9rem 0 5rem;
+            padding: 10rem 0 6rem;
             text-align: center;
             background: var(--bg-primary);
         }
-        .value-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 1.5rem;
-            margin-top: 3rem;
+
+        .about-hero h1 {
+            font-size: clamp(2.4rem, 6vw, 3.8rem);
+            line-height: 1.15;
+            margin-bottom: 1.25rem;
         }
-        .value-card {
-            background: var(--bg-secondary);
-            border: 1px solid rgba(255,255,255,0.07);
-            border-radius: 12px;
-            padding: 2rem;
-        }
-        .value-card .value-icon {
-            font-size: 1.8rem;
-            margin-bottom: 1rem;
-        }
-        .value-card h3 {
-            font-size: 1.1rem;
-            margin-bottom: 0.6rem;
-        }
-        .value-card p {
+
+        .about-hero .hero-sub {
+            font-size: 1.2rem;
             color: var(--text-secondary);
-            font-size: 0.95rem;
-            line-height: 1.65;
-        }
-        .location-bar {
-            background: var(--bg-secondary);
-            border-top: 1px solid rgba(255,255,255,0.07);
-            border-bottom: 1px solid rgba(255,255,255,0.07);
-            padding: 3rem 0;
-            text-align: center;
-        }
-        .location-bar p {
-            color: var(--text-secondary);
-            font-size: 1.05rem;
-            max-width: 640px;
+            max-width: 560px;
             margin: 0 auto;
             line-height: 1.7;
         }
-        .location-bar strong { color: var(--text-primary); }
+
+        .about-body {
+            padding: 5rem 0 6rem;
+            background: var(--bg-primary);
+        }
+
+        .about-body .inner {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .about-body .lead-line {
+            display: block;
+            width: 40px;
+            height: 3px;
+            background: #1677ff;
+            border-radius: 2px;
+            margin-bottom: 2rem;
+        }
+
+        .about-body p {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            line-height: 1.85;
+            margin-bottom: 1.6rem;
+        }
+
+        .about-body p:last-child {
+            margin-bottom: 0;
+        }
+
+        .about-body strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .about-cta {
+            padding: 5rem 0;
+            text-align: center;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .about-cta h2 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .about-cta p {
+            color: var(--text-secondary);
+            max-width: 480px;
+            margin: 0 auto 2rem;
+            font-size: 1.05rem;
+            line-height: 1.7;
+        }
     </style>
 </head>
 <body>
@@ -72,83 +101,42 @@
         </div>
     </nav>
 
-    <!-- Hero -->
     <section class="about-hero">
         <div class="container">
-            <h1 class="section-title">About <span class="gradient-text">Iotistica</span></h1>
-            <p class="section-subtitle" style="margin-top: 1rem;">
+            <h1>About <span class="gradient-text">Iotistica</span></h1>
+            <p class="hero-sub">
                 We build production-grade IoT infrastructure for industrial and commercial businesses.
             </p>
         </div>
     </section>
 
-    <!-- Who we are -->
-    <section class="services">
+    <section class="about-body">
         <div class="container">
-            <div class="about-content">
-                <div class="about-text">
-                    <p class="about-description">
-                        Iotistica is a software company focused on the hard parts of IoT — reliable device connectivity,
-                        high-throughput data ingestion, and remote fleet management at scale. We've built our platform
-                        from the ground up to handle the realities of industrial environments: intermittent connectivity,
-                        high-frequency sensor data, and the need to manage thousands of devices without on-site intervention.
-                    </p>
-                    <p class="about-description">
-                        We don't believe in cookie-cutter products. Every customer has a different hardware stack,
-                        different protocols, and different data retention requirements. Our platform adapts to fit —
-                        whether you're connecting a handful of Modbus PLCs or streaming telemetry from a nationwide fleet.
-                    </p>
-                </div>
+            <div class="inner">
+                <span class="lead-line"></span>
+                <p>
+                    Iotistica is a software company <strong>founded in Toronto, Canada</strong>, focused on the hard
+                    parts of IoT — reliable device connectivity, high-throughput data ingestion, and remote fleet
+                    management at scale. We've built our platform from the ground up to handle the realities of
+                    industrial environments: intermittent connectivity, high-frequency sensor data, and the need
+                    to manage thousands of devices without on-site intervention. We work with industrial and
+                    commercial businesses <strong>across North America</strong>, delivering custom solutions
+                    that span from edge hardware to cloud infrastructure.
+                </p>
+                <p>
+                    We don't believe in cookie-cutter products. Every customer has a different hardware stack,
+                    different protocols, and different data retention requirements. Our platform adapts to fit —
+                    whether you're connecting a handful of <strong>Modbus PLCs</strong> or streaming telemetry
+                    from a nationwide fleet.
+                </p>
             </div>
         </div>
     </section>
 
-    <!-- Location -->
-    <div class="location-bar">
-        <p>
-            <strong>Based in Toronto, Canada.</strong> We work with industrial and commercial businesses
-            across North America, delivering custom IoT solutions from edge hardware to cloud infrastructure.
-        </p>
-    </div>
-
-    <!-- Values -->
-    <section class="services">
+    <section class="about-cta">
         <div class="container">
-            <div class="section-header">
-                <h2 class="section-title">What We Stand For</h2>
-            </div>
-            <div class="value-grid">
-                <div class="value-card">
-                    <div class="value-icon">🔒</div>
-                    <h3>Reliability First</h3>
-                    <p>Offline-first design, SQLite buffers, QoS 1 MQTT — data doesn't get lost because connectivity dropped.</p>
-                </div>
-                <div class="value-card">
-                    <div class="value-icon">⚙️</div>
-                    <h3>Built for Industry</h3>
-                    <p>Modbus, OPC-UA, BACnet, SNMP, CAN bus — we speak the protocols your hardware already uses.</p>
-                </div>
-                <div class="value-card">
-                    <div class="value-icon">📐</div>
-                    <h3>Custom-Engineered</h3>
-                    <p>No off-the-shelf compromises. We scope and build to your environment, fleet size, and data requirements.</p>
-                </div>
-                <div class="value-card">
-                    <div class="value-icon">🚀</div>
-                    <h3>Scalable by Design</h3>
-                    <p>TimescaleDB hypertables, Redis Streams ingestion, and Kubernetes deployment scale from pilot to production.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- CTA -->
-    <section class="services" style="background: var(--bg-secondary); text-align: center;">
-        <div class="container">
-            <h2 class="section-title">Ready to Talk?</h2>
-            <p class="section-subtitle" style="margin: 1rem auto 2rem;">
-                Tell us about your devices and what you're trying to build — we'll take it from there.
-            </p>
+            <h2>Ready to Talk?</h2>
+            <p>Tell us about your devices and what you're trying to build — we'll take it from there.</p>
             <a href="contact.html" class="btn btn-primary btn-large">Contact Us</a>
         </div>
     </section>
@@ -169,7 +157,7 @@
                     <div class="footer-column">
                         <h4>Products</h4>
                         <a href="agent.html">Iotistica Agent</a>
-                        <a href="index.html">Platform Capabilities</a>
+                        <a href="solutions.html">Platform Capabilities</a>
                         <a href="https://docs.iotistica.com/docs/intro" target="_blank">Documentation</a>
                     </div>
                     <div class="footer-column">
