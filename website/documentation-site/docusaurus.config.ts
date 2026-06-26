@@ -68,9 +68,9 @@ const config: Config = {
   themeConfig: {
     image: 'img/social-card.jpg',
     colorMode: {
-      defaultMode: 'light',
-      disableSwitch: false,
-      respectPrefersColorScheme: true,
+      defaultMode: 'dark',
+      disableSwitch: true,
+      respectPrefersColorScheme: false,
     },
     navbar: {
       title: 'Iotistica',
