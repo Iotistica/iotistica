@@ -104,15 +104,16 @@ async function submit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f0f2f5;
+  background: #0a0a0a;
 }
 
 .login-card {
   width: 360px;
-  background: #fff;
-  border-radius: 8px;
+  background: #111111;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
   padding: 40px 36px 36px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
 }
 
 .login-header {
@@ -127,14 +128,39 @@ async function submit() {
   gap: 10px;
   font-size: 22px;
   font-weight: 700;
-  color: #1677ff;
+  color: #ffffff;
   letter-spacing: -0.3px;
   margin-bottom: 6px;
 }
 
 .login-sub {
-  color: #888;
+  color: rgba(255, 255, 255, 0.45);
   font-size: 13px;
   margin: 0;
+}
+
+:deep(.ant-form-item-label > label) {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+:deep(.ant-input-affix-wrapper),
+:deep(.ant-input) {
+  background: #1a1a1a;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+:deep(.ant-input-affix-wrapper:hover),
+:deep(.ant-input-affix-wrapper-focused) {
+  border-color: #3b82f6;
+}
+
+:deep(.ant-input::placeholder) {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+:deep(.ant-input-password input) {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
 }
 </style>

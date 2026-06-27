@@ -34,7 +34,7 @@ function onMenuClick({ key }: { key: string }) {
   <a-layout-sider
     :width="220"
     theme="dark"
-    style="min-height: 100vh"
+    style="min-height: 100vh; background: #0a0a0a;"
   >
     <div class="logo">
       <IotisticaLogo :size="24" />
@@ -116,8 +116,21 @@ function onMenuClick({ key }: { key: string }) {
   color: rgba(255, 255, 255, 0.85);
   font-size: 16px;
   font-weight: 600;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   margin-bottom: 8px;
 }
 
+:deep(.ant-layout-sider) {
+  background: #0a0a0a !important;
+}
+
+:deep(.ant-menu-dark),
+:deep(.ant-menu-dark .ant-menu-sub),
+:deep(.ant-menu-dark.ant-menu-inline) {
+  background: #0a0a0a !important;
+}
+
+:deep(.ant-menu-dark .ant-menu-item:not(.ant-menu-item-selected):hover) {
+  background: #111111 !important;
+}
 </style>
