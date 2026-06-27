@@ -1,8 +1,29 @@
 # Iotistica
 
-Iotistica is an IoT fleet management platform built around a lightweight edge agent. The agent runs on industrial hardware, bridges field devices over Modbus, OPC-UA, BACnet, SNMP, and CAN, orchestrates Docker applications via cloud-pushed target state, streams telemetry to configurable upstream destinations, and performs on-device anomaly detection — all designed to operate reliably with intermittent or no cloud connectivity.
+Open-source edge runtime for industrial IoT — connects field devices over Modbus, OPC UA, BACnet, and MQTT, orchestrates Docker workloads, and streams telemetry to the cloud or any MQTT broker. Pro adds fleet management, remote shell, anomaly detection, and managed cloud ingestion.
+
+**[iotistica.com](https://iotistica.com) · [Solutions & Pricing](https://iotistica.com/solutions.html)**
 
 ![Dashboard](website/documentation-site/static/img/agent/dashboard.png)
+
+---
+
+## Offerings
+
+| | Community | Agent Pro | Pro + Ingestion |
+|---|---|---|---|
+| Edge runtime & admin UI | ✓ | ✓ | ✓ |
+| Industrial protocol support | ✓ | ✓ | ✓ |
+| Publish to any MQTT broker | ✓ | ✓ | ✓ |
+| Docker container orchestration | ✓ | ✓ | ✓ |
+| Fleet management & remote shell | — | ✓ | ✓ |
+| On-device anomaly detection | — | ✓ | ✓ |
+| Publish to InfluxDB, Azure, AWS, GCP | — | ✓ | ✓ |
+| Managed cloud ingestion & time-series storage | — | — | ✓ |
+| 24/7 support | — | ✓ | ✓ |
+| License | Apache 2.0 | Commercial | Commercial |
+
+See [iotistica.com/solutions.html](https://iotistica.com/solutions.html) for full feature details and pricing.
 
 ---
 
@@ -12,7 +33,7 @@ Iotistica is an IoT fleet management platform built around a lightweight edge ag
 |-----------|-------------|
 | `agent/` | Edge runtime deployed on IoT hardware (Node.js 20 / TypeScript) |
 | `mosquitto-agent/` | MQTT broker auth sidecar |
-| `website/` | Docusaurus documentation site |
+| `website/` | Documentation and marketing site |
 | `simulators/` | Sensor data simulators for development |
 | `influxdb/` | InfluxDB configuration |
 | `grafana/` | Grafana dashboards |
@@ -23,14 +44,14 @@ Iotistica is an IoT fleet management platform built around a lightweight edge ag
 
 The agent is the core component. It runs on edge hardware and handles:
 
-- **Container orchestration** — pulls Docker images, reconciles running containers against a desired target state pushed from the cloud
-- **Industrial protocols** — Modbus TCP/RTU, OPC-UA, BACnet, SNMP, MQTT broker, CAN bus
-- **Data publishing** — forwards sensor readings to MQTT, InfluxDB, Azure IoT Hub, AWS IoT Core, GCP IoT Core
-- **Anomaly detection** — edge ML baseline tracking with per-metric alert rules, no cloud round-trip required
-- **Cloud sync** — polls target state every 60s, reports current state every 10s, buffers everything to SQLite during outages
+- **Container orchestration** — pulls Docker images, reconciles running containers against a desired target state
+- **Industrial protocols** — Modbus TCP/RTU, OPC UA, BACnet, MQTT broker
+- **Data publishing** — forwards sensor readings to MQTT and configurable upstream destinations
+- **Cloud sync** — polls target state every 60s, reports current state every 10s, buffers to SQLite during outages
 - **Device discovery** — scans networks for industrial devices and auto-registers endpoints
-- **Remote shell** — HMAC-signed, MQTT-delivered interactive shell sessions
-- **VPN** — Tailscale integration for secure remote access
+- **Offline-first** — continues operating without cloud connectivity; all state changes buffer and flush on reconnect
+
+> **Pro features** — fleet management, remote shell, anomaly detection, and cloud destinations (InfluxDB, Azure IoT Hub, AWS IoT Core, GCP) require [Iotistica Agent Pro](https://iotistica.com/solutions.html).
 
 ### Admin UI
 
@@ -101,7 +122,6 @@ On first boot, the agent runs a three-phase provisioning protocol (register → 
 | `DATA_DIR` | — | Writable directory for SQLite database and keys |
 | `LOG_DIR` | — | Log file directory |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `ANOMALY_DETECTION_ENABLED` | `true` | Enable edge anomaly detection |
 | `ENABLE_AUTH` | `false` | Require `X-Api-Key` header on Device API |
 | `API_KEY` | — | API key value when `ENABLE_AUTH=true` |
 
@@ -120,7 +140,7 @@ Cloud desired state (MQTT / REST)
           │
    Data publishing pipeline
           │
-   Upstream destinations (MQTT, InfluxDB, Azure, AWS, GCP)
+   Upstream destinations (MQTT · InfluxDB · Azure · AWS · GCP)
 ```
 
 The agent is **offline-first**. When the cloud is unreachable:
@@ -140,7 +160,7 @@ node dist/app.js
             2. logging    AgentLogger (local + cloud backends)
             3. infra      ContainerManager, MQTT, HTTP client
             4. device     Provisioning, Device API (port 48484)
-            5. features   Anomaly, discovery, remote access, jobs
+            5. features   Discovery, remote access, jobs (Pro)
             6. sync       Cloud polling + reporting
 ```
 
@@ -162,8 +182,6 @@ POST /v1/apps
 POST /v1/provision
 GET  /v1/endpoints
 POST /v1/endpoints
-GET  /v1/anomaly/alerts
-PATCH /v1/anomaly/config
 GET  /v1/logs
 GET  /v1/settings
 ...
@@ -178,11 +196,9 @@ See the full [Agent API reference](website/documentation-site/docs/references/ag
 | Protocol | Transport | Notes |
 |----------|-----------|-------|
 | Modbus | TCP, RTU (serial) | Register read/write, multi-device polling |
-| OPC-UA | TCP | Address space browsing, security modes, session auth |
+| OPC UA | TCP | Address space browsing, security modes, session auth |
 | BACnet | IP | Object discovery, COV subscriptions |
-| SNMP | UDP | v1/v2c/v3 |
 | MQTT | TCP/TLS | Acts as subscriber on a local broker |
-| CAN bus | SocketCAN | Frame-level read |
 
 ---
 
@@ -204,7 +220,7 @@ Compression options: `json`, `msgpack`, `json+deflate`, `msgpack+deflate`.
 
 - **Provisioning** — Ed25519 proof-of-possession key exchange; provisioning token destroyed after use; UUID immutable post-registration
 - **Credential storage** — AES-256-GCM with unique IV per record; master key at `chmod 0600`
-- **Remote shell** — HMAC-SHA256 on every command, 30s anti-replay window, device UUID binding, shell allowlist, privilege drop to UID 1000
+- **Remote shell** — HMAC-SHA256 on every command, 30s anti-replay window, device UUID binding, shell allowlist, privilege drop to UID 1000 *(Pro)*
 - **Firewall** — custom `IOTISTIC-FIREWALL` iptables chain; Device API blocked externally; MQTT restricted to LAN + Docker subnets; IPv4 + IPv6
 
 See the [Security documentation](website/documentation-site/docs/agent/security.mdx) for full details.
@@ -250,36 +266,18 @@ npm start       # http://localhost:3000
 npm run build   # Production build
 ```
 
-Sections:
-
-- **Agent** — overview, quickstart, configuration, endpoints, destinations, subscriptions, data publishing, discovery, applications, alerts, settings, cloud sync, security, CLI
-- **Agent API** — full REST API reference
-- **Iotistica API** — cloud API reference
-
----
-
-## Anomaly Detection
-
-The agent runs an edge ML anomaly detection engine with no cloud dependency:
-
-- Baseline statistics (mean, std dev, median, MAD) computed from a rolling window of observed values
-- Per-metric sensitivity and threshold configuration
-- Three detection methods combined: z-score, IQR, and trend
-- Anomaly scores enriched with predicted next value, trend direction, forecast confidence, and time-to-threshold
-- Alerts stored in memory; baselines persisted to SQLite and survive restarts
-- Configuration hot-reloadable via `PATCH /v1/anomaly/config` without restarting
-
-![Alerts](website/documentation-site/static/img/agent/alerts-rules.png)
-
 ---
 
 ## License
 
-[MIT](LICENSE)
+The Community Edition is licensed under [Apache 2.0](LICENSE).
+
+Iotistica Agent Pro is a commercial extension distributed as a private npm package. See [iotistica.com/solutions.html](https://iotistica.com/solutions.html) for details.
 
 ---
 
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/Iotistica/iotistica/issues)
-- **Documentation**: See `website/documentation-site/`
+- **Documentation**: [iotistica.com](https://iotistica.com)
+- **Pro & Ingestion**: [iotistica.com/solutions.html](https://iotistica.com/solutions.html)
