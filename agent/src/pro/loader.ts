@@ -9,7 +9,7 @@
  * Installing it alongside the Community base activates all Pro features.
  */
 
-const PRO_PKG = '@iotistica/pro'
+const PRO_PKG = '@iotistica/agent-pro'
 
 async function tryLoad<T>(subpath: string): Promise<T | null> {
   try {
@@ -25,10 +25,6 @@ export async function loadShellHandler(): Promise<{ ShellHandler: any } | null> 
 
 export async function loadJobsFeature(): Promise<{ JobsFeature: any } | null> {
   return tryLoad('jobs')
-}
-
-export async function loadCloudSync(): Promise<{ CloudSync: any } | null> {
-  return tryLoad('cloud-sync')
 }
 
 export async function loadAnomalyDetection(): Promise<{ AnomalyDetectionService: any; loadConfigFromTargetState: any } | null> {

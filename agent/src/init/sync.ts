@@ -2,7 +2,7 @@ import type { AgentInitContext } from './context.js';
 import * as deviceActions from '../api/actions.js';
 import { LogComponents } from '../logging/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
-import { loadCloudSync } from '../pro/loader.js';
+import { CloudSync } from '../sync/index.js';
 import { initAnomalyDetection } from './anomaly.js';
 import { isStandaloneMode } from '../utils/env.js';
 
@@ -66,18 +66,10 @@ export async function initAgentSync(ctx: AgentInitContext): Promise<void> {
 		return;
 	}
 
-	const pro = await loadCloudSync();
-	if (!pro) {
-		ctx.agentLogger?.warnSync('Cloud sync skipped — requires Iotistica Pro', {
-			component: LogComponents.agent,
-		});
-		return;
-	}
-
 	const intervals = ctx.configManager!.getIntervalConfig();
 	const features = ctx.featureInitializer?.getFeatures() || {};
 
-	ctx.cloudSync = new pro.CloudSync(
+	ctx.cloudSync = new CloudSync(
 		ctx.stateReconciler!,
 		ctx.agentManager!,
 		{
@@ -98,9 +90,9 @@ export async function initAgentSync(ctx: AgentInitContext): Promise<void> {
 
 	const targetSyncEnabled = ctx.agentInfo?.targetSyncEnabled !== false;
 	if (targetSyncEnabled) {
-		await ctx.cloudSync.startPoll();
+		await ctx.cloudSync!.startPoll();
 	} else {
-		await ctx.cloudSync.startReportOnly();
+		await ctx.cloudSync!.startReportOnly();
 	}
 
 	// Root-cause fix for delayed cloud log flushes: when CloudSync confirms the cloud API
@@ -110,7 +102,7 @@ export async function initAgentSync(ctx: AgentInitContext): Promise<void> {
 	) as { triggerFlush: (reason?: string) => void } | undefined;
 
 	if (cloudLogBackend) {
-		ctx.cloudSync.on('online', () => {
+		ctx.cloudSync!.on('online', () => {
 			cloudLogBackend.triggerFlush('cloudsync-online');
 		});
 	}
