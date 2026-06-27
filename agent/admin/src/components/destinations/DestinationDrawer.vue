@@ -5,6 +5,9 @@ import type { FormInstance } from 'ant-design-vue'
 import type { Destination, DestinationFormData } from '@/types'
 import { destinationsApi } from '@/api/destinations'
 import DestinationConfigFields from './DestinationConfigFields.vue'
+import { useProStatus } from '@/composables/useProStatus'
+
+const { proInstalled } = useProStatus()
 
 const props = defineProps<{
   open: boolean
@@ -18,6 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const ALL_DESTINATION_TYPES = ['iotistica', 'mqtt', 'influxdb', 'azure', 'aws', 'gcp']
+const PRO_DESTINATION_TYPES = new Set(['azure', 'aws', 'gcp'])
 const DESTINATION_TYPES = computed(() =>
   props.provisioned ? ALL_DESTINATION_TYPES : ALL_DESTINATION_TYPES.filter((t) => t !== 'iotistica'),
 )
@@ -171,8 +175,23 @@ function close() {
 
       <a-form-item label="Type" name="type">
         <a-select v-model:value="form.type" @change="onTypeChange">
-          <a-select-option v-for="t in DESTINATION_TYPES" :key="t" :value="t">
-            {{ t }}
+          <a-select-option
+            v-for="t in DESTINATION_TYPES"
+            :key="t"
+            :value="t"
+            :disabled="PRO_DESTINATION_TYPES.has(t) && !proInstalled"
+          >
+            <a-tooltip
+              v-if="PRO_DESTINATION_TYPES.has(t) && !proInstalled"
+              title="Requires Pro — install @iotistica/agent-pro to enable"
+            >
+              <span style="color: #bbb">{{ t }}</span>
+              <a-tag color="gold" style="font-size:10px;padding:0 4px;height:16px;line-height:16px;margin-left:4px;border-radius:3px">Pro</a-tag>
+            </a-tooltip>
+            <template v-else>
+              {{ t }}
+              <a-tag v-if="PRO_DESTINATION_TYPES.has(t)" color="gold" style="font-size:10px;padding:0 4px;height:16px;line-height:16px;margin-left:4px;border-radius:3px">Pro</a-tag>
+            </template>
           </a-select-option>
         </a-select>
       </a-form-item>

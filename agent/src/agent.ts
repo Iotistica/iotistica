@@ -28,8 +28,6 @@ import {
 	startMemoryLeakSimulation,
 	stopMemoryLeakSimulation
 } from "./system/memory.js";
-import { type AnomalyDetectionService } from "./anomaly/index.js";
-import { type SimulationOrchestrator } from "./anomaly/simulator.js";
 import { type DiscoveryService } from "./discovery/service.js";
 import { type FeatureInitializer } from "./init/features.js";
 import type { ConfigManager } from "./core/config.js";import type { DictionaryManager } from './mqtt/dictionary.js';
@@ -61,8 +59,8 @@ export default class Agent {
 	private firewall?: AgentFirewall; // Network firewall protection
 	private updater?: AgentUpdater; // Agent self-update handler
 	private featureInitializer?: FeatureInitializer;
-	private anomalyService?: AnomalyDetectionService; // Edge-based AI anomaly detection for metrics and devices
-	private simulationOrchestrator?: SimulationOrchestrator; // Simulation framework for testing
+	private anomalyService?: any; // Edge-based AI anomaly detection for metrics and devices
+	private simulationOrchestrator?: any; // Simulation framework for testing
 	private discoveryService?: DiscoveryService; // Protocol discovery (Modbus, OPC-UA, CAN, etc.)
 	private configManager!: ConfigManager; // Configuration manager (centralized config access)
 	private dictionaryManager?: DictionaryManager; // MQTT message key compaction (top-level service)

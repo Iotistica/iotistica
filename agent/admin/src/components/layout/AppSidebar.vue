@@ -19,6 +19,9 @@ import {
   CustomerServiceOutlined,
 } from '@ant-design/icons-vue'
 import IotisticaLogo from '@/components/IotisticaLogo.vue'
+import { useProStatus } from '@/composables/useProStatus'
+
+const { proInstalled } = useProStatus()
 
 const route = useRoute()
 const router = useRouter()
@@ -97,6 +100,7 @@ function onMenuClick({ key }: { key: string }) {
         <a-menu-item key="/anomaly">
           <template #icon><AlertOutlined /></template>
           Alerts
+          <a-tag color="gold" class="pro-badge">Pro</a-tag>
         </a-menu-item>
 
         <a-menu-item key="/logs">
@@ -149,10 +153,16 @@ function onMenuClick({ key }: { key: string }) {
           Help
         </a-menu-item>
 
-        <a-menu-item key="support">
-          <template #icon><CustomerServiceOutlined /></template>
-          Support
-        </a-menu-item>
+        <a-tooltip
+          :title="!proInstalled ? 'Priority support requires Pro' : ''"
+          placement="right"
+        >
+          <a-menu-item key="support" :disabled="!proInstalled">
+            <template #icon><CustomerServiceOutlined /></template>
+            Support
+            <a-tag color="gold" class="pro-badge">Pro</a-tag>
+          </a-menu-item>
+        </a-tooltip>
       </a-menu>
     </div>
 
@@ -202,5 +212,15 @@ function onMenuClick({ key }: { key: string }) {
 
 :deep(.ant-menu-dark .ant-menu-item:not(.ant-menu-item-selected):hover) {
   background: #111111 !important;
+}
+
+.pro-badge {
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 4px;
+  height: 16px;
+  margin-left: 6px;
+  vertical-align: middle;
+  border-radius: 3px;
 }
 </style>

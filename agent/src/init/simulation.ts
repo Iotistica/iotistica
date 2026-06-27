@@ -1,9 +1,19 @@
 import { LogComponents } from '../logging/types.js';
-import { SimulationOrchestrator, loadSimulationConfig } from '../anomaly/simulator.js';
+import { loadSimulationModule } from '../pro/loader.js';
 import type { AgentInitContext } from './context.js';
 
 export async function initSimulationMode(ctx: AgentInitContext): Promise<void> {
-	const config = loadSimulationConfig();
+	const pro = await loadSimulationModule();
+
+	if (!pro) {
+		ctx.agentLogger?.debugSync('Simulation mode requires Iotistica Agent Pro', {
+			component: LogComponents.agent,
+		});
+		ctx.simulationOrchestrator = undefined;
+		return;
+	}
+
+	const config = pro.loadSimulationConfig();
 
 	if (!config.enabled) {
 		ctx.agentLogger?.debugSync('Simulation mode disabled by environment', {
@@ -44,7 +54,7 @@ export async function initSimulationMode(ctx: AgentInitContext): Promise<void> {
 			: undefined,
 	});
 
-	const orchestrator = new SimulationOrchestrator(config, {
+	const orchestrator = new pro.SimulationOrchestrator(config, {
 		logger: ctx.agentLogger,
 		anomalyService: ctx.anomalyService,
 	});

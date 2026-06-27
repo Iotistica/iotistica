@@ -663,8 +663,8 @@ router.get('/v1/anomaly/alerts', (req: Request, res: Response, next: NextFunctio
 		const limit = req.query.limit ? Math.min(Number(req.query.limit), 500) : 200;
 
 		let alerts = anomalyService.getAlerts(since);
-		if (severity) alerts = alerts.filter((a) => a.severity === severity);
-		if (metric) alerts = alerts.filter((a) => a.metric === metric);
+		if (severity) alerts = alerts.filter((a: any) => a.severity === severity);
+		if (metric) alerts = alerts.filter((a: any) => a.metric === metric);
 		alerts = alerts.slice(0, limit);
 
 		return res.status(200).json({ alerts, total: alerts.length });

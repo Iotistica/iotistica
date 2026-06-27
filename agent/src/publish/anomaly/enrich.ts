@@ -1,10 +1,8 @@
-import type { AnomalyDetectionService } from "../../anomaly/index.js";
-import type { Protocol } from "../../anomaly/types.js";
-import type { Prediction } from "../../anomaly/forecaster.js";
+import type { Protocol } from "../../plugins/protocol.js";
 import {
 	extractRawDeviceState,
 	normalizeDeviceState,
-} from "../../anomaly/device-state.js";
+} from "./device-state.js";
 
 type Reading = {
 	[key: string]: any;
@@ -43,7 +41,7 @@ type Reading = {
  */
 export class AnomalyEnricher {
 	constructor(
-		private readonly getService: () => AnomalyDetectionService | undefined,
+		private readonly getService: () => any | undefined,
 		private readonly deviceUuid: string,
 		private readonly protocol: Protocol | undefined,
 	) {}
@@ -128,8 +126,8 @@ export class AnomalyEnricher {
 	}
 
 	private attachScores(
-		service: AnomalyDetectionService,
-		predictions: Record<string, Prediction> | undefined,
+		service: any,
+		predictions: Record<string, any> | undefined,
 		target: Reading,
 		deviceIdentifierName: string,
 		fieldName: string,

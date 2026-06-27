@@ -6,7 +6,6 @@ import systeminformation from 'systeminformation';
 import { exec as execCallback } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
-import type { AnomalyDetectionService } from '../anomaly';
 
 const exec = promisify(execCallback);
 
@@ -44,10 +43,10 @@ async function startCpuSampler() {
 // Start sampling once.
 startCpuSampler();
 
-let anomalyService: AnomalyDetectionService | undefined;
+let anomalyService: any | undefined;
 
 /** Configure anomaly feed integration for system metrics. */
-export function configureAnomalyFeed(service: AnomalyDetectionService | undefined): void {
+export function configureAnomalyFeed(service: any | undefined): void {
 	anomalyService = service;
 }
 

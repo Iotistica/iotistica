@@ -1,7 +1,6 @@
 import { type AgentLogger } from '../logging/agent-logger.js';
 import { LogComponents } from '../logging/types.js';
-import type { Protocol } from '../anomaly/types.js';
-import type { AnomalyDetectionService } from '../anomaly/index.js';
+import type { Protocol } from '../plugins/protocol.js';
 import type { PipelineService } from '../features/pipeline/index.js';
 import {
 	type DevicePublishConfig,
@@ -15,9 +14,7 @@ import type { IPublishClient as BufferSyncPublishClient } from './core/buffer.js
 import { CloudMqttClient } from '../mqtt/manager.js';
 import type { DictionaryManager } from '../mqtt/dictionary.js';
 import { EventEmitter } from 'events';
-import { AzurePublishPlugin } from './plugins/azure.js';
-import { AwsPublishPlugin } from './plugins/aws.js';
-import { GcpPublishPlugin } from './plugins/gcp.js';
+import { loadAzureDestination, loadAwsDestination, loadGcpDestination } from '../pro/loader.js';
 import { MqttPublishPlugin } from './plugins/mqtt.js';
 import { InfluxDbPublishPlugin } from './plugins/influxdb.js';
 import { BasePublishPlugin } from './core/base-plugin.js';
@@ -44,8 +41,9 @@ export class DevicePublish extends EventEmitter {
 	private readonly useMsgpackPoc: boolean;
 	private readonly useKeyCompactionPoc: boolean;
 	private readonly useDeflatePoc: boolean;
-	private anomalyService?: AnomalyDetectionService;
+	private anomalyService?: any;
 	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
+	private proPlugins: { azure?: any; aws?: any; gcp?: any } = {};
 
 	constructor(
 		config: DevicePublishConfig & { enabled: boolean },
@@ -55,7 +53,7 @@ export class DevicePublish extends EventEmitter {
 		useMsgpackPoc: boolean = false, // Enable MessagePack compression POC
 		useKeyCompactionPoc: boolean = false, // Enable dictionary key compaction POC
 		useDeflatePoc: boolean = false, // Enable DEFLATE compression POC
-		anomalyService?: AnomalyDetectionService,
+		anomalyService?: any,
 	) {
 		super();
 		this.config = config;
@@ -95,7 +93,7 @@ export class DevicePublish extends EventEmitter {
 		this.anomalyService = anomalyService;
 	}
 
-	public setAnomalyService(anomalyService?: AnomalyDetectionService): void {
+	public setAnomalyService(anomalyService?: any): void {
 		this.anomalyService = anomalyService;
 		for (const device of this.devices) {
 			device.setAnomalyService(anomalyService);
@@ -197,6 +195,14 @@ export class DevicePublish extends EventEmitter {
 
 		this.validateConfig();
 		await this.onInitialize();
+		const [azure, aws, gcp] = await Promise.all([
+			loadAzureDestination(),
+			loadAwsDestination(),
+			loadGcpDestination(),
+		]);
+		this.proPlugins.azure = azure?.AzurePublishPlugin;
+		this.proPlugins.aws = aws?.AwsPublishPlugin;
+		this.proPlugins.gcp = gcp?.GcpPublishPlugin;
 		await this.onStart();
 		this.isRunning = true;
 	}
@@ -316,9 +322,15 @@ export class DevicePublish extends EventEmitter {
 		const config = publisher.config_json ?? null;
 		switch (target) {
 			case 'iotistica': return new BasePublishPlugin(client, logger);
-			case 'azure': return AzurePublishPlugin.fromEnv(this.agentLogger, logger);
-			case 'aws': return AwsPublishPlugin.fromEnv(this.agentLogger, logger);
-			case 'gcp': return GcpPublishPlugin.fromEnv(this.agentLogger, logger);
+			case 'azure':
+				if (!this.proPlugins.azure) throw new Error('Azure IoT Hub destination requires Iotistica Agent Pro');
+				return this.proPlugins.azure.fromEnv(this.agentLogger, logger);
+			case 'aws':
+				if (!this.proPlugins.aws) throw new Error('AWS IoT Core destination requires Iotistica Agent Pro');
+				return this.proPlugins.aws.fromEnv(this.agentLogger, logger);
+			case 'gcp':
+				if (!this.proPlugins.gcp) throw new Error('Google Cloud IoT destination requires Iotistica Agent Pro');
+				return this.proPlugins.gcp.fromEnv(this.agentLogger, logger);
 			case 'mqtt': return MqttPublishPlugin.fromConfig(config, this.agentLogger, logger, this.deviceUuid, endpointName, publisher.id);
 			case 'influxdb': return InfluxDbPublishPlugin.fromConfig(config, logger);
 			default: throw new Error(`Publish destination type not found: ${target}`);

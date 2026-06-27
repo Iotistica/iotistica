@@ -2,6 +2,9 @@ import { LogComponents } from '../logging/types.js';
 import { DatabaseModel } from '../db/models/index.js';
 import { loadAnomalyDetection } from '../pro/loader.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
+import { agentTopic } from '../mqtt/topics.js';
+import { PublishDestinationsModel } from '../db/models/publish-destinations.model.js';
+import { createExternalMqttClientFromDestination } from '../publish/plugins/mqtt.js';
 import type { AgentInitContext } from './context.js';
 
 export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void> {
@@ -75,20 +78,28 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 			CloudMqttClient.getInstance(),
 			ctx.agentInfo!.uuid,
 			ctx.agentInfo!.name ?? 'device',
-			'system'
+			'system',
+			{
+				buildTopic: (deviceUuid: string, ...segments: string[]) =>
+					agentTopic(deviceUuid, ...segments),
+				getAlertDestination: (id: number) =>
+					PublishDestinationsModel.getById(id) ?? null,
+				createAlertMqttClient: (config: Record<string, unknown> | null | undefined, deviceId?: string, name?: string, logger?: any) =>
+					createExternalMqttClientFromDestination(config, deviceId, name, logger),
+			}
 		);
 
 		// Keep the service in catalog-only mode when detection is disabled.
 		// It still observes every metric that flows through for the admin UI picker.
 		if (!detectionEnabled) {
-			ctx.anomalyService.setEnabled(false);
+			ctx.anomalyService!.setEnabled(false);
 		}
 
 		ctx.agentLogger?.infoSync('Anomaly detection initialized', {
 			component: LogComponents.agent,
 			detectionEnabled,
 			enabledMetrics: enabledMetrics.length,
-			sampleMetrics: enabledMetrics.slice(0, 5).map((metric) => metric.name),
+			sampleMetrics: enabledMetrics.slice(0, 5).map((metric: any) => metric.name),
 			defaults: config.defaults,
 			systemMetricsEnabled: true,
 			endpointFeedEnabled: true,

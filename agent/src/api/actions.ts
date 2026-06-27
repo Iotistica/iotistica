@@ -10,8 +10,6 @@ import type { AgentManager } from '../core/index.js';
 import type { CloudSync } from '../sync';
 import type { AgentLogger } from '../logging/agent-logger';
 import type { LocalLogBackend } from '../logging/local-backend';
-import type { AnomalyDetectionService } from '../anomaly';
-import type { SimulationOrchestrator } from '../anomaly/simulator';
 import type { AdapterManager } from '../plugins';
 import type { ConfigManager } from '../core/config';
 import type { StateManager } from '../core/state';
@@ -31,6 +29,7 @@ import type { TailscaleConfig, TailscaleStatus } from '../network/vpn/tailscale-
 import type { DevicePublish } from '../publish/index.js';
 import type { DiscoveryRulesScheduler } from '../discovery/rules-scheduler.js';
 import type { DockerOptions } from 'dockerode';
+import { isProInstalled } from '../pro/loader.js';
 
 type AgentInstance = {
 	getLifecycleState: () => string;
@@ -42,8 +41,8 @@ let containerManager: ContainerManager;
 let agentManager: AgentManager;
 let cloudSync: CloudSync | undefined;
 let logger: AgentLogger | undefined;
-let anomalyService: AnomalyDetectionService | undefined;
-let simulationOrchestrator: SimulationOrchestrator | undefined;
+let anomalyService: any | undefined;
+let simulationOrchestrator: any;
 let adapterManager: AdapterManager | undefined;
 let configManager: ConfigManager | undefined;
 let stateManager: StateManager | undefined;
@@ -232,8 +231,8 @@ export function initialize(
 	dm: AgentManager, 
 	ab?: CloudSync, 
 	agentLogger?: AgentLogger,
-	anomaly?: AnomalyDetectionService,
-	simulation?: SimulationOrchestrator
+	anomaly?: any,
+	simulation?: any
 ) {
 	containerManager = cm;
 	agentManager = dm;
@@ -447,14 +446,14 @@ export function getAdapterManager(): AdapterManager | undefined {
 /**
  * Get anomaly detection service (for testing endpoints)
  */
-export function getAnomalyService(): AnomalyDetectionService | undefined {
+export function getAnomalyService(): any | undefined {
 	return anomalyService;
 }
 
 /**
  * Get simulation orchestrator (for testing endpoints)
  */
-export function getSimulationOrchestrator(): SimulationOrchestrator | undefined {
+export function getSimulationOrchestrator(): any {
 	return simulationOrchestrator;
 }
 
@@ -645,6 +644,7 @@ export const getDeviceState = async () => {
 		apps: Object.keys(currentState.apps).length,
 		is_online: isOnline,
 		status: 'Idle',
+		pro_installed: isProInstalled(),
 	};
 };
 
@@ -1546,7 +1546,7 @@ export const getAvailableAnomalyMetrics = async (): Promise<
 		configured: boolean;
 	}>
 > => {
-	const configuredNames = new Set(anomalyService?.getConfig().metrics.map((m) => m.name) ?? []);
+	const configuredNames = new Set(anomalyService?.getConfig().metrics.map((m: any) => m.name) ?? []);
 	const results = new Map<
 		string,
 		{

@@ -121,6 +121,7 @@ onMounted(async () => {
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'type'">
           <a-tag :color="destinationColor(record.type)">{{ record.type }}</a-tag>
+          <a-tag v-if="['azure','aws','gcp'].includes(record.type)" color="gold" style="font-size:10px;padding:0 4px;height:16px;line-height:16px;border-radius:3px">Pro</a-tag>
         </template>
 
         <template v-else-if="column.key === 'enabled'">

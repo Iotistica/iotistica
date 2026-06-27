@@ -1,18 +1,23 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { LogoutOutlined, UserOutlined } from '@ant-design/icons-vue'
 import AppSidebar from './AppSidebar.vue'
 import { useAuth } from '@/composables/useAuth'
+import { useProStatus } from '@/composables/useProStatus'
 
 defineProps<{ title: string }>()
 
 const router = useRouter()
 const { currentUser, logout } = useAuth()
+const { fetchProStatus } = useProStatus()
 
 async function handleLogout() {
   await logout()
   router.push('/login')
 }
+
+onMounted(fetchProStatus)
 </script>
 
 <template>

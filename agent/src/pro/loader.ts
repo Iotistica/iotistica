@@ -31,6 +31,10 @@ export async function loadAnomalyDetection(): Promise<{ AnomalyDetectionService:
   return tryLoad('anomaly')
 }
 
+export async function loadSimulationModule(): Promise<{ SimulationOrchestrator: any; loadSimulationConfig: any } | null> {
+  return tryLoad('anomaly')
+}
+
 export async function loadAzureDestination(): Promise<{ AzurePublishPlugin: any } | null> {
   return tryLoad('destinations/azure')
 }

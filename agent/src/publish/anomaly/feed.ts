@@ -1,6 +1,5 @@
-import type { AnomalyDetectionService } from "../../anomaly/index.js";
-import type { Protocol } from "../../anomaly/types.js";
-import { extractRawDeviceState } from "../../anomaly/device-state.js";
+import type { Protocol } from "../../plugins/protocol.js";
+import { extractRawDeviceState } from "./device-state.js";
 import type { Logger } from "../core/types.js";
 
 /**
@@ -17,10 +16,10 @@ export class AnomalyFeed {
 	private batchCandidateMetrics = new Set<string>();
 	private batchSkippedMetrics = new Set<string>();
 	private batchMetricLabels = new Map<string, string>();
-	private currentService?: AnomalyDetectionService;
+	private currentService?: any;
 
 	constructor(
-		private readonly getService: () => AnomalyDetectionService | undefined,
+		private readonly getService: () => any | undefined,
 		private readonly deviceUuid: string,
 		private readonly protocol: Protocol | undefined,
 		private readonly logger?: Logger,
@@ -125,10 +124,7 @@ export class AnomalyFeed {
 
 	private dispatchToAnomaly(
 		metricKey: string,
-		point: Omit<
-			Parameters<AnomalyDetectionService["processDataPoint"]>[0],
-			"metric"
-		>,
+		point: any,
 	): boolean {
 		const service = this.currentService;
 		this.batchCandidateMetrics.add(metricKey);
@@ -156,10 +152,7 @@ export class AnomalyFeed {
 
 	private buildFriendlyMetricLabel(
 		metricKey: string,
-		point: Omit<
-			Parameters<AnomalyDetectionService["processDataPoint"]>[0],
-			"metric"
-		>,
+		point: any,
 	): string {
 		const tags = (point as { tags?: Record<string, unknown> }).tags;
 		if (!tags || typeof tags !== "object") return metricKey;

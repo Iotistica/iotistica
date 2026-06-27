@@ -1,8 +1,7 @@
 import { EventEmitter } from 'events';
 import { getHeapStatistics } from 'v8';
 import { agentTopic } from '../../mqtt/topics.js';
-import type { AnomalyDetectionService } from '../../anomaly/index.js';
-import type { Protocol } from '../../anomaly/types.js';
+import type { Protocol } from '../../plugins/protocol.js';
 import type { DeviceConfig, MqttConnection, Logger, DeviceStats, IPublishClient, IPublishPlugin } from './types.js';
 import { DeviceState, normalizeTarget } from './types.js';
 import { AnomalyFeed } from '../anomaly/feed.js';
@@ -138,7 +137,7 @@ export class PublishManager extends EventEmitter {
     private useMsgpackPoc = false,
     private useKeyCompactionPoc = false,
     private useDeflatePoc = false,
-    private anomalyService?: AnomalyDetectionService,
+    private anomalyService?: any,
 	private readonly payloadFormat: PayloadFormat = 'custom',
 	) {
 		super();
@@ -163,7 +162,7 @@ export class PublishManager extends EventEmitter {
 		this.batcher.on('message-added', () => { this.stats.data.messagesReceived++; });
 	}
 
-	public setAnomalyService(service?: AnomalyDetectionService): void {
+	public setAnomalyService(service?: any): void {
 		this.anomalyService = service;
 	}
 

@@ -10,6 +10,9 @@ import {
 } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import { useProStatus } from '@/composables/useProStatus'
+
+const { proInstalled } = useProStatus()
 import { methodColor } from '@/utils/protocol'
 import { anomalyApi } from '@/api/anomaly'
 import { destinationsApi } from '@/api/destinations'
@@ -354,6 +357,14 @@ onUnmounted(() => {
 
 <template>
   <AppLayout title="Alerts">
+    <a-alert
+      v-if="!proInstalled"
+      type="info"
+      show-icon
+      message="Pro feature"
+      description="Anomaly detection requires @iotistica/agent-pro. Install it alongside the Community agent to enable ML-based metric monitoring and alerting."
+      style="margin-bottom: 16px"
+    />
     <a-tabs :active-key="activeTab" @change="onTabChange">
 
       <!-- ══ ALERTS ══════════════════════════════════════════════════════════ -->
