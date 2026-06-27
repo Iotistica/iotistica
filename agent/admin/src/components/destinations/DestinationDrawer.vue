@@ -21,7 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const ALL_DESTINATION_TYPES = ['iotistica', 'mqtt', 'influxdb', 'azure', 'aws', 'gcp']
-const PRO_DESTINATION_TYPES = new Set(['azure', 'aws', 'gcp'])
+const PRO_DESTINATION_TYPES = new Set(['influxdb', 'azure', 'aws', 'gcp'])
 const DESTINATION_TYPES = computed(() =>
   props.provisioned ? ALL_DESTINATION_TYPES : ALL_DESTINATION_TYPES.filter((t) => t !== 'iotistica'),
 )

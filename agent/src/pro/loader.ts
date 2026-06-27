@@ -47,6 +47,10 @@ export async function loadGcpDestination(): Promise<{ GcpPublishPlugin: any } | 
   return tryLoad('destinations/gcp')
 }
 
+export async function loadInfluxDbDestination(): Promise<{ InfluxDbPublishPlugin: any } | null> {
+  return tryLoad('destinations/influxdb')
+}
+
 /** Returns true when the Pro package is resolvable in the current node_modules. */
 export function isProInstalled(): boolean {
   try {

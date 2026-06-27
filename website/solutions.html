@@ -254,7 +254,7 @@
                 including Raspberry Pi, industrial PCs, and ARM single-board computers. It securely collects data from local devices
                 and equipment, processes it autonomously at the edge, and continues operating even without cloud connectivity.
                 Data delivery is managed through a flexible subscription-based publishing system, allowing collected data to be routed
-                to any MQTT broker, InfluxDB, or major cloud platform including Azure IoT Hub, AWS IoT Core, and Google Cloud IoT.
+                to any MQTT broker or, with Pro, to InfluxDB, Azure IoT Hub, AWS IoT Core, and Google Cloud IoT.
             </p>
             <p class="lead" style="margin-top: -1.5rem;">
                 Available in two editions, both delivered through a single installer for a streamlined deployment experience.
@@ -275,8 +275,7 @@
                     <p class="edition-desc">
                         The Community Edition is a free, self-hosted edge runtime for developers, system integrators,
                         and organizations building industrial IoT solutions. Deploy without creating an account, operate
-                        entirely offline, or connect to the MQTT broker or data platform of your choice. The complete
-                        source code is available on GitHub under the Apache 2.0 license.
+                        entirely offline, or connect to the MQTT broker or data platform of your choice. 
                     </p>
                     <ul class="feature-list">
                         <li>Native support for industrial protocols including Modbus TCP/RTU, OPC UA, BACnet, and MQTT</li>
@@ -309,7 +308,7 @@
                         <li>Remote Docker container deployment and orchestration</li>
                         <li>Fleet-wide jobs for scripts, configuration, and firmware updates</li>
                         <li>On-device anomaly detection and edge intelligence</li>
-                        <li>Connect to Iotistica Cloud, self-hosted deployments, Azure IoT Hub, AWS IoT Core, or Google Cloud</li>
+                        <li>Publish to InfluxDB, Azure IoT Hub, AWS IoT Core, Google Cloud, or your own Iotistica deployment</li>
                     </ul>
                     <a href="contact.html" class="btn btn-primary" style="display:block;text-align:center;">Get in Touch</a>
                 </div>
@@ -418,6 +417,12 @@
                         <tr>
                             <td>Publish to any MQTT broker</td>
                             <td class="check">Yes</td>
+                            <td class="check">Yes</td>
+                            <td class="dash">—</td>
+                        </tr>
+                        <tr>
+                            <td>Publish to InfluxDB</td>
+                            <td class="dash">—</td>
                             <td class="check">Yes</td>
                             <td class="dash">—</td>
                         </tr>

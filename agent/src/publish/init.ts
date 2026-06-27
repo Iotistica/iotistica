@@ -14,9 +14,8 @@ import type { IPublishClient as BufferSyncPublishClient } from './core/buffer.js
 import { CloudMqttClient } from '../mqtt/manager.js';
 import type { DictionaryManager } from '../mqtt/dictionary.js';
 import { EventEmitter } from 'events';
-import { loadAzureDestination, loadAwsDestination, loadGcpDestination } from '../pro/loader.js';
+import { loadAzureDestination, loadAwsDestination, loadGcpDestination, loadInfluxDbDestination } from '../pro/loader.js';
 import { MqttPublishPlugin } from './plugins/mqtt.js';
-import { InfluxDbPublishPlugin } from './plugins/influxdb.js';
 import { BasePublishPlugin } from './core/base-plugin.js';
 import type { IPublishPlugin, IPublishClient } from './core/types.js';
 
@@ -43,7 +42,7 @@ export class DevicePublish extends EventEmitter {
 	private readonly useDeflatePoc: boolean;
 	private anomalyService?: any;
 	private liveDataInterceptor?: (messages: any[], endpointName: string) => Promise<any[]> | any[];
-	private proPlugins: { azure?: any; aws?: any; gcp?: any } = {};
+	private proPlugins: { azure?: any; aws?: any; gcp?: any; influxdb?: any } = {};
 
 	constructor(
 		config: DevicePublishConfig & { enabled: boolean },
@@ -195,14 +194,16 @@ export class DevicePublish extends EventEmitter {
 
 		this.validateConfig();
 		await this.onInitialize();
-		const [azure, aws, gcp] = await Promise.all([
+		const [azure, aws, gcp, influxdb] = await Promise.all([
 			loadAzureDestination(),
 			loadAwsDestination(),
 			loadGcpDestination(),
+			loadInfluxDbDestination(),
 		]);
 		this.proPlugins.azure = azure?.AzurePublishPlugin;
 		this.proPlugins.aws = aws?.AwsPublishPlugin;
 		this.proPlugins.gcp = gcp?.GcpPublishPlugin;
+		this.proPlugins.influxdb = influxdb?.InfluxDbPublishPlugin;
 		await this.onStart();
 		this.isRunning = true;
 	}
@@ -332,7 +333,9 @@ export class DevicePublish extends EventEmitter {
 				if (!this.proPlugins.gcp) throw new Error('Google Cloud IoT destination requires Iotistica Agent Pro');
 				return this.proPlugins.gcp.fromEnv(this.agentLogger, logger);
 			case 'mqtt': return MqttPublishPlugin.fromConfig(config, this.agentLogger, logger, this.deviceUuid, endpointName, publisher.id);
-			case 'influxdb': return InfluxDbPublishPlugin.fromConfig(config, logger);
+			case 'influxdb':
+				if (!this.proPlugins.influxdb) throw new Error('InfluxDB destination requires Iotistica Agent Pro');
+				return this.proPlugins.influxdb.fromConfig(config, logger);
 			default: throw new Error(`Publish destination type not found: ${target}`);
 		}
 	}

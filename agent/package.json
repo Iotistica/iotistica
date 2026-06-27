@@ -39,7 +39,6 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@influxdata/influxdb-client": "~1.33.2",
     "bacstack": "^0.0.1-beta.14",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.4.1",
