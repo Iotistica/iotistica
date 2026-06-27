@@ -118,6 +118,28 @@
             margin-top: 6px;
         }
         .edition-card .feature-list strong { color: var(--text-primary); }
+        .edition-card .feature-list li.pro-item::before { background: #f59e0b; }
+        .edition-card .feature-list li.pro-item { color: var(--text-primary); }
+        .feature-legend {
+            display: flex;
+            gap: 1.25rem;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            margin-top: -1rem;
+            margin-bottom: 1.75rem;
+        }
+        .feature-legend .dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            vertical-align: middle;
+            margin-right: 4px;
+            position: relative;
+            top: -1px;
+        }
+        .feature-legend .dot-base { background: #00d4aa; }
+        .feature-legend .dot-pro { background: #f59e0b; }
 
         /* Install block */
         .install-block {
@@ -304,14 +326,17 @@
                         <li>Supports industrial protocols including Modbus TCP/RTU, OPC UA, BACnet, and MQTT</li>
                         <li>Automatic discovery of compatible device on the local network</li>
                         <li>Integrated web-based administration interface for configuration, diagnostics, and monitoring</li>
-                        <li>Docker container deployment and orchestration</li>
                         <li>Cross-platform support for ARM64, ARM32, and x86-64 Linux systems</li>
                         <li>Data buffering during network interruptions</li>
-                        <li>Built-in Docker container orchestration for deploying and managing edge apps</li>
-                        <li>On-device anomaly detection and edge intelligence</li>
-                        <li>Publish to MQTT, InfluxDB, Azure IoT Hub, AWS IoT Core, Google Cloud, or your own Iotistica deployment</li>
-                        <li>24/7 Technical Support</li>
+                        <li class="pro-item">Built-in Docker container orchestration for deploying and managing edge apps</li>
+                        <li class="pro-item">On-device anomaly detection and edge intelligence</li>
+                        <li class="pro-item">Publish to MQTT, InfluxDB, Azure IoT Hub, AWS IoT Core, Google Cloud, or your own Iotistica deployment</li>
+                        <li class="pro-item">24/7 Technical Support</li>
                     </ul>
+                    <div class="feature-legend">
+                        <span><i class="dot dot-base"></i>Included in all plans</span>
+                        <span><i class="dot dot-pro"></i>Pro highlights</span>
+                    </div>
                     <a href="contact.html" class="btn btn-primary" style="display:block;text-align:center;">Get in Touch</a>
                 </div>
 
@@ -328,15 +353,19 @@
                         <li>Supports industrial protocols including Modbus TCP/RTU, OPC UA, BACnet, and MQTT</li>
                         <li>Zero-touch provisioning and credential management</li>
                         <li>Secure remote shell — no VPNs or port forwarding</li>
-                        <li>Remote Docker container deployment and orchestration</li>
                         <li>Fleet-wide jobs for scripts, configuration, and firmware updates</li>
-                        <li>On-device anomaly detection and edge intelligence</li>
-                        <li>Hosted MQTT broker with per-device authentication and topic isolation</li>
-                        <li>High-throughput telemetry ingestion pipeline — no data loss during traffic spikes</li>
-                        <li>Time-series storage with hourly and daily rollups — raw data retained up to two years</li>
-                        <li>Cloud REST API for telemetry, device status, and fleet management</li>
-                        <li>24/7 Technical Support</li>
+                        <li class="pro-item">Built-in Docker container orchestration for deploying and managing edge apps</li>
+                        <li class="pro-item">On-device anomaly detection and edge intelligence</li>
+                        <li class="pro-item">Hosted MQTT broker with per-device authentication and topic isolation</li>
+                        <li class="pro-item">High-throughput telemetry ingestion pipeline — no data loss during traffic spikes</li>
+                        <li class="pro-item">Time-series storage with hourly and daily rollups — raw data retained up to two years</li>
+                        <li class="pro-item">Cloud REST API for telemetry, device status, and fleet management</li>
+                        <li class="pro-item">24/7 Technical Support</li>
                     </ul>
+                    <div class="feature-legend">
+                        <span><i class="dot dot-base"></i>Included in all plans</span>
+                        <span><i class="dot dot-pro"></i>Pro highlights</span>
+                    </div>
                     <a href="contact.html" class="btn btn-primary" style="display:block;text-align:center;">Get in Touch</a>
                 </div>
             </div>
