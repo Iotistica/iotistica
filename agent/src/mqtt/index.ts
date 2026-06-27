@@ -29,8 +29,5 @@ export type { DictionaryMetrics } from './dictionary';
 export { MessageBufferSync } from '../publish/core/buffer';
 export type { BufferSyncConfig } from '../publish/core/buffer';
 export type { MessageBufferSyncOptions } from '../publish/core/buffer';
-export { AzureIotClient } from '../publish/plugins/azure';
-export { AwsIotClient as AwsIotMqttClient } from '../publish/plugins/aws';
-export { GcpIotClient as GcpIotMqttClient } from '../publish/plugins/gcp';
 export { normalizeTarget } from '../publish/core/types';
 export type { PublishTarget as CloudPublishTarget } from '../publish/core/types';

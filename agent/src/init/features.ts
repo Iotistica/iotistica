@@ -21,7 +21,7 @@ import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
 import { setDevicePublish, setDiscoveryRulesScheduler } from '../api/actions.js';
 import { type CloudMqttClient } from '../mqtt/manager.js';
-import { MQTT_TOPIC_PATTERNS } from '../mqtt/topics.js';
+import { MQTT_TOPIC_PATTERNS, agentTopic } from '../mqtt/topics.js';
 import { type StateManager } from '../core/state.js';
 import { isStandaloneMode } from '../utils/env.js';
 
@@ -228,7 +228,12 @@ export class FeatureInitializer {
 				},
 				logger,
 				deviceInfo.uuid,
-				this.context.httpClient // Use shared HTTP client for connection pooling
+				this.context.httpClient, // Use shared HTTP client for connection pooling
+				{
+					mqttClient: this.context.mqttManager,
+					notifyTopic: agentTopic(deviceInfo.uuid, 'jobs', 'notify-next'),
+					buildUpdateTopic: (jobId: string) => agentTopic(deviceInfo.uuid, 'jobs', jobId, 'update'),
+				}
 			);
 
 			await this.features.jobs.start();
@@ -490,11 +495,16 @@ export class FeatureInitializer {
 				return;
 			}
 			const { ShellHandler } = pro;
+			const { agentTopic } = await import('../mqtt/topics.js');
 
 			this.features.shellHandler = new ShellHandler(
 				deviceInfo.uuid,
 				mqttManager,
-				logger
+				logger,
+				{
+					commandTopic: agentTopic(deviceInfo.uuid, 'agent', 'shell'),
+					outputTopic: agentTopic(deviceInfo.uuid, 'agent', 'shell-output'),
+				}
 			);
 
 			await this.features.shellHandler.initialize();
