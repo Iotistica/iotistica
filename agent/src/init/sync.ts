@@ -2,7 +2,7 @@ import type { AgentInitContext } from './context.js';
 import * as deviceActions from '../api/actions.js';
 import { LogComponents } from '../logging/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
-import { CloudSync } from '../sync/index.js';
+import { loadCloudSync } from '../pro/loader.js';
 import { initAnomalyDetection } from './anomaly.js';
 import { isStandaloneMode } from '../utils/env.js';
 
@@ -66,10 +66,18 @@ export async function initAgentSync(ctx: AgentInitContext): Promise<void> {
 		return;
 	}
 
+	const pro = await loadCloudSync();
+	if (!pro) {
+		ctx.agentLogger?.warnSync('Cloud sync skipped — requires Iotistica Pro', {
+			component: LogComponents.agent,
+		});
+		return;
+	}
+
 	const intervals = ctx.configManager!.getIntervalConfig();
 	const features = ctx.featureInitializer?.getFeatures() || {};
 
-	ctx.cloudSync = new CloudSync(
+	ctx.cloudSync = new pro.CloudSync(
 		ctx.stateReconciler!,
 		ctx.agentManager!,
 		{

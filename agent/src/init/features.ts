@@ -9,14 +9,13 @@ import type { AgentLogger } from '../logging/agent-logger';
 import type { AgentInfo } from '../core/types.js';
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types';
-import { JobsFeature } from '../features/jobs/monitor.js';
+import { loadJobsFeature, loadShellHandler as loadShellHandlerPro } from '../pro/loader.js';
 import { DiscoveryService } from '../discovery/service.js';
 import { DiscoveryRulesScheduler } from '../discovery/rules-scheduler.js';
 
 import { DevicePublish } from '../publish/index.js';
 import type { AdapterManager } from '../plugins/index.js';
 import type { PipelineService } from '../features/pipeline/index.js';
-import type { AnomalyDetectionService } from '../anomaly/index.js';
 import { AdapterInitializer } from './adapters.js';
 import { AgentUpdater } from '../updater.js';
 import { AgentFirewall } from '../network/firewall.js';
@@ -39,7 +38,7 @@ export interface FeatureContext {
   configProtocols?: Record<string, any>; // New: protocols section from target state
   cloudApiEndpoint: string;
   deviceApiPort: number;
-  anomalyService?: AnomalyDetectionService;
+  anomalyService?: any;
   discoveryService?: any; // Discovery service for endpoint auto-reload
   dictionaryManager?: any; // Dictionary manager for MQTT message key compaction
   pipelineService?: PipelineService; // Node-RED payload transform pipeline (optional)
@@ -47,7 +46,7 @@ export interface FeatureContext {
 }
 
 export interface InitializedFeatures {
-  jobs?: JobsFeature;
+  jobs?: any;
   devicePublish?: DevicePublish;
 	devices?: AdapterManager;
   updater?: AgentUpdater;
@@ -137,7 +136,7 @@ export class FeatureInitializer {
 		};
 	}
 
-	public setAnomalyService(anomalyService?: AnomalyDetectionService): void {
+	public setAnomalyService(anomalyService?: any): void {
 		this.context.anomalyService = anomalyService;
 		this.features.devicePublish?.setAnomalyService?.(anomalyService);
 	}
@@ -203,12 +202,20 @@ export class FeatureInitializer {
 		}
 
 		try {
+			const pro = await loadJobsFeature();
+			if (!pro) {
+				logger.debugSync('Jobs Feature skipped — requires Iotistica Pro', {
+					component: LogComponents.agent,
+				});
+				return;
+			}
+
 			const cloudApiUrl = process.env.CLOUD_API_URL || cloudApiEndpoint;
 			const pollingIntervalMs =
         configSettings.cloudJobsPollingIntervalMs ||
         parseInt(process.env.CLOUD_JOBS_POLLING_INTERVAL || "30000", 10);
 
-			this.features.jobs = new JobsFeature(
+			this.features.jobs = new pro.JobsFeature(
 				{
 					enabled: deviceJobsEnabled,
 					cloudApiUrl,
@@ -475,8 +482,15 @@ export class FeatureInitializer {
 		}
 
 		try {
-			const { ShellHandler } = await import('../remote/shell-handler.js');
-      
+			const pro = await loadShellHandlerPro();
+			if (!pro) {
+				logger.debugSync('Shell handler skipped — requires Iotistica Pro', {
+					component: LogComponents.agent,
+				});
+				return;
+			}
+			const { ShellHandler } = pro;
+
 			this.features.shellHandler = new ShellHandler(
 				deviceInfo.uuid,
 				mqttManager,

@@ -1,6 +1,6 @@
 import { LogComponents } from '../logging/types.js';
 import { DatabaseModel } from '../db/models/index.js';
-import { loadConfigFromTargetState } from '../anomaly/utils.js';
+import { loadAnomalyDetection } from '../pro/loader.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 import type { AgentInitContext } from './context.js';
 
@@ -46,8 +46,16 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 	}
 
 	try {
-		const config = loadConfigFromTargetState(targetConfig);
-		const enabledMetrics = config.metrics.filter((metric) => metric.enabled);
+		const pro = await loadAnomalyDetection();
+		if (!pro) {
+			ctx.agentLogger?.debugSync('Anomaly detection skipped — requires Iotistica Pro', {
+				component: LogComponents.agent,
+			});
+			return;
+		}
+
+		const config = pro.loadConfigFromTargetState(targetConfig);
+		const enabledMetrics = config.metrics.filter((metric: any) => metric.enabled);
 
 		const dbInstance = DatabaseModel.getConnection();
 
@@ -55,11 +63,11 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 			component: LogComponents.agent,
 			totalMetrics: config.metrics.length,
 			enabledMetrics: enabledMetrics.length,
-			sampleMetrics: config.metrics.slice(0, 10).map((metric) => metric.name),
+			sampleMetrics: config.metrics.slice(0, 10).map((metric: any) => metric.name),
 			defaults: config.defaults,
 		});
 
-		const { AnomalyDetectionService } = await import('../anomaly/index.js');
+		const { AnomalyDetectionService } = pro;
 		ctx.anomalyService = new AnomalyDetectionService(
 			config,
 			dbInstance,

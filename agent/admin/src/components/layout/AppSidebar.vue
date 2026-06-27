@@ -13,6 +13,10 @@ import {
   SettingOutlined,
   TeamOutlined,
   SafetyOutlined,
+  UserOutlined,
+  KeyOutlined,
+  QuestionCircleOutlined,
+  CustomerServiceOutlined,
 } from '@ant-design/icons-vue'
 import IotisticaLogo from '@/components/IotisticaLogo.vue'
 
@@ -21,11 +25,22 @@ const router = useRouter()
 
 const selectedKey = computed(() => route.path)
 
-const openKeys = computed(() =>
-  route.path.startsWith('/admin') ? ['administration'] : [],
-)
+const openKeys = computed(() => {
+  const keys: string[] = []
+  if (route.path.startsWith('/admin')) keys.push('administration')
+  if (route.path.startsWith('/user')) keys.push('user-settings')
+  return keys
+})
 
 function onMenuClick({ key }: { key: string }) {
+  if (key === 'help') {
+    window.open('https://docs.iotistica.com/docs/intro', '_blank')
+    return
+  }
+  if (key === 'support') {
+    window.open('https://iotistica.com/solutions.html', '_blank')
+    return
+  }
   router.push(key)
 }
 </script>
@@ -34,74 +49,112 @@ function onMenuClick({ key }: { key: string }) {
   <a-layout-sider
     :width="220"
     theme="dark"
-    style="min-height: 100vh; background: #0a0a0a;"
+    style="min-height: 100vh; background: #0a0a0a; display: flex; flex-direction: column;"
   >
     <div class="logo">
       <IotisticaLogo :size="24" />
       <span>Iotistica</span>
     </div>
-    <a-menu
-      theme="dark"
-      mode="inline"
-      :selected-keys="[selectedKey]"
-      :open-keys="openKeys"
-      @click="onMenuClick"
-    >
-      <a-menu-item key="/dashboard">
-        <template #icon><DashboardOutlined /></template>
-        Dashboard
-      </a-menu-item>
 
-      <a-menu-item key="/endpoints">
-        <template #icon><ApartmentOutlined /></template>
-        Endpoints
-      </a-menu-item>
-
-      <a-menu-item key="/destinations">
-        <template #icon><CloudUploadOutlined /></template>
-        Destinations
-      </a-menu-item>
-
-      <a-menu-item key="/subscriptions">
-        <template #icon><PartitionOutlined /></template>
-        Subscriptions
-      </a-menu-item>
-
-      <a-menu-item key="/discovery-rules">
-        <template #icon><RadarChartOutlined /></template>
-        Discovery
-      </a-menu-item>
-
-      <a-menu-item key="/applications">
-        <template #icon><ContainerOutlined /></template>
-        Applications
-      </a-menu-item>
-
-      <a-menu-item key="/anomaly">
-        <template #icon><AlertOutlined /></template>
-        Alerts
-      </a-menu-item>
-
-      <a-menu-item key="/logs">
-        <template #icon><FileTextOutlined /></template>
-        Logs
-      </a-menu-item>
-
-      <a-menu-item key="/settings">
-        <template #icon><SettingOutlined /></template>
-        Settings
-      </a-menu-item>
-
-      <a-sub-menu key="administration">
-        <template #icon><SafetyOutlined /></template>
-        <template #title>Administration</template>
-
-        <a-menu-item key="/admin/users">
-          <template #icon><TeamOutlined /></template>
-          Users
+    <div class="nav-main">
+      <a-menu
+        theme="dark"
+        mode="inline"
+        :selected-keys="[selectedKey]"
+        :open-keys="openKeys"
+        @click="onMenuClick"
+      >
+        <a-menu-item key="/dashboard">
+          <template #icon><DashboardOutlined /></template>
+          Dashboard
         </a-menu-item>
-      </a-sub-menu>
-    </a-menu>
+
+        <a-menu-item key="/endpoints">
+          <template #icon><ApartmentOutlined /></template>
+          Endpoints
+        </a-menu-item>
+
+        <a-menu-item key="/destinations">
+          <template #icon><CloudUploadOutlined /></template>
+          Destinations
+        </a-menu-item>
+
+        <a-menu-item key="/subscriptions">
+          <template #icon><PartitionOutlined /></template>
+          Subscriptions
+        </a-menu-item>
+
+        <a-menu-item key="/discovery-rules">
+          <template #icon><RadarChartOutlined /></template>
+          Discovery
+        </a-menu-item>
+
+        <a-menu-item key="/applications">
+          <template #icon><ContainerOutlined /></template>
+          Applications
+        </a-menu-item>
+
+        <a-menu-item key="/anomaly">
+          <template #icon><AlertOutlined /></template>
+          Alerts
+        </a-menu-item>
+
+        <a-menu-item key="/logs">
+          <template #icon><FileTextOutlined /></template>
+          Logs
+        </a-menu-item>
+
+        <a-menu-item key="/settings">
+          <template #icon><SettingOutlined /></template>
+          Settings
+        </a-menu-item>
+
+        <a-sub-menu key="administration">
+          <template #icon><SafetyOutlined /></template>
+          <template #title>Administration</template>
+
+          <a-menu-item key="/admin/users">
+            <template #icon><TeamOutlined /></template>
+            Users
+          </a-menu-item>
+        </a-sub-menu>
+      </a-menu>
+    </div>
+
+    <div class="nav-bottom">
+      <a-menu
+        theme="dark"
+        mode="inline"
+        :selected-keys="[selectedKey]"
+        :open-keys="openKeys"
+        @click="onMenuClick"
+      >
+        <a-sub-menu key="user-settings">
+          <template #icon><UserOutlined /></template>
+          <template #title>User</template>
+
+          <a-menu-item key="/user/profile">
+            <template #icon><UserOutlined /></template>
+            Profile
+          </a-menu-item>
+
+          <a-menu-item key="/user/api-tokens">
+            <template #icon><KeyOutlined /></template>
+            API Tokens
+          </a-menu-item>
+        </a-sub-menu>
+
+        <a-menu-item key="help">
+          <template #icon><QuestionCircleOutlined /></template>
+          Help
+        </a-menu-item>
+
+        <a-menu-item key="support">
+          <template #icon><CustomerServiceOutlined /></template>
+          Support
+        </a-menu-item>
+      </a-menu>
+    </div>
 
   </a-layout-sider>
 </template>
@@ -118,10 +171,27 @@ function onMenuClick({ key }: { key: string }) {
   font-weight: 600;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.nav-main {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.nav-bottom {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 4px;
 }
 
 :deep(.ant-layout-sider) {
   background: #0a0a0a !important;
+}
+
+:deep(.ant-layout-sider-children) {
+  display: flex;
+  flex-direction: column;
 }
 
 :deep(.ant-menu-dark),
