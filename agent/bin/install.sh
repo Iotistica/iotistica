@@ -703,6 +703,23 @@ echo ""
             exit 1
         fi
         echo "✓ Agent built successfully"
+
+        # Build web admin UI
+        if [ -d /opt/iotistic/agent/admin ]; then
+            echo ""
+            echo "Building web admin UI..."
+            cd /opt/iotistic/agent/admin
+            npm ci --legacy-peer-deps
+            npm run build
+            if [ ! -d dist ]; then
+                echo "✗ Error: Admin UI build failed - dist/ not found"
+                exit 1
+            fi
+            echo "✓ Web admin UI built successfully"
+            cd /opt/iotistic/agent
+        else
+            echo "Warning: admin/ directory not found, skipping web admin build"
+        fi
     else
         echo ""
         echo "Using pre-built agent from distribution server"
@@ -737,6 +754,13 @@ echo ""
         fi
         
         echo "✓ Pre-built agent verified (architecture-specific native modules included)"
+
+        # Verify admin UI is included in the tarball
+        if [ -d /opt/iotistic/agent/admin/dist ]; then
+            echo "✓ Web admin UI dist included in tarball"
+        else
+            echo "Warning: admin/dist not found in tarball — web admin UI will not be available"
+        fi
     fi
 
     # Install update script
