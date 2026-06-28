@@ -302,6 +302,12 @@ export interface AgentSettingsInfo {
   targetSyncEnabled?: boolean
 }
 
+export interface AgentSettingsMqttMonitor {
+  url?: string
+  username?: string
+  password?: string
+}
+
 export interface AgentSettings {
   agent?: AgentSettingsInfo
   logging?: AgentSettingsLogging
@@ -309,4 +315,5 @@ export interface AgentSettings {
   intervals?: AgentSettingsIntervals
   runtime?: AgentSettingsRuntime
   anomalyDetection?: Record<string, unknown>
+  mqttMonitor?: AgentSettingsMqttMonitor
 }

@@ -19,6 +19,7 @@ import {
 import { PluginLoader } from "./plugin-loader.js";
 import { EndpointOutputModel } from "../db/models/endpoint-outputs.model.js";
 import { EndpointModel } from "../db/models/endpoint.model.js";
+import { DeviceModel } from "../db/models/device.model.js";
 import { encodeIfUuid } from "../mqtt/codec.js";
 
 // Type-only import.
@@ -142,9 +143,16 @@ export class AdapterManager extends EventEmitter {
 	): void {
 		const label = protocol.toUpperCase();
 		adapter.on("started", () => this.logger.info(`${label} adapter started`));
-		adapter.on("data", (dps: DeviceDataPoint[]) =>
-			socket.sendData(this.enrichWithEndpointUuid(dps, uuidMap), protocol),
-		);
+		adapter.on("data", (dps: DeviceDataPoint[]) => {
+			socket.sendData(this.enrichWithEndpointUuid(dps, uuidMap), protocol);
+			// Stamp lastSeenAt on every data arrival for both endpoint and device tables.
+			// This keeps health status fresh regardless of which protocol emits data.
+			const names = [...new Set(dps.map((dp) => dp.deviceName).filter(Boolean))];
+			for (const name of names) {
+				EndpointModel.updateLastSeenByName(name).catch(() => {});
+				DeviceModel.updateLastSeenByEndpointName(name).catch(() => {});
+			}
+		});
 		adapter.on("device-connected", (name: string) =>
 			this.logger.info(`${label} device connected: ${name}`),
 		);
@@ -346,7 +354,7 @@ export class AdapterManager extends EventEmitter {
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			this.logger.error(`Failed to start ${protocol.toUpperCase()} adapter group ${groupName}: ${errorMessage}`);
-			throw error;
+			// Non-fatal: one broken adapter group must not prevent other adapters or health reporting from working.
 		}
 	}
 
@@ -769,7 +777,7 @@ export class AdapterManager extends EventEmitter {
 
 			const uuidMap = this.buildUuidMap(endpoints);
 			const socket = await this.createSocketServer("mqtt");
-			const adapter = new MqttAdapter(mqttConfig, this.logger);
+			const adapter = new MqttAdapter(mqttConfig, this.logger, this.deviceUuid);
 			this.adapters.set(groupName, adapter);
 			(adapter as any)._socketServer = socket;
 			this.wireAdapterEvents(groupName, adapter, socket, uuidMap);

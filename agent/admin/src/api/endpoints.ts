@@ -18,6 +18,10 @@ export const endpointsApi = {
     return client.patch<{ endpoint: Endpoint }>(`${BASE}/${uuid}`, data).then((r) => r.data.endpoint)
   },
 
+  replace(uuid: string, data: EndpointCreateData): Promise<Endpoint> {
+    return client.put<{ endpoint: Endpoint }>(`${BASE}/${uuid}`, data).then((r) => r.data.endpoint)
+  },
+
   remove(uuid: string): Promise<void> {
     return client.delete(`${BASE}/${uuid}`).then(() => undefined)
   },

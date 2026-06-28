@@ -152,7 +152,68 @@ const netIface   = computed(() => stats.value ? (primaryNet(stats.value.network)
 
         </a-row>
 
-        <!-- ── Row 2: System ───────────────────────────────────────────────── -->
+        <!-- ── Row 2: Performance charts ─────────────────────────────────── -->
+        <div class="section-label">Performance History · last {{ cpuHistory.length * 3 }}s</div>
+        <a-row :gutter="16" style="margin-bottom:16px">
+
+          <a-col :xs="24" :lg="12">
+            <div class="widget chart-widget">
+              <div class="chart-header">
+                <span class="widget-title">CPU Usage</span>
+                <span class="chart-current" :style="{ color: cpuColor(stats.cpu_usage) }">{{ stats.cpu_usage }}%</span>
+              </div>
+              <div class="chart-body">
+                <SparklineChart
+                  :data="cpuHistory"
+                  :color="cpuColor(stats.cpu_usage)"
+                  :fill-color="`${cpuColor(stats.cpu_usage)}22`"
+                  :max-value="100"
+                  :height="90"
+                  full-width
+                />
+              </div>
+              <a-progress
+                :percent="stats.cpu_usage"
+                :stroke-color="cpuColor(stats.cpu_usage)"
+                :show-info="false"
+                size="small"
+                style="margin-top:8px"
+              />
+            </div>
+          </a-col>
+
+          <a-col :xs="24" :lg="12">
+            <div class="widget chart-widget">
+              <div class="chart-header">
+                <span class="widget-title">Memory Usage</span>
+                <span class="chart-current" :style="{ color: memColor(stats.memory_percent) }">
+                  {{ stats.memory_percent }}%
+                  <span class="chart-sub">{{ fmtMb(stats.memory_used) }} / {{ fmtMb(stats.memory_total) }}</span>
+                </span>
+              </div>
+              <div class="chart-body">
+                <SparklineChart
+                  :data="memHistory"
+                  :color="memColor(stats.memory_percent)"
+                  :fill-color="`${memColor(stats.memory_percent)}22`"
+                  :max-value="100"
+                  :height="90"
+                  full-width
+                />
+              </div>
+              <a-progress
+                :percent="stats.memory_percent"
+                :stroke-color="memColor(stats.memory_percent)"
+                :show-info="false"
+                size="small"
+                style="margin-top:8px"
+              />
+            </div>
+          </a-col>
+
+        </a-row>
+
+        <!-- ── Row 3: System ───────────────────────────────────────────────── -->
         <div class="section-label">System · {{ stats.hostname }}</div>
         <a-row :gutter="16" style="margin-bottom:16px">
 
@@ -290,5 +351,34 @@ const netIface   = computed(() => stats.value ? (primaryNet(stats.value.network)
   font-size: 11px;
   color: #aaa;
   margin-top: 6px;
+}
+
+.chart-widget {
+  padding-bottom: 14px;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.chart-current {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-sub {
+  font-size: 11px;
+  color: #aaa;
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.chart-body {
+  line-height: 0;
 }
 </style>

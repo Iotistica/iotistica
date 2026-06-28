@@ -357,14 +357,31 @@ onUnmounted(() => {
 
 <template>
   <AppLayout title="Alerts">
-    <a-alert
-      v-if="!proInstalled"
-      type="info"
-      show-icon
-      message="Pro feature"
-      description="Anomaly detection requires @iotistica/agent-pro. Install it alongside the Community agent to enable ML-based metric monitoring and alerting."
-      style="margin-bottom: 16px"
-    />
+    <a-alert v-if="!proInstalled" type="info" show-icon style="margin-bottom: 16px">
+      <template #message>Catch anomalies before they become failures</template>
+      <template #description>
+        <div style="margin-top: 4px">
+          <strong>Iotistica Agent Pro</strong> adds on-device ML anomaly detection — baseline tracking,
+          per-metric alert rules, and trend forecasting that runs entirely on the device with no cloud
+          round-trip required. Get notified the moment a sensor drifts outside its normal range.
+        </div>
+        <div style="margin-top: 12px">
+          <a-button
+            type="primary"
+            size="small"
+            href="https://iotistica.com/solutions.html"
+            target="_blank"
+            rel="noopener"
+          >Upgrade to Agent Pro →</a-button>
+          <a
+            href="https://iotistica.com/solutions.html"
+            target="_blank"
+            rel="noopener"
+            style="margin-left: 16px; font-size: 12px"
+          >Compare plans</a>
+        </div>
+      </template>
+    </a-alert>
     <a-tabs :active-key="activeTab" @change="onTabChange">
 
       <!-- ══ ALERTS ══════════════════════════════════════════════════════════ -->

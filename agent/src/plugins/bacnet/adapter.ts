@@ -3,6 +3,7 @@ import { type BACnetAdapterConfig, type BACnetDevice } from './types';
 import { BACnetClient } from './client';
 import { type DeviceDataPoint, type IDeviceStatus, type Logger } from '../types.js';
 import { DeviceModel } from '../../db/models/device.model.js';
+import { EndpointModel } from '../../db/models/endpoint.model.js';
 import { pLimit } from '../../lib/p-limit.js';
 
 /**
@@ -421,6 +422,9 @@ export class BACnetAdapter extends BaseProtocolAdapter {
 		if (success) {
 			DeviceModel.updateLastSeenByEndpointName(deviceName).catch(err => {
 				this.logger.warn(`Failed to update device lastSeenAt for ${deviceName}: ${err.message}`);
+			});
+			EndpointModel.updateLastSeenByName(deviceName).catch((err: Error) => {
+				this.logger.warn(`Failed to update endpoint lastSeenAt for ${deviceName}: ${err.message}`);
 			});
 		}
 	}

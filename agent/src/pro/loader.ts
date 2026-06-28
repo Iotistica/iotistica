@@ -51,8 +51,10 @@ export async function loadInfluxDbDestination(): Promise<{ InfluxDbPublishPlugin
   return tryLoad('destinations/influxdb')
 }
 
-/** Returns true when the Pro package is resolvable in the current node_modules. */
+/** Returns true when the Pro package is resolvable in the current node_modules.
+ *  Set PRO_FORCE=true to bypass the check (dev/testing only). */
 export function isProInstalled(): boolean {
+  if (process.env.PRO_FORCE === 'true') return true
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require.resolve(PRO_PKG)

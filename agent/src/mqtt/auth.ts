@@ -102,9 +102,9 @@ function buildAclContent(users: UserEntry[], acls: AclEntry[]): string {
 		'',
 	];
 
-	// Superusers first with unrestricted access
+	// Superusers first with unrestricted access (incl. $SYS for broker metrics)
 	for (const u of users.filter(u => u.isSuperuser)) {
-		lines.push(`user ${u.username}`, 'topic readwrite #', '');
+		lines.push(`user ${u.username}`, 'topic readwrite #', 'topic read $SYS/#', '');
 	}
 
 	// Per-user topic ACLs
@@ -158,7 +158,11 @@ export class MqttFileAuthReconciler {
   * Bcrypt-only entries from the legacy cloud path are skipped because they
   * cannot be converted into mosquitto native password-file hashes.
    */
-	async reconcile(endpoints: EndpointMqttAuth[], options: FileAuthOptions): Promise<ReconcileResult> {
+	async reconcile(
+		endpoints: EndpointMqttAuth[],
+		options: FileAuthOptions,
+		localUsers?: Array<{ username: string; passwordHash: string; isSuperuser?: boolean }>,
+	): Promise<ReconcileResult> {
 		const users: UserEntry[] = [];
 		const acls: AclEntry[] = [];
 
@@ -189,6 +193,18 @@ export class MqttFileAuthReconciler {
 
 			users.push({ username, passwordPlaintext: plaintext, passwordFileHash, isSuperuser: false });
 			acls.push({ username, topic, access });
+		}
+
+		// Locally-managed MQTT users (mqtt_users table) — persist across cloud sync and builds
+		for (const u of localUsers ?? []) {
+			const uname = u.username?.trim();
+			if (!uname || !u.passwordHash) continue;
+			if (bootstrapUsername && uname === bootstrapUsername) continue;
+			if (users.some(x => x.username === uname)) continue; // endpoint already added this user
+			users.push({ username: uname, passwordFileHash: u.passwordHash, isSuperuser: u.isSuperuser ?? false });
+			if (!(u.isSuperuser ?? false)) {
+				acls.push({ username: uname, topic: '#', access: 3 }); // readwrite all broker topics
+			}
 		}
 
 		if (users.length === 0) {

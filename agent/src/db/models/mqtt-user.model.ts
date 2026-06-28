@@ -80,4 +80,12 @@ export class MqttUserModel {
 			.get(username);
 		return row !== undefined;
 	}
+
+	/** Returns all active users with their stored password hash, for use by the auth reconciler. */
+	static getAllForReconciler(): { username: string; passwordHash: string; isSuperuser: boolean }[] {
+		const rows = this.db()
+			.prepare('SELECT username, password_hash, is_superuser FROM mqtt_users WHERE is_active = 1 ORDER BY created_at ASC')
+			.all() as { username: string; password_hash: string; is_superuser: number }[];
+		return rows.map(r => ({ username: r.username, passwordHash: r.password_hash, isSuperuser: r.is_superuser === 1 }));
+	}
 }

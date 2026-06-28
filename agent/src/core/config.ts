@@ -1204,11 +1204,20 @@ export class ConfigManager extends EventEmitter {
 				}
 				: undefined;
 
+			// Always include locally-managed MQTT users from the mqtt_users table
+			let localUsers: Array<{ username: string; passwordHash: string; isSuperuser: boolean }> = [];
+			try {
+				const { MqttUserModel } = await import('../db/models/mqtt-user.model.js');
+				localUsers = MqttUserModel.getAllForReconciler();
+			} catch {
+				// non-fatal — DB may not be ready yet
+			}
+
 			const result = await reconciler.reconcile(devices, {
 				authDir: resolveMosquittoAuthDir(),
 				containerName: "iotistic-mosquitto-agent",
 				dockerManager,
-			});
+			}, localUsers);
 
 			if (result.changed) {
 				this.logger?.infoSync("Reconciled MQTT file auth", {
@@ -1228,6 +1237,11 @@ export class ConfigManager extends EventEmitter {
 				},
 			);
 		}
+	}
+
+	/** Trigger a one-off MQTT auth file reconciliation (e.g. after a local user is created/deleted). */
+	public async reconcileMqttAuth(): Promise<void> {
+		await this.syncMosquittoAuthToFiles(this.targetConfig.endpoints || []);
 	}
 
 	/**

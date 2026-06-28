@@ -1247,6 +1247,84 @@ export const removeEndpoint = async (uuid: string) => {
 };
 
 /**
+ * Full replace of an endpoint — preserves UUID, updates all fields.
+ * Used by: PUT /v1/endpoints/:uuid
+ */
+export const replaceEndpoint = async (
+	uuid: string,
+	body: {
+		name: string;
+		protocol: string;
+		connection: Record<string, any>;
+		poll_interval?: number;
+		enabled?: boolean;
+		data_points?: any[];
+		metadata?: Record<string, any>;
+		fingerprint?: string;
+	},
+) => {
+	if (!configManager && !stateManager) throw new Error('Config manager not initialized');
+
+	const { EndpointModel } = await import('../db/models/endpoint.model.js');
+	const existing = await EndpointModel.getByUuid(uuid);
+	if (!existing) throw Object.assign(new Error(`Endpoint not found: ${uuid}`), { statusCode: 404 });
+
+	let mqttAuth: Record<string, any> | undefined;
+	const resolvedConnection = { ...body.connection };
+	const resolvedDataPoints = body.data_points ? [...body.data_points] : [];
+
+	if (body.protocol === 'mqtt') {
+		const username = body.connection?.username as string | undefined;
+		const password = body.connection?.password as string | undefined;
+		if (username && password) {
+			mqttAuth = { username, passwordPlaintext: password, access: 2 };
+		}
+		if (!resolvedConnection.topic) {
+			const firstTopic = body.data_points?.[0]?.topic as string | undefined;
+			resolvedConnection.topic = firstTopic ?? '#';
+		}
+	}
+
+	const updatedEndpoint = {
+		id: uuid,
+		uuid,
+		name: body.name,
+		protocol: body.protocol,
+		connection: resolvedConnection,
+		poll_interval: body.poll_interval ?? existing.poll_interval,
+		pollInterval: body.poll_interval ?? existing.poll_interval,
+		enabled: body.enabled !== undefined ? body.enabled : existing.enabled,
+		...(mqttAuth ? { auth: { mqtt: mqttAuth } } : {}),
+		...(body.metadata ? { metadata: body.metadata } : {}),
+		dataPoints: resolvedDataPoints,
+	};
+
+	await applyConfigUpdate((config) => {
+		if (!Array.isArray(config.endpoints)) config.endpoints = [];
+		const idx = config.endpoints.findIndex((ep: any) => ep.uuid === uuid || ep.id === uuid);
+		if (idx >= 0) {
+			config.endpoints[idx] = updatedEndpoint as any;
+		} else {
+			config.endpoints.push(updatedEndpoint as any);
+		}
+	});
+
+	await EndpointModel.upsert({
+		uuid,
+		fingerprint: body.fingerprint,
+		name: body.name,
+		protocol: body.protocol as any,
+		connection: resolvedConnection,
+		poll_interval: body.poll_interval ?? existing.poll_interval,
+		enabled: body.enabled !== undefined ? body.enabled : existing.enabled,
+		data_points: resolvedDataPoints.length > 0 ? resolvedDataPoints : undefined,
+		metadata: body.metadata,
+	});
+
+	return { uuid, name: body.name, protocol: body.protocol, enabled: updatedEndpoint.enabled };
+};
+
+/**
  * Remove all endpoints from target state
  * Used by: DELETE /v1/endpoints
  */
@@ -1260,6 +1338,11 @@ export const removeAllEndpoints = async () => {
 	});
 
 	return { removed };
+};
+
+/** Trigger a one-off MQTT auth file reconciliation after local user changes. */
+export const reconcileMqttAuth = async (): Promise<void> => {
+	if (configManager) await configManager.reconcileMqttAuth();
 };
 
 /**
@@ -1836,7 +1919,7 @@ export const getSettings = async (): Promise<Record<string, any>> => {
 	}
 
 	const settings: Record<string, any> = {};
-	for (const key of ['logging', 'features', 'intervals', 'runtime', 'anomalyDetection']) {
+	for (const key of ['logging', 'features', 'intervals', 'runtime', 'anomalyDetection', 'mqttMonitor']) {
 		if (config[key] !== undefined) settings[key] = config[key];
 	}
 
@@ -1878,7 +1961,7 @@ export const getSettings = async (): Promise<Record<string, any>> => {
  * callers cannot accidentally overwrite endpoints or apps config.
  */
 export const updateSettings = async (patch: Record<string, any>): Promise<void> => {
-	const ALLOWED = new Set(['logging', 'features', 'intervals', 'runtime', 'anomalyDetection']);
+	const ALLOWED = new Set(['logging', 'features', 'intervals', 'runtime', 'anomalyDetection', 'mqttMonitor']);
 	await applyConfigUpdate((config) => {
 		for (const [key, value] of Object.entries(patch)) {
 			if (ALLOWED.has(key)) {

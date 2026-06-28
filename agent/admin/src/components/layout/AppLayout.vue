@@ -21,9 +21,9 @@ onMounted(fetchProStatus)
 </script>
 
 <template>
-  <a-layout style="min-height: 100vh">
+  <a-layout style="height: 100vh; overflow: hidden">
     <AppSidebar />
-    <a-layout>
+    <a-layout style="overflow: hidden">
       <a-layout-header class="page-header">
         <h2>{{ title }}</h2>
         <div class="header-right">
@@ -87,5 +87,7 @@ onMounted(fetchProStatus)
   background: #fff;
   border-radius: 8px;
   min-height: 360px;
+  overflow-y: auto;
+  height: calc(100vh - 52px - 48px);
 }
 </style>

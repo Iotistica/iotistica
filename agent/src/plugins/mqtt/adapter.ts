@@ -6,6 +6,7 @@ import { type MqttAdapterConfig, type MqttDevice, type MqttMetricConfig } from "
 import { parsePayload, coerceType } from "./payload.js";
 import { agentTopic } from "../../mqtt/topics.js";
 import { EndpointModel } from "../../db/models/endpoint.model.js";
+import { DeviceModel } from "../../db/models/device.model.js";
 import { MqttBrokerClient } from "./client.js";
 
 /**
@@ -1388,6 +1389,11 @@ export class MqttAdapter extends BaseProtocolAdapter {
 		EndpointModel.updateLastSeenByName(deviceName).catch((err: Error) => {
 			this.logger.warn(
 				`Failed to update lastSeen for ${deviceName}: ${err.message}`,
+			);
+		});
+		DeviceModel.updateLastSeenByEndpointName(deviceName).catch((err: Error) => {
+			this.logger.warn(
+				`Failed to update device lastSeenAt for ${deviceName}: ${err.message}`,
 			);
 		});
 

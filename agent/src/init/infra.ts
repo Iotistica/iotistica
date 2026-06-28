@@ -1,6 +1,7 @@
 import type { AgentInitContext } from './context.js';
 import { LogComponents } from '../logging/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
+import { BrokerMonitorService } from '../mqtt/broker-monitor.js';
 
 
 export async function initInfrastructure(ctx: AgentInitContext): Promise<void> {
@@ -10,6 +11,31 @@ export async function initInfrastructure(ctx: AgentInitContext): Promise<void> {
 	]);
 
 	await initDeviceAPI(ctx);
+	initBrokerMonitor(ctx);
+}
+
+function initBrokerMonitor(ctx: AgentInitContext): void {
+	try {
+		const monitor = BrokerMonitorService.getInstance();
+
+		// Apply persisted config if present (overrides env var defaults)
+		const cfg = (ctx.configManager?.getTargetConfig?.() as any)?.mqttMonitor;
+		if (cfg?.url) {
+			monitor.reconfigure(cfg.url, cfg.username ?? '', cfg.password ?? '');
+		} else {
+			monitor.start();
+		}
+
+		ctx.agentLogger?.infoSync('Local MQTT broker monitor started', {
+			component: LogComponents.agent,
+			url: process.env.LOCAL_MQTT_URL ?? 'mqtt://localhost:1883',
+		});
+	} catch (err) {
+		ctx.agentLogger?.warnSync('Failed to start broker monitor (non-fatal)', {
+			component: LogComponents.agent,
+			error: (err as Error).message,
+		});
+	}
 }
 
 export async function initializeConnections(ctx: AgentInitContext): Promise<void> {

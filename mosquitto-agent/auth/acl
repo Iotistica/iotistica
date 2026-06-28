@@ -3,3 +3,7 @@
 
 user admin
 topic readwrite #
+topic read $SYS/#
+
+user mqtt-user-1
+topic readwrite #

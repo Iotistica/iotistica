@@ -104,6 +104,7 @@ param(
     [string]$AnomalyDetectionEnabled = "true",
     [string]$FirewallEnabled = "true",
     [string]$FirewallMode = "auto",
+    [string]$ProForce = "false",
     [string]$UseMsgpackPoc = "false",
     [string]$UseKeyCompactionPoc = "false",
     [string]$UseDeflateCompression = "false",
@@ -117,6 +118,9 @@ param(
     [string]$MqttBrokerUrl = "mqtt://localhost:5884",
     [string]$MqttUsername = "admin",
     [string]$MqttPassword = "iotistic42!",
+    [string]$LocalMqttUrl = "",
+    [string]$LocalMqttUser = "",
+    [string]$LocalMqttPass = "",
     [string]$ModbusTcpHost = "iotistic-modbus-sim",
     [int]$ModbusTcpPort = 502,
     [int]$ModbusSlaveRangeStart = 1,
@@ -482,11 +486,13 @@ if (
         Write-Host "  Build source : $(if ($BuildFromSource) { 'yes (--build)' } else { 'no (image pull)' })" -ForegroundColor Gray
 
         # Patch publish target env vars in-place if explicitly supplied.
-        if ($PSBoundParameters.ContainsKey('PublishTarget') -or $PSBoundParameters.ContainsKey('AzureIothubConnectionString')) {
+        if ($PSBoundParameters.ContainsKey('PublishTarget') -or $PSBoundParameters.ContainsKey('AzureIothubConnectionString') -or $PSBoundParameters.ContainsKey('ProForce')) {
             $composeLines = Get-Content $composeFile
-            # Strip any existing publish target lines so we don't duplicate them.
+            # Strip any existing lines we're about to re-emit so we don't duplicate them.
             $composeLines = $composeLines | Where-Object {
-                $_ -notmatch '^\s+- PUBLISH_TARGET=' -and $_ -notmatch '^\s+- AZURE_IOTHUB_CONNECTION_STRING='
+                $_ -notmatch '^\s+- PUBLISH_TARGET=' -and
+                $_ -notmatch '^\s+- AZURE_IOTHUB_CONNECTION_STRING=' -and
+                $_ -notmatch '^\s+- PRO_FORCE='
             }
             # Re-insert after the last fixed env var (AGENT_SHELL_MAX_SESSION_MS).
             $anchor = '      - AGENT_SHELL_MAX_SESSION_MS=3600000'
@@ -494,12 +500,13 @@ if (
             foreach ($line in $composeLines) {
                 $patched += $line
                 if ($line -eq $anchor) {
-                    if ($PublishTarget -ne '')             { $patched += "      - PUBLISH_TARGET=$PublishTarget" }
-                    if ($AzureIothubConnectionString -ne '') { $patched += "      - AZURE_IOTHUB_CONNECTION_STRING=$AzureIothubConnectionString" }
+                    if ($PSBoundParameters.ContainsKey('ProForce'))                { $patched += "      - PRO_FORCE=$ProForce" }
+                    if ($PublishTarget -ne '')                                      { $patched += "      - PUBLISH_TARGET=$PublishTarget" }
+                    if ($AzureIothubConnectionString -ne '')                        { $patched += "      - AZURE_IOTHUB_CONNECTION_STRING=$AzureIothubConnectionString" }
                 }
             }
             $patched | Set-Content $composeFile
-            Write-Host "  Updated compose file with publish target settings." -ForegroundColor Gray
+            Write-Host "  Updated compose file with patched env vars." -ForegroundColor Gray
         }
 
         if ($Run) {
@@ -1486,12 +1493,16 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
                 "      - MQTT_BROKER_URL=$MqttBrokerUrl",
                 "      - MQTT_USERNAME=$MqttUsername",
                 "      - MQTT_PASSWORD=$MqttPassword",
+                "      - LOCAL_MQTT_URL=$(if ($LocalMqttUrl) { $LocalMqttUrl } else { $MqttBrokerUrl })",
+                "      - LOCAL_MQTT_USER=$(if ($LocalMqttUser) { $LocalMqttUser } else { $MqttUsername })",
+                "      - LOCAL_MQTT_PASS=$(if ($LocalMqttPass) { $LocalMqttPass } else { $MqttPassword })",
                 '      # Bootstrap & Security (not dashboard-controlled)',
                 "      - STANDALONE=$(if ($Standalone) { 'true' } else { 'false' })",
                 "      - API_SECURITY_MODE=$ApiSecurityMode",
                 "      - FIREWALL_ENABLED=$FirewallEnabled",
                 "      - FIREWALL_MODE=$FirewallMode",
                 '      # Testing & Development (not dashboard-controlled)',
+                "      - PRO_FORCE=$ProForce",
                 "      - SIMULATION_MODE=$($simConfig.enabled)",
                 "      - SIMULATION_PROFILE=$($simConfig.name)",
                 "      - SIMULATION_CONFIG='$($simConfig.config)'",

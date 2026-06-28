@@ -17,11 +17,11 @@ import {
   KeyOutlined,
   QuestionCircleOutlined,
   CustomerServiceOutlined,
+  WifiOutlined,
+  ApiOutlined,
+  ClusterOutlined,
 } from '@ant-design/icons-vue'
 import IotisticaLogo from '@/components/IotisticaLogo.vue'
-import { useProStatus } from '@/composables/useProStatus'
-
-const { proInstalled } = useProStatus()
 
 const route = useRoute()
 const router = useRouter()
@@ -40,10 +40,6 @@ function onMenuClick({ key }: { key: string }) {
     window.open('https://docs.iotistica.com/docs/intro', '_blank')
     return
   }
-  if (key === 'support') {
-    window.open('https://iotistica.com/solutions.html', '_blank')
-    return
-  }
   router.push(key)
 }
 </script>
@@ -52,7 +48,7 @@ function onMenuClick({ key }: { key: string }) {
   <a-layout-sider
     :width="220"
     theme="dark"
-    style="min-height: 100vh; background: #0a0a0a; display: flex; flex-direction: column;"
+    style="height: 100vh; background: #0a0a0a; display: flex; flex-direction: column; flex-shrink: 0;"
   >
     <div class="logo">
       <IotisticaLogo :size="24" />
@@ -75,6 +71,11 @@ function onMenuClick({ key }: { key: string }) {
         <a-menu-item key="/endpoints">
           <template #icon><ApartmentOutlined /></template>
           Endpoints
+        </a-menu-item>
+
+        <a-menu-item key="/devices">
+          <template #icon><ClusterOutlined /></template>
+          Devices
         </a-menu-item>
 
         <a-menu-item key="/destinations">
@@ -103,6 +104,12 @@ function onMenuClick({ key }: { key: string }) {
           <a-tag color="gold" class="pro-badge">Pro</a-tag>
         </a-menu-item>
 
+        <a-menu-item key="/mqtt-broker">
+          <template #icon><WifiOutlined /></template>
+          MQTT
+          <a-tag color="gold" class="pro-badge">Pro</a-tag>
+        </a-menu-item>
+
         <a-menu-item key="/logs">
           <template #icon><FileTextOutlined /></template>
           Logs
@@ -120,6 +127,11 @@ function onMenuClick({ key }: { key: string }) {
           <a-menu-item key="/admin/users">
             <template #icon><TeamOutlined /></template>
             Users
+          </a-menu-item>
+
+          <a-menu-item key="/admin/mqtt-users">
+            <template #icon><ApiOutlined /></template>
+            MQTT Users
           </a-menu-item>
         </a-sub-menu>
       </a-menu>
@@ -153,16 +165,11 @@ function onMenuClick({ key }: { key: string }) {
           Help
         </a-menu-item>
 
-        <a-tooltip
-          :title="!proInstalled ? 'Priority support requires Pro' : ''"
-          placement="right"
-        >
-          <a-menu-item key="support" :disabled="!proInstalled">
-            <template #icon><CustomerServiceOutlined /></template>
-            Support
-            <a-tag color="gold" class="pro-badge">Pro</a-tag>
-          </a-menu-item>
-        </a-tooltip>
+        <a-menu-item key="/support">
+          <template #icon><CustomerServiceOutlined /></template>
+          Support
+          <a-tag color="gold" class="pro-badge">Pro</a-tag>
+        </a-menu-item>
       </a-menu>
     </div>
 

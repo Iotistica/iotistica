@@ -1226,6 +1226,20 @@ router.patch('/v1/endpoints/:uuid', async (req: Request, res: Response, next: Ne
 });
 
 /**
+ * PUT /v1/endpoints/:uuid
+ * Full replace — update all fields including name, protocol, connection, data_points.
+ */
+router.put('/v1/endpoints/:uuid', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const result = await actions.replaceEndpoint(req.params.uuid, req.body);
+		return res.status(200).json({ endpoint: result });
+	} catch (error: any) {
+		if (error?.statusCode === 404) return res.status(404).json({ error: error.message });
+		next(error);
+	}
+});
+
+/**
  * DELETE /v1/endpoints/:uuid
  * Remove an endpoint from the agent configuration by UUID
  */
@@ -1832,6 +1846,130 @@ router.delete('/v1/admin/users/:username', (req: Request, res: Response, next: N
 			return res.status(404).json({ error: 'User not found' });
 		}
 		UserModel.delete(username);
+		return res.status(200).json({ ok: true });
+	} catch (error) {
+		next(error);
+	}
+});
+
+// ── MQTT Broker Monitor (/v1/mqtt/*) ──────────────────────────────────────────
+
+import { BrokerMonitorService } from '../mqtt/broker-monitor.js';
+
+// ── MQTT Users (/v1/mqtt/users) ───────────────────────────────────────────────
+// Users are stored in the mqtt_users SQLite table so they survive builds and
+// cloud-state syncs. The auth reconciler picks them up on every reconcile cycle.
+
+import { generateMosquittoHash } from '../mqtt/auth.js';
+import { MqttUserModel } from '../db/models/mqtt-user.model.js';
+
+router.get('/v1/mqtt/users', (_req: Request, res: Response, next: NextFunction) => {
+	try {
+		const bootstrapUsername = process.env.MQTT_USERNAME ?? 'admin';
+		const localUsers = MqttUserModel.getAll();
+		const users = [
+			{ username: bootstrapUsername, topic: '#', access: 'readwrite', superuser: true },
+			...localUsers
+				.filter(u => u.username !== bootstrapUsername)
+				.map(u => ({
+					username: u.username,
+					topic: '#',
+					access: u.is_superuser ? 'readwrite' : 'readwrite',
+					superuser: u.is_superuser,
+				})),
+		];
+		res.json({ users });
+	} catch (err) { next(err); }
+});
+
+router.post('/v1/mqtt/users', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { username, password } = req.body ?? {};
+		if (!username || typeof username !== 'string') return res.status(400).json({ error: '"username" is required' });
+		if (!password || typeof password !== 'string') return res.status(400).json({ error: '"password" is required' });
+		const bootstrapUsername = process.env.MQTT_USERNAME ?? 'admin';
+		if (username === bootstrapUsername) return res.status(400).json({ error: 'Cannot create a user with the admin username' });
+		if (MqttUserModel.existsByUsername(username)) return res.status(409).json({ error: `User "${username}" already exists` });
+
+		const passwordHash = generateMosquittoHash(password);
+		MqttUserModel.create(username, passwordHash);
+		await actions.reconcileMqttAuth();
+		res.status(201).json({ ok: true, username });
+	} catch (err) { next(err); }
+});
+
+router.delete('/v1/mqtt/users/:username', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { username } = req.params;
+		const bootstrapUsername = process.env.MQTT_USERNAME ?? 'admin';
+		if (username === bootstrapUsername) return res.status(400).json({ error: 'Cannot delete the bootstrap admin user' });
+		if (!MqttUserModel.existsByUsername(username)) return res.status(404).json({ error: `User "${username}" not found` });
+		MqttUserModel.delete(username);
+		await actions.reconcileMqttAuth();
+		res.json({ ok: true });
+	} catch (err) { next(err); }
+});
+
+router.get('/v1/mqtt/broker/status', (_req: Request, res: Response) => {
+	const monitor = BrokerMonitorService.getInstance();
+	res.json(monitor.getStatus());
+});
+
+router.get('/v1/mqtt/broker/metrics', (_req: Request, res: Response) => {
+	const monitor = BrokerMonitorService.getInstance();
+	res.json(monitor.getMetrics());
+});
+
+router.get('/v1/mqtt/broker/topic-tree', (_req: Request, res: Response) => {
+	const monitor = BrokerMonitorService.getInstance();
+	res.json(monitor.getTopicTree());
+});
+
+router.get('/v1/mqtt/topics', (_req: Request, res: Response) => {
+	const monitor = BrokerMonitorService.getInstance();
+	res.json(monitor.getTopics());
+});
+
+router.post('/v1/mqtt/broker/test', (req: Request, res: Response) => {
+	const { url, username, password } = req.body ?? {};
+	if (typeof url !== 'string' || !url.trim()) {
+		return res.status(400).json({ ok: false, error: '"url" is required' });
+	}
+	import('mqtt').then(({ default: mqtt }) => {
+		let settled = false;
+		const client = mqtt.connect(url.trim(), {
+			clientId: `iotistica-test-${Math.random().toString(36).slice(2, 8)}`,
+			clean: true,
+			reconnectPeriod: 0,
+			connectTimeout: 8000,
+			...(username ? { username, password: password ?? '' } : {}),
+		});
+		const finish = (ok: boolean, error?: string) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			client.end(true);
+			res.json({ ok, ...(error ? { error } : {}) });
+		};
+		const timer = setTimeout(() => finish(false, 'Connection timed out'), 9000);
+		client.on('connect', () => finish(true));
+		client.on('error', (err: Error) => finish(false, err.message));
+	}).catch((err: Error) => res.status(500).json({ ok: false, error: err.message }));
+});
+
+router.patch('/v1/mqtt/broker/config', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { url, username, password } = req.body ?? {};
+		if (typeof url !== 'string' || !url.trim()) {
+			return res.status(400).json({ error: '"url" (string) is required' });
+		}
+		// Persist to settings
+		await actions.updateSettings({
+			mqttMonitor: { url: url.trim(), username: username ?? '', password: password ?? '' },
+		});
+		// Apply immediately — reconnect the live monitor
+		const monitor = BrokerMonitorService.getInstance();
+		monitor.reconfigure(url.trim(), username ?? '', password ?? '');
 		return res.status(200).json({ ok: true });
 	} catch (error) {
 		next(error);

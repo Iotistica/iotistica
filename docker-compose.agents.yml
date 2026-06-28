@@ -33,6 +33,9 @@ services:
       - MQTT_BROKER_URL=mqtt://iotistic-mosquitto-agent:1883
       - MQTT_USERNAME=admin
       - MQTT_PASSWORD=iotistic42!
+      - LOCAL_MQTT_URL=mqtt://iotistic-mosquitto-agent:1883
+      - LOCAL_MQTT_USER=admin
+      - LOCAL_MQTT_PASS=iotistic42!
       # Bootstrap & Security (not dashboard-controlled)
       - STANDALONE=false
       - IOTISTICA_API=http://host.docker.internal:4003
@@ -51,6 +54,7 @@ services:
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000
+      - PRO_FORCE=true
   agent-cli:
     build:
       context: ./agent-cli

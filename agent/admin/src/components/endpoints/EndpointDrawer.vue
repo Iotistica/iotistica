@@ -30,17 +30,19 @@ const form = ref<EndpointCreateData>({
   enabled: true,
 })
 
-// edit-only fields (PATCH supports only these two)
-const editForm = ref({ enabled: true, poll_interval: 5000 })
-
 watch(
   () => props.open,
   (open) => {
     if (!open) return
     if (props.editing) {
-      editForm.value = {
-        enabled: props.editing.enabled,
+      form.value = {
+        name: props.editing.name,
+        protocol: props.editing.protocol,
+        connection: { ...props.editing.connection },
         poll_interval: props.editing.poll_interval,
+        enabled: props.editing.enabled,
+        data_points: props.editing.data_points ? [...props.editing.data_points] : undefined,
+        metadata: props.editing.metadata ? { ...props.editing.metadata } : undefined,
       }
     } else if (props.prefill) {
       form.value = {
@@ -65,7 +67,7 @@ async function submit() {
   saving.value = true
   try {
     if (props.editing) {
-      await endpointsApi.update(props.editing.uuid, editForm.value)
+      await endpointsApi.replace(props.editing.uuid, form.value)
       message.success('Endpoint updated')
     } else {
       await endpointsApi.create(form.value)
@@ -93,32 +95,7 @@ function close() {
     width="480"
     @close="close"
   >
-    <!-- Edit mode: only expose what PATCH supports -->
     <a-form
-      v-if="editing"
-      ref="formRef"
-      :model="editForm"
-      layout="vertical"
-    >
-      <a-form-item label="Enabled" name="enabled">
-        <a-switch v-model:checked="editForm.enabled" />
-      </a-form-item>
-      <a-form-item label="Poll Interval (ms)" name="poll_interval">
-        <a-input-number
-          v-model:value="editForm.poll_interval"
-          :min="100"
-          :step="1000"
-          style="width: 100%"
-        />
-      </a-form-item>
-      <div style="color: #999; font-size: 12px; margin-top: -8px">
-        To change connection settings, delete this endpoint and re-add it.
-      </div>
-    </a-form>
-
-    <!-- Create mode: full form -->
-    <a-form
-      v-else
       ref="formRef"
       :model="form"
       layout="vertical"
@@ -133,7 +110,7 @@ function close() {
       </a-form-item>
 
       <a-form-item label="Protocol" name="protocol">
-        <a-select v-model:value="form.protocol" @change="onProtocolChange">
+        <a-select v-model:value="form.protocol" :disabled="!!editing" @change="onProtocolChange">
           <a-select-option v-for="p in PROTOCOLS" :key="p" :value="p">
             {{ p.toUpperCase() === 'OPCUA' ? 'OPC-UA' : p.charAt(0).toUpperCase() + p.slice(1) }}
           </a-select-option>

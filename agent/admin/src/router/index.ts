@@ -27,6 +27,11 @@ const router = createRouter({
       meta: { title: 'Endpoints' },
     },
     {
+      path: '/devices',
+      component: () => import('@/views/DevicesView.vue'),
+      meta: { title: 'Devices' },
+    },
+    {
       path: '/discovery-rules',
       component: () => import('@/views/DiscoveryRulesView.vue'),
       meta: { title: 'Discovery' },
@@ -57,9 +62,24 @@ const router = createRouter({
       meta: { title: 'Users' },
     },
     {
+      path: '/admin/mqtt-users',
+      component: () => import('@/views/MqttUsersView.vue'),
+      meta: { title: 'MQTT Users' },
+    },
+    {
       path: '/user/profile',
       component: () => import('@/views/ProfileView.vue'),
       meta: { title: 'Profile' },
+    },
+    {
+      path: '/support',
+      component: () => import('@/views/SupportView.vue'),
+      meta: { title: 'Support' },
+    },
+    {
+      path: '/mqtt-broker',
+      component: () => import('@/views/MqttBrokerView.vue'),
+      meta: { title: 'MQTT Broker' },
     },
   ],
 })
