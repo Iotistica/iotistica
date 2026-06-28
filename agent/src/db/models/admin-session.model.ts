@@ -31,6 +31,17 @@ export class AdminSessionModel {
 		getDatabase().prepare(`DELETE FROM admin_sessions WHERE token = ?`).run(token);
 	}
 
+	static getAll(): { token: string; username: string; created_at: number; expires_at: number }[] {
+		return getDatabase()
+			.prepare(`SELECT token, username, created_at, expires_at FROM admin_sessions ORDER BY created_at DESC`)
+			.all() as { token: string; username: string; created_at: number; expires_at: number }[];
+	}
+
+	static deleteByToken(token: string): boolean {
+		const info = getDatabase().prepare(`DELETE FROM admin_sessions WHERE token = ?`).run(token);
+		return info.changes > 0;
+	}
+
 	static cleanup(): void {
 		getDatabase().prepare(`DELETE FROM admin_sessions WHERE expires_at < ?`).run(Date.now());
 	}

@@ -1852,6 +1852,35 @@ router.delete('/v1/admin/users/:username', (req: Request, res: Response, next: N
 	}
 });
 
+// ── Administration: Sessions ──────────────────────────────────────────────────
+
+router.get('/v1/admin/sessions', (_req: Request, res: Response, next: NextFunction) => {
+	try {
+		const now = Date.now();
+		const sessions = AdminSessionModel.getAll().map((s) => ({
+			token: s.token.slice(0, 8) + '…',
+			token_id: s.token,
+			username: s.username,
+			created_at: new Date(s.created_at).toISOString(),
+			expires_at: new Date(s.expires_at).toISOString(),
+			active: s.expires_at > now,
+		}));
+		return res.status(200).json({ sessions });
+	} catch (error) {
+		next(error);
+	}
+});
+
+router.delete('/v1/admin/sessions/:token', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const deleted = AdminSessionModel.deleteByToken(req.params.token);
+		if (!deleted) return res.status(404).json({ error: 'Session not found' });
+		return res.status(200).json({ ok: true });
+	} catch (error) {
+		next(error);
+	}
+});
+
 // ── MQTT Broker Monitor (/v1/mqtt/*) ──────────────────────────────────────────
 
 import { BrokerMonitorService } from '../mqtt/broker-monitor.js';

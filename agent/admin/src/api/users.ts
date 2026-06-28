@@ -9,7 +9,17 @@ export interface User {
   updated_at: string
 }
 
+export interface Session {
+  token: string
+  token_id: string
+  username: string
+  created_at: string
+  expires_at: string
+  active: boolean
+}
+
 const BASE = '/v1/admin/users'
+const SESSIONS_BASE = '/v1/admin/sessions'
 
 export const usersApi = {
   getAll(): Promise<User[]> {
@@ -26,5 +36,15 @@ export const usersApi = {
 
   remove(username: string): Promise<void> {
     return client.delete(`${BASE}/${encodeURIComponent(username)}`).then(() => undefined)
+  },
+}
+
+export const sessionsApi = {
+  getAll(): Promise<Session[]> {
+    return client.get<{ sessions: Session[] }>(SESSIONS_BASE).then((r) => r.data.sessions)
+  },
+
+  revoke(token: string): Promise<void> {
+    return client.delete(`${SESSIONS_BASE}/${encodeURIComponent(token)}`).then(() => undefined)
   },
 }
