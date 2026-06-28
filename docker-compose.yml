@@ -508,7 +508,8 @@ services:
         ports:
             - "47808:47808/udp"
         networks:
-            - iotistica-net
+            iotistica-net:
+                ipv4_address: 172.22.0.20
         environment:
             - BACPYPES_IFACE=0.0.0.0:47808  # ip:port format — bacpypes3 Address() does not accept ip:port/prefix
         logging:
@@ -807,3 +808,6 @@ networks:
   iotistica-net:
     driver: bridge
     name: iotistica-net
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
