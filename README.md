@@ -1,10 +1,10 @@
 # Iotistica
 
-Open-source edge runtime for industrial IoT — connects field devices over Modbus, OPC UA, BACnet, and MQTT, orchestrates Docker workloads, and streams telemetry to the cloud or any MQTT broker. Pro adds fleet management, remote shell, anomaly detection, and managed cloud ingestion.
+Connect industrial assets, process data at the edge, and deliver trusted telemetry to your cloud or the Iotistica platform. The agent runs on any Linux edge device, bridges industrial protocols, orchestrates Docker workloads, and streams telemetry upstream. Agent Pro adds fleet management, remote shell, MQTT broker monitoring, anomaly detection, and managed cloud ingestion.
 
 **[iotistica.com](https://iotistica.com) · [Solutions & Pricing](https://iotistica.com/solutions.html)**
 
-![Dashboard](website/documentation-site/static/img/agent/dashboard.png)
+![Dashboard](https://raw.githubusercontent.com/Iotistica/iot-website/main/docs/static/img/agent/dashboard.JPG)
 
 ---
 
@@ -18,12 +18,13 @@ Open-source edge runtime for industrial IoT — connects field devices over Modb
 | Docker container orchestration | ✓ | ✓ | ✓ |
 | Fleet management & remote shell | — | ✓ | ✓ |
 | On-device anomaly detection | — | ✓ | ✓ |
+| **MQTT broker monitor** | — | ✓ | ✓ |
 | Publish to InfluxDB, Azure, AWS, GCP | — | ✓ | ✓ |
 | Managed cloud ingestion & time-series storage | — | — | ✓ |
 | 24/7 support | — | ✓ | ✓ |
 | License | Apache 2.0 | Commercial | Commercial |
 
-See [iotistica.com/solutions.html](https://iotistica.com/solutions.html) for full feature details and pricing.
+See **[iotistica.com/solutions.html](https://iotistica.com/solutions.html)** for full feature details and pricing.
 
 ---
 
@@ -33,8 +34,6 @@ See [iotistica.com/solutions.html](https://iotistica.com/solutions.html) for ful
 |-----------|-------------|
 | `agent/` | Edge runtime deployed on IoT hardware (Node.js 20 / TypeScript) |
 | `mosquitto-agent/` | MQTT broker auth sidecar |
-| `website/` | Documentation and marketing site |
-| `simulators/` | Sensor data simulators for development |
 | `influxdb/` | InfluxDB configuration |
 | `grafana/` | Grafana dashboards |
 
@@ -51,15 +50,32 @@ The agent is the core component. It runs on edge hardware and handles:
 - **Device discovery** — scans networks for industrial devices and auto-registers endpoints
 - **Offline-first** — continues operating without cloud connectivity; all state changes buffer and flush on reconnect
 
-> **Pro features** — fleet management, remote shell, anomaly detection, and cloud destinations (InfluxDB, Azure IoT Hub, AWS IoT Core, GCP) require [Iotistica Agent Pro](https://iotistica.com/solutions.html).
+> **Pro features** — fleet management, remote shell, MQTT broker monitor, anomaly detection, and cloud destinations (InfluxDB, Azure IoT Hub, AWS IoT Core, GCP) require [Iotistica Agent Pro](https://iotistica.com/solutions.html).
 
 ### Admin UI
 
-![Endpoints](website/documentation-site/static/img/agent/endpoints-list.png)
-
 The agent ships a local admin UI (Vue 3 + Ant Design Vue) served at `http://<device>:48481/admin/`.
 
-![Applications](website/documentation-site/static/img/agent/applications-grid.png)
+![Endpoints](https://raw.githubusercontent.com/Iotistica/iot-website/main/docs/static/img/agent/endpoints.JPG)
+
+![Applications](https://raw.githubusercontent.com/Iotistica/iot-website/main/docs/static/img/agent/applications.JPG)
+
+---
+
+## MQTT Broker Monitor ✦ Pro
+
+Agent Pro includes a live MQTT broker monitor — browse every active topic, inspect message payloads in real time, and track client counts and throughput without leaving the admin UI.
+
+![MQTT Broker Monitor showing metric cards, topic tree, and message payload viewer](https://raw.githubusercontent.com/Iotistica/iot-website/main/docs/static/img/agent/mqtt.JPG)
+
+The monitor connects to the local Mosquitto broker and refreshes every five seconds:
+
+- **Metric cards** — connected clients, active topic count, inbound and outbound message rates
+- **Topic tree** — every active topic grouped by path segments, with live filtering and per-topic message counts
+- **Message viewer** — full payload for the selected topic, formatted as JSON where possible, with QoS and retain flag
+- **MQTT Users** — manage per-device broker credentials with topic-pattern isolation and read/write access control
+
+> MQTT broker monitoring is available in **Agent Pro**. [Compare plans →](https://iotistica.com/solutions.html)
 
 ---
 
@@ -187,8 +203,6 @@ GET  /v1/settings
 ...
 ```
 
-See the full [Agent API reference](website/documentation-site/docs/references/agent-api.mdx) or the built documentation site.
-
 ---
 
 ## Industrial Protocols
@@ -223,8 +237,6 @@ Compression options: `json`, `msgpack`, `json+deflate`, `msgpack+deflate`.
 - **Remote shell** — HMAC-SHA256 on every command, 30s anti-replay window, device UUID binding, shell allowlist, privilege drop to UID 1000 *(Pro)*
 - **Firewall** — custom `IOTISTIC-FIREWALL` iptables chain; Device API blocked externally; MQTT restricted to LAN + Docker subnets; IPv4 + IPv6
 
-See the [Security documentation](website/documentation-site/docs/agent/security.mdx) for full details.
-
 ---
 
 ## Development
@@ -255,19 +267,6 @@ npm run build   # Build into agent/admin/dist/
 
 ---
 
-## Documentation
-
-Full documentation is in `website/documentation-site/`. To run locally:
-
-```bash
-cd website/documentation-site
-npm install
-npm start       # http://localhost:3000
-npm run build   # Production build
-```
-
----
-
 ## License
 
 The Community Edition is licensed under [Apache 2.0](LICENSE).
@@ -279,5 +278,5 @@ Iotistica Agent Pro is a commercial extension distributed as a private npm packa
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/Iotistica/iotistica/issues)
-- **Documentation**: [iotistica.com](https://iotistica.com)
+- **Documentation**: [docs.iotistica.com](https://docs.iotistica.com)
 - **Pro & Ingestion**: [iotistica.com/solutions.html](https://iotistica.com/solutions.html)
