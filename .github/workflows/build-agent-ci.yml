@@ -8,6 +8,7 @@ on:
       - 'agent/**'
       - 'agent-cli/**'
       - '.github/workflows/build-agent-ci.yml'
+      - '.github/actions/**'
   workflow_dispatch:
 
 env:
