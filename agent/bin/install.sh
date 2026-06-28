@@ -112,9 +112,9 @@ install_docker_if_needed() {
         SHOULD_INSTALL="yes"
     fi
 
-    if [ "$SHOULD_INSTALL" != "yes" ] && [ "$SHOULD_INSTALL" != "y" ] && [ -t 0 ]; then
-        echo -n "Would you like to install Docker now? (yes/no): "
-        read SHOULD_INSTALL
+    if [ "$SHOULD_INSTALL" != "yes" ] && [ "$SHOULD_INSTALL" != "y" ] && [ -e /dev/tty ]; then
+        echo -n "Would you like to install Docker now? (yes/no): " >/dev/tty
+        read SHOULD_INSTALL </dev/tty
     fi
     
     if [ "$SHOULD_INSTALL" = "yes" ] || [ "$SHOULD_INSTALL" = "y" ]; then
@@ -171,10 +171,10 @@ should_manage_mosquitto() {
         SHOULD_INSTALL_MOSQUITTO="yes"
     elif [ "$IOTISTICA_INSTALL_MOSQUITTO" = "no" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "false" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "0" ]; then
         SHOULD_INSTALL_MOSQUITTO="no"
-    elif [ -t 0 ]; then
+    elif [ -e /dev/tty ]; then
         echo ""
-        echo -n "Install and manage a local Mosquitto broker? (yes/no): "
-        read SHOULD_INSTALL_MOSQUITTO
+        echo -n "Install and manage a local Mosquitto MQTT broker? (yes/no): " >/dev/tty
+        read SHOULD_INSTALL_MOSQUITTO </dev/tty
     fi
 
     if [ "$SHOULD_INSTALL_MOSQUITTO" = "yes" ] || [ "$SHOULD_INSTALL_MOSQUITTO" = "y" ]; then
@@ -503,25 +503,51 @@ echo ""
         fi
     }
     
-    # Check if running interactively
-    # Interactive if: NOT in CI mode AND (has terminal OR stdin is from terminal)
-    # When piped (curl | sh), stdin is not a tty, but we can still prompt if we redirect from /dev/tty
-    if [ -z "$CI" ] && [ -z "$IOTISTICA_AGENT_VERSION" ] && [ -z "$IOTISTICA_DEVICE_PORT" ]; then
-        # No CI and no env vars set = assume interactive mode
+    # Detect interactive vs non-interactive.
+    # Non-interactive: CI flag set, or key env vars already provided via environment.
+    INTERACTIVE_MODE="no"
+    if [ -z "$CI" ] && [ -z "$IOTISTICA_AGENT_VERSION" ] && [ -z "$IOTISTICA_DEVICE_PORT" ] \
+       && [ -z "$IOTISTICA_API" ] && [ -z "$PROVISIONING_KEY" ] && [ -e /dev/tty ]; then
+        INTERACTIVE_MODE="yes"
+    fi
+
+    if [ "$INTERACTIVE_MODE" = "yes" ]; then
         echo "Running in interactive mode"
-        
-        # Prompt for configuration (read directly from /dev/tty to work when piped)
-        echo -n "Enter cloud API endpoint (leave empty for local mode): " >/dev/tty
-        read IOTISTICA_API < /dev/tty
-        echo -n "Enter provisioning API key (leave empty for local mode): " >/dev/tty
-        read PROVISIONING_KEY < /dev/tty
-        echo -n "Enter device API port [48484]: " >/dev/tty
-        read DEVICE_API_PORT < /dev/tty
-        DEVICE_API_PORT=${DEVICE_API_PORT:-48484}
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo " Deployment Mode"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  1) Standalone  — fully offline, local admin UI only"
+        echo "  2) Cloud       — connect to Iotistica Cloud (fleet management, remote access)"
+        echo ""
+        echo -n "Select mode [1/2]: " >/dev/tty
+        read DEPLOY_MODE </dev/tty
+
+        if [ "$DEPLOY_MODE" = "2" ]; then
+            echo ""
+            echo -n "Iotistica API URL [https://api.iotistica.com]: " >/dev/tty
+            read IOTISTICA_API </dev/tty
+            IOTISTICA_API="${IOTISTICA_API:-https://api.iotistica.com}"
+
+            echo -n "Provisioning key: " >/dev/tty
+            read PROVISIONING_KEY </dev/tty
+
+            if [ -z "$PROVISIONING_KEY" ]; then
+                echo "Warning: No provisioning key provided — agent will run in cloud mode but cannot provision"
+            fi
+        else
+            echo "→ Standalone mode selected"
+            IOTISTICA_API=""
+            PROVISIONING_KEY=""
+        fi
+
+        echo ""
+        echo -n "Device API port [48484]: " >/dev/tty
+        read DEVICE_API_PORT </dev/tty
+        DEVICE_API_PORT="${DEVICE_API_PORT:-48484}"
         AGENT_VERSION="dev"
     else
         echo "Running in non-interactive mode"
-        
         if [ -n "$PROVISIONING_KEY" ]; then
             echo "[DEBUG] PROVISIONING_KEY found in environment (redacted)"
         fi
