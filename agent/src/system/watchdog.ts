@@ -64,16 +64,17 @@ function sendNativeNotification(message: string, socketPath: string, logger?: Ag
 	}
 }
 
-/** Send a systemd notification using systemd-notify command fallback. */
+/** Send a systemd notification. Prefers the systemd-notify CLI which correctly
+ *  handles both filesystem and abstract socket paths without needing a bound
+ *  local socket. Falls back to raw unix_dgram if the CLI is unavailable. */
 async function sendNotification(message: string, logger?: AgentLogger): Promise<void> {
 	const socketPath = process.env.NOTIFY_SOCKET;
-
-	if (socketPath) {
-		sendNativeNotification(message, socketPath, logger);
-		await new Promise(resolve => setTimeout(resolve, 25));
+	if (!socketPath) {
 		return;
 	}
 
+	// Try systemd-notify CLI first — it is the most reliable method and handles
+	// all socket path formats (filesystem and abstract @-prefixed paths).
 	try {
 		await execFileAsync('systemd-notify', ['--pid=parent', message]);
 		logger?.debugSync(`Sent notification: ${message}`, {
@@ -81,12 +82,13 @@ async function sendNotification(message: string, logger?: AgentLogger): Promise<
 			operation: 'sendNotification',
 			method: 'systemd-notify'
 		});
-	} catch (error) {
-		logger?.errorSync(`Failed to send notification: ${message}`, error instanceof Error ? error : undefined, {
-			component: LogComponents.agent,
-			operation: 'sendNotification'
-		});
+		return;
+	} catch {
+		// CLI not available; fall back to raw unix_dgram socket.
 	}
+
+	sendNativeNotification(message, socketPath, logger);
+	await new Promise(resolve => setTimeout(resolve, 25));
 }
 
 /** Health check used to gate watchdog pings. */
