@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 20000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
-    PYTHON=python3 npm ci --omit=dev --omit=optional && \
+    PYTHON=python3 npm ci --omit=dev --omit=optional --legacy-peer-deps && \
     npm dedupe --omit=dev --omit=optional && \
     find node_modules -type d \( \
         -name test -o \
