@@ -189,14 +189,13 @@ onMounted(() => { load(); loadSchedule() })
         style="margin-bottom: 20px"
       />
 
-      <div class="schedule-card">
-        <div class="schedule-header">
-          <div class="schedule-title">
-            <ClockCircleOutlined style="margin-right: 8px" />
-            Automatic Schedule
-          </div>
+      <a-card size="small" style="margin-bottom: 20px">
+        <template #title>
+          <span><ClockCircleOutlined style="margin-right: 8px" />Automatic Schedule</span>
+        </template>
+        <template #extra>
           <a-switch v-model:checked="schedule.enabled" @change="saveSchedule" />
-        </div>
+        </template>
 
         <a-spin :spinning="scheduleLoading">
           <div class="schedule-body">
@@ -229,7 +228,7 @@ onMounted(() => { load(); loadSchedule() })
               </a-button>
             </div>
 
-            <div v-if="schedule.enabled" class="schedule-meta">
+            <div v-if="schedule.enabled && (schedule.lastRunAt || schedule.nextRunAt)" class="schedule-meta">
               <span v-if="schedule.lastRunAt" class="meta-item">
                 Last run: <strong>{{ formatDate(schedule.lastRunAt) }}</strong>
               </span>
@@ -239,7 +238,7 @@ onMounted(() => { load(); loadSchedule() })
             </div>
           </div>
         </a-spin>
-      </div>
+      </a-card>
 
       <a-table
         :dataSource="backups"
@@ -345,27 +344,6 @@ onMounted(() => { load(); loadSchedule() })
 
 .muted {
   color: #555;
-}
-
-.schedule-card {
-  background: #111;
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
-  padding: 16px 20px;
-  margin-bottom: 20px;
-}
-
-.schedule-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.schedule-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
 }
 
 .schedule-body {
