@@ -406,11 +406,11 @@ jobs:
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz" \
               --file "/tmp/all-artifacts/agent-package-${arch}/agent-${VERSION}-${arch}.tar.gz" \
-              --overwrite true --auth-mode key --content-type application/gzip
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type application/gzip
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz.sha256" \
               --file "/tmp/all-artifacts/agent-package-${arch}/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --overwrite true --auth-mode key --content-type text/plain
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type text/plain
           done
 
       - name: Upload install.sh to Azure staging
@@ -420,15 +420,15 @@ jobs:
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent/builds/${VERSION}/install.sh" \
             --file "/tmp/all-artifacts/agent-package-x86_64/install.sh" \
-            --overwrite true --auth-mode key --content-type text/x-shellscript
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type text/x-shellscript
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent/builds/${VERSION}/install.sh.sha256" \
             --file "/tmp/all-artifacts/agent-package-x86_64/install.sh.sha256" \
-            --overwrite true --auth-mode key --content-type text/plain
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type text/plain
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent/builds/${VERSION}/build-meta.json" \
             --file "/tmp/all-artifacts/agent-package-x86_64/build-meta.json" \
-            --overwrite true --auth-mode key --content-type application/json
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type application/json
 
       - name: Upload CLI tarballs to Azure
         run: |
@@ -439,25 +439,25 @@ jobs:
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent-cli/cli-latest-${arch}.tar.gz" \
               --file "/tmp/all-artifacts/cli-package-${arch}/cli-latest-${arch}.tar.gz" \
-              --overwrite true --auth-mode key --content-type application/gzip
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type application/gzip
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent-cli/cli-latest-${arch}.tar.gz.sha256" \
               --file "/tmp/all-artifacts/cli-package-${arch}/cli-latest-${arch}.tar.gz.sha256" \
-              --overwrite true --auth-mode key --content-type text/plain
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type text/plain
           done
 
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent-cli/cli-latest.tar.gz" \
             --file "/tmp/all-artifacts/cli-package-x86_64/cli-latest.tar.gz" \
-            --overwrite true --auth-mode key --content-type application/gzip
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type application/gzip
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent-cli/cli-latest.tar.gz.sha256" \
             --file "/tmp/all-artifacts/cli-package-x86_64/cli-latest.tar.gz.sha256" \
-            --overwrite true --auth-mode key --content-type text/plain
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type text/plain
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent-cli/cli-latest-build-meta.json" \
             --file "/tmp/all-artifacts/cli-package-x86_64/cli-latest-build-meta.json" \
-            --overwrite true --auth-mode key --content-type application/json
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type application/json
 
       - name: Upload CLI installer to Azure
         run: |
@@ -465,7 +465,7 @@ jobs:
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent-cli/cli-install.sh" \
             --file "${{ github.workspace }}/agent-cli/bin/cli-install.sh" \
-            --overwrite true --auth-mode key --content-type text/x-shellscript
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type text/x-shellscript
 
       - name: Azure Upload Summary
         if: always()

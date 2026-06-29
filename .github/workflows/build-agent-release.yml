@@ -73,18 +73,18 @@ jobs:
             az storage blob download --account-name "$ACCT" --container-name scripts \
               --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz" \
               --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" \
-              --auth-mode key
+              --auth-mode key --only-show-errors --output none
             az storage blob download --account-name "$ACCT" --container-name scripts \
               --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz.sha256" \
               --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --auth-mode key
+              --auth-mode key --only-show-errors --output none
           done
           az storage blob download --account-name "$ACCT" --container-name scripts \
             --name "agent/builds/${VERSION}/install.sh" \
-            --file "/tmp/artifacts/install.sh" --auth-mode key
+            --file "/tmp/artifacts/install.sh" --auth-mode key --only-show-errors --output none
           az storage blob download --account-name "$ACCT" --container-name scripts \
             --name "agent/builds/${VERSION}/install.sh.sha256" \
-            --file "/tmp/artifacts/install.sh.sha256" --auth-mode key
+            --file "/tmp/artifacts/install.sh.sha256" --auth-mode key --only-show-errors --output none
 
       - name: Verify checksums
         run: |
@@ -107,41 +107,41 @@ jobs:
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/versions/agent-${VERSION}-${arch}.tar.gz" \
               --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" \
-              --overwrite true --auth-mode key --content-type application/gzip
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type application/gzip
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/versions/agent-${VERSION}-${arch}.tar.gz.sha256" \
               --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --overwrite true --auth-mode key --content-type text/plain
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type text/plain
             # Rolling latest pointer
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/agent-latest-${arch}.tar.gz" \
               --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" \
-              --overwrite true --auth-mode key --content-type application/gzip
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type application/gzip
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/agent-latest-${arch}.tar.gz.sha256" \
               --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --overwrite true --auth-mode key --content-type text/plain
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type text/plain
           done
 
           # Generic x86_64 latest (used by install.sh default)
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent/agent-latest.tar.gz" \
             --file "/tmp/artifacts/agent-${VERSION}-x86_64.tar.gz" \
-            --overwrite true --auth-mode key --content-type application/gzip
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type application/gzip
 
           # install.sh — current + versioned snapshot
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent/install.sh" \
             --file "/tmp/artifacts/install.sh" \
-            --overwrite true --auth-mode key --content-type text/x-shellscript
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type text/x-shellscript
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent/install.sh.sha256" \
             --file "/tmp/artifacts/install.sh.sha256" \
-            --overwrite true --auth-mode key --content-type text/plain
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type text/plain
           az storage blob upload --account-name "$ACCT" --container-name scripts \
             --name "agent/versions/install-${VERSION}.sh" \
             --file "/tmp/artifacts/install.sh" \
-            --overwrite true --auth-mode key --content-type text/x-shellscript
+            --overwrite true --auth-mode key --only-show-errors --output none --content-type text/x-shellscript
 
   promote-docker:
     name: Promote Docker Image
@@ -214,17 +214,17 @@ jobs:
           for arch in x86_64 arm64; do
             az storage blob download --account-name "$ACCT" --container-name scripts \
               --name "agent/versions/agent-${VERSION}-${arch}.tar.gz" \
-              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" --auth-mode key
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" --auth-mode key --only-show-errors --output none
             az storage blob download --account-name "$ACCT" --container-name scripts \
               --name "agent/versions/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" --auth-mode key
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" --auth-mode key --only-show-errors --output none
           done
           az storage blob download --account-name "$ACCT" --container-name scripts \
             --name "agent/install.sh" \
-            --file "/tmp/artifacts/install.sh" --auth-mode key
+            --file "/tmp/artifacts/install.sh" --auth-mode key --only-show-errors --output none
           az storage blob download --account-name "$ACCT" --container-name scripts \
             --name "agent/install.sh.sha256" \
-            --file "/tmp/artifacts/install.sh.sha256" --auth-mode key
+            --file "/tmp/artifacts/install.sh.sha256" --auth-mode key --only-show-errors --output none
 
       - name: Generate SBOM with Syft
         run: |
@@ -252,11 +252,11 @@ jobs:
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json" \
               --file "/tmp/sbom/${f}.cyclonedx.json" \
-              --overwrite true --auth-mode key --content-type application/json
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type application/json
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/sbom/${f}.cyclonedx.json" \
               --file "/tmp/sbom/${f}.cyclonedx.json" \
-              --overwrite true --auth-mode key --content-type application/json
+              --overwrite true --auth-mode key --only-show-errors --output none --content-type application/json
           done
 
       - name: Create GitHub Release
