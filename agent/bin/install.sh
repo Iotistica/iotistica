@@ -145,8 +145,8 @@ install_docker_if_needed() {
 install_mosquitto_if_needed() {
     if ! command -v setfacl >/dev/null 2>&1; then
         echo "Installing ACL utilities..."
-        apt-get install -y --no-install-recommends acl || {
-            echo "Error: Failed to install ACL utilities"
+        apt-get install -y -qq --no-install-recommends acl > /dev/null || {
+            echo "✗ Error: Failed to install ACL utilities"
             exit 1
         }
     fi
@@ -155,14 +155,14 @@ install_mosquitto_if_needed() {
         echo "✓ Mosquitto is already installed ($(mosquitto -h 2>&1 | head -1))"
     else
         echo "Installing Mosquitto..."
-        apt-get install -y --no-install-recommends mosquitto mosquitto-clients || {
-            echo "Error: Failed to install Mosquitto"
+        apt-get install -y -qq --no-install-recommends mosquitto mosquitto-clients > /dev/null || {
+            echo "✗ Error: Failed to install Mosquitto"
             exit 1
         }
         echo "✓ Mosquitto installed successfully"
     fi
 
-    systemctl enable mosquitto
+    systemctl enable mosquitto > /dev/null 2>&1
 }
 
 should_manage_mosquitto() {
@@ -413,32 +413,30 @@ echo ""
     fi
     
     # Clean up package cache and fix broken dependencies
-    apt-get clean
-    apt-get autoclean
-    dpkg --configure -a 2>/dev/null || true
-    
+    apt-get clean > /dev/null 2>&1 || true
+    dpkg --configure -a > /dev/null 2>&1 || true
+
     # Update package lists
-    apt-get update || {
+    apt-get update -qq > /dev/null || {
         echo "Warning: apt-get update failed, continuing anyway..."
     }
-    
+
     # Install essential dependencies first (these should always work)
-    apt-get install -y --no-install-recommends \
-        curl wget git build-essential python3 make g++ || {
-        echo "Error: Failed to install essential build tools"
+    apt-get install -y -qq --no-install-recommends \
+        curl wget git build-essential python3 make g++ > /dev/null || {
+        echo "✗ Error: Failed to install essential build tools"
         exit 1
     }
-    
+
     # Install database and utilities (skip if fails due to architecture issues)
-    apt-get install -y --no-install-recommends \
-        sqlite3 libsqlite3-dev jq procps 2>/dev/null || {
+    apt-get install -y -qq --no-install-recommends \
+        sqlite3 libsqlite3-dev jq procps > /dev/null 2>&1 || {
         echo "Warning: Some database packages failed to install, continuing..."
     }
-    
-    
+
     # Install networking tools
-    apt-get install -y --no-install-recommends \
-        iproute2 iptables net-tools iputils-ping || {
+    apt-get install -y -qq --no-install-recommends \
+        iproute2 iptables net-tools iputils-ping > /dev/null 2>&1 || {
         echo "Warning: Some network tools failed to install"
     }
 
@@ -452,16 +450,16 @@ echo ""
     if ! command -v node &> /dev/null; then
         echo ""
         echo "Installing Node.js 20..."
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-        apt-get install -y nodejs
+        curl -fsSL https://deb.nodesource.com/setup_20.x 2>/dev/null | bash - > /dev/null 2>&1
+        apt-get install -y -qq nodejs > /dev/null
         echo "✓ Node.js installed successfully"
     else
         NODE_MAJOR_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
         if [ "$NODE_MAJOR_VERSION" -lt 18 ]; then
             echo ""
             echo "Upgrading Node.js to version 20..."
-            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-            apt-get install -y nodejs
+            curl -fsSL https://deb.nodesource.com/setup_20.x 2>/dev/null | bash - > /dev/null 2>&1
+            apt-get install -y -qq nodejs > /dev/null
             echo "✓ Node.js upgraded successfully"
         else
             echo "✓ Node.js is already installed ($(node --version)) - version 18+ is compatible"
@@ -819,16 +817,21 @@ echo ""
         # and will not load on aarch64. Unconditional — no detection needed.
         if [ "$ARCH" = "aarch64" ]; then
             echo ""
-            echo "ARM64 device — rebuilding native modules from source (this takes ~2 min)..."
-            apt-get install -y --no-install-recommends build-essential python3 libsqlite3-dev || {
+            echo "ARM64 device — compiling native modules from source (takes ~3 min)..."
+            apt-get install -y -qq --no-install-recommends build-essential python3 libsqlite3-dev > /dev/null || {
                 echo "✗ Error: Failed to install build tools for native module compilation"
                 exit 1
             }
             cd /opt/iotistic/agent
-            npm rebuild better-sqlite3 node-pty --build-from-source || {
-                echo "✗ Error: Failed to rebuild native modules for ARM64"
+            _BUILD_LOG=$(mktemp)
+            if ! npm rebuild better-sqlite3 node-pty --build-from-source > "$_BUILD_LOG" 2>&1; then
+                echo "✗ Error: Failed to compile native modules for ARM64"
+                echo "--- Build output ---"
+                cat "$_BUILD_LOG"
+                rm -f "$_BUILD_LOG"
                 exit 1
-            }
+            fi
+            rm -f "$_BUILD_LOG"
             echo "✓ Native modules compiled for aarch64"
         fi
 
