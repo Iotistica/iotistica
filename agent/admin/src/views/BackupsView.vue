@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, ReloadOutlined, RollbackOutlined, DeleteOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, ReloadOutlined, RollbackOutlined, DeleteOutlined, ClockCircleOutlined } from '@ant-design/icons-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { client } from '@/api/client'
 
@@ -12,11 +12,32 @@ interface Backup {
   checksumSha256?: string
 }
 
+interface BackupSchedule {
+  enabled: boolean
+  intervalHours: number
+  keepCount: number
+  lastRunAt: string | null
+  nextRunAt: string | null
+}
+
 const backups = ref<Backup[]>([])
 const loading = ref(false)
 const creating = ref(false)
 const restoringFile = ref<string | null>(null)
 const deletingFile = ref<string | null>(null)
+
+const schedule = ref<BackupSchedule>({ enabled: false, intervalHours: 24, keepCount: 7, lastRunAt: null, nextRunAt: null })
+const scheduleLoading = ref(false)
+const scheduleSaving = ref(false)
+
+const intervalOptions = [
+  { label: 'Every hour', value: 1 },
+  { label: 'Every 6 hours', value: 6 },
+  { label: 'Every 12 hours', value: 12 },
+  { label: 'Daily (24 h)', value: 24 },
+  { label: 'Every 2 days', value: 48 },
+  { label: 'Weekly', value: 168 },
+]
 
 const columns = [
   { title: 'File', key: 'fileName', ellipsis: true },
@@ -35,6 +56,35 @@ async function load() {
     message.error(e?.message ?? 'Failed to load backups')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSchedule() {
+  scheduleLoading.value = true
+  try {
+    const { data } = await client.get<{ schedule: BackupSchedule }>('/v1/backups/schedule')
+    schedule.value = data.schedule
+  } catch (e: any) {
+    message.error(e?.message ?? 'Failed to load schedule')
+  } finally {
+    scheduleLoading.value = false
+  }
+}
+
+async function saveSchedule() {
+  scheduleSaving.value = true
+  try {
+    const { data } = await client.put<{ schedule: BackupSchedule }>('/v1/backups/schedule', {
+      enabled: schedule.value.enabled,
+      intervalHours: schedule.value.intervalHours,
+      keepCount: schedule.value.keepCount,
+    })
+    schedule.value = data.schedule
+    message.success('Schedule saved')
+  } catch (e: any) {
+    message.error(e?.message ?? 'Failed to save schedule')
+  } finally {
+    scheduleSaving.value = false
   }
 }
 
@@ -109,7 +159,7 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleString()
 }
 
-onMounted(load)
+onMounted(() => { load(); loadSchedule() })
 </script>
 
 <template>
@@ -138,6 +188,58 @@ onMounted(load)
         message="Backups are stored on the device filesystem. Restore replaces the live database — a pre-restore snapshot is created automatically before any restore."
         style="margin-bottom: 20px"
       />
+
+      <div class="schedule-card">
+        <div class="schedule-header">
+          <div class="schedule-title">
+            <ClockCircleOutlined style="margin-right: 8px" />
+            Automatic Schedule
+          </div>
+          <a-switch v-model:checked="schedule.enabled" @change="saveSchedule" />
+        </div>
+
+        <a-spin :spinning="scheduleLoading">
+          <div class="schedule-body">
+            <div class="schedule-fields">
+              <a-form-item label="Frequency" style="margin-bottom: 0">
+                <a-select
+                  v-model:value="schedule.intervalHours"
+                  :options="intervalOptions"
+                  style="width: 200px"
+                  :disabled="!schedule.enabled"
+                />
+              </a-form-item>
+              <a-form-item label="Keep last" style="margin-bottom: 0">
+                <a-input-number
+                  v-model:value="schedule.keepCount"
+                  :min="1"
+                  :max="100"
+                  :disabled="!schedule.enabled"
+                  addon-after="backups"
+                  style="width: 160px"
+                />
+              </a-form-item>
+              <a-button
+                type="primary"
+                :loading="scheduleSaving"
+                :disabled="!schedule.enabled"
+                @click="saveSchedule"
+              >
+                Save
+              </a-button>
+            </div>
+
+            <div v-if="schedule.enabled" class="schedule-meta">
+              <span v-if="schedule.lastRunAt" class="meta-item">
+                Last run: <strong>{{ formatDate(schedule.lastRunAt) }}</strong>
+              </span>
+              <span v-if="schedule.nextRunAt" class="meta-item">
+                Next run: <strong>{{ formatDate(schedule.nextRunAt) }}</strong>
+              </span>
+            </div>
+          </div>
+        </a-spin>
+      </div>
 
       <a-table
         :dataSource="backups"
@@ -243,5 +345,50 @@ onMounted(load)
 
 .muted {
   color: #555;
+}
+
+.schedule-card {
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.schedule-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.schedule-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.schedule-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.schedule-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.schedule-meta {
+  display: flex;
+  gap: 24px;
+  font-size: 12px;
+  color: #888;
+}
+
+.meta-item strong {
+  color: rgba(255, 255, 255, 0.65);
 }
 </style>

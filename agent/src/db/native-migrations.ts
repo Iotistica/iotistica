@@ -17,6 +17,7 @@ import { migration as addAdminSessions } from './migrations/20260620000000_add_a
 import { migration as addAdminUsers } from './migrations/20260620010000_add_admin_users.js';
 import { migration as addDriftOptionsToEndpointOutputs } from './migrations/20260621000000_add_drift_options_to_endpoint_outputs.js';
 import { migration as addTargetSyncEnabled } from './migrations/20260626000000_add_target_sync_enabled.js';
+import { migration as addBackupSchedule } from './migrations/20260629000000_add_backup_schedule.js';
 import type { NativeSqliteMigration } from './migration-types.js';
 
 export const nativeMigrations: NativeSqliteMigration[] = [
@@ -39,4 +40,5 @@ export const nativeMigrations: NativeSqliteMigration[] = [
 	addAdminUsers,
 	addDriftOptionsToEndpointOutputs,
 	addTargetSyncEnabled,
+	addBackupSchedule,
 ];

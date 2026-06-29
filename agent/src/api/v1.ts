@@ -2024,6 +2024,7 @@ import {
 	getDefaultBackupDir,
 } from '../db/backup.js';
 import { getDatabasePath } from '../db/db-path.js';
+import { BackupScheduleModel } from '../db/models/backup-schedule.model.js';
 import { join as pathJoin } from 'path';
 import { existsSync, rmSync } from 'fs';
 
@@ -2078,6 +2079,44 @@ router.delete('/v1/backups/:fileName', async (req: Request, res: Response, next:
 		rmSync(backupPath, { force: true });
 		rmSync(metaPath, { force: true });
 		return res.status(200).json({ ok: true });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/** GET /v1/backups/schedule — get the current backup schedule config */
+router.get('/v1/backups/schedule', (_req: Request, res: Response, next: NextFunction) => {
+	try {
+		const schedule = BackupScheduleModel.get();
+		return res.status(200).json({ schedule });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/** PUT /v1/backups/schedule — update the backup schedule config */
+router.put('/v1/backups/schedule', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { enabled, intervalHours, keepCount } = req.body as {
+			enabled?: boolean;
+			intervalHours?: number;
+			keepCount?: number;
+		};
+
+		const patch: Parameters<typeof BackupScheduleModel.upsert>[0] = {};
+		if (typeof enabled === 'boolean') patch.enabled = enabled;
+		if (typeof intervalHours === 'number' && intervalHours >= 1) patch.intervalHours = intervalHours;
+		if (typeof keepCount === 'number' && keepCount >= 1) patch.keepCount = keepCount;
+
+		// When enabling or changing the interval, recalculate next_run_at
+		if (patch.intervalHours !== undefined || patch.enabled) {
+			const current = BackupScheduleModel.get();
+			const hours = patch.intervalHours ?? current.intervalHours;
+			patch.nextRunAt = new Date(Date.now() + hours * 3_600_000).toISOString();
+		}
+
+		const schedule = BackupScheduleModel.upsert(patch);
+		return res.status(200).json({ schedule });
 	} catch (error) {
 		next(error);
 	}

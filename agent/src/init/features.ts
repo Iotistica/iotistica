@@ -12,6 +12,7 @@ import { LogComponents } from '../logging/types';
 import { loadJobsFeature, loadShellHandler as loadShellHandlerPro } from '../pro/loader.js';
 import { DiscoveryService } from '../discovery/service.js';
 import { DiscoveryRulesScheduler } from '../discovery/rules-scheduler.js';
+import { BackupScheduler } from '../db/backup-scheduler.js';
 
 import { DevicePublish } from '../publish/index.js';
 import type { AdapterManager } from '../plugins/index.js';
@@ -689,6 +690,8 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 	await initDiscoveryService(ctx);
 	featureContext.discoveryService = ctx.discoveryService;
 
+	initBackupScheduler(ctx);
+
 	await initializer.initDeviceFeatures();
 	await initializer.initJobsFeature();
 
@@ -720,6 +723,19 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 	} else {
 		agentLogger?.warnSync('AgentUpdater not initialized, version reconciliation unavailable', {
 			component: LogComponents.agent
+		});
+	}
+}
+
+export function initBackupScheduler(ctx: AgentInitContext): void {
+	try {
+		const scheduler = new BackupScheduler(ctx.agentLogger);
+		scheduler.start();
+		ctx.backupScheduler = scheduler;
+	} catch (error) {
+		ctx.agentLogger?.warnSync('Failed to start backup scheduler (non-fatal)', {
+			component: LogComponents.agent,
+			error: (error as Error).message,
 		});
 	}
 }
