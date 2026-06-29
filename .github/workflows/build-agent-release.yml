@@ -61,7 +61,7 @@ jobs:
           for arch in x86_64 arm64; do
             az storage blob show --account-name "$ACCT" --container-name scripts \
               --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz" \
-              --auth-mode key --output none \
+              --auth-mode key --only-show-errors --output none \
               || { echo "ERROR: agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz not found."; \
                    echo "Ensure package.json version is ${VERSION} and CI has completed on master before tagging."; \
                    exit 1; }
@@ -69,7 +69,7 @@ jobs:
           done
           az storage blob show --account-name "$ACCT" --container-name scripts \
             --name "agent/builds/${VERSION}/install.sh" \
-            --auth-mode key --output none \
+            --auth-mode key --only-show-errors --output none \
             || { echo "ERROR: agent/builds/${VERSION}/install.sh not found."; exit 1; }
           echo "  ✓ install.sh"
           echo "All artifacts verified."
