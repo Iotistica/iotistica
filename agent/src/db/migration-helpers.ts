@@ -1,8 +1,8 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import * as fs from 'fs';
 
-export function tableExists(db: Database.Database, tableName: string): boolean {
+export function tableExists(db: DatabaseSync, tableName: string): boolean {
 	const row = db
 		.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1")
 		.get(tableName);
@@ -10,12 +10,12 @@ export function tableExists(db: Database.Database, tableName: string): boolean {
 	return Boolean(row);
 }
 
-export function columnExists(db: Database.Database, tableName: string, columnName: string): boolean {
+export function columnExists(db: DatabaseSync, tableName: string, columnName: string): boolean {
 	if (!tableExists(db, tableName)) {
 		return false;
 	}
 
-	const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+	const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as unknown as Array<{ name: string }>;
 	return columns.some((column) => column.name === columnName);
 }
 

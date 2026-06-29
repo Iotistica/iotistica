@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 
 export interface DiscoveryRule {
@@ -33,7 +33,7 @@ type DiscoveryRuleRow = Omit<DiscoveryRule, 'enabled' | 'auto_enable' | 'target_
 export class DiscoveryRuleModel {
 	private static table = 'discovery_rules';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -61,14 +61,14 @@ export class DiscoveryRuleModel {
 	static getAll(): DiscoveryRule[] {
 		const rows = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} ORDER BY name ASC`)
-			.all() as DiscoveryRuleRow[];
+			.all() as unknown as DiscoveryRuleRow[];
 		return rows.map(r => this.parseRow(r)).filter((r): r is DiscoveryRule => r !== null);
 	}
 
 	static getByUuid(uuid: string): DiscoveryRule | null {
 		const row = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} WHERE uuid = ? LIMIT 1`)
-			.get(uuid) as DiscoveryRuleRow | undefined;
+			.get(uuid) as unknown as DiscoveryRuleRow | undefined;
 		return this.parseRow(row);
 	}
 
@@ -76,7 +76,7 @@ export class DiscoveryRuleModel {
 		const now = new Date().toISOString();
 		const rows = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} WHERE enabled = 1 AND status != 'running' AND (next_run_at IS NULL OR next_run_at <= ?)`)
-			.all(now) as DiscoveryRuleRow[];
+			.all(now) as unknown as DiscoveryRuleRow[];
 		return rows.map(r => this.parseRow(r)).filter((r): r is DiscoveryRule => r !== null);
 	}
 

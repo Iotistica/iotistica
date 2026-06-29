@@ -1,6 +1,6 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 
 export type NativeSqliteMigration = {
 	name: string;
-	up: (db: Database.Database) => void;
+	up: (db: DatabaseSync) => void;
 };

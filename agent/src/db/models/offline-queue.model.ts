@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 
 export interface OfflineQueueRecord {
@@ -12,7 +12,7 @@ export interface OfflineQueueRecord {
 export class OfflineQueueModel {
 	private static table = 'offline_queue';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -50,7 +50,7 @@ export class OfflineQueueModel {
 				WHERE queueName = ?
 				ORDER BY createdAt ASC
 			`)
-			.all(queueName) as OfflineQueueRecord[];
+			.all(queueName) as unknown as OfflineQueueRecord[];
 	}
 
 	static getPayloads(queueName: string): Array<{ payload: string }> {
@@ -61,7 +61,7 @@ export class OfflineQueueModel {
 				WHERE queueName = ?
 				ORDER BY createdAt ASC
 			`)
-			.all(queueName) as Array<{ payload: string }>;
+			.all(queueName) as unknown as Array<{ payload: string }>;
 	}
 
 	static insert(queueName: string, payload: string, createdAt: number, attempts: number = 0): void {
@@ -82,7 +82,7 @@ export class OfflineQueueModel {
 				ORDER BY createdAt ASC
 				LIMIT 1
 			`)
-			.get(queueName) as Pick<OfflineQueueRecord, 'id'> | undefined;
+			.get(queueName) as unknown as Pick<OfflineQueueRecord, 'id'> | undefined;
 
 		return row ?? null;
 	}
@@ -135,6 +135,6 @@ export class OfflineQueueModel {
 		const result = this.getDb()
 			.prepare(`DELETE FROM ${this.table} WHERE queueName = ? AND createdAt < ?`)
 			.run(queueName, cutoffMs);
-		return result.changes;
+		return Number(result.changes);
 	}
 }

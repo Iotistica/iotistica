@@ -36,14 +36,14 @@ export class MqttUserModel {
 	static getAll(): MqttUser[] {
 		const rows = this.db()
 			.prepare('SELECT id, username, is_superuser, is_active, created_at, updated_at FROM mqtt_users ORDER BY created_at DESC')
-			.all() as MqttUserRow[];
+			.all() as unknown as MqttUserRow[];
 		return rows.map(parseRow);
 	}
 
 	static getByUsername(username: string): MqttUser | null {
 		const row = this.db()
 			.prepare('SELECT id, username, is_superuser, is_active, created_at, updated_at FROM mqtt_users WHERE username = ?')
-			.get(username) as MqttUserRow | undefined;
+			.get(username) as unknown as MqttUserRow | undefined;
 		return row ? parseRow(row) : null;
 	}
 
@@ -57,7 +57,7 @@ export class MqttUserModel {
 
 	static update(username: string, fields: { is_active?: boolean; is_superuser?: boolean; password_hash?: string }): MqttUser | null {
 		const sets: string[] = [];
-		const values: unknown[] = [];
+		const values: (string | number | null)[] = [];
 
 		if (fields.is_active !== undefined)    { sets.push('is_active = ?');    values.push(fields.is_active ? 1 : 0); }
 		if (fields.is_superuser !== undefined)  { sets.push('is_superuser = ?'); values.push(fields.is_superuser ? 1 : 0); }

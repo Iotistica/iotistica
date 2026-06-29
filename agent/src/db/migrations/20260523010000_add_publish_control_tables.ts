@@ -1,8 +1,8 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { tableExists } from '../migration-helpers.js';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
-function up(db: Database.Database): void {
+function up(db: DatabaseSync): void {
 	if (!tableExists(db, 'publish_destinations')) {
 		db.exec(`
 			CREATE TABLE publish_destinations (

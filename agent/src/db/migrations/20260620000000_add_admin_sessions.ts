@@ -1,7 +1,7 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
-function up(db: Database.Database): void {
+function up(db: DatabaseSync): void {
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS admin_sessions (
 			token       TEXT    PRIMARY KEY,

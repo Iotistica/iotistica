@@ -3,7 +3,7 @@
  * Stores key-value metadata for agent operations (discovery, etc.)
  */
 
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 
 type MetadataRow = {
@@ -14,7 +14,7 @@ type MetadataRow = {
 export class MetadataModel {
 	private static table = 'agent_metadata';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -24,7 +24,7 @@ export class MetadataModel {
 	static async get(key: string): Promise<string | null> {
 		const row = this.getDb()
 			.prepare(`SELECT value FROM ${this.table} WHERE key = ? LIMIT 1`)
-			.get(key) as Pick<MetadataRow, 'value'> | undefined;
+			.get(key) as unknown as Pick<MetadataRow, 'value'> | undefined;
     
 		return row?.value ?? null;
 	}
@@ -66,7 +66,7 @@ export class MetadataModel {
 	static async getByPrefix(prefix: string): Promise<Record<string, string>> {
 		const rows = this.getDb()
 			.prepare(`SELECT key, value FROM ${this.table} WHERE key LIKE ? ORDER BY key ASC`)
-			.all(`${prefix}%`) as MetadataRow[];
+			.all(`${prefix}%`) as unknown as MetadataRow[];
 
 		return Object.fromEntries(rows.map((row) => [row.key, row.value]));
 	}

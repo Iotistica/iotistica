@@ -16,7 +16,7 @@
  * - Avoids ORM, repository layers, and lifecycle complexity.
  */
 
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 
 export type DriftType = 'new-field' | 'missing-field' | 'type-drift' | 'rename-candidate';
@@ -78,7 +78,7 @@ export class SchemaDriftModel {
 	private static readonly driftTable = 'message_schema_drift_log';
 	private static readonly baselineTable = 'message_schema_baseline';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -109,7 +109,7 @@ export class SchemaDriftModel {
 				event.renameCandidateFrom ?? null,
 				event.renameCandidateTo ?? null,
 				event.renameSimilarity ?? null,
-				event.timestamp ?? new Date().toISOString(),
+				event.timestamp instanceof Date ? event.timestamp.toISOString() : (event.timestamp ?? new Date().toISOString()),
 				event.details ? JSON.stringify(event.details) : null,
 			);
 	}
@@ -174,7 +174,7 @@ export class SchemaDriftModel {
 				ORDER BY detected_at DESC
 				LIMIT ?
 			`)
-			.all(endpointName, limit) as SchemaDriftLogRow[];
+			.all(endpointName, limit) as unknown as SchemaDriftLogRow[];
 
 		return rows.map((row) => ({
 			endpointName: row.endpoint_name,

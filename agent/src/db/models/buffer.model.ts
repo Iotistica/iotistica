@@ -12,8 +12,8 @@
  * - Statistics tracking
  */
 
-import type Database from 'better-sqlite3';
-import { getDatabase } from '../sqlite';
+import type { DatabaseSync } from 'node:sqlite';
+import { getDatabase, transact } from '../sqlite';
 
 export interface MessageBufferRecord {
   id?: number;
@@ -82,7 +82,7 @@ export class MessageBufferModel {
 	private static ttlCacheHours?: number;
 	private static ttlCacheAt?: number;
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -156,7 +156,7 @@ export class MessageBufferModel {
 		expiresAt.setHours(expiresAt.getHours() + ttlHours);
 
 		const createdAtIso = new Date().toISOString();
-		const enqueueTransaction = db.transaction(() => {
+		return transact(db, () => {
 			const result = db
 				.prepare(`
           INSERT INTO ${this.TABLE} (
@@ -202,9 +202,7 @@ export class MessageBufferModel {
 			this.enforceQuotas();
 
 			return Number(result.lastInsertRowid);
-		});
-
-		return enqueueTransaction.immediate();
+		}, 'IMMEDIATE');
 	}
 
 	/**
@@ -232,7 +230,7 @@ export class MessageBufferModel {
 		const scopeExact = scope?.exact ?? null;
 		const scopeExcludePattern = scope?.excludePrefix ? `${scope.excludePrefix}%` : null;
 
-		const dequeueTransaction = db.transaction(() => {
+		return transact(db, () => {
 			// Also exclude already-expired records (mirrors EdgeHub MessageIterator which
 			// skips messages where DateTime.UtcNow - timeStamp >= timeToLive mid-iteration,
 			// so expired data is never sent even before CleanupProcessor runs).
@@ -252,7 +250,7 @@ export class MessageBufferModel {
           ORDER BY created_at ASC
           LIMIT ?
         `)
-				.all(lockCutoffIso, nowIso, maxRetries ?? null, maxRetries ?? null, nowIso, scopeExact, scopeExact, scopeExcludePattern, scopeExcludePattern, limit) as Array<{ id: number }>;
+				.all(lockCutoffIso, nowIso, maxRetries ?? null, maxRetries ?? null, nowIso, scopeExact, scopeExact, scopeExcludePattern, scopeExcludePattern, limit) as unknown as Array<{ id: number }>;
 
 			if (candidateRows.length === 0) {
 				return [];
@@ -285,12 +283,10 @@ export class MessageBufferModel {
             AND status = 'sending'
           ORDER BY created_at ASC
         `)
-				.all(lockId) as MessageBufferRow[];
+				.all(lockId) as unknown as MessageBufferRow[];
 
 			return lockedRows.map((row) => this.mapRow(row));
-		});
-
-		return dequeueTransaction.immediate();
+		}, 'IMMEDIATE');
 	}
 
 	/**
@@ -423,9 +419,9 @@ export class MessageBufferModel {
 		}
 
 		const placeholders = idsToDelete.map(() => '?').join(', ');
-		const deleted = db
+		const deleted = Number(db
 			.prepare(`DELETE FROM ${this.TABLE} WHERE id IN (${placeholders})`)
-			.run(...idsToDelete).changes;
+			.run(...idsToDelete).changes);
 
 		if (deleted > 0) {
 			this.incrementMetric('total_dropped', deleted);
@@ -515,7 +511,7 @@ export class MessageBufferModel {
 		const lockedCutoff = new Date(Date.now() - lockTimeoutMs).toISOString();
 		const retryFutureCutoff = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-		const deleted = db.transaction(() => {
+		const deleted = transact(db, () => {
 			// Recover orphaned lock rows first so they can retry instead of being stuck forever.
 			db.prepare(`
         UPDATE ${this.TABLE}
@@ -536,17 +532,17 @@ export class MessageBufferModel {
       `).run(retryFutureCutoff);
 
 			if (typeof maxRetries === 'number') {
-				return db.prepare(`
+				return Number(db.prepare(`
           DELETE FROM ${this.TABLE}
           WHERE expires_at < ? OR retry_count >= ?
-        `).run(new Date().toISOString(), maxRetries).changes;
+        `).run(new Date().toISOString(), maxRetries).changes);
 			}
 
-			return db.prepare(`
+			return Number(db.prepare(`
         DELETE FROM ${this.TABLE}
         WHERE expires_at < ?
-      `).run(new Date().toISOString()).changes;
-		}).immediate();
+      `).run(new Date().toISOString()).changes);
+		}, 'IMMEDIATE');
     
 		if (deleted > 0) {
 			this.incrementMetric('total_dropped', deleted);
@@ -737,9 +733,9 @@ export class MessageBufferModel {
 		for (let start = 0; start < ids.length; start += this.ID_DELETE_CHUNK_SIZE) {
 			const chunk = ids.slice(start, start + this.ID_DELETE_CHUNK_SIZE);
 			const placeholders = chunk.map(() => '?').join(', ');
-			deleted += db
+			deleted += Number(db
 				.prepare(`DELETE FROM ${this.TABLE} WHERE id IN (${placeholders})`)
-				.run(...chunk).changes;
+				.run(...chunk).changes);
 		}
 
 		return deleted;
@@ -770,7 +766,7 @@ export class MessageBufferModel {
         ORDER BY created_at DESC
         LIMIT ?
       `)
-			.all(endpointName, limit) as MessageBufferRow[];
+			.all(endpointName, limit) as unknown as MessageBufferRow[];
 
 		return rows.map((row) => this.mapRow(row));
 	}

@@ -1,8 +1,8 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { columnExists } from '../migration-helpers.js';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
-function up(db: Database.Database): void {
+function up(db: DatabaseSync): void {
 	if (columnExists(db, 'agent', 'target_sync_enabled')) return;
 	// Default 1 so existing provisioned agents keep full sync behaviour unchanged.
 	db.exec(`ALTER TABLE agent ADD COLUMN target_sync_enabled INTEGER NOT NULL DEFAULT 1`);

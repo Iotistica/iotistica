@@ -40,13 +40,13 @@ export class UserModel {
 	static getAll(): User[] {
 		return (this.db()
 			.prepare('SELECT id, username, is_superuser, is_active, created_at, updated_at FROM users ORDER BY created_at ASC')
-			.all() as UserRow[]).map(parseRow);
+			.all() as unknown as UserRow[]).map(parseRow);
 	}
 
 	static getByUsername(username: string): User | null {
 		const row = this.db()
 			.prepare('SELECT id, username, is_superuser, is_active, created_at, updated_at FROM users WHERE username = ?')
-			.get(username) as UserRow | undefined;
+			.get(username) as unknown as UserRow | undefined;
 		return row ? parseRow(row) : null;
 	}
 
@@ -67,7 +67,7 @@ export class UserModel {
 
 	static update(username: string, fields: { is_active?: boolean; is_superuser?: boolean; password_hash?: string }): User | null {
 		const sets: string[] = [];
-		const values: unknown[] = [];
+		const values: (string | number | null)[] = [];
 
 		if (fields.is_active !== undefined)     { sets.push('is_active = ?');     values.push(fields.is_active ? 1 : 0); }
 		if (fields.is_superuser !== undefined)  { sets.push('is_superuser = ?');  values.push(fields.is_superuser ? 1 : 0); }

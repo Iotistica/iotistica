@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 import { encryptData, decryptData, isEncrypted, MasterKeyManager } from '../../security/encryption';
 import type { AgentLogger } from '../../logging/agent-logger';
@@ -44,7 +44,7 @@ export class PublishDestinationsModel {
 		}
 	}
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -86,8 +86,8 @@ export class PublishDestinationsModel {
 	static getAll(includeDisabled: boolean = true): PublishDestinationRecord[] {
 		const db = this.getDb();
 		const rows = includeDisabled
-			? (db.prepare(`SELECT * FROM ${this.table} ORDER BY id ASC`).all() as PublishDestinationRow[])
-			: (db.prepare(`SELECT * FROM ${this.table} WHERE enabled = 1 ORDER BY id ASC`).all() as PublishDestinationRow[]);
+			? (db.prepare(`SELECT * FROM ${this.table} ORDER BY id ASC`).all() as unknown as PublishDestinationRow[])
+			: (db.prepare(`SELECT * FROM ${this.table} WHERE enabled = 1 ORDER BY id ASC`).all() as unknown as PublishDestinationRow[]);
 
 		return rows
 			.map((row) => this.mapRow(row))
@@ -95,7 +95,7 @@ export class PublishDestinationsModel {
 	}
 
 	static getById(id: number): PublishDestinationRecord | null {
-		const row = this.getDb().prepare(`SELECT * FROM ${this.table} WHERE id = ? LIMIT 1`).get(id) as PublishDestinationRow | undefined;
+		const row = this.getDb().prepare(`SELECT * FROM ${this.table} WHERE id = ? LIMIT 1`).get(id) as unknown as PublishDestinationRow | undefined;
 		return this.mapRow(row);
 	}
 
@@ -154,6 +154,6 @@ export class PublishDestinationsModel {
 
 	static delete(id: number): boolean {
 		const result = this.getDb().prepare(`DELETE FROM ${this.table} WHERE id = ?`).run(id);
-		return result.changes > 0;
+		return Number(result.changes) > 0;
 	}
 }

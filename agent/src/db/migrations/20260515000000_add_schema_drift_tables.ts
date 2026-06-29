@@ -1,8 +1,8 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { tableExists } from '../migration-helpers.js';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
-function indexExists(db: Database.Database, indexName: string): boolean {
+function indexExists(db: DatabaseSync, indexName: string): boolean {
 	const row = db
 		.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ? LIMIT 1")
 		.get(indexName);
@@ -10,7 +10,7 @@ function indexExists(db: Database.Database, indexName: string): boolean {
 	return Boolean(row);
 }
 
-function up(db: Database.Database): void {
+function up(db: DatabaseSync): void {
 	const oldDriftTable = 'schema_drift_log';
 	const newDriftTable = 'message_schema_drift_log';
 	const oldBaselineTable = 'schema_baseline';

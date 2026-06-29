@@ -1,9 +1,10 @@
 name: CI Build, Test & Push Agent
 
-on: 
+on:
   push:
     branches:
       - master
+      - feature/**
     paths:
       - 'agent/**'
       - 'agent-cli/**'
@@ -35,7 +36,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Cache node_modules
         id: node-modules-cache
@@ -120,7 +121,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Set up QEMU (ARM64 only)
         if: matrix.arch == 'arm64'
@@ -146,9 +147,9 @@ jobs:
         if: matrix.arch == 'arm64'
         run: |
           docker run --rm -v "${{ github.workspace }}/agent":/app -w /app --platform linux/arm64 \
-            node:20-slim bash -c "
+            node:24-slim bash -c "
               apt-get update -qq && apt-get install -y -qq build-essential python3 libsqlite3-dev
-              npm rebuild better-sqlite3 node-pty --build-from-source
+              npm rebuild node-pty @serialport/bindings-cpp
             "
 
       - name: Build tarball (${{ matrix.arch }})
@@ -172,7 +173,7 @@ jobs:
           fi
 
       - name: Azure login
-        uses: azure/login@1384c340ab2dda50fed2bee3041d1d87018aa5e8 # v2
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
@@ -296,7 +297,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Cache CLI node_modules
         id: cli-node-modules-cache
@@ -332,7 +333,7 @@ jobs:
           fi
 
       - name: Azure login
-        uses: azure/login@1384c340ab2dda50fed2bee3041d1d87018aa5e8 # v2
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
@@ -501,6 +502,93 @@ jobs:
           echo "### Installation Scripts:" >> $GITHUB_STEP_SUMMARY
           echo "- [install-docker.sh](https://apps.iotistica.com/agent/install-docker.sh) ([checksum](https://apps.iotistica.com/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
           echo "- [install-systemd.sh](https://apps.iotistica.com/agent/install-systemd.sh) ([checksum](https://apps.iotistica.com/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+
+  generate-sbom:
+    name: Generate SBOM
+    needs: [package, docker]
+    runs-on: [ubuntu-24.04]
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Azure login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Download latest tarballs from Azure
+        run: |
+          set -euo pipefail
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          mkdir -p /tmp/artifacts /tmp/sbom /tmp/extract/x86_64 /tmp/extract/arm64
+
+          az storage blob download --account-name "$ACCT" --container-name scripts \
+            --name agent/agent-latest-x86_64.tar.gz \
+            --file /tmp/artifacts/agent-latest-x86_64.tar.gz --auth-mode key
+
+          az storage blob download --account-name "$ACCT" --container-name scripts \
+            --name agent/agent-latest-arm64.tar.gz \
+            --file /tmp/artifacts/agent-latest-arm64.tar.gz --auth-mode key
+
+      - name: Install Syft
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft version
+
+      - name: Generate CycloneDX SBOMs
+        run: |
+          set -euo pipefail
+
+          # Source SBOM — npm dep graph from package-lock.json (same packages both arches)
+          syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source-x86_64.cyclonedx.json
+          cp /tmp/sbom/agent-source-x86_64.cyclonedx.json /tmp/sbom/agent-source-arm64.cyclonedx.json
+
+          # Artifact SBOMs — scan extracted tarballs (captures native binaries per arch)
+          tar -xzf /tmp/artifacts/agent-latest-x86_64.tar.gz -C /tmp/extract/x86_64
+          tar -xzf /tmp/artifacts/agent-latest-arm64.tar.gz -C /tmp/extract/arm64
+          syft dir:/tmp/extract/x86_64 -o cyclonedx-json=/tmp/sbom/agent-artifacts-x86_64.cyclonedx.json
+          syft dir:/tmp/extract/arm64 -o cyclonedx-json=/tmp/sbom/agent-artifacts-arm64.cyclonedx.json
+
+          # Install script SBOM
+          VERSION=$(jq -r '.version' agent/package.json)
+          mkdir -p /tmp/install
+          sed "s/AGENT_VERSION_PLACEHOLDER/${VERSION}/g" agent/bin/install.sh > /tmp/install/install.sh
+          syft dir:/tmp/install -o cyclonedx-json=/tmp/sbom/install-script.cyclonedx.json
+
+      - name: Upload SBOMs to Azure
+        run: |
+          set -euo pipefail
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+
+          for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
+            az storage blob upload \
+              --account-name "$ACCT" \
+              --container-name scripts \
+              --name "agent/sbom/${f}.cyclonedx.json" \
+              --file "/tmp/sbom/${f}.cyclonedx.json" \
+              --overwrite true \
+              --auth-mode key \
+              --content-type application/json
+          done
+
+      - name: SBOM summary
+        if: always()
+        run: |
+          echo "## SBOM" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
+            if [ -f "/tmp/sbom/${f}.cyclonedx.json" ]; then
+              echo "| \`${f}.cyclonedx.json\` | Uploaded |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| \`${f}.cyclonedx.json\` | Missing |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
 
   # integration-tests:
   #   name: Run Integration Tests

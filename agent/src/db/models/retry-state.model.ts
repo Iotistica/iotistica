@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 
 export interface RetryStateRecord {
@@ -14,7 +14,7 @@ export interface RetryStateRecord {
 export class RetryStateModel {
 	private static table = 'retry_state';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -24,7 +24,7 @@ export class RetryStateModel {
 				SELECT key, count, next_retry, last_error, terminal, retryable, updated_at
 				FROM ${this.table}
 			`)
-			.all() as RetryStateRecord[];
+			.all() as unknown as RetryStateRecord[];
 	}
 
 	static upsert(record: RetryStateRecord): void {

@@ -39,7 +39,7 @@ export class AdminSessionModel {
 
 	static deleteByToken(token: string): boolean {
 		const info = getDatabase().prepare(`DELETE FROM admin_sessions WHERE token = ?`).run(token);
-		return info.changes > 0;
+		return Number(info.changes) > 0;
 	}
 
 	static cleanup(): void {

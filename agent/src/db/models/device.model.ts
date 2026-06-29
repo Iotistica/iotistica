@@ -17,7 +17,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 import type { Endpoint } from './endpoint.model';
 
@@ -50,14 +50,14 @@ type DeviceRow = Omit<Device, 'enabled' | 'metadata'> & {
 export class DeviceModel {
 	private static readonly table = 'devices';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
 	static async getAll(protocol?: string): Promise<Device[]> {
 		const rows = protocol
-			? this.getDb().prepare(`SELECT * FROM ${this.table} WHERE protocol = ? ORDER BY name ASC`).all(protocol) as DeviceRow[]
-			: this.getDb().prepare(`SELECT * FROM ${this.table} ORDER BY name ASC`).all() as DeviceRow[];
+			? this.getDb().prepare(`SELECT * FROM ${this.table} WHERE protocol = ? ORDER BY name ASC`).all(protocol) as unknown as DeviceRow[]
+			: this.getDb().prepare(`SELECT * FROM ${this.table} ORDER BY name ASC`).all() as unknown as DeviceRow[];
 
 		return rows.map(this.parse);
 	}
@@ -75,7 +75,7 @@ export class DeviceModel {
         JOIN endpoints e ON e.id = d.endpoint_id
         ORDER BY d.name ASC
       `)
-			.all() as Array<DeviceRow & { endpoint_uuid: string }>;
+			.all() as unknown as Array<DeviceRow & { endpoint_uuid: string }>;
 
 		return rows.map((row) => ({ ...this.parse(row), endpoint_uuid: row.endpoint_uuid }));
 	}
@@ -83,7 +83,7 @@ export class DeviceModel {
 	static async getByEndpointId(endpointId: number): Promise<Device[]> {
 		const rows = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} WHERE endpoint_id = ?`)
-			.all(endpointId) as DeviceRow[];
+			.all(endpointId) as unknown as DeviceRow[];
 
 		return rows.map(this.parse);
 	}
@@ -91,7 +91,7 @@ export class DeviceModel {
 	static async getByUuid(uuid: string): Promise<Device | null> {
 		const row = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} WHERE uuid = ? LIMIT 1`)
-			.get(uuid) as DeviceRow | undefined;
+			.get(uuid) as unknown as DeviceRow | undefined;
 
 		return row ? this.parse(row) : null;
 	}
@@ -133,7 +133,7 @@ export class DeviceModel {
 		const existing = hasIdentifier
 			? db
 				.prepare(`SELECT id FROM ${this.table} WHERE endpoint_id = ? AND identifier = ? LIMIT 1`)
-				.get(device.endpoint_id, device.identifier) as { id: number } | undefined
+				.get(device.endpoint_id, device.identifier ?? null) as unknown as { id: number } | undefined
 			: db
 				.prepare(`SELECT id FROM ${this.table} WHERE endpoint_id = ? AND identifier IS NULL LIMIT 1`)
 				.get(device.endpoint_id) as { id: number } | undefined;
@@ -141,20 +141,20 @@ export class DeviceModel {
 		if (existing) {
 			db.prepare(`
         UPDATE ${this.table}
-        SET name = @name,
-            enabled = @enabled,
-            metadata = @metadata,
-            lastSeenAt = @lastSeenAt,
-            updated_at = @updated_at
-        WHERE id = @id
-      `).run({
-				id: existing.id,
-				name: device.name,
-				enabled: device.enabled ? 1 : 0,
-				metadata: device.metadata ? JSON.stringify(device.metadata) : null,
-				lastSeenAt: device.lastSeenAt instanceof Date ? device.lastSeenAt.toISOString() : (device.lastSeenAt ?? null),
-				updated_at: now,
-			});
+        SET name = ?,
+            enabled = ?,
+            metadata = ?,
+            lastSeenAt = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(
+				device.name,
+				device.enabled ? 1 : 0,
+				device.metadata ? JSON.stringify(device.metadata) : null,
+				device.lastSeenAt instanceof Date ? device.lastSeenAt.toISOString() : (device.lastSeenAt ?? null),
+				now,
+				existing.id,
+			);
 		} else {
 			db.prepare(`
         INSERT INTO ${this.table} (
@@ -168,30 +168,19 @@ export class DeviceModel {
           lastSeenAt,
           created_at,
           updated_at
-        ) VALUES (
-          @uuid,
-          @endpoint_id,
-          @name,
-          @protocol,
-          @enabled,
-          @identifier,
-          @metadata,
-          @lastSeenAt,
-          @created_at,
-          @updated_at
-        )
-      `).run({
-				uuid: device.uuid,
-				endpoint_id: device.endpoint_id,
-				name: device.name,
-				protocol: device.protocol,
-				enabled: device.enabled ? 1 : 0,
-				identifier: device.identifier ?? null,
-				metadata: device.metadata ? JSON.stringify(device.metadata) : null,
-				lastSeenAt: device.lastSeenAt instanceof Date ? device.lastSeenAt.toISOString() : (device.lastSeenAt ?? null),
-				created_at: now,
-				updated_at: now,
-			});
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+				device.uuid,
+				device.endpoint_id,
+				device.name,
+				device.protocol,
+				device.enabled ? 1 : 0,
+				device.identifier ?? null,
+				device.metadata ? JSON.stringify(device.metadata) : null,
+				device.lastSeenAt instanceof Date ? device.lastSeenAt.toISOString() : (device.lastSeenAt ?? null),
+				now,
+				now,
+			);
 		}
 	}
 
