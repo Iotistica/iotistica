@@ -15,6 +15,7 @@ set -e
 #   IOTISTICA_INSTALL_SOURCE       - Install source: auto | repo | artifact (default: auto)
 #   IOTISTICA_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
 #   IOTISTICA_INSTALL_MOSQUITTO    - Set to yes/true/1 to install and manage a local Mosquitto broker
+#   MQTT_BROKER_PORT               - Port for the local Mosquitto broker (default: 1883); set if 1883 is already in use
 #   AGENT_SHELL_HMAC_KEY           - HMAC secret for remote shell command verification (required when remote shell access is enabled)
 #   FORCE_INSTALL                 - Legacy opt-in flag; set to 1 to allow automatic Docker installation
 
@@ -184,6 +185,18 @@ should_manage_mosquitto() {
     return 1
 }
 
+is_port_in_use() {
+    local port="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -tlnp 2>/dev/null | grep -q ":${port}[[:space:]]" && return 0 || return 1
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -tlnp 2>/dev/null | grep -q ":${port}[[:space:]]" && return 0 || return 1
+    else
+        # fallback: try to bind briefly
+        (echo > /dev/tcp/127.0.0.1/"$port") 2>/dev/null && return 0 || return 1
+    fi
+}
+
 configure_mosquitto_file_auth() {
     echo ""
     echo "=================================="
@@ -201,6 +214,24 @@ configure_mosquitto_file_auth() {
 
     MQTT_BROKER_HOST_VALUE="${MQTT_BROKER_HOST:-localhost}"
     MQTT_BROKER_PORT_VALUE="${MQTT_BROKER_PORT:-1883}"
+
+    # Check if the desired port is already occupied
+    if is_port_in_use "$MQTT_BROKER_PORT_VALUE"; then
+        echo ""
+        echo "⚠️  Port $MQTT_BROKER_PORT_VALUE is already in use by another process."
+        echo "   (A Docker container or existing service may be running on this port.)"
+        echo ""
+        if [ -e /dev/tty ]; then
+            echo -n "Enter an alternative port for Mosquitto [8883]: " >/dev/tty
+            read ALT_PORT </dev/tty
+            MQTT_BROKER_PORT_VALUE="${ALT_PORT:-8883}"
+            echo "→ Using port $MQTT_BROKER_PORT_VALUE"
+        else
+            echo "Error: Port $MQTT_BROKER_PORT_VALUE is in use. Set MQTT_BROKER_PORT=<port> and rerun."
+            exit 1
+        fi
+    fi
+
     MQTT_BROKER_URL_VALUE="mqtt://${MQTT_BROKER_HOST_VALUE}:${MQTT_BROKER_PORT_VALUE}"
 
     export MQTT_BROKER_HOST_VALUE MQTT_BROKER_PORT_VALUE MQTT_BROKER_URL_VALUE
