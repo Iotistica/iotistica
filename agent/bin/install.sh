@@ -864,12 +864,15 @@ echo ""
         DEVICE_UUID=$(cat /var/lib/iotistic/agent/device-uuid)
     fi
     
+    API_SECURITY_MODE_VALUE="${API_SECURITY_MODE:-LOCAL_NETWORK}"
+
     cat > /etc/iotistic/agent.env << EOF
 AGENT_VERSION=${AGENT_VERSION}
 DEVICE_API_PORT=${DEVICE_API_PORT}
 DEVICE_UUID=${DEVICE_UUID}
 NODE_ENV=production
 LOG_LEVEL=info
+API_SECURITY_MODE=${API_SECURITY_MODE_VALUE}
 ORCHESTRATOR_TYPE=docker-compose
 ORCHESTRATOR_INTERVAL=30000
 DATA_DIR=/var/lib/iotistic/agent
