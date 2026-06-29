@@ -1344,8 +1344,12 @@ router.post('/v1/publish/destinations/test', async (req: Request, res: Response,
 
 		if (type === 'mqtt') {
 			const { createConnection } = await import('net');
-			const brokerUrl = typeof cfg?.brokerUrl === 'string' ? cfg.brokerUrl.trim() : '';
-			if (!brokerUrl) return res.status(200).json({ ok: false, error: 'Broker URL is required' });
+			let brokerUrl = typeof cfg?.brokerUrl === 'string' ? cfg.brokerUrl.trim() : '';
+			if (!brokerUrl && typeof cfg?.host === 'string' && cfg.host) {
+				const port = typeof cfg.port === 'number' ? cfg.port : 1883;
+				brokerUrl = `mqtt://${cfg.host}:${port}`;
+			}
+			if (!brokerUrl) return res.status(200).json({ ok: false, error: 'Host is required' });
 			try {
 				const u = new URL(brokerUrl);
 				const host = u.hostname;
