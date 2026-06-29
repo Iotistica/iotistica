@@ -67,6 +67,11 @@ const router = createRouter({
       meta: { title: 'MQTT Users' },
     },
     {
+      path: '/admin/backups',
+      component: () => import('@/views/BackupsView.vue'),
+      meta: { title: 'Backups' },
+    },
+    {
       path: '/user/profile',
       component: () => import('@/views/ProfileView.vue'),
       meta: { title: 'Profile' },

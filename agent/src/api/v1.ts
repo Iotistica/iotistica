@@ -2015,4 +2015,73 @@ router.patch('/v1/mqtt/broker/config', async (req: Request, res: Response, next:
 	}
 });
 
+// ─── Database Backups ─────────────────────────────────────────────────────────
+
+import {
+	createDbBackup,
+	listDbBackups,
+	restoreDbFromBackup,
+	pruneDbBackups,
+	getDefaultBackupDir,
+} from '../db/backup.js';
+import { getDatabasePath } from '../db/db-path.js';
+
+/** GET /v1/backups — list all database backups */
+router.get('/v1/backups', async (_req: Request, res: Response, next: NextFunction) => {
+	try {
+		const dbPath = getDatabasePath();
+		const backupDir = getDefaultBackupDir(dbPath);
+		const backups = listDbBackups({ backupDir });
+		return res.status(200).json({ backups });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/** POST /v1/backups — create a new database backup */
+router.post('/v1/backups', async (_req: Request, res: Response, next: NextFunction) => {
+	try {
+		const dbPath = getDatabasePath();
+		const backup = await createDbBackup({ dbPath });
+		return res.status(201).json({ backup });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/** POST /v1/backups/:fileName/restore — restore database from a named backup */
+router.post('/v1/backups/:fileName/restore', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { fileName } = req.params;
+		const dbPath = getDatabasePath();
+		const backupDir = getDefaultBackupDir(dbPath);
+		const backupPath = require('path').join(backupDir, fileName);
+		const result = await restoreDbFromBackup({ dbPath, backupPath, createPreRestoreBackup: true });
+		return res.status(200).json({ ok: true, restoredPath: result.restoredPath, preRestoreBackupPath: result.preRestoreBackupPath });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/** DELETE /v1/backups/:fileName — delete a backup file */
+router.delete('/v1/backups/:fileName', async (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const { fileName } = req.params;
+		const dbPath = getDatabasePath();
+		const backupDir = getDefaultBackupDir(dbPath);
+		const fs = await import('fs');
+		const path = await import('path');
+		const backupPath = path.join(backupDir, fileName);
+		const metaPath = `${backupPath}.meta.json`;
+		if (!fs.existsSync(backupPath)) {
+			return res.status(404).json({ error: 'Backup not found' });
+		}
+		fs.rmSync(backupPath, { force: true });
+		fs.rmSync(metaPath, { force: true });
+		return res.status(200).json({ ok: true });
+	} catch (error) {
+		next(error);
+	}
+});
+
 export default router;

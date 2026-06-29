@@ -20,6 +20,7 @@ import {
   WifiOutlined,
   ApiOutlined,
   ClusterOutlined,
+  DatabaseOutlined,
 } from '@ant-design/icons-vue'
 import IotisticaLogo from '@/components/IotisticaLogo.vue'
 
@@ -132,6 +133,11 @@ function onMenuClick({ key }: { key: string }) {
           <a-menu-item key="/admin/mqtt-users">
             <template #icon><ApiOutlined /></template>
             MQTT Users
+          </a-menu-item>
+
+          <a-menu-item key="/admin/backups">
+            <template #icon><DatabaseOutlined /></template>
+            Backups
           </a-menu-item>
         </a-sub-menu>
       </a-menu>
