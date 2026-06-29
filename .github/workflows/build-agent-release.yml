@@ -1,5 +1,9 @@
 name: Agent Release
 
+# Triggered by pushing a version tag: git tag v1.2.3 && git push origin v1.2.3
+# Promotes CI-built artifacts from agent/builds/{version}/ — no rebuild.
+# Requires: package.json version must match the tag before tagging.
+
 on:
   push:
     tags:
@@ -13,125 +17,150 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  package:
-    name: Build & Package (${{ matrix.arch }})
+  promote-artifacts:
+    name: Promote Artifacts to Release Paths
     runs-on: [ubuntu-24.04]
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            platform: linux/amd64
-          - arch: arm64
-            platform: linux/arm64
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
       - name: Extract version from tag
         id: version
         run: |
           TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Azure login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
-          node-version: '24'
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Set up QEMU (ARM64 only)
-        if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
-        with:
-          platforms: linux/arm64
-
-      - name: Stamp version into package.json
-        working-directory: ./agent
+      - name: Verify CI artifacts exist
         run: |
-          jq --arg v "${{ steps.version.outputs.version }}" '.version = $v' package.json > tmp.json
-          mv tmp.json package.json
-
-      - name: Install dependencies
-        working-directory: ./agent
-        run: npm ci --legacy-peer-deps
-
-      - name: Build
-        working-directory: ./agent
-        run: npm run build
-
-      - name: Rebuild native modules for ARM64
-        if: matrix.arch == 'arm64'
-        run: |
-          docker run --rm -v "${{ github.workspace }}/agent":/app -w /app --platform linux/arm64 \
-            node:24-slim bash -c "
-              apt-get update -qq && apt-get install -y -qq build-essential python3
-              npm rebuild node-pty @serialport/bindings-cpp
-            "
-
-      - name: Build tarball
-        run: |
+          set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          ARCH="${{ matrix.arch }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+
+          echo "Verifying agent/builds/${VERSION}/ exists on Azure..."
+          for arch in x86_64 arm64; do
+            az storage blob show --account-name "$ACCT" --container-name scripts \
+              --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz" \
+              --auth-mode key --output none \
+              || { echo "ERROR: agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz not found."; \
+                   echo "Ensure package.json version is ${VERSION} and CI has completed on master before tagging."; \
+                   exit 1; }
+            echo "  ✓ agent-${VERSION}-${arch}.tar.gz"
+          done
+          az storage blob show --account-name "$ACCT" --container-name scripts \
+            --name "agent/builds/${VERSION}/install.sh" \
+            --auth-mode key --output none \
+            || { echo "ERROR: agent/builds/${VERSION}/install.sh not found."; exit 1; }
+          echo "  ✓ install.sh"
+          echo "All artifacts verified."
+
+      - name: Download CI artifacts from Azure
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
           mkdir -p /tmp/artifacts
 
-          tar -czf /tmp/artifacts/agent-${VERSION}-${ARCH}.tar.gz \
-            -C "${{ github.workspace }}/agent" \
-            dist/ package.json package-lock.json node_modules/ bin/
+          for arch in x86_64 arm64; do
+            az storage blob download --account-name "$ACCT" --container-name scripts \
+              --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz" \
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" \
+              --auth-mode key
+            az storage blob download --account-name "$ACCT" --container-name scripts \
+              --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz.sha256" \
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
+              --auth-mode key
+          done
+          az storage blob download --account-name "$ACCT" --container-name scripts \
+            --name "agent/builds/${VERSION}/install.sh" \
+            --file "/tmp/artifacts/install.sh" --auth-mode key
+          az storage blob download --account-name "$ACCT" --container-name scripts \
+            --name "agent/builds/${VERSION}/install.sh.sha256" \
+            --file "/tmp/artifacts/install.sh.sha256" --auth-mode key
 
-          if [ "$ARCH" = "x86_64" ]; then
-            cp /tmp/artifacts/agent-${VERSION}-x86_64.tar.gz /tmp/artifacts/agent-${VERSION}.tar.gz
-          fi
-
-          cd /tmp/artifacts
-          sha256sum agent-${VERSION}-${ARCH}.tar.gz > agent-${VERSION}-${ARCH}.tar.gz.sha256
-          if [ "$ARCH" = "x86_64" ]; then
-            sha256sum agent-${VERSION}.tar.gz > agent-${VERSION}.tar.gz.sha256
-          fi
-
-      - name: Stamp install.sh (x86_64 only)
-        if: matrix.arch == 'x86_64'
+      - name: Verify checksums
         run: |
+          set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          sed "s/AGENT_VERSION_PLACEHOLDER/${VERSION}/g" agent/bin/install.sh > /tmp/artifacts/install.sh
-          chmod +x /tmp/artifacts/install.sh
           cd /tmp/artifacts
-          sha256sum install.sh > install.sh.sha256
+          sha256sum -c agent-${VERSION}-x86_64.tar.gz.sha256
+          sha256sum -c agent-${VERSION}-arm64.tar.gz.sha256
+          sha256sum -c install.sh.sha256
+          echo "All checksums verified."
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: agent-${{ matrix.arch }}
-          path: /tmp/artifacts/*
-          if-no-files-found: error
+      - name: Promote to versioned and latest paths
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
 
-  docker:
-    name: Docker Build & Push
+          for arch in x86_64 arm64; do
+            # Versioned permanent path
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/versions/agent-${VERSION}-${arch}.tar.gz" \
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" \
+              --overwrite true --auth-mode key --content-type application/gzip
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/versions/agent-${VERSION}-${arch}.tar.gz.sha256" \
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
+              --overwrite true --auth-mode key --content-type text/plain
+            # Rolling latest pointer
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/agent-latest-${arch}.tar.gz" \
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" \
+              --overwrite true --auth-mode key --content-type application/gzip
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/agent-latest-${arch}.tar.gz.sha256" \
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
+              --overwrite true --auth-mode key --content-type text/plain
+          done
+
+          # Generic x86_64 latest (used by install.sh default)
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/agent-latest.tar.gz" \
+            --file "/tmp/artifacts/agent-${VERSION}-x86_64.tar.gz" \
+            --overwrite true --auth-mode key --content-type application/gzip
+
+          # install.sh — current + versioned snapshot
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/install.sh" \
+            --file "/tmp/artifacts/install.sh" \
+            --overwrite true --auth-mode key --content-type text/x-shellscript
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/install.sh.sha256" \
+            --file "/tmp/artifacts/install.sh.sha256" \
+            --overwrite true --auth-mode key --content-type text/plain
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/versions/install-${VERSION}.sh" \
+            --file "/tmp/artifacts/install.sh" \
+            --overwrite true --auth-mode key --content-type text/x-shellscript
+
+  promote-docker:
+    name: Promote Docker Image
     runs-on: [ubuntu-24.04]
     permissions:
       contents: read
-      security-events: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
       - name: Extract version from tag
         id: version
         run: |
           TAG="${{ github.ref_name }}"
-          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+          VERSION="${TAG#v}"
+          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-        with:
-          driver-opts: |
-            image=moby/buildkit:buildx-stable-1
-            network=host
 
       - name: Login to Docker Hub
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -139,37 +168,22 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
-        with:
-          context: .
-          file: ./agent/Dockerfile
-          push: true
-          provenance: false
-          platforms: linux/amd64
-          cache-from: type=registry,ref=iotistic/agent:buildcache
-          cache-to: type=registry,ref=iotistic/agent:buildcache,mode=min,ignore-error=true
-          tags: |
-            iotistic/agent:${{ steps.version.outputs.version }}
-            iotistic/agent:latest
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-
-      - name: Scan with Trivy
-        uses: ./.github/actions/trivy-scan
-        with:
-          image-ref: 'iotistic/agent:${{ steps.version.outputs.version }}'
-          output-file: 'trivy-results.sarif'
-          fail-on-critical: 'true'
-          ignore-file: 'agent/.trivyignore'
+      - name: Re-tag CI image with release version
+        run: |
+          SHA_SHORT="${{ steps.version.outputs.sha_short }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          # Manifest copy — no layer download or rebuild
+          docker buildx imagetools create \
+            -t iotistic/agent:${VERSION} \
+            iotistic/agent:${SHA_SHORT}
+          echo "Tagged iotistic/agent:${SHA_SHORT} → iotistic/agent:${VERSION}"
 
   publish:
-    name: Upload to Azure, SBOM & GitHub Release
-    needs: [package, docker]
+    name: SBOM & GitHub Release
+    needs: [promote-artifacts, promote-docker]
     runs-on: [ubuntu-24.04]
     permissions:
       contents: write
-      security-events: write
 
     steps:
       - name: Checkout repository
@@ -185,69 +199,32 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Download x86_64 artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: agent-x86_64
-          path: /tmp/artifacts
-
-      - name: Download arm64 artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: agent-arm64
-          path: /tmp/artifacts
-
       - name: Azure login
         uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Upload versioned artifacts to Azure
+      - name: Download promoted artifacts for SBOM + Release
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          mkdir -p /tmp/artifacts
 
           for arch in x86_64 arm64; do
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
+            az storage blob download --account-name "$ACCT" --container-name scripts \
               --name "agent/versions/agent-${VERSION}-${arch}.tar.gz" \
-              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" \
-              --overwrite true --auth-mode key --content-type application/gzip
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" --auth-mode key
+            az storage blob download --account-name "$ACCT" --container-name scripts \
               --name "agent/versions/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --overwrite true --auth-mode key --content-type text/plain
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "agent/agent-latest-${arch}.tar.gz" \
-              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" \
-              --overwrite true --auth-mode key --content-type application/gzip
-            az storage blob upload --account-name "$ACCT" --container-name scripts \
-              --name "agent/agent-latest-${arch}.tar.gz.sha256" \
-              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" \
-              --overwrite true --auth-mode key --content-type text/plain
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz.sha256" --auth-mode key
           done
-
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/versions/agent-${VERSION}.tar.gz" \
-            --file "/tmp/artifacts/agent-${VERSION}.tar.gz" \
-            --overwrite true --auth-mode key --content-type application/gzip
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/agent-latest.tar.gz" \
-            --file "/tmp/artifacts/agent-${VERSION}.tar.gz" \
-            --overwrite true --auth-mode key --content-type application/gzip
-
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
+          az storage blob download --account-name "$ACCT" --container-name scripts \
             --name "agent/install.sh" \
-            --file "/tmp/artifacts/install.sh" \
-            --overwrite true --auth-mode key --content-type text/x-shellscript
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/versions/install-${VERSION}.sh" \
-            --file "/tmp/artifacts/install.sh" \
-            --overwrite true --auth-mode key --content-type text/x-shellscript
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --file "/tmp/artifacts/install.sh" --auth-mode key
+          az storage blob download --account-name "$ACCT" --container-name scripts \
             --name "agent/install.sh.sha256" \
-            --file "/tmp/artifacts/install.sh.sha256" \
-            --overwrite true --auth-mode key --content-type text/plain
+            --file "/tmp/artifacts/install.sh.sha256" --auth-mode key
 
       - name: Generate SBOM with Syft
         run: |
@@ -256,8 +233,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p /tmp/sbom /tmp/extract/x86_64 /tmp/extract/arm64 /tmp/install
 
-          syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source-x86_64.cyclonedx.json
-          cp /tmp/sbom/agent-source-x86_64.cyclonedx.json /tmp/sbom/agent-source-arm64.cyclonedx.json
+          syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source.cyclonedx.json
 
           tar -xzf /tmp/artifacts/agent-${VERSION}-x86_64.tar.gz -C /tmp/extract/x86_64
           tar -xzf /tmp/artifacts/agent-${VERSION}-arm64.tar.gz -C /tmp/extract/arm64
@@ -272,7 +248,7 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
+          for f in agent-source agent-artifacts-x86_64 agent-artifacts-arm64 install-script; do
             az storage blob upload --account-name "$ACCT" --container-name scripts \
               --name "agent/versions/${VERSION}/sbom/${f}.cyclonedx.json" \
               --file "/tmp/sbom/${f}.cyclonedx.json" \
@@ -301,13 +277,17 @@ jobs:
 
           ${CHANGELOG}
 
+          ## Install
+
+          curl -sfL https://get.iotistica.com/agent | sudo sh
+
+          ## Docker
+
+          docker pull iotistic/agent:${VERSION}
+
           ## Artifacts
           - [agent-${VERSION}-x86_64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${VERSION}-x86_64.tar.gz)
           - [agent-${VERSION}-arm64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${VERSION}-arm64.tar.gz)
-          - [install.sh](https://apps.iotistica.com/agent/install.sh)
-
-          ## Docker
-          \`docker pull iotistic/agent:${VERSION}\`
           NOTES
 
           gh release create "$TAG" \
@@ -328,10 +308,10 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           echo "## Release v${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Artifact | Path |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact | |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--|" >> $GITHUB_STEP_SUMMARY
           echo "| x86_64 tarball | \`agent/versions/agent-${VERSION}-x86_64.tar.gz\` |" >> $GITHUB_STEP_SUMMARY
           echo "| arm64 tarball | \`agent/versions/agent-${VERSION}-arm64.tar.gz\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| install.sh | \`agent/versions/install-${VERSION}.sh\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| install.sh | \`agent/install.sh\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Docker | \`iotistic/agent:${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| SBOM | \`agent/versions/${VERSION}/sbom/\` |" >> $GITHUB_STEP_SUMMARY

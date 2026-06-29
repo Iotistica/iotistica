@@ -173,6 +173,130 @@ jobs:
           echo "- \`iotistic/agent:${{ needs.build.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/agent:latest\`" >> $GITHUB_STEP_SUMMARY
 
+  package-agent:
+    name: Package Agent (${{ matrix.arch }})
+    needs: build
+    # Only package on master — feature branches get build/test/docker only
+    if: github.ref == 'refs/heads/master'
+    runs-on: [ubuntu-24.04]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+
+      - name: Set up QEMU (ARM64 only)
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        with:
+          platforms: linux/arm64
+
+      - name: Install dependencies
+        working-directory: ./agent
+        run: npm ci --legacy-peer-deps
+
+      - name: Build
+        working-directory: ./agent
+        run: npm run build
+
+      - name: Rebuild native modules for ARM64
+        if: matrix.arch == 'arm64'
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/agent":/app \
+            -w /app \
+            --platform linux/arm64 \
+            node:24-slim bash -c "
+              apt-get update -qq && apt-get install -y -qq build-essential python3
+              npm rebuild node-pty @serialport/bindings-cpp
+            "
+
+      - name: Prune dev dependencies
+        working-directory: ./agent
+        run: npm prune --omit=dev
+
+      - name: Build tarball
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.agent_version }}"
+          ARCH="${{ matrix.arch }}"
+          mkdir -p /tmp/artifacts
+
+          tar -czf /tmp/artifacts/agent-${VERSION}-${ARCH}.tar.gz \
+            -C "${{ github.workspace }}/agent" \
+            dist/ package.json package-lock.json node_modules/ bin/
+
+          cd /tmp/artifacts
+          sha256sum agent-${VERSION}-${ARCH}.tar.gz > agent-${VERSION}-${ARCH}.tar.gz.sha256
+
+      - name: Stamp install.sh (x86_64 only)
+        if: matrix.arch == 'x86_64'
+        run: |
+          VERSION="${{ needs.build.outputs.agent_version }}"
+          SHA_SHORT="${{ needs.build.outputs.sha_short }}"
+          sed "s/AGENT_VERSION_PLACEHOLDER/${VERSION}/g" agent/bin/install.sh > /tmp/artifacts/install.sh
+          chmod +x /tmp/artifacts/install.sh
+          cd /tmp/artifacts
+          sha256sum install.sh > install.sh.sha256
+          jq -n \
+            --arg commit "${{ github.sha }}" \
+            --arg sha_short "$SHA_SHORT" \
+            --arg version "$VERSION" \
+            --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{commit: $commit, sha_short: $sha_short, version: $version, built_at: $built_at}' \
+            > build-meta.json
+
+      - name: Azure login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Upload agent tarball to Azure staging
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.agent_version }}"
+          ARCH="${{ matrix.arch }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/builds/${VERSION}/agent-${VERSION}-${ARCH}.tar.gz" \
+            --file "/tmp/artifacts/agent-${VERSION}-${ARCH}.tar.gz" \
+            --overwrite true --auth-mode key --content-type application/gzip
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/builds/${VERSION}/agent-${VERSION}-${ARCH}.tar.gz.sha256" \
+            --file "/tmp/artifacts/agent-${VERSION}-${ARCH}.tar.gz.sha256" \
+            --overwrite true --auth-mode key --content-type text/plain
+
+      - name: Upload install.sh to Azure staging (x86_64 only)
+        if: matrix.arch == 'x86_64'
+        run: |
+          VERSION="${{ needs.build.outputs.agent_version }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/builds/${VERSION}/install.sh" \
+            --file "/tmp/artifacts/install.sh" \
+            --overwrite true --auth-mode key --content-type text/x-shellscript
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/builds/${VERSION}/install.sh.sha256" \
+            --file "/tmp/artifacts/install.sh.sha256" \
+            --overwrite true --auth-mode key --content-type text/plain
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/builds/${VERSION}/build-meta.json" \
+            --file "/tmp/artifacts/build-meta.json" \
+            --overwrite true --auth-mode key --content-type application/json
+
   package-cli:
     name: Package CLI Tarballs (${{ matrix.arch }})
     needs: build
