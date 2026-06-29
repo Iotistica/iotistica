@@ -18,7 +18,7 @@ interface Device {
 
 const rows = ref<Device[]>([])
 const loading = ref(false)
-const activeProtocol = ref<string | null>(null)
+const activeProtocol = ref('')
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const protocols = computed(() => {
@@ -109,7 +109,7 @@ onUnmounted(() => {
           button-style="solid"
           size="small"
         >
-          <a-radio-button :value="null">All ({{ rows.length }})</a-radio-button>
+          <a-radio-button value="">All ({{ rows.length }})</a-radio-button>
           <a-radio-button
             v-for="p in protocols"
             :key="p"
@@ -166,10 +166,7 @@ onUnmounted(() => {
         </template>
 
         <template #emptyText>
-          <a-empty
-            description="No devices yet"
-            :image="null"
-          >
+          <a-empty description="No devices yet">
             <template #description>
               <span>Devices appear here once endpoints connect and report data.</span><br>
               <a-typography-link href="/admin/#/endpoints">Go to Endpoints →</a-typography-link>
