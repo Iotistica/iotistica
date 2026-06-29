@@ -21,8 +21,62 @@ concurrency:
 
 
 jobs:
+  test:
+    name: Lint & Test
+    runs-on: [ubuntu-24.04]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+
+      - name: Cache agent node_modules
+        id: agent-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: agent/node_modules
+          key: ${{ runner.os }}-node-modules-x86_64-${{ hashFiles('agent/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-x86_64-
+
+      - name: Install Agent dependencies
+        if: steps.agent-cache.outputs.cache-hit != 'true'
+        working-directory: ./agent
+        run: npm ci --prefer-offline --no-audit --legacy-peer-deps
+
+      - name: Run ESLint
+        working-directory: ./agent
+        run: npm run lint
+
+      - name: Run unit tests
+        working-directory: ./agent
+        run: npm run test:unit
+        continue-on-error: true
+
+      - name: Cache CLI node_modules
+        id: cli-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: agent-cli/node_modules
+          key: ${{ runner.os }}-cli-node-modules-x86_64-${{ hashFiles('agent-cli/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-cli-node-modules-x86_64-
+
+      - name: Install CLI dependencies
+        if: steps.cli-cache.outputs.cache-hit != 'true'
+        working-directory: ./agent-cli
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Run CLI ESLint
+        working-directory: ./agent-cli
+        run: npm run lint --if-present
+
   build:
-    name: Build & Test
+    name: Build
     runs-on: [ubuntu-24.04]
     outputs:
       sha_short: ${{ steps.meta.outputs.sha_short }}
@@ -38,8 +92,8 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Cache node_modules
-        id: node-modules-cache
+      - name: Cache agent node_modules
+        id: agent-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: agent/node_modules
@@ -48,25 +102,16 @@ jobs:
             ${{ runner.os }}-node-modules-x86_64-
 
       - name: Install Agent dependencies
-        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        if: steps.agent-cache.outputs.cache-hit != 'true'
         working-directory: ./agent
         run: npm ci --prefer-offline --no-audit --legacy-peer-deps
-
-      - name: Run ESLint
-        working-directory: ./agent
-        run: npm run lint
-
-      - name: Run unit tests
-        working-directory: ./agent
-        run: npm run test:unit
-        continue-on-error: true
 
       - name: Build Agent
         working-directory: ./agent
         run: npm run build
 
       - name: Cache CLI node_modules
-        id: cli-node-modules-cache
+        id: cli-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: agent-cli/node_modules
@@ -75,13 +120,9 @@ jobs:
             ${{ runner.os }}-cli-node-modules-x86_64-
 
       - name: Install CLI dependencies
-        if: steps.cli-node-modules-cache.outputs.cache-hit != 'true'
+        if: steps.cli-cache.outputs.cache-hit != 'true'
         working-directory: ./agent-cli
         run: npm ci --prefer-offline --no-audit
-
-      - name: Run CLI ESLint
-        working-directory: ./agent-cli
-        run: npm run lint --if-present
 
       - name: Build CLI
         working-directory: ./agent-cli
@@ -104,7 +145,7 @@ jobs:
 
   docker:
     name: Docker Build, Scan & Push
-    needs: build
+    needs: [test, build]
     runs-on: [ubuntu-24.04]
     permissions:
       contents: read
@@ -175,7 +216,7 @@ jobs:
 
   package-agent:
     name: Package Agent (${{ matrix.arch }})
-    needs: build
+    needs: [test, build]
     # Only package on master — feature branches get build/test/docker only
     if: github.ref == 'refs/heads/master'
     runs-on: [ubuntu-24.04]
@@ -265,7 +306,7 @@ jobs:
 
   package-cli:
     name: Package CLI (${{ matrix.arch }})
-    needs: build
+    needs: [test, build]
     # Only package on master — feature branches are covered by the build job
     if: github.ref == 'refs/heads/master'
     runs-on: [ubuntu-24.04]
