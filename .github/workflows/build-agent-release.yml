@@ -165,11 +165,31 @@ jobs:
       - name: Extract version from tag
         id: version
         run: |
-          TAG="${{ github.ref_name }}"
-          VERSION="${TAG#v}"
-          SHA_SHORT=$(echo "${{ github.sha }}" | cut -c1-7)
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Azure login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Read SHA from CI build-meta.json
+        id: meta
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          az storage blob download --account-name "$ACCT" --container-name scripts \
+            --name "agent/builds/${VERSION}/build-meta.json" \
+            --file /tmp/build-meta.json --auth-mode key --only-show-errors --output none
+          SHA_SHORT=$(jq -r '.sha_short' /tmp/build-meta.json)
           echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
+          echo "Docker source image: iotistic/agent:${SHA_SHORT}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -182,7 +202,7 @@ jobs:
 
       - name: Re-tag CI image with release version
         run: |
-          SHA_SHORT="${{ steps.version.outputs.sha_short }}"
+          SHA_SHORT="${{ steps.meta.outputs.sha_short }}"
           VERSION="${{ steps.version.outputs.version }}"
           # Manifest copy — no layer download or rebuild
           docker buildx imagetools create \
