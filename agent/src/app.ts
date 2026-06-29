@@ -115,18 +115,25 @@ function registerRuntimeHealthSubsystems(): void {
 		try {
 			const port = process.env.DEVICE_API_PORT || '48484';
 			const response = await fetch(`http://127.0.0.1:${port}/ping`, {
-				signal: AbortSignal.timeout(2000),
+				signal: AbortSignal.timeout(3000),
 			});
 			return response.ok;
-		} catch {
+		} catch (err) {
+			agent.agentLogger?.warnSync('Agent API ping failed', {
+				component: 'agent',
+				operation: 'health-agent-api',
+				error: err instanceof Error ? err.message : String(err),
+			});
 			return false;
 		}
 	}, {
-		// For provisioned devices (state loaded from SQLite), local API loss is degraded mode only:
-		// the agent must keep running local orchestration and buffering. For unprovisioned devices,
-		// keep this critical so setup/provisioning remains restartable.
+		// For provisioned devices (state loaded from SQLite), local API loss is degraded mode only.
+		// For unprovisioned devices, keep critical so setup/provisioning remains restartable.
+		// minFailuresBeforeLatch=2: the immediate startup check may fail transiently (busy event loop);
+		// require a periodic check to confirm before permanently latching.
 		critical: !isProvisioned,
 		description: 'Local Agent API ping check',
+		minFailuresBeforeLatch: 2,
 	});
 
 	health.registerSubsystem('mqtt', async () => {
@@ -193,7 +200,7 @@ async function gracefulShutdown(signal: string) {
 		stopWatchdog();
 
 		// Notify systemd we're stopping (final meaningful signal)
-		await notifySystemd('STOPPING=1');
+		notifySystemd('STOPPING=1');
 
 		// Stop the agent (closes Device API, MQTT, etc.)
 		await agent.stop();

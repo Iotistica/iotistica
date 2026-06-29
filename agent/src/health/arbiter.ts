@@ -49,12 +49,18 @@ export interface SubsystemOptions {
   description?: string;
   /** Check interval in milliseconds (default: 30s) */
   checkIntervalMs?: number;
-  /** 
+  /**
    * Cooldown period (ms) before allowing recovery after failure
    * Prevents flapping subsystems from masking failures
    * Default: 30s for critical, 0 for non-critical
    */
   recoveryCooldownMs?: number;
+  /**
+   * Minimum consecutive failures before permanently latching a critical subsystem.
+   * Default: 2. The immediate startup check counts as failure #1 — requiring 2+ means
+   * at least one periodic check must confirm the failure before the subsystem is latched.
+   */
+  minFailuresBeforeLatch?: number;
 }
 
 /**
@@ -71,8 +77,9 @@ interface SubsystemHealth {
   consecutiveFailures: number;
   checkIntervalMs: number;
   recoveryCooldownMs: number;
-  lastFailureTime: number; // Timestamp of last failure (for cooldown enforcement)
-  latched: boolean; // If true, subsystem is permanently failed until restart
+  minFailuresBeforeLatch: number;
+  lastFailureTime: number;
+  latched: boolean;
 }
 
 /**
@@ -133,13 +140,14 @@ export class HealthArbiter {
 		checkFn: SubsystemCheckFn,
 		options: SubsystemOptions = {}
 	): void {
-		const { 
-			critical = false, 
-			description, 
+		const {
+			critical = false,
+			description,
 			checkIntervalMs = this.DEFAULT_CHECK_INTERVAL_MS,
-			recoveryCooldownMs = critical ? this.DEFAULT_CRITICAL_COOLDOWN_MS : 0
+			recoveryCooldownMs = critical ? this.DEFAULT_CRITICAL_COOLDOWN_MS : 0,
+			minFailuresBeforeLatch = 2,
 		} = options;
-    
+
 		if (this.subsystems.has(name)) {
 			this.logger?.warnSync('Subsystem already registered - replacing', {
 				component: LogComponents.agent,
@@ -147,17 +155,18 @@ export class HealthArbiter {
 				subsystem: name
 			});
 		}
-    
+
 		this.subsystems.set(name, {
 			name,
 			checkFn,
 			critical,
 			description,
-			healthy: false, // Start as unhealthy until first check
+			healthy: false,
 			lastCheck: 0,
 			consecutiveFailures: 0,
 			checkIntervalMs,
 			recoveryCooldownMs,
+			minFailuresBeforeLatch,
 			lastFailureTime: 0,
 			latched: false
 		});
@@ -266,8 +275,10 @@ export class HealthArbiter {
 				subsystem.lastFailureTime = now;
 				subsystem.lastError = 'health_check_failed';
 
-				// Latch critical subsystems permanently until restart (edge fail-fast)
-				if (subsystem.critical) {
+				// Latch critical subsystems permanently only after minFailuresBeforeLatch consecutive failures.
+				// The immediate startup check counts as failure #1, so a threshold of 2 means
+				// at least one periodic check must confirm failure before the subsystem is latched.
+				if (subsystem.critical && subsystem.consecutiveFailures >= subsystem.minFailuresBeforeLatch) {
 					subsystem.latched = true;
 				}
 
