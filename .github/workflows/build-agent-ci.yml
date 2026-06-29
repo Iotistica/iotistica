@@ -263,6 +263,10 @@ jobs:
               npm rebuild node-pty @serialport/bindings-cpp
             "
 
+      - name: Build Admin UI
+        working-directory: ./agent/admin
+        run: npm ci --legacy-peer-deps && npm run build
+
       - name: Prune dev dependencies
         working-directory: ./agent
         run: npm prune --omit=dev
@@ -276,7 +280,7 @@ jobs:
 
           tar -czf /tmp/artifacts/agent-${VERSION}-${ARCH}.tar.gz \
             -C "${{ github.workspace }}/agent" \
-            dist/ package.json package-lock.json node_modules/ bin/
+            dist/ package.json package-lock.json node_modules/ bin/ admin/dist/
 
           cd /tmp/artifacts
           sha256sum agent-${VERSION}-${ARCH}.tar.gz > agent-${VERSION}-${ARCH}.tar.gz.sha256
