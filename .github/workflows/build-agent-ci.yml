@@ -142,13 +142,13 @@ jobs:
         working-directory: ./agent
         run: npm ci --prefer-offline --no-audit --legacy-peer-deps
 
-      - name: Rebuild sqlite3 for ARM64
+      - name: Rebuild native modules for ARM64
         if: matrix.arch == 'arm64' && steps.node-modules-cache.outputs.cache-hit != 'true'
         run: |
           docker run --rm -v "${{ github.workspace }}/agent":/app -w /app --platform linux/arm64 \
             node:20-slim bash -c "
               apt-get update -qq && apt-get install -y -qq build-essential python3 libsqlite3-dev
-              npm rebuild sqlite3 --build-from-source
+              npm rebuild better-sqlite3 node-pty --build-from-source
             "
 
       - name: Build tarball (${{ matrix.arch }})

@@ -814,6 +814,21 @@ echo ""
         
         echo "✓ Pre-built agent verified (architecture-specific native modules included)"
 
+        # Verify native modules are loadable on this architecture; rebuild if not.
+        # This handles cases where the tarball was built for a different arch or the
+        # .node binary is missing.
+        if ! node -e "require('/opt/iotistic/agent/node_modules/better-sqlite3')" 2>/dev/null; then
+            echo ""
+            echo "Native modules are not compatible with this architecture — rebuilding from source..."
+            apt-get install -y --no-install-recommends build-essential python3 libsqlite3-dev || true
+            cd /opt/iotistic/agent
+            npm rebuild better-sqlite3 node-pty --build-from-source || {
+                echo "✗ Error: Failed to rebuild native modules"
+                exit 1
+            }
+            echo "✓ Native modules rebuilt for $(uname -m)"
+        fi
+
         # Verify admin UI is included in the tarball
         if [ -d /opt/iotistic/agent/admin/dist ]; then
             echo "✓ Web admin UI dist included in tarball"
