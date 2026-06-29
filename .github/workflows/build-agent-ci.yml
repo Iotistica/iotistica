@@ -483,33 +483,6 @@ jobs:
           echo "**Agent staging path:** \`agent/builds/${VERSION}/\`" >> $GITHUB_STEP_SUMMARY
           echo "**CLI path:** \`agent-cli/cli-latest-*.tar.gz\`" >> $GITHUB_STEP_SUMMARY
 
-  auto-tag:
-    name: Auto-tag Release
-    needs: [upload-azure]
-    if: github.ref == 'refs/heads/master'
-    runs-on: [ubuntu-24.04]
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Tag if version is new
-        run: |
-          VERSION=$(jq -r '.version' agent/package.json)
-          TAG="v${VERSION}"
-
-          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
-            echo "Tag ${TAG} already exists — skipping release trigger."
-          else
-            echo "Tagging ${TAG} to trigger release workflow..."
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag "${TAG}"
-            git push origin "${TAG}"
-            echo "Pushed ${TAG} — release workflow will start automatically."
-          fi
 
   # integration-tests:
   #   name: Run Integration Tests
