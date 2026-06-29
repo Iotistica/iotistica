@@ -67,23 +67,104 @@ esac
 
 echo "Detected OS: $OS $OS_VERSION ($ARCH_NAME)"
 
+detect_pkg_manager
+
 # Systemd service name - single source of truth
 SERVICE_NAME="iotistica-agent"
 
-# This installer currently relies on apt-get/dpkg for package setup.
-# Detect Debian family explicitly so unsupported distros fail fast with a clear error.
-is_debian_family() {
-    case "$OS" in
-        debian|ubuntu|raspbian)
-            return 0
+# ── Package manager detection ──────────────────────────────────────────────────
+# Sets PKG_MGR to one of: apt | dnf | yum | apk | pacman
+# Sets package-name variables used by pkg_install wrappers below.
+detect_pkg_manager() {
+    if command -v apt-get >/dev/null 2>&1; then
+        PKG_MGR="apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        PKG_MGR="dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        PKG_MGR="yum"
+    elif command -v apk >/dev/null 2>&1; then
+        PKG_MGR="apk"
+    elif command -v pacman >/dev/null 2>&1; then
+        PKG_MGR="pacman"
+    else
+        echo "Error: No supported package manager found (apt/dnf/yum/apk/pacman)"
+        exit 1
+    fi
+    echo "Detected package manager: $PKG_MGR"
+
+    # Build-tool package names
+    case "$PKG_MGR" in
+        apt)
+            PKG_BUILD_TOOLS="build-essential python3 make g++"
+            PKG_SQLITE_DEV="sqlite3 libsqlite3-dev"
+            PKG_NET_TOOLS="iproute2 iptables net-tools iputils-ping"
+            PKG_COMMON="curl wget git jq procps ca-certificates"
+            PKG_ACL="acl"
+            ;;
+        dnf|yum)
+            PKG_BUILD_TOOLS="gcc-c++ make python3"
+            PKG_SQLITE_DEV="sqlite sqlite-devel"
+            PKG_NET_TOOLS="iproute iptables net-tools iputils"
+            PKG_COMMON="curl wget git jq procps-ng ca-certificates"
+            PKG_ACL="acl"
+            ;;
+        apk)
+            PKG_BUILD_TOOLS="build-base python3 make g++"
+            PKG_SQLITE_DEV="sqlite sqlite-dev"
+            PKG_NET_TOOLS="iproute2 iptables net-tools iputils"
+            PKG_COMMON="curl wget git jq procps ca-certificates"
+            PKG_ACL=""
+            ;;
+        pacman)
+            PKG_BUILD_TOOLS="base-devel python"
+            PKG_SQLITE_DEV="sqlite"
+            PKG_NET_TOOLS="iproute2 iptables net-tools iputils"
+            PKG_COMMON="curl wget git jq procps-ng ca-certificates"
+            PKG_ACL="acl"
             ;;
     esac
+}
 
-    if [ -n "$ID_LIKE" ] && echo "$ID_LIKE" | grep -qi "debian"; then
-        return 0
-    fi
+# Update package index
+pkg_update() {
+    case "$PKG_MGR" in
+        apt)    apt-get update || echo "Warning: apt-get update failed, continuing..." ;;
+        dnf)    dnf check-update -y 2>/dev/null || true ;;
+        yum)    yum check-update -y 2>/dev/null || true ;;
+        apk)    apk update || echo "Warning: apk update failed, continuing..." ;;
+        pacman) pacman -Sy --noconfirm 2>/dev/null || true ;;
+    esac
+}
 
-    return 1
+# Install packages (silent on individual package failures)
+pkg_install() {
+    case "$PKG_MGR" in
+        apt)    apt-get install -y --no-install-recommends "$@" ;;
+        dnf)    dnf install -y "$@" ;;
+        yum)    yum install -y "$@" ;;
+        apk)    apk add --no-cache "$@" ;;
+        pacman) pacman -S --noconfirm --needed "$@" ;;
+    esac
+}
+
+# Install Node.js 20 using the best method for this distro
+install_nodejs() {
+    case "$PKG_MGR" in
+        apt)
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+            ;;
+        dnf|yum)
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+            $PKG_MGR install -y nodejs
+            ;;
+        apk)
+            apk add --no-cache nodejs npm
+            ;;
+        pacman)
+            pacman -S --noconfirm --needed nodejs npm
+            ;;
+    esac
 }
 
 # Helper function to install Docker if needed
@@ -143,19 +224,16 @@ install_docker_if_needed() {
 }
 
 install_mosquitto_if_needed() {
-    if ! command -v setfacl >/dev/null 2>&1; then
+    if [ -n "$PKG_ACL" ] && ! command -v setfacl >/dev/null 2>&1; then
         echo "Installing ACL utilities..."
-        apt-get install -y --no-install-recommends acl || {
-            echo "Error: Failed to install ACL utilities"
-            exit 1
-        }
+        pkg_install $PKG_ACL || echo "Warning: ACL utilities not available on this platform"
     fi
 
     if command -v mosquitto >/dev/null 2>&1; then
         echo "✓ Mosquitto is already installed ($(mosquitto -h 2>&1 | head -1))"
     else
         echo "Installing Mosquitto..."
-        apt-get install -y --no-install-recommends mosquitto mosquitto-clients || {
+        pkg_install mosquitto mosquitto-clients || pkg_install mosquitto || {
             echo "Error: Failed to install Mosquitto"
             exit 1
         }
@@ -386,59 +464,31 @@ echo ""
         exit 1
     fi
 
-    # Fail fast on unsupported OS families before running apt-get/dpkg commands.
-    if ! is_debian_family; then
-        echo "Error: Unsupported OS family for this installer: $OS${OS_VERSION:+ $OS_VERSION}"
-        echo ""
-        echo "This install path currently supports Debian-family distributions only"
-        echo "(debian, ubuntu, raspbian, or ID_LIKE containing 'debian')."
-        echo ""
-        echo "Detected ID_LIKE: ${ID_LIKE:-<not-set>}"
-        echo ""
-        echo "Please use a Debian-based OS or add package-manager support for your distro"
-        echo "(dnf/yum/apk/opkg) before running this script."
-        exit 1
-    fi
-
     # Install system dependencies
     echo "Installing system dependencies..."
-    
-    # Detect multiarch and warn only.
-    # Do not auto-remove foreign architectures or packages because that can
-    # remove valid system packages and destabilize the host.
-    FOREIGN_ARCHES="$(dpkg --print-foreign-architectures 2>/dev/null || true)"
-    if [ -n "$FOREIGN_ARCHES" ]; then
-        echo "Warning: multiarch detected: $FOREIGN_ARCHES"
-        echo "Warning: installer will not modify foreign architectures automatically."
+
+    # Debian-specific: fix broken dpkg state before running apt
+    if [ "$PKG_MGR" = "apt" ]; then
+        FOREIGN_ARCHES="$(dpkg --print-foreign-architectures 2>/dev/null || true)"
+        if [ -n "$FOREIGN_ARCHES" ]; then
+            echo "Warning: multiarch detected: $FOREIGN_ARCHES"
+        fi
+        apt-get clean
+        dpkg --configure -a 2>/dev/null || true
     fi
-    
-    # Clean up package cache and fix broken dependencies
-    apt-get clean
-    apt-get autoclean
-    dpkg --configure -a 2>/dev/null || true
-    
-    # Update package lists
-    apt-get update || {
-        echo "Warning: apt-get update failed, continuing anyway..."
-    }
-    
-    # Install essential dependencies first (these should always work)
-    apt-get install -y --no-install-recommends \
-        curl wget git build-essential python3 make g++ || {
+
+    pkg_update
+
+    pkg_install $PKG_BUILD_TOOLS || {
         echo "Error: Failed to install essential build tools"
         exit 1
     }
-    
-    # Install database and utilities (skip if fails due to architecture issues)
-    apt-get install -y --no-install-recommends \
-        sqlite3 libsqlite3-dev jq procps 2>/dev/null || {
-        echo "Warning: Some database packages failed to install, continuing..."
+
+    pkg_install $PKG_SQLITE_DEV $PKG_COMMON 2>/dev/null || {
+        echo "Warning: Some packages failed to install, continuing..."
     }
-    
-    
-    # Install networking tools
-    apt-get install -y --no-install-recommends \
-        iproute2 iptables net-tools iputils-ping || {
+
+    pkg_install $PKG_NET_TOOLS 2>/dev/null || {
         echo "Warning: Some network tools failed to install"
     }
 
@@ -449,19 +499,17 @@ echo ""
     install_docker_if_needed "no"
 
     # Install Node.js 20 (or accept existing Node 18+)
-    if ! command -v node &> /dev/null; then
+    if ! command -v node >/dev/null 2>&1; then
         echo ""
         echo "Installing Node.js 20..."
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-        apt-get install -y nodejs
+        install_nodejs
         echo "✓ Node.js installed successfully"
     else
         NODE_MAJOR_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
         if [ "$NODE_MAJOR_VERSION" -lt 18 ]; then
             echo ""
             echo "Upgrading Node.js to version 20..."
-            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-            apt-get install -y nodejs
+            install_nodejs
             echo "✓ Node.js upgraded successfully"
         else
             echo "✓ Node.js is already installed ($(node --version)) - version 18+ is compatible"
@@ -820,7 +868,7 @@ echo ""
         if ! node -e "require('/opt/iotistic/agent/node_modules/better-sqlite3')" 2>/dev/null; then
             echo ""
             echo "Native modules are not compatible with this architecture — rebuilding from source..."
-            apt-get install -y --no-install-recommends build-essential python3 libsqlite3-dev || true
+            pkg_install $PKG_BUILD_TOOLS $PKG_SQLITE_DEV || true
             cd /opt/iotistic/agent
             npm rebuild better-sqlite3 node-pty --build-from-source || {
                 echo "✗ Error: Failed to rebuild native modules"
