@@ -711,8 +711,13 @@ echo ""
             echo "Error: Failed to extract agent tarball"
             exit 1
         }
-        
-        
+
+        # Stop running agent before overwriting files
+        if systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null; then
+            echo "Stopping running agent service..."
+            systemctl stop "${SERVICE_NAME}"
+        fi
+
         # Clean up ALL existing installation files to ensure fresh install
         echo "Cleaning up existing installation files..."
         rm -rf /opt/iotistic/agent/node_modules
@@ -1098,12 +1103,12 @@ EOFJOURNALD
         echo "✗ dist/ directory NOT FOUND"
     fi
     
-    # Start service
+    # Start (or restart) service
     systemctl daemon-reload
     echo ""
     echo "Starting agent service..."
     systemctl enable "${SERVICE_NAME}"
-    systemctl start "${SERVICE_NAME}"
+    systemctl restart "${SERVICE_NAME}"
 
     sleep 10
 
