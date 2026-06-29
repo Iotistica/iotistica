@@ -326,15 +326,27 @@ jobs:
           - [agent-${VERSION}-arm64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${VERSION}-arm64.tar.gz)
           NOTES
 
-          gh release create "$TAG" \
-            --title "Agent v${VERSION}" \
-            --notes-file /tmp/release-notes.md \
-            /tmp/artifacts/agent-${VERSION}-x86_64.tar.gz \
-            /tmp/artifacts/agent-${VERSION}-x86_64.tar.gz.sha256 \
-            /tmp/artifacts/agent-${VERSION}-arm64.tar.gz \
-            /tmp/artifacts/agent-${VERSION}-arm64.tar.gz.sha256 \
-            /tmp/artifacts/install.sh \
+          ASSETS=(
+            /tmp/artifacts/agent-${VERSION}-x86_64.tar.gz
+            /tmp/artifacts/agent-${VERSION}-x86_64.tar.gz.sha256
+            /tmp/artifacts/agent-${VERSION}-arm64.tar.gz
+            /tmp/artifacts/agent-${VERSION}-arm64.tar.gz.sha256
+            /tmp/artifacts/install.sh
             /tmp/artifacts/install.sh.sha256
+          )
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists — updating notes and re-uploading assets"
+            gh release edit "$TAG" \
+              --title "Agent v${VERSION}" \
+              --notes-file /tmp/release-notes.md
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$TAG" \
+              --title "Agent v${VERSION}" \
+              --notes-file /tmp/release-notes.md \
+              "${ASSETS[@]}"
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
