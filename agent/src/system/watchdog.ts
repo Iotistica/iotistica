@@ -193,9 +193,9 @@ export function startWatchdog(healthCheck?: HealthCheckFn, logger?: AgentLogger)
 		}
     
 		const isHealthy = healthCheck ? await healthCheck() : true;
-    
+
 		if (isHealthy) {
-			sendNativeNotification('WATCHDOG=1', socketPath, logger);
+			await sendNotification('WATCHDOG=1', logger);
 			lastWatchdogPing = now;
       
 			// Reset skip counter on successful ping.
