@@ -23,12 +23,12 @@ concurrency:
 jobs:
   build:
     name: Build & Test
-    runs-on:  [ubuntu-24.04]
+    runs-on: [ubuntu-24.04]
     outputs:
       sha_short: ${{ steps.meta.outputs.sha_short }}
       agent_version: ${{ steps.meta.outputs.agent_version }}
       cli_version: ${{ steps.meta.outputs.cli_version }}
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -50,7 +50,7 @@ jobs:
       - name: Install Agent dependencies
         if: steps.node-modules-cache.outputs.cache-hit != 'true'
         working-directory: ./agent
-        run: npm ci --prefer-offline --no-audit
+        run: npm ci --prefer-offline --no-audit --legacy-peer-deps
 
       - name: Run ESLint
         working-directory: ./agent
@@ -101,331 +101,6 @@ jobs:
           echo "**Agent Version:** \`${{ steps.meta.outputs.agent_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**CLI Version:** \`${{ steps.meta.outputs.cli_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Git SHA:** \`${{ steps.meta.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
-
-  package:
-    name: Package Tarballs (${{ matrix.arch }})
-    needs: build
-    runs-on: [ubuntu-24.04]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            platform: linux/amd64
-          - arch: arm64
-            platform: linux/arm64
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '24'
-
-      - name: Set up QEMU (ARM64 only)
-        if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
-        with:
-          platforms: linux/arm64
-
-      - name: Cache node_modules
-        id: node-modules-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: agent/node_modules
-          key: ${{ runner.os }}-node-modules-${{ matrix.arch }}-v2-${{ hashFiles('agent/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-modules-${{ matrix.arch }}-v2-
-
-      - name: Install dependencies
-        if: steps.node-modules-cache.outputs.cache-hit != 'true'
-        working-directory: ./agent
-        run: npm ci --prefer-offline --no-audit --legacy-peer-deps
-
-      - name: Rebuild native modules for ARM64
-        if: matrix.arch == 'arm64'
-        run: |
-          docker run --rm -v "${{ github.workspace }}/agent":/app -w /app --platform linux/arm64 \
-            node:24-slim bash -c "
-              apt-get update -qq && apt-get install -y -qq build-essential python3 libsqlite3-dev
-              npm rebuild node-pty @serialport/bindings-cpp
-            "
-
-      - name: Build tarball (${{ matrix.arch }})
-        run: |
-          ARCH="${{ matrix.arch }}"
-
-          cd agent
-          npm run build
-
-          mkdir -p /tmp/iotistic-artifacts
-
-          tar -czf /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz \
-            dist/ \
-            package.json \
-            package-lock.json \
-            node_modules/ \
-            bin/
-
-          if [ "$ARCH" = "x86_64" ]; then
-            cp /tmp/iotistic-artifacts/agent-latest-x86_64.tar.gz /tmp/iotistic-artifacts/agent-latest.tar.gz
-          fi
-
-      - name: Azure login
-        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Generate checksums (${{ matrix.arch }})
-        run: |
-          set -euo pipefail
-          ARCH="${{ matrix.arch }}"
-
-          cd /tmp/iotistic-artifacts
-          sha256sum agent-latest-${ARCH}.tar.gz > agent-latest-${ARCH}.tar.gz.sha256
-
-          if [ "$ARCH" = "x86_64" ]; then
-            sha256sum agent-latest.tar.gz > agent-latest.tar.gz.sha256
-
-            VERSION=$(jq -r '.version' "${{ github.workspace }}/agent/package.json")
-            STAMPED_INSTALL=/tmp/iotistic-artifacts/install.sh
-            sed "s/AGENT_VERSION_PLACEHOLDER/${VERSION}/g" "${{ github.workspace }}/agent/bin/install.sh" > "$STAMPED_INSTALL"
-            sha256sum "$STAMPED_INSTALL" > /tmp/iotistic-artifacts/install.sh.sha256
-
-            SHA_SHORT=$(printf '%s' "${{ github.sha }}" | cut -c1-7)
-            jq -n \
-              --arg commit "${{ github.sha }}" \
-              --arg sha_short "$SHA_SHORT" \
-              --arg version "$VERSION" \
-              --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-              '{
-                commit: $commit,
-                sha_short: $sha_short,
-                version: $version,
-                generated_at_utc: $generated_at_utc
-              }' > agent-latest-build-meta.json
-          fi
-
-      - name: Upload latest tarball and checksum (${{ matrix.arch }})
-        run: |
-          ARCH="${{ matrix.arch }}"
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-${ARCH}.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz \
-            --overwrite true \
-            --auth-mode key \
-            --content-type application/gzip
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-${ARCH}.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest-${ARCH}.tar.gz.sha256 \
-            --overwrite true \
-            --auth-mode key \
-            --content-type text/plain
-
-      - name: Upload generic latest tarball and checksum (x86_64 only)
-        if: matrix.arch == 'x86_64'
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest.tar.gz \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz \
-            --overwrite true \
-            --auth-mode key \
-            --content-type application/gzip
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/agent-latest.tar.gz.sha256 \
-            --overwrite true \
-            --auth-mode key \
-            --content-type text/plain
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/agent-latest-build-meta.json \
-            --file /tmp/iotistic-artifacts/agent-latest-build-meta.json \
-            --overwrite true \
-            --auth-mode key \
-            --content-type application/json
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/install.sh \
-            --file /tmp/iotistic-artifacts/install.sh \
-            --overwrite true \
-            --auth-mode key \
-            --content-type text/x-shellscript
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent/install.sh.sha256 \
-            --file /tmp/iotistic-artifacts/install.sh.sha256 \
-            --overwrite true \
-            --auth-mode key \
-            --content-type text/plain
-
-  package-cli:
-    name: Package CLI Tarballs (${{ matrix.arch }})
-    needs: build
-    runs-on: [ubuntu-24.04]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            platform: linux/amd64
-          - arch: arm64
-            platform: linux/arm64
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '24'
-
-      - name: Cache CLI node_modules
-        id: cli-node-modules-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: agent-cli/node_modules
-          key: ${{ runner.os }}-cli-node-modules-${{ matrix.arch }}-${{ hashFiles('agent-cli/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-cli-node-modules-${{ matrix.arch }}-
-
-      - name: Install CLI dependencies
-        if: steps.cli-node-modules-cache.outputs.cache-hit != 'true'
-        working-directory: ./agent-cli
-        run: npm ci --prefer-offline --no-audit
-
-      - name: Build CLI tarball (${{ matrix.arch }})
-        run: |
-          ARCH="${{ matrix.arch }}"
-
-          cd agent-cli
-          npm run build
-
-          mkdir -p /tmp/iotistic-artifacts
-
-          tar -czf /tmp/iotistic-artifacts/cli-latest-${ARCH}.tar.gz \
-            dist/ \
-            package.json \
-            package-lock.json \
-            node_modules/
-
-          if [ "$ARCH" = "x86_64" ]; then
-            cp /tmp/iotistic-artifacts/cli-latest-x86_64.tar.gz /tmp/iotistic-artifacts/cli-latest.tar.gz
-          fi
-
-      - name: Azure login
-        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Generate CLI checksums (${{ matrix.arch }})
-        run: |
-          set -euo pipefail
-          ARCH="${{ matrix.arch }}"
-
-          cd /tmp/iotistic-artifacts
-          sha256sum cli-latest-${ARCH}.tar.gz > cli-latest-${ARCH}.tar.gz.sha256
-
-          if [ "$ARCH" = "x86_64" ]; then
-            sha256sum cli-latest.tar.gz > cli-latest.tar.gz.sha256
-
-            VERSION=$(jq -r '.version' "${{ github.workspace }}/agent-cli/package.json")
-            SHA_SHORT=$(printf '%s' "${{ github.sha }}" | cut -c1-7)
-            jq -n \
-              --arg commit "${{ github.sha }}" \
-              --arg sha_short "$SHA_SHORT" \
-              --arg version "$VERSION" \
-              --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-              '{
-                commit: $commit,
-                sha_short: $sha_short,
-                version: $version,
-                generated_at_utc: $generated_at_utc
-              }' > cli-latest-build-meta.json
-          fi
-
-      - name: Upload CLI latest tarball and checksum (${{ matrix.arch }})
-        run: |
-          ARCH="${{ matrix.arch }}"
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent-cli/cli-latest-${ARCH}.tar.gz \
-            --file /tmp/iotistic-artifacts/cli-latest-${ARCH}.tar.gz \
-            --overwrite true \
-            --auth-mode key \
-            --content-type application/gzip
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent-cli/cli-latest-${ARCH}.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/cli-latest-${ARCH}.tar.gz.sha256 \
-            --overwrite true \
-            --auth-mode key \
-            --content-type text/plain
-
-      - name: Upload generic CLI latest tarball and checksum (x86_64 only)
-        if: matrix.arch == 'x86_64'
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent-cli/cli-latest.tar.gz \
-            --file /tmp/iotistic-artifacts/cli-latest.tar.gz \
-            --overwrite true \
-            --auth-mode key \
-            --content-type application/gzip
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent-cli/cli-latest.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/cli-latest.tar.gz.sha256 \
-            --overwrite true \
-            --auth-mode key \
-            --content-type text/plain
-
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent-cli/cli-latest-build-meta.json \
-            --file /tmp/iotistic-artifacts/cli-latest-build-meta.json \
-            --overwrite true \
-            --auth-mode key \
-            --content-type application/json
-
-      - name: Upload CLI installer script (x86_64 only)
-        if: matrix.arch == 'x86_64'
-        run: |
-          az storage blob upload \
-            --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-            --container-name scripts \
-            --name agent-cli/cli-install.sh \
-            --file "${{ github.workspace }}/agent-cli/bin/cli-install.sh" \
-            --overwrite true \
-            --auth-mode key \
-            --content-type text/x-shellscript
 
   docker:
     name: Docker Build, Scan & Push
@@ -492,111 +167,127 @@ jobs:
         run: |
           echo "## Docker Image Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** \`${{ needs.build.outputs.agent_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Git SHA:** \`${{ needs.build.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Docker Images:" >> $GITHUB_STEP_SUMMARY
-          echo "- [\`iotistic/agent:latest\`](https://hub.docker.com/r/iotistic/agent/tags?name=latest)" >> $GITHUB_STEP_SUMMARY
-          echo "- [\`iotistic/agent:${{ needs.build.outputs.sha_short }}\`](https://hub.docker.com/r/iotistic/agent/tags?name=${{ needs.build.outputs.sha_short }})" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Installation Scripts:" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-docker.sh](https://apps.iotistica.com/agent/install-docker.sh) ([checksum](https://apps.iotistica.com/agent/install-docker.sh.sha256))" >> $GITHUB_STEP_SUMMARY
-          echo "- [install-systemd.sh](https://apps.iotistica.com/agent/install-systemd.sh) ([checksum](https://apps.iotistica.com/agent/install-systemd.sh.sha256))" >> $GITHUB_STEP_SUMMARY
+          echo "### Images pushed:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/agent:${{ needs.build.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`iotistic/agent:latest\`" >> $GITHUB_STEP_SUMMARY
 
-  generate-sbom:
-    name: Generate SBOM
-    needs: [package, docker]
+  package-cli:
+    name: Package CLI Tarballs (${{ matrix.arch }})
+    needs: build
     runs-on: [ubuntu-24.04]
-    permissions:
-      contents: read
-      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+
+      - name: Cache CLI node_modules
+        id: cli-node-modules-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: agent-cli/node_modules
+          key: ${{ runner.os }}-cli-node-modules-${{ matrix.arch }}-${{ hashFiles('agent-cli/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-cli-node-modules-${{ matrix.arch }}-
+
+      - name: Install CLI dependencies
+        if: steps.cli-node-modules-cache.outputs.cache-hit != 'true'
+        working-directory: ./agent-cli
+        run: npm ci --prefer-offline --no-audit
+
+      - name: Build CLI tarball (${{ matrix.arch }})
+        run: |
+          ARCH="${{ matrix.arch }}"
+          cd agent-cli
+          npm run build
+          mkdir -p /tmp/iotistic-artifacts
+          tar -czf /tmp/iotistic-artifacts/cli-latest-${ARCH}.tar.gz \
+            dist/ package.json package-lock.json node_modules/
+          if [ "$ARCH" = "x86_64" ]; then
+            cp /tmp/iotistic-artifacts/cli-latest-x86_64.tar.gz /tmp/iotistic-artifacts/cli-latest.tar.gz
+          fi
 
       - name: Azure login
         uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Download latest tarballs from Azure
+      - name: Generate CLI checksums (${{ matrix.arch }})
         run: |
           set -euo pipefail
+          ARCH="${{ matrix.arch }}"
+          cd /tmp/iotistic-artifacts
+          sha256sum cli-latest-${ARCH}.tar.gz > cli-latest-${ARCH}.tar.gz.sha256
+          if [ "$ARCH" = "x86_64" ]; then
+            sha256sum cli-latest.tar.gz > cli-latest.tar.gz.sha256
+            VERSION=$(jq -r '.version' "${{ github.workspace }}/agent-cli/package.json")
+            SHA_SHORT=$(printf '%s' "${{ github.sha }}" | cut -c1-7)
+            jq -n \
+              --arg commit "${{ github.sha }}" \
+              --arg sha_short "$SHA_SHORT" \
+              --arg version "$VERSION" \
+              --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{commit: $commit, sha_short: $sha_short, version: $version, generated_at_utc: $generated_at_utc}' \
+              > cli-latest-build-meta.json
+          fi
+
+      - name: Upload CLI tarball (${{ matrix.arch }})
+        run: |
+          ARCH="${{ matrix.arch }}"
           ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          mkdir -p /tmp/artifacts /tmp/sbom /tmp/extract/x86_64 /tmp/extract/arm64
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent-cli/cli-latest-${ARCH}.tar.gz \
+            --file /tmp/iotistic-artifacts/cli-latest-${ARCH}.tar.gz \
+            --overwrite true --auth-mode key --content-type application/gzip
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent-cli/cli-latest-${ARCH}.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/cli-latest-${ARCH}.tar.gz.sha256 \
+            --overwrite true --auth-mode key --content-type text/plain
 
-          az storage blob download --account-name "$ACCT" --container-name scripts \
-            --name agent/agent-latest-x86_64.tar.gz \
-            --file /tmp/artifacts/agent-latest-x86_64.tar.gz --auth-mode key
-
-          az storage blob download --account-name "$ACCT" --container-name scripts \
-            --name agent/agent-latest-arm64.tar.gz \
-            --file /tmp/artifacts/agent-latest-arm64.tar.gz --auth-mode key
-
-      - name: Install Syft
+      - name: Upload generic CLI latest (x86_64 only)
+        if: matrix.arch == 'x86_64'
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-          syft version
-
-      - name: Generate CycloneDX SBOMs
-        run: |
-          set -euo pipefail
-
-          # Source SBOM — npm dep graph from package-lock.json (same packages both arches)
-          syft dir:./agent -o cyclonedx-json=/tmp/sbom/agent-source-x86_64.cyclonedx.json
-          cp /tmp/sbom/agent-source-x86_64.cyclonedx.json /tmp/sbom/agent-source-arm64.cyclonedx.json
-
-          # Artifact SBOMs — scan extracted tarballs (captures native binaries per arch)
-          tar -xzf /tmp/artifacts/agent-latest-x86_64.tar.gz -C /tmp/extract/x86_64
-          tar -xzf /tmp/artifacts/agent-latest-arm64.tar.gz -C /tmp/extract/arm64
-          syft dir:/tmp/extract/x86_64 -o cyclonedx-json=/tmp/sbom/agent-artifacts-x86_64.cyclonedx.json
-          syft dir:/tmp/extract/arm64 -o cyclonedx-json=/tmp/sbom/agent-artifacts-arm64.cyclonedx.json
-
-          # Install script SBOM
-          VERSION=$(jq -r '.version' agent/package.json)
-          mkdir -p /tmp/install
-          sed "s/AGENT_VERSION_PLACEHOLDER/${VERSION}/g" agent/bin/install.sh > /tmp/install/install.sh
-          syft dir:/tmp/install -o cyclonedx-json=/tmp/sbom/install-script.cyclonedx.json
-
-      - name: Upload SBOMs to Azure
-        run: |
-          set -euo pipefail
           ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent-cli/cli-latest.tar.gz \
+            --file /tmp/iotistic-artifacts/cli-latest.tar.gz \
+            --overwrite true --auth-mode key --content-type application/gzip
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent-cli/cli-latest.tar.gz.sha256 \
+            --file /tmp/iotistic-artifacts/cli-latest.tar.gz.sha256 \
+            --overwrite true --auth-mode key --content-type text/plain
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent-cli/cli-latest-build-meta.json \
+            --file /tmp/iotistic-artifacts/cli-latest-build-meta.json \
+            --overwrite true --auth-mode key --content-type application/json
 
-          for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
-            az storage blob upload \
-              --account-name "$ACCT" \
-              --container-name scripts \
-              --name "agent/sbom/${f}.cyclonedx.json" \
-              --file "/tmp/sbom/${f}.cyclonedx.json" \
-              --overwrite true \
-              --auth-mode key \
-              --content-type application/json
-          done
-
-      - name: SBOM summary
-        if: always()
+      - name: Upload CLI installer (x86_64 only)
+        if: matrix.arch == 'x86_64'
         run: |
-          echo "## SBOM" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| File | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          for f in agent-artifacts-x86_64 agent-artifacts-arm64 agent-source-x86_64 agent-source-arm64 install-script; do
-            if [ -f "/tmp/sbom/${f}.cyclonedx.json" ]; then
-              echo "| \`${f}.cyclonedx.json\` | Uploaded |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| \`${f}.cyclonedx.json\` | Missing |" >> $GITHUB_STEP_SUMMARY
-            fi
-          done
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name agent-cli/cli-install.sh \
+            --file "${{ github.workspace }}/agent-cli/bin/cli-install.sh" \
+            --overwrite true --auth-mode key --content-type text/x-shellscript
 
   # integration-tests:
   #   name: Run Integration Tests
-  #   needs: [build, package, package-cli, docker]
-  #   if: ${{ needs.build.result == 'success' && needs.package.result == 'success' && needs.package-cli.result == 'success' && needs.docker.result == 'success' }}
+  #   needs: [build, docker]
   #   uses: ./.github/workflows/integration-tests.yml
   #   with:
   #     agent_version: latest
   #   secrets: inherit
-
-  # cleanup removed: GitHub-hosted runners are ephemeral and cleaned automatically.
