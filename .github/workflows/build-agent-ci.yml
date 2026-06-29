@@ -1,9 +1,10 @@
 name: CI Build, Test & Push Agent
 
-on: 
+on:
   push:
     branches:
       - master
+      - feature/**
     paths:
       - 'agent/**'
       - 'agent-cli/**'
@@ -148,7 +149,7 @@ jobs:
           docker run --rm -v "${{ github.workspace }}/agent":/app -w /app --platform linux/arm64 \
             node:24-slim bash -c "
               apt-get update -qq && apt-get install -y -qq build-essential python3 libsqlite3-dev
-              npm rebuild better-sqlite3 node-pty --build-from-source
+              npm rebuild node-pty @serialport/bindings-cpp --build-from-source
             "
 
       - name: Build tarball (${{ matrix.arch }})
