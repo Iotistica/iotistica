@@ -39,7 +39,7 @@ export function transact<T>(db: DatabaseSync, fn: () => T, mode: 'DEFERRED' | 'I
 		db.exec('COMMIT');
 		return result;
 	} catch (err) {
-		try { db.exec('ROLLBACK'); } catch {}
+		try { db.exec('ROLLBACK'); } catch (_) { /* ignore rollback errors */ }
 		throw err;
 	}
 }

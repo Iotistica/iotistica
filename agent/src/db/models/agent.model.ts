@@ -119,7 +119,7 @@ export class AgentModel {
 				const colName = column === 'targetSyncEnabled' ? 'target_sync_enabled' : column;
 				createData[colName] = value ? 1 : 0;
 			} else {
-				createData[column] = typeof value === 'boolean' ? (value ? 1 : 0) : value as string | number | null;
+				createData[column] = typeof value === 'boolean' ? (value ? 1 : 0) : value;
 			}
 		}
 
@@ -141,7 +141,7 @@ export class AgentModel {
 				const colName = column === 'targetSyncEnabled' ? 'target_sync_enabled' : column;
 				updateData[colName] = value ? 1 : 0;
 			} else {
-				updateData[column] = typeof value === 'boolean' ? (value ? 1 : 0) : value as string | number | null;
+				updateData[column] = typeof value === 'boolean' ? (value ? 1 : 0) : value;
 			}
 		}
 
