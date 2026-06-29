@@ -1,12 +1,12 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 
 export class DatabaseModel {
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
-	static getConnection(): Database.Database {
+	static getConnection(): DatabaseSync {
 		return this.getDb();
 	}
 

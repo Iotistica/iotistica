@@ -1,7 +1,7 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
-function up(db: Database.Database): void {
+function up(db: DatabaseSync): void {
 	const hasColumn = db
 		.prepare("SELECT 1 FROM pragma_table_info('endpoints') WHERE name = 'group_name'")
 		.get();

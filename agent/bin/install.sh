@@ -446,23 +446,23 @@ echo ""
     echo ""
     install_docker_if_needed "no"
 
-    # Install Node.js 20 (or accept existing Node 18+)
+    # Install Node.js 24 (or accept existing Node 22+)
     if ! command -v node &> /dev/null; then
         echo ""
-        echo "Installing Node.js 20..."
-        curl -fsSL https://deb.nodesource.com/setup_20.x 2>/dev/null | bash - > /dev/null 2>&1
+        echo "Installing Node.js 24..."
+        curl -fsSL https://deb.nodesource.com/setup_24.x 2>/dev/null | bash - > /dev/null 2>&1
         apt-get install -y -qq nodejs > /dev/null
         echo "✓ Node.js installed successfully"
     else
         NODE_MAJOR_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-        if [ "$NODE_MAJOR_VERSION" -lt 18 ]; then
+        if [ "$NODE_MAJOR_VERSION" -lt 22 ]; then
             echo ""
-            echo "Upgrading Node.js to version 20..."
-            curl -fsSL https://deb.nodesource.com/setup_20.x 2>/dev/null | bash - > /dev/null 2>&1
+            echo "Upgrading Node.js to version 24..."
+            curl -fsSL https://deb.nodesource.com/setup_24.x 2>/dev/null | bash - > /dev/null 2>&1
             apt-get install -y -qq nodejs > /dev/null
             echo "✓ Node.js upgraded successfully"
         else
-            echo "✓ Node.js is already installed ($(node --version)) - version 18+ is compatible"
+            echo "✓ Node.js is already installed ($(node --version)) - version 22+ is compatible"
         fi
     fi
 

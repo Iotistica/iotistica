@@ -35,7 +35,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Cache node_modules
         id: node-modules-cache
@@ -120,7 +120,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Set up QEMU (ARM64 only)
         if: matrix.arch == 'arm64'
@@ -146,7 +146,7 @@ jobs:
         if: matrix.arch == 'arm64'
         run: |
           docker run --rm -v "${{ github.workspace }}/agent":/app -w /app --platform linux/arm64 \
-            node:20-slim bash -c "
+            node:24-slim bash -c "
               apt-get update -qq && apt-get install -y -qq build-essential python3 libsqlite3-dev
               npm rebuild better-sqlite3 node-pty --build-from-source
             "
@@ -296,7 +296,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Cache CLI node_modules
         id: cli-node-modules-cache

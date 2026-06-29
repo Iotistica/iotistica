@@ -1,8 +1,8 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { columnExists, tableExists } from '../migration-helpers.js';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
-function up(db: Database.Database): void {
+function up(db: DatabaseSync): void {
 	if (!tableExists(db, 'agent') || !columnExists(db, 'agent', 'cloudId')) {
 		return;
 	}

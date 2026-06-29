@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 
 export type PublishPayloadFormat = 'custom' | 'tags' | 'ecp';
@@ -38,7 +38,7 @@ type PublishSubscriptionRow = Omit<PublishSubscriptionRecord, 'topics' | 'route_
 export class PublishSubscriptionsModel {
 	private static readonly table = 'publish_subscriptions';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -81,8 +81,8 @@ export class PublishSubscriptionsModel {
 	static getAll(includeDisabled: boolean = true): PublishSubscriptionRecord[] {
 		const db = this.getDb();
 		const rows = includeDisabled
-			? (db.prepare(`SELECT * FROM ${this.table} ORDER BY id ASC`).all() as PublishSubscriptionRow[])
-			: (db.prepare(`SELECT * FROM ${this.table} WHERE enabled = 1 ORDER BY id ASC`).all() as PublishSubscriptionRow[]);
+			? (db.prepare(`SELECT * FROM ${this.table} ORDER BY id ASC`).all() as unknown as PublishSubscriptionRow[])
+			: (db.prepare(`SELECT * FROM ${this.table} WHERE enabled = 1 ORDER BY id ASC`).all() as unknown as PublishSubscriptionRow[]);
 
 		return rows
 			.map((row) => this.mapRow(row))
@@ -92,8 +92,8 @@ export class PublishSubscriptionsModel {
 	static getByPublishDestinationId(publishDestinationId: number, includeDisabled: boolean = true): PublishSubscriptionRecord[] {
 		const db = this.getDb();
 		const rows = includeDisabled
-			? (db.prepare(`SELECT * FROM ${this.table} WHERE publish_destination_id = ? ORDER BY id ASC`).all(publishDestinationId) as PublishSubscriptionRow[])
-			: (db.prepare(`SELECT * FROM ${this.table} WHERE publish_destination_id = ? AND enabled = 1 ORDER BY id ASC`).all(publishDestinationId) as PublishSubscriptionRow[]);
+			? (db.prepare(`SELECT * FROM ${this.table} WHERE publish_destination_id = ? ORDER BY id ASC`).all(publishDestinationId) as unknown as PublishSubscriptionRow[])
+			: (db.prepare(`SELECT * FROM ${this.table} WHERE publish_destination_id = ? AND enabled = 1 ORDER BY id ASC`).all(publishDestinationId) as unknown as PublishSubscriptionRow[]);
 
 		return rows
 			.map((row) => this.mapRow(row))
@@ -101,7 +101,7 @@ export class PublishSubscriptionsModel {
 	}
 
 	static getById(id: number): PublishSubscriptionRecord | null {
-		const row = this.getDb().prepare(`SELECT * FROM ${this.table} WHERE id = ? LIMIT 1`).get(id) as PublishSubscriptionRow | undefined;
+		const row = this.getDb().prepare(`SELECT * FROM ${this.table} WHERE id = ? LIMIT 1`).get(id) as unknown as PublishSubscriptionRow | undefined;
 		return this.mapRow(row);
 	}
 
@@ -156,11 +156,11 @@ export class PublishSubscriptionsModel {
 
 	static delete(id: number): boolean {
 		const result = this.getDb().prepare(`DELETE FROM ${this.table} WHERE id = ?`).run(id);
-		return result.changes > 0;
+		return Number(result.changes) > 0;
 	}
 
 	static deleteByPublishDestinationId(publishDestinationId: number): number {
 		const result = this.getDb().prepare(`DELETE FROM ${this.table} WHERE publish_destination_id = ?`).run(publishDestinationId);
-		return result.changes;
+		return Number(result.changes);
 	}
 }

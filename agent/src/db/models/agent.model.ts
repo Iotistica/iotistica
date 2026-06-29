@@ -3,7 +3,7 @@
  * Manages device provisioning and registration data in SQLite
  */
 
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import type { AgentLogger } from '../../logging/agent-logger';
 import { getDatabase } from '../sqlite';
 import { 
@@ -72,7 +72,7 @@ export class AgentModel {
 		'targetSyncEnabled',
 	];
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -102,9 +102,9 @@ export class AgentModel {
 		return decryptedDevice;
 	}
 
-	private static buildCreateData(device: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Record<string, unknown> {
+	private static buildCreateData(device: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Record<string, string | number | null> {
 		const now = new Date().toISOString();
-		const createData: Record<string, unknown> = {
+		const createData: Record<string, string | number | null> = {
 			createdAt: now,
 			updatedAt: now,
 		};
@@ -119,15 +119,15 @@ export class AgentModel {
 				const colName = column === 'targetSyncEnabled' ? 'target_sync_enabled' : column;
 				createData[colName] = value ? 1 : 0;
 			} else {
-				createData[column] = value;
+				createData[column] = typeof value === 'boolean' ? (value ? 1 : 0) : value as string | number | null;
 			}
 		}
 
 		return createData;
 	}
 
-	private static buildUpdateData(updates: Partial<Agent>): Record<string, unknown> {
-		const updateData: Record<string, unknown> = {
+	private static buildUpdateData(updates: Partial<Agent>): Record<string, string | number | null> {
+		const updateData: Record<string, string | number | null> = {
 			updatedAt: new Date().toISOString(),
 		};
 
@@ -141,7 +141,7 @@ export class AgentModel {
 				const colName = column === 'targetSyncEnabled' ? 'target_sync_enabled' : column;
 				updateData[colName] = value ? 1 : 0;
 			} else {
-				updateData[column] = value;
+				updateData[column] = typeof value === 'boolean' ? (value ? 1 : 0) : value as string | number | null;
 			}
 		}
 
@@ -181,7 +181,7 @@ export class AgentModel {
 	static async get(): Promise<Agent | null> {
 		const device = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} LIMIT 1`)
-			.get() as AgentRow | undefined;
+			.get() as unknown as AgentRow | undefined;
     
 		if (!device) {
 			return null;
@@ -196,14 +196,15 @@ export class AgentModel {
 	static async create(device: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Promise<Agent> {
 		const createData = this.buildCreateData(device);
 		const columns = Object.keys(createData);
+		const values = Object.values(createData);
 
 		this.getDb()
 			.prepare(
-				`INSERT INTO ${this.table} (${columns.map((column) => `"${column}"`).join(', ')}) VALUES (${columns.map((column) => `@${column}`).join(', ')})`,
+				`INSERT INTO ${this.table} (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
 			)
-			.run(createData);
+			.run(...values);
 
-		return await this.get() as Agent;
+		return await this.get() as unknown as Agent;
 	}
 
 	/**
@@ -212,10 +213,11 @@ export class AgentModel {
 	static async update(updates: Partial<Agent>): Promise<Agent | null> {
 		const updateData = this.buildUpdateData(updates);
 		const columns = Object.keys(updateData);
+		const values = Object.values(updateData);
 
 		this.getDb()
-			.prepare(`UPDATE ${this.table} SET ${columns.map((column) => `"${column}" = @${column}`).join(', ')}`)
-			.run(updateData);
+			.prepare(`UPDATE ${this.table} SET ${columns.map((c) => `"${c}" = ?`).join(', ')}`)
+			.run(...values);
 
 		return await this.get();
 	}
@@ -240,7 +242,7 @@ export class AgentModel {
 		const result = this.getDb()
 			.prepare(`DELETE FROM ${this.table}`)
 			.run();
-		return result.changes > 0;
+		return Number(result.changes) > 0;
 	}
 
 	/**

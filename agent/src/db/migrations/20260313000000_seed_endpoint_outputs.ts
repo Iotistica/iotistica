@@ -1,7 +1,7 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
-function up(db: Database.Database): void {
+function up(db: DatabaseSync): void {
 	const isWindows = process.platform === 'win32';
 	const hasProtocol = db
 		.prepare('SELECT 1 FROM endpoint_outputs WHERE protocol = ? LIMIT 1');

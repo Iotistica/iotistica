@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 
 export interface DbBackupMetadata {
 	version: 1;
@@ -54,10 +54,10 @@ async function hashFileSha256(filePath: string): Promise<string> {
 }
 
 function getIntegrityCheck(filePath: string): string {
-	const db = new Database(filePath, { readonly: true, fileMustExist: true });
+	const db = new DatabaseSync(filePath);
 	try {
-		const row = db.pragma('integrity_check', { simple: true }) as string;
-		return row;
+		const row = db.prepare('PRAGMA integrity_check').get() as { integrity_check?: string } | undefined;
+		return row?.integrity_check ?? 'failed';
 	} finally {
 		db.close();
 	}
@@ -105,14 +105,11 @@ export async function createDbBackup(params: {
 	const backupPath = path.join(backupDir, safeName);
 	const tmpPath = `${backupPath}.tmp`;
 
-	const db = new Database(params.dbPath, { fileMustExist: true });
+	// VACUUM INTO creates an online copy of the current database including all
+	// committed WAL frames — no separate checkpoint step required.
+	const db = new DatabaseSync(params.dbPath);
 	try {
-		try {
-			db.pragma('wal_checkpoint(TRUNCATE)');
-		} catch {
-			// Checkpoint best effort for compatibility.
-		}
-		await db.backup(tmpPath);
+		db.exec(`VACUUM INTO '${tmpPath}'`);
 	} finally {
 		db.close();
 	}

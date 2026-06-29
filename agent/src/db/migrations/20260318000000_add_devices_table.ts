@@ -1,9 +1,9 @@
 import { randomUUID } from 'crypto';
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { tableExists } from '../migration-helpers.js';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
-function up(db: Database.Database): void {
+function up(db: DatabaseSync): void {
 	if (tableExists(db, 'devices')) {
 		return;
 	}
@@ -47,7 +47,7 @@ function up(db: Database.Database): void {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`);
 
-	const endpoints = selectEndpoints.all('modbus') as Array<{
+	const endpoints = selectEndpoints.all('modbus') as unknown as Array<{
 		id: number;
 		uuid: string | null;
 		name: string;

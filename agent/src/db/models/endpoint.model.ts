@@ -4,8 +4,8 @@
  */
 
 import { randomUUID } from 'crypto';
-import type Database from 'better-sqlite3';
-import { getDatabase } from '../sqlite';
+import type { DatabaseSync } from 'node:sqlite';
+import { getDatabase, transact } from '../sqlite';
 import { EndpointOutputModel } from './endpoint-outputs.model';
 
 export interface Endpoint {
@@ -36,7 +36,7 @@ type EndpointRow = Omit<Endpoint, 'enabled' | 'connection' | 'data_points' | 'me
 export class EndpointModel {
 	private static table = 'endpoints';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -69,8 +69,8 @@ export class EndpointModel {
 			.filter((row): row is Endpoint => row !== null);
 	}
 
-	private static serializeEndpoint(endpoint: Partial<Endpoint>, includeDefaults: boolean = false): Record<string, unknown> {
-		const serialized: Record<string, unknown> = {};
+	private static serializeEndpoint(endpoint: Partial<Endpoint>, includeDefaults: boolean = false): Record<string, string | number | null> {
+		const serialized: Record<string, string | number | null> = {};
 
 		if (endpoint.uuid !== undefined || includeDefaults) serialized.uuid = endpoint.uuid ?? null;
 		if (endpoint.fingerprint !== undefined || includeDefaults) serialized.fingerprint = endpoint.fingerprint ?? null;
@@ -94,8 +94,8 @@ export class EndpointModel {
    */
 	static async getAll(protocol?: string): Promise<Endpoint[]> {
 		const devices = protocol
-			? this.getDb().prepare(`SELECT * FROM ${this.table} WHERE protocol = ? ORDER BY name ASC`).all(protocol) as EndpointRow[]
-			: this.getDb().prepare(`SELECT * FROM ${this.table} ORDER BY name ASC`).all() as EndpointRow[];
+			? this.getDb().prepare(`SELECT * FROM ${this.table} WHERE protocol = ? ORDER BY name ASC`).all(protocol) as unknown as EndpointRow[]
+			: this.getDb().prepare(`SELECT * FROM ${this.table} ORDER BY name ASC`).all() as unknown as EndpointRow[];
 
 		return this.parseRows(devices);
 	}
@@ -106,7 +106,7 @@ export class EndpointModel {
 	static async getByName(name: string): Promise<Endpoint | null> {
 		const device = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} WHERE name = ? LIMIT 1`)
-			.get(name) as EndpointRow | undefined;
+			.get(name) as unknown as EndpointRow | undefined;
 
 		return this.parseRow(device);
 	}
@@ -124,7 +124,7 @@ export class EndpointModel {
 		try {
 			const device = this.getDb()
 				.prepare(`SELECT * FROM ${this.table} WHERE uuid = ? LIMIT 1`)
-				.get(uuid) as EndpointRow | undefined;
+				.get(uuid) as unknown as EndpointRow | undefined;
 
 			return this.parseRow(device);
 		} catch (error: any) {
@@ -145,7 +145,7 @@ export class EndpointModel {
 	static async getByFingerprint(fingerprint: string): Promise<Endpoint | null> {
 		const device = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} WHERE fingerprint = ? LIMIT 1`)
-			.get(fingerprint) as EndpointRow | undefined;
+			.get(fingerprint) as unknown as EndpointRow | undefined;
 
 		return this.parseRow(device);
 	}
@@ -156,7 +156,7 @@ export class EndpointModel {
 	static async getEnabled(protocol: string): Promise<Endpoint[]> {
 		const devices = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} WHERE protocol = ? AND enabled = 1 ORDER BY name ASC`)
-			.all(protocol) as EndpointRow[];
+			.all(protocol) as unknown as EndpointRow[];
 
 		return this.parseRows(devices);
 	}
@@ -173,11 +173,12 @@ export class EndpointModel {
 		}, true);
 
 		const columns = Object.keys(serialized);
+		const values = Object.values(serialized);
 		const result = this.getDb()
 			.prepare(
-				`INSERT INTO ${this.table} (${columns.map((column) => `"${column}"`).join(', ')}) VALUES (${columns.map((column) => `@${column}`).join(', ')})`,
+				`INSERT INTO ${this.table} (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
 			)
-			.run(serialized);
+			.run(...values);
 
 		return await this.getById(Number(result.lastInsertRowid));
 	}
@@ -218,9 +219,10 @@ export class EndpointModel {
 		};
 
 		const columns = Object.keys(updateData);
+		const values = [...Object.values(updateData), name];
 		this.getDb()
-			.prepare(`UPDATE ${this.table} SET ${columns.map((column) => `"${column}" = @${column}`).join(', ')} WHERE name = @lookup_name`)
-			.run({ ...updateData, lookup_name: name });
+			.prepare(`UPDATE ${this.table} SET ${columns.map((c) => `"${c}" = ?`).join(', ')} WHERE name = ?`)
+			.run(...values);
 
 		return await this.getByName(name);
 	}
@@ -240,9 +242,10 @@ export class EndpointModel {
 		};
 
 		const columns = Object.keys(updateData);
+		const values = [...Object.values(updateData), uuid];
 		this.getDb()
-			.prepare(`UPDATE ${this.table} SET ${columns.map((column) => `"${column}" = @${column}`).join(', ')} WHERE uuid = @lookup_uuid`)
-			.run({ ...updateData, lookup_uuid: uuid });
+			.prepare(`UPDATE ${this.table} SET ${columns.map((c) => `"${c}" = ?`).join(', ')} WHERE uuid = ?`)
+			.run(...values);
 
 		return await this.getByUuid(uuid);
 	}
@@ -258,9 +261,10 @@ export class EndpointModel {
 		};
 
 		const columns = Object.keys(updateData);
+		const values = [...Object.values(updateData), fingerprint];
 		this.getDb()
-			.prepare(`UPDATE ${this.table} SET ${columns.map((column) => `"${column}" = @${column}`).join(', ')} WHERE fingerprint = @lookup_fingerprint`)
-			.run({ ...updateData, lookup_fingerprint: fingerprint });
+			.prepare(`UPDATE ${this.table} SET ${columns.map((c) => `"${c}" = ?`).join(', ')} WHERE fingerprint = ?`)
+			.run(...values);
 
 		return await this.getByFingerprint(fingerprint);
 	}
@@ -272,7 +276,7 @@ export class EndpointModel {
 		const result = this.getDb()
 			.prepare(`DELETE FROM ${this.table} WHERE name = ?`)
 			.run(name);
-		return result.changes > 0;
+		return Number(result.changes) > 0;
 	}
 
 	/**
@@ -287,13 +291,13 @@ export class EndpointModel {
 		const result = this.getDb()
 			.prepare(`DELETE FROM ${this.table} WHERE uuid = ?`)
 			.run(uuid);
-		return result.changes > 0;
+		return Number(result.changes) > 0;
 	}
 
 	static deleteMissingUuid(): number {
-		return this.getDb()
+		return Number(this.getDb()
 			.prepare(`DELETE FROM ${this.table} WHERE uuid IS NULL`)
-			.run().changes;
+			.run().changes);
 	}
 
 	/**
@@ -302,7 +306,7 @@ export class EndpointModel {
 	private static async getById(id: number): Promise<Endpoint> {
 		const device = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} WHERE id = ? LIMIT 1`)
-			.get(id) as EndpointRow | undefined;
+			.get(id) as unknown as EndpointRow | undefined;
 
 		return this.parseRow(device) as Endpoint;
 	}
@@ -317,7 +321,7 @@ export class EndpointModel {
 
 		const devices = this.getDb()
 			.prepare(`SELECT * FROM ${this.table} WHERE lastSeenAt < ? OR lastSeenAt IS NULL ORDER BY lastSeenAt ASC`)
-			.all(cutoffDate.toISOString()) as EndpointRow[];
+			.all(cutoffDate.toISOString()) as unknown as EndpointRow[];
 
 		return this.parseRows(devices);
 	}
@@ -348,14 +352,14 @@ export class EndpointModel {
 	static async importFromJson(protocol: string, config: any): Promise<void> {
 		const db = this.getDb();
 
-		const transaction = db.transaction(() => {
+		transact(db, () => {
 			// Import devices
 			if (config.devices && Array.isArray(config.devices)) {
 				for (const device of config.devices) {
 					const existing = db
 						.prepare(`SELECT id FROM ${this.table} WHERE name = ? LIMIT 1`)
 						.get(device.name);
-          
+
 					if (!existing) {
 						db
 							.prepare(`
@@ -368,34 +372,22 @@ export class EndpointModel {
                   connection,
                   data_points,
                   metadata
-                ) VALUES (
-                  @uuid,
-                  @name,
-                  @protocol,
-                  @enabled,
-                  @poll_interval,
-                  @connection,
-                  @data_points,
-                  @metadata
-                )
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
               `)
-							.run({
-								uuid: randomUUID(),
-								name: device.name,
+							.run(
+								randomUUID(),
+								device.name,
 								protocol,
-								enabled: device.enabled !== undefined ? (device.enabled ? 1 : 0) : 1,
-								poll_interval: device.pollInterval || 5000,
-								connection: JSON.stringify(device.connection),
-								data_points: device.registers ? JSON.stringify(device.registers) : null,
-								metadata: device.slaveId ? JSON.stringify({ slaveId: device.slaveId }) : null,
-							});
+								device.enabled !== undefined ? (device.enabled ? 1 : 0) : 1,
+								device.pollInterval || 5000,
+								JSON.stringify(device.connection),
+								device.registers ? JSON.stringify(device.registers) : null,
+								device.slaveId ? JSON.stringify({ slaveId: device.slaveId }) : null,
+							);
 					}
 				}
 			}
-
 		});
-
-		transaction();
 
 		// Import output config after the device transaction. EndpointOutputModel now
 		// uses the shared direct SQLite helper and exposes an async API.

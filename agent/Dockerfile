@@ -1,5 +1,5 @@
 # ---- Build base stage (build tools only - never inherited by production) ----
-FROM node:20-alpine3.22 AS build-base
+FROM node:24-alpine AS build-base
 
 WORKDIR /app
 
@@ -71,7 +71,7 @@ RUN npx tsc --project tsconfig.build.json && \
     npm prune --omit=dev
 
 # ---- Admin panel build stage ----
-FROM node:20-alpine3.22 AS admin-builder
+FROM node:24-alpine AS admin-builder
 
 WORKDIR /app
 
@@ -83,7 +83,7 @@ COPY agent/admin ./
 RUN npx vite build
 
 # ---- Production stage ------
-FROM node:20-alpine3.22 AS production
+FROM node:24-alpine AS production
 
 WORKDIR /app
 

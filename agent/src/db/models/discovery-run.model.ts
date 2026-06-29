@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 
 export interface DiscoveryRun {
@@ -23,7 +23,7 @@ const MAX_RUNS_PER_RULE = 100;
 export class DiscoveryRunModel {
 	private static table = 'discovery_runs';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -94,13 +94,13 @@ export class DiscoveryRunModel {
 			.prepare(
 				`SELECT * FROM ${this.table} WHERE rule_uuid = ? ORDER BY id DESC LIMIT ?`,
 			)
-			.all(ruleUuid, limit) as DiscoveryRun[];
+			.all(ruleUuid, limit) as unknown as DiscoveryRun[];
 	}
 
 	static getRecent(limit = 20): DiscoveryRun[] {
 		return this.getDb()
 			.prepare(`SELECT * FROM ${this.table} ORDER BY id DESC LIMIT ?`)
-			.all(limit) as DiscoveryRun[];
+			.all(limit) as unknown as DiscoveryRun[];
 	}
 
 	static deleteByRule(ruleUuid: string): void {

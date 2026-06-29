@@ -12,8 +12,8 @@
  * - Audit trail
  */
 
-import type Database from 'better-sqlite3';
-import { getDatabase } from '../sqlite';
+import type { DatabaseSync } from 'node:sqlite';
+import { getDatabase, transact } from '../sqlite';
 
 export type DictionaryDomain = 'key' | 'metric' | 'unit' | 'quality' | 'device';
 
@@ -62,7 +62,7 @@ export class DictionaryModel {
 	private static readonly METADATA_TABLE = 'dictionary_metadata';
 	private static readonly DELTAS_TABLE = 'dictionary_deltas';
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -92,7 +92,7 @@ export class DictionaryModel {
   }> {
 		const entries = this.getDb()
 			.prepare(`SELECT field_name, field_index, domain FROM ${this.ENTRIES_TABLE} ORDER BY field_index ASC`)
-			.all() as Array<Pick<DictionaryEntryRow, 'field_name' | 'field_index' | 'domain'>>;
+			.all() as unknown as Array<Pick<DictionaryEntryRow, 'field_name' | 'field_index' | 'domain'>>;
 
 		// Initialize domain maps
 		const domains = {
@@ -119,15 +119,9 @@ export class DictionaryModel {
 		this.getDb()
 			.prepare(`
         INSERT INTO ${this.ENTRIES_TABLE} (field_name, field_index, version_added, domain, created_at)
-        VALUES (@field_name, @field_index, @version_added, @domain, @created_at)
+        VALUES (?, ?, ?, ?, ?)
       `)
-			.run({
-				field_name: fieldName,
-				field_index: fieldIndex,
-				version_added: versionAdded,
-				domain,
-				created_at: this.now(),
-			});
+			.run(fieldName, fieldIndex, versionAdded, domain, this.now());
 	}
 
 	/**
@@ -137,16 +131,9 @@ export class DictionaryModel {
 		const result = this.getDb()
 			.prepare(`
         INSERT INTO ${this.DELTAS_TABLE} (version, field_name, field_index, domain, synced_to_cloud, created_at)
-        VALUES (@version, @field_name, @field_index, @domain, @synced_to_cloud, @created_at)
+        VALUES (?, ?, ?, ?, 0, ?)
       `)
-			.run({
-				version,
-				field_name: fieldName,
-				field_index: fieldIndex,
-				domain,
-				synced_to_cloud: 0,
-				created_at: this.now(),
-			});
+			.run(version, fieldName, fieldIndex, domain, this.now());
 
 		return Number(result.lastInsertRowid);
 	}
@@ -157,7 +144,7 @@ export class DictionaryModel {
 	static async getUnsyncedDeltas(): Promise<DictionaryDelta[]> {
 		const deltas = this.getDb()
 			.prepare(`SELECT * FROM ${this.DELTAS_TABLE} WHERE synced_to_cloud = 0 ORDER BY version ASC`)
-			.all() as DictionaryDeltaRow[];
+			.all() as unknown as DictionaryDeltaRow[];
 
 		return deltas.map((delta) => this.parseDelta(delta));
 	}
@@ -168,7 +155,7 @@ export class DictionaryModel {
 	static async getDeltasByVersion(version: number): Promise<DictionaryDelta[]> {
 		const deltas = this.getDb()
 			.prepare(`SELECT * FROM ${this.DELTAS_TABLE} WHERE version = ? ORDER BY field_index ASC`)
-			.all(version) as DictionaryDeltaRow[];
+			.all(version) as unknown as DictionaryDeltaRow[];
 
 		return deltas.map((delta) => this.parseDelta(delta));
 	}
@@ -200,7 +187,7 @@ export class DictionaryModel {
 	static async getCurrentVersion(): Promise<number> {
 		const result = this.getDb()
 			.prepare(`SELECT value FROM ${this.METADATA_TABLE} WHERE key = 'current_version' LIMIT 1`)
-			.get() as Pick<DictionaryMetadataRow, 'value'> | undefined;
+			.get() as unknown as Pick<DictionaryMetadataRow, 'value'> | undefined;
     
 		return result ? parseInt(result.value, 10) : 1;
 	}
@@ -218,7 +205,7 @@ export class DictionaryModel {
 	static async getMetadata(key: string): Promise<string | null> {
 		const result = this.getDb()
 			.prepare(`SELECT value FROM ${this.METADATA_TABLE} WHERE key = ? LIMIT 1`)
-			.get(key) as Pick<DictionaryMetadataRow, 'value'> | undefined;
+			.get(key) as unknown as Pick<DictionaryMetadataRow, 'value'> | undefined;
     
 		return result ? result.value : null;
 	}
@@ -230,16 +217,12 @@ export class DictionaryModel {
 		this.getDb()
 			.prepare(`
         INSERT INTO ${this.METADATA_TABLE} (key, value, updated_at)
-        VALUES (@key, @value, @updated_at)
+        VALUES (?, ?, ?)
         ON CONFLICT(key) DO UPDATE SET
           value = excluded.value,
           updated_at = excluded.updated_at
       `)
-			.run({
-				key,
-				value,
-				updated_at: this.now(),
-			});
+			.run(key, value, this.now());
 	}
 
 	/**
@@ -266,7 +249,7 @@ export class DictionaryModel {
   }> {
 		const db = this.getDb();
 		const [entriesCount, deltasCount, unsyncedCount, version, dateRange] = await Promise.all([
-			Promise.resolve(db.prepare(`SELECT COUNT(*) as count FROM ${this.ENTRIES_TABLE}`).get() as { count: number | string } | undefined),
+			Promise.resolve(db.prepare(`SELECT COUNT(*) as unknown as count FROM ${this.ENTRIES_TABLE}`).get() as { count: number | string } | undefined),
 			Promise.resolve(db.prepare(`SELECT COUNT(*) as count FROM ${this.DELTAS_TABLE}`).get() as { count: number | string } | undefined),
 			this.getUnsyncedDeltaCount(),
 			this.getCurrentVersion(),
@@ -290,12 +273,10 @@ export class DictionaryModel {
    */
 	static async clearAll(): Promise<void> {
 		const db = this.getDb();
-		const clear = db.transaction(() => {
+		transact(db, () => {
 			db.prepare(`DELETE FROM ${this.DELTAS_TABLE}`).run();
 			db.prepare(`DELETE FROM ${this.ENTRIES_TABLE}`).run();
 		});
-
-		clear();
 		await this.setCurrentVersion(1);
 		await this.setMetadata('last_full_sync', '0');
 		await this.setMetadata('last_delta_sync', '0');
@@ -362,7 +343,7 @@ export class DictionaryModel {
   }> {
 		const enumKeys = this.getDb()
 			.prepare(`SELECT key, value FROM ${this.METADATA_TABLE} WHERE key LIKE 'enum:%'`)
-			.all() as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
+			.all() as unknown as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
     
 		const result = {
 			qualityCodes: {},
@@ -404,7 +385,7 @@ export class DictionaryModel {
   }> {
 		const statsKeys = this.getDb()
 			.prepare(`SELECT key, value FROM ${this.METADATA_TABLE} WHERE key LIKE 'stats:%'`)
-			.all() as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
+			.all() as unknown as Array<Pick<DictionaryMetadataRow, 'key' | 'value'>>;
     
 		const result = {
 			qualityCodes: {},

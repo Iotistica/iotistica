@@ -3,7 +3,7 @@
  * Manages output configurations for protocol adapters (Modbus, CAN, OPC-UA)
  */
 
-import type Database from 'better-sqlite3';
+import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase } from '../sqlite';
 
 export interface DriftOptions {
@@ -53,7 +53,7 @@ export class EndpointOutputModel {
 		'updated_at',
 	] as const;
 
-	private static getDb(): Database.Database {
+	private static getDb(): DatabaseSync {
 		return getDatabase();
 	}
 
@@ -76,7 +76,7 @@ export class EndpointOutputModel {
 			.prepare(
 				`SELECT ${this.SELECT_COLUMNS.join(', ')} FROM ${this.table} WHERE protocol = ? LIMIT 1`,
 			)
-			.get(protocol) as EndpointOutputRow | undefined;
+			.get(protocol) as unknown as EndpointOutputRow | undefined;
 
 		return output ? this.toModel(output) : null;
 	}
@@ -146,7 +146,7 @@ export class EndpointOutputModel {
 		const result = this.getDb()
 			.prepare(`DELETE FROM ${this.table} WHERE protocol = ?`)
 			.run(protocol);
-		return result.changes > 0;
+		return Number(result.changes) > 0;
 	}
 
 	/**
@@ -155,7 +155,7 @@ export class EndpointOutputModel {
 	static async getAll(): Promise<DeviceEndpointOutput[]> {
 		const rows = this.getDb()
 			.prepare(`SELECT ${this.SELECT_COLUMNS.join(', ')} FROM ${this.table} ORDER BY protocol ASC`)
-			.all() as EndpointOutputRow[];
+			.all() as unknown as EndpointOutputRow[];
 
 		return rows.map((row) => this.toModel(row));
 	}
