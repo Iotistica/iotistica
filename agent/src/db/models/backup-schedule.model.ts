@@ -40,7 +40,7 @@ export class BackupScheduleModel {
 
 	static upsert(patch: Partial<Omit<BackupSchedule, 'updatedAt'>>): BackupSchedule {
 		const now = new Date().toISOString();
-		const fields: Record<string, unknown> = { updated_at: now };
+		const fields: Record<string, string | number | null> = { updated_at: now };
 
 		if (patch.enabled !== undefined) fields.enabled = patch.enabled ? 1 : 0;
 		if (patch.intervalHours !== undefined) fields.interval_hours = patch.intervalHours;
