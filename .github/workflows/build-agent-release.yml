@@ -303,9 +303,9 @@ jobs:
 
           PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
           if [ -n "$PREV_TAG" ]; then
-            CHANGELOG=$(git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s (%h)" --no-merges | head -30)
+            CHANGELOG=$(git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s (%h)" --no-merges --max-count=30)
           else
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges | head -30)
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges --max-count=30)
           fi
 
           cat > /tmp/release-notes.md << NOTES
