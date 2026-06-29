@@ -950,7 +950,9 @@ EOF
     echo "Service memory high watermark: ${AGENT_MEMORY_HIGH}"
 
     SERVICE_TYPE="notify"
-    WATCHDOG_DIRECTIVES=$'# Watchdog configuration (health-gated automatic restart)\nWatchdogSec=60\nNotifyAccess=main'
+    WATCHDOG_DIRECTIVES="# Watchdog configuration (health-gated automatic restart)
+WatchdogSec=60
+NotifyAccess=main"
     STARTUP_TIMEOUT="120"
 
     if [ "$CI" = "true" ]; then
