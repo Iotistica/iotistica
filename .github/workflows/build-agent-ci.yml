@@ -184,9 +184,7 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            platform: linux/amd64
           - arch: arm64
-            platform: linux/arm64
 
     steps:
       - name: Checkout repository
@@ -245,70 +243,38 @@ jobs:
         if: matrix.arch == 'x86_64'
         run: |
           VERSION="${{ needs.build.outputs.agent_version }}"
-          SHA_SHORT="${{ needs.build.outputs.sha_short }}"
           sed "s/AGENT_VERSION_PLACEHOLDER/${VERSION}/g" agent/bin/install.sh > /tmp/artifacts/install.sh
           chmod +x /tmp/artifacts/install.sh
           cd /tmp/artifacts
           sha256sum install.sh > install.sh.sha256
           jq -n \
             --arg commit "${{ github.sha }}" \
-            --arg sha_short "$SHA_SHORT" \
+            --arg sha_short "${{ needs.build.outputs.sha_short }}" \
             --arg version "$VERSION" \
             --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '{commit: $commit, sha_short: $sha_short, version: $version, built_at: $built_at}' \
-            > build-meta.json
+            > /tmp/artifacts/build-meta.json
 
-      - name: Azure login
-        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
+      - name: Upload agent package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Upload agent tarball to Azure staging
-        run: |
-          set -euo pipefail
-          VERSION="${{ needs.build.outputs.agent_version }}"
-          ARCH="${{ matrix.arch }}"
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/builds/${VERSION}/agent-${VERSION}-${ARCH}.tar.gz" \
-            --file "/tmp/artifacts/agent-${VERSION}-${ARCH}.tar.gz" \
-            --overwrite true --auth-mode key --content-type application/gzip
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/builds/${VERSION}/agent-${VERSION}-${ARCH}.tar.gz.sha256" \
-            --file "/tmp/artifacts/agent-${VERSION}-${ARCH}.tar.gz.sha256" \
-            --overwrite true --auth-mode key --content-type text/plain
-
-      - name: Upload install.sh to Azure staging (x86_64 only)
-        if: matrix.arch == 'x86_64'
-        run: |
-          VERSION="${{ needs.build.outputs.agent_version }}"
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/builds/${VERSION}/install.sh" \
-            --file "/tmp/artifacts/install.sh" \
-            --overwrite true --auth-mode key --content-type text/x-shellscript
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/builds/${VERSION}/install.sh.sha256" \
-            --file "/tmp/artifacts/install.sh.sha256" \
-            --overwrite true --auth-mode key --content-type text/plain
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name "agent/builds/${VERSION}/build-meta.json" \
-            --file "/tmp/artifacts/build-meta.json" \
-            --overwrite true --auth-mode key --content-type application/json
+          name: agent-package-${{ matrix.arch }}
+          path: /tmp/artifacts/
+          if-no-files-found: error
+          retention-days: 7
 
   package-cli:
-    name: Package CLI Tarballs (${{ matrix.arch }})
+    name: Package CLI (${{ matrix.arch }})
     needs: build
+    # Only package on master — feature branches are covered by the build job
+    if: github.ref == 'refs/heads/master'
     runs-on: [ubuntu-24.04]
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: x86_64
-            platform: linux/amd64
           - arch: arm64
-            platform: linux/arm64
 
     steps:
       - name: Checkout repository
@@ -333,80 +299,140 @@ jobs:
         working-directory: ./agent-cli
         run: npm ci --prefer-offline --no-audit
 
-      - name: Build CLI tarball (${{ matrix.arch }})
+      - name: Build CLI tarball
         run: |
+          set -euo pipefail
           ARCH="${{ matrix.arch }}"
           cd agent-cli
           npm run build
-          mkdir -p /tmp/iotistic-artifacts
-          tar -czf /tmp/iotistic-artifacts/cli-latest-${ARCH}.tar.gz \
+          mkdir -p /tmp/cli-artifacts
+          tar -czf /tmp/cli-artifacts/cli-latest-${ARCH}.tar.gz \
             dist/ package.json package-lock.json node_modules/
-          if [ "$ARCH" = "x86_64" ]; then
-            cp /tmp/iotistic-artifacts/cli-latest-x86_64.tar.gz /tmp/iotistic-artifacts/cli-latest.tar.gz
-          fi
+          cd /tmp/cli-artifacts
+          sha256sum cli-latest-${ARCH}.tar.gz > cli-latest-${ARCH}.tar.gz.sha256
+
+      - name: Build generic latest + meta (x86_64 only)
+        if: matrix.arch == 'x86_64'
+        run: |
+          cd /tmp/cli-artifacts
+          cp cli-latest-x86_64.tar.gz cli-latest.tar.gz
+          sha256sum cli-latest.tar.gz > cli-latest.tar.gz.sha256
+          VERSION=$(jq -r '.version' "${{ github.workspace }}/agent-cli/package.json")
+          jq -n \
+            --arg commit "${{ github.sha }}" \
+            --arg sha_short "${{ needs.build.outputs.sha_short }}" \
+            --arg version "$VERSION" \
+            --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{commit: $commit, sha_short: $sha_short, version: $version, built_at: $built_at}' \
+            > cli-latest-build-meta.json
+
+      - name: Upload CLI package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-package-${{ matrix.arch }}
+          path: /tmp/cli-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+
+  upload-azure:
+    name: Upload to Azure
+    needs: [build, package-agent, package-cli]
+    if: github.ref == 'refs/heads/master'
+    runs-on: [ubuntu-24.04]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: /tmp/all-artifacts
 
       - name: Azure login
         uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Generate CLI checksums (${{ matrix.arch }})
+      - name: Upload agent tarballs to Azure staging
         run: |
           set -euo pipefail
-          ARCH="${{ matrix.arch }}"
-          cd /tmp/iotistic-artifacts
-          sha256sum cli-latest-${ARCH}.tar.gz > cli-latest-${ARCH}.tar.gz.sha256
-          if [ "$ARCH" = "x86_64" ]; then
-            sha256sum cli-latest.tar.gz > cli-latest.tar.gz.sha256
-            VERSION=$(jq -r '.version' "${{ github.workspace }}/agent-cli/package.json")
-            SHA_SHORT=$(printf '%s' "${{ github.sha }}" | cut -c1-7)
-            jq -n \
-              --arg commit "${{ github.sha }}" \
-              --arg sha_short "$SHA_SHORT" \
-              --arg version "$VERSION" \
-              --arg generated_at_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-              '{commit: $commit, sha_short: $sha_short, version: $version, generated_at_utc: $generated_at_utc}' \
-              > cli-latest-build-meta.json
-          fi
+          VERSION="${{ needs.build.outputs.agent_version }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
 
-      - name: Upload CLI tarball (${{ matrix.arch }})
+          for arch in x86_64 arm64; do
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz" \
+              --file "/tmp/all-artifacts/agent-package-${arch}/agent-${VERSION}-${arch}.tar.gz" \
+              --overwrite true --auth-mode key --content-type application/gzip
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/builds/${VERSION}/agent-${VERSION}-${arch}.tar.gz.sha256" \
+              --file "/tmp/all-artifacts/agent-package-${arch}/agent-${VERSION}-${arch}.tar.gz.sha256" \
+              --overwrite true --auth-mode key --content-type text/plain
+          done
+
+      - name: Upload install.sh to Azure staging
         run: |
-          ARCH="${{ matrix.arch }}"
+          VERSION="${{ needs.build.outputs.agent_version }}"
           ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
           az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent-cli/cli-latest-${ARCH}.tar.gz \
-            --file /tmp/iotistic-artifacts/cli-latest-${ARCH}.tar.gz \
-            --overwrite true --auth-mode key --content-type application/gzip
+            --name "agent/builds/${VERSION}/install.sh" \
+            --file "/tmp/all-artifacts/agent-package-x86_64/install.sh" \
+            --overwrite true --auth-mode key --content-type text/x-shellscript
           az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent-cli/cli-latest-${ARCH}.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/cli-latest-${ARCH}.tar.gz.sha256 \
-            --overwrite true --auth-mode key --content-type text/plain
-
-      - name: Upload generic CLI latest (x86_64 only)
-        if: matrix.arch == 'x86_64'
-        run: |
-          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent-cli/cli-latest.tar.gz \
-            --file /tmp/iotistic-artifacts/cli-latest.tar.gz \
-            --overwrite true --auth-mode key --content-type application/gzip
-          az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent-cli/cli-latest.tar.gz.sha256 \
-            --file /tmp/iotistic-artifacts/cli-latest.tar.gz.sha256 \
+            --name "agent/builds/${VERSION}/install.sh.sha256" \
+            --file "/tmp/all-artifacts/agent-package-x86_64/install.sh.sha256" \
             --overwrite true --auth-mode key --content-type text/plain
           az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent-cli/cli-latest-build-meta.json \
-            --file /tmp/iotistic-artifacts/cli-latest-build-meta.json \
+            --name "agent/builds/${VERSION}/build-meta.json" \
+            --file "/tmp/all-artifacts/agent-package-x86_64/build-meta.json" \
             --overwrite true --auth-mode key --content-type application/json
 
-      - name: Upload CLI installer (x86_64 only)
-        if: matrix.arch == 'x86_64'
+      - name: Upload CLI tarballs to Azure
+        run: |
+          set -euo pipefail
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+
+          for arch in x86_64 arm64; do
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent-cli/cli-latest-${arch}.tar.gz" \
+              --file "/tmp/all-artifacts/cli-package-${arch}/cli-latest-${arch}.tar.gz" \
+              --overwrite true --auth-mode key --content-type application/gzip
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent-cli/cli-latest-${arch}.tar.gz.sha256" \
+              --file "/tmp/all-artifacts/cli-package-${arch}/cli-latest-${arch}.tar.gz.sha256" \
+              --overwrite true --auth-mode key --content-type text/plain
+          done
+
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent-cli/cli-latest.tar.gz" \
+            --file "/tmp/all-artifacts/cli-package-x86_64/cli-latest.tar.gz" \
+            --overwrite true --auth-mode key --content-type application/gzip
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent-cli/cli-latest.tar.gz.sha256" \
+            --file "/tmp/all-artifacts/cli-package-x86_64/cli-latest.tar.gz.sha256" \
+            --overwrite true --auth-mode key --content-type text/plain
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent-cli/cli-latest-build-meta.json" \
+            --file "/tmp/all-artifacts/cli-package-x86_64/cli-latest-build-meta.json" \
+            --overwrite true --auth-mode key --content-type application/json
+
+      - name: Upload CLI installer to Azure
         run: |
           ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
           az storage blob upload --account-name "$ACCT" --container-name scripts \
-            --name agent-cli/cli-install.sh \
+            --name "agent-cli/cli-install.sh" \
             --file "${{ github.workspace }}/agent-cli/bin/cli-install.sh" \
             --overwrite true --auth-mode key --content-type text/x-shellscript
+
+      - name: Azure Upload Summary
+        if: always()
+        run: |
+          VERSION="${{ needs.build.outputs.agent_version }}"
+          echo "## Azure Upload Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Agent staging path:** \`agent/builds/${VERSION}/\`" >> $GITHUB_STEP_SUMMARY
+          echo "**CLI path:** \`agent-cli/cli-latest-*.tar.gz\`" >> $GITHUB_STEP_SUMMARY
 
   # integration-tests:
   #   name: Run Integration Tests
