@@ -247,35 +247,37 @@ user ${MQTT_USERNAME_VALUE}
 topic readwrite #
 EOFACL
 
-    chown root:root /etc/mosquitto/passwd /etc/mosquitto/acl
-    chmod 0700 /etc/mosquitto/passwd
-    chmod 0644 /etc/mosquitto/acl
+    # root:mosquitto + 0640 lets the mosquitto service read the files without ACLs.
+    # The iotistic agent user gets write access via setfacl when available (SD cards
+    # without ACL mount option fall back to group write via the iotistic group).
+    chown root:mosquitto /etc/mosquitto/passwd /etc/mosquitto/acl
+    chmod 0640 /etc/mosquitto/passwd
+    chmod 0640 /etc/mosquitto/acl
     chown mosquitto:mosquitto /var/log/mosquitto/mosquitto.log
     chmod 640 /var/log/mosquitto/mosquitto.log
+
+    # Add iotistic user to mosquitto group so it can write passwd/acl without ACLs
+    usermod -aG mosquitto iotistic 2>/dev/null || true
 
     if command -v setfacl >/dev/null 2>&1; then
         setfacl -m u:iotistic:rwx /etc/mosquitto || true
         setfacl -m u:iotistic:rw /etc/mosquitto/passwd || true
         setfacl -m u:iotistic:rw /etc/mosquitto/acl || true
-        setfacl -m u:mosquitto:r /etc/mosquitto/passwd || true
-        setfacl -m u:mosquitto:r /etc/mosquitto/acl || true
     else
-        echo "Warning: setfacl not available; verify the agent user can update /etc/mosquitto/passwd and /etc/mosquitto/acl"
+        echo "Note: setfacl not available; iotistic user will use group membership for auth file access"
     fi
 
     cat > /usr/local/bin/iotistica-mqtt-reload.sh << 'EOFRELOAD'
 #!/bin/bash
 set -e
 
-chown root:root /etc/mosquitto/passwd /etc/mosquitto/acl
-chmod 0700 /etc/mosquitto/passwd
-chmod 0644 /etc/mosquitto/acl
+chown root:mosquitto /etc/mosquitto/passwd /etc/mosquitto/acl
+chmod 0640 /etc/mosquitto/passwd
+chmod 0640 /etc/mosquitto/acl
 
 if command -v setfacl >/dev/null 2>&1; then
     setfacl -m u:iotistic:rw /etc/mosquitto/passwd || true
     setfacl -m u:iotistic:rw /etc/mosquitto/acl || true
-    setfacl -m u:mosquitto:r /etc/mosquitto/passwd || true
-    setfacl -m u:mosquitto:r /etc/mosquitto/acl || true
 fi
 
 systemctl reload mosquitto
