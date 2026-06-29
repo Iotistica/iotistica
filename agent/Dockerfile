@@ -28,9 +28,9 @@ RUN --mount=type=cache,target=/root/.npm \
     npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 20000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
-    PYTHON=python3 npm ci --omit=dev --omit=optional --legacy-peer-deps && \
-    npm dedupe --omit=dev --omit=optional && \
-    find node_modules -type d \( \
+    PYTHON=python3 npm ci --omit=dev --legacy-peer-deps && \
+    npm dedupe --omit=dev
+RUN find node_modules -type d \( \
         -name test -o \
         -name tests -o \
         -name docs -o \
@@ -116,8 +116,8 @@ RUN (deluser node || true) && \
 # Copy package files from agent directory (contains version info)
 COPY --chown=agentuser:agentgroup agent/package*.json ./
 
-# Copy production dependencies from deps stage (pre-stripped in deps stage)
-COPY --from=deps --chown=agentuser:agentgroup /app/node_modules ./node_modules
+# Copy production dependencies from builder stage (pruned via npm prune --omit=dev)
+COPY --from=builder --chown=agentuser:agentgroup /app/node_modules ./node_modules
 
 # Copy built application from builder stage
 COPY --from=builder --chown=agentuser:agentgroup /app/dist ./dist
