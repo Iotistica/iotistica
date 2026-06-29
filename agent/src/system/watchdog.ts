@@ -31,10 +31,14 @@ function sendNativeNotification(message: string, socketPath: string, logger?: Ag
 				notifySocket = null;
 			});
 		}
-    
+
+		// systemd encodes abstract socket paths with a leading '@'.
+		// The kernel abstract namespace uses a NUL byte prefix instead.
+		const actualPath = socketPath.startsWith('@') ? '\0' + socketPath.slice(1) : socketPath;
+
 		// Send datagram to systemd socket.
 		// @ts-ignore - Unix socket path not in official types
-		notifySocket.send(message, socketPath, (err: Error | null) => {
+		notifySocket.send(message, actualPath, (err: Error | null) => {
 			if (err) {
 				logger?.errorSync('Failed to send watchdog ping', err, {
 					component: LogComponents.agent,
@@ -245,12 +249,15 @@ export function startWatchdog(healthCheck?: HealthCheckFn, logger?: AgentLogger)
 
 /** Notify systemd that the application is ready. */
 export async function notifyReady(logger?: AgentLogger): Promise<void> {
-	if (!process.env.NOTIFY_SOCKET) {
+	const socketPath = process.env.NOTIFY_SOCKET;
+	if (!socketPath) {
 		return;
 	}
 
+	console.log(`[watchdog] Sending READY=1 to NOTIFY_SOCKET=${socketPath}`);
 	await sendNotification('READY=1', logger);
-  
+
+	console.log('[watchdog] READY=1 sent');
 	logger?.infoSync('Systemd READY notification sent', {
 		component: LogComponents.agent,
 		operation: 'notifyReady'
