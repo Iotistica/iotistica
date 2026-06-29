@@ -206,11 +206,7 @@ configure_mosquitto_file_auth() {
     MQTT_AUTH_DIR_VALUE="/etc/mosquitto"
     MQTT_USERNAME_VALUE="${MQTT_USERNAME:-admin}"
 
-    if [ -n "$MQTT_PASSWORD" ]; then
-        MQTT_PASSWORD_VALUE="$MQTT_PASSWORD"
-    else
-        MQTT_PASSWORD_VALUE="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)"
-    fi
+    MQTT_PASSWORD_VALUE="${MQTT_PASSWORD:-admin}"
 
     MQTT_BROKER_HOST_VALUE="${MQTT_BROKER_HOST:-localhost}"
     MQTT_BROKER_PORT_VALUE="${MQTT_BROKER_PORT:-1883}"
@@ -1125,8 +1121,17 @@ EOFJOURNALD
         echo "====================================="
         echo ""
         echo "Agent is running as systemd service '${SERVICE_NAME}'"
-        echo "Device API: http://localhost:${DEVICE_API_PORT}"
+        echo "Admin UI:   http://$(hostname -I | awk '{print $1}'):${DEVICE_API_PORT}/admin"
         echo ""
+        echo "Default credentials: admin / admin"
+        echo "  Change password via the admin UI after first login."
+        echo ""
+        if [ "$MANAGE_LOCAL_MOSQUITTO" = "yes" ]; then
+            echo "Local MQTT broker: ${MQTT_BROKER_URL_VALUE}"
+            echo "  Username: ${MQTT_USERNAME_VALUE}"
+            echo "  Password: ${MQTT_PASSWORD_VALUE}"
+            echo ""
+        fi
         echo "Useful commands:"
         echo "  systemctl status ${SERVICE_NAME}        # Check status"
         echo "  journalctl -u ${SERVICE_NAME} -f        # View logs"
