@@ -100,7 +100,7 @@ export async function createDbBackup(params: {
 		throw new Error(`Database file not found: ${params.dbPath}`);
 	}
 
-	const baseName = params.name?.trim() || `device-${formatTimestampForFile()}`;
+	const baseName = params.name?.trim() || `agent-${formatTimestampForFile()}`;
 	const safeName = baseName.endsWith('.sqlite') ? baseName : `${baseName}.sqlite`;
 	const backupPath = path.join(backupDir, safeName);
 	const tmpPath = `${backupPath}.tmp`;
