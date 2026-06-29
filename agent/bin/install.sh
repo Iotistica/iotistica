@@ -958,7 +958,7 @@ EOF
     SERVICE_TYPE="notify"
     WATCHDOG_DIRECTIVES="# Watchdog configuration (health-gated automatic restart)
 WatchdogSec=60
-NotifyAccess=main"
+NotifyAccess=exec"
     STARTUP_TIMEOUT="120"
 
     if [ "$CI" = "true" ]; then

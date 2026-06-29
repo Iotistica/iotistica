@@ -37,8 +37,11 @@ function sendNativeNotification(message: string, socketPath: string, logger?: Ag
 		const actualPath = socketPath.startsWith('@') ? '\0' + socketPath.slice(1) : socketPath;
 
 		// Send datagram to systemd socket.
+		// Must use the 5-arg form (buf, offset, length, path, cb) — the 3-arg
+		// form (buf, path, cb) maps 'path' into the 'port' slot and is silently dropped.
+		const buf = Buffer.isBuffer(message) ? message : Buffer.from(message);
 		// @ts-ignore - Unix socket path not in official types
-		notifySocket.send(message, actualPath, (err: Error | null) => {
+		notifySocket.send(buf, 0, buf.length, actualPath, (err: Error | null) => {
 			if (err) {
 				logger?.errorSync('Failed to send watchdog ping', err, {
 					component: LogComponents.agent,
