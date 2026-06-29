@@ -703,7 +703,7 @@ onUnmounted(() => {
                     extra="Local broker from the Destinations page (standalone mode)."
                   >
                     <a-select
-                      :value="config.alerts.alertDestinationId ?? null"
+                      :value="config.alerts.alertDestinationId"
                       allow-clear
                       placeholder="None (use cloud MQTT)"
                       style="width: 100%"
