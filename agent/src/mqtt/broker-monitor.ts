@@ -85,7 +85,7 @@ export class BrokerMonitorService extends EventEmitter {
 		super();
 		this.brokerUrl = process.env.LOCAL_MQTT_URL ?? 'mqtt://localhost:1883';
 		this.username  = process.env.LOCAL_MQTT_USER ?? 'admin';
-		this.password  = process.env.LOCAL_MQTT_PASS ?? '';
+		this.password  = process.env.LOCAL_MQTT_PASS ?? process.env.MQTT_PASSWORD ?? '';
 	}
 
 	static getInstance(): BrokerMonitorService {

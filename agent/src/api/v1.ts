@@ -1992,13 +1992,19 @@ router.patch('/v1/mqtt/broker/config', async (req: Request, res: Response, next:
 		if (typeof url !== 'string' || !url.trim()) {
 			return res.status(400).json({ error: '"url" (string) is required' });
 		}
+		// If password is blank, keep whatever is already persisted
+		let resolvedPassword: string = password ?? '';
+		if (!resolvedPassword) {
+			const existing = await actions.getSettings();
+			resolvedPassword = existing.mqttMonitor?.password ?? '';
+		}
 		// Persist to settings
 		await actions.updateSettings({
-			mqttMonitor: { url: url.trim(), username: username ?? '', password: password ?? '' },
+			mqttMonitor: { url: url.trim(), username: username ?? '', password: resolvedPassword },
 		});
 		// Apply immediately — reconnect the live monitor
 		const monitor = BrokerMonitorService.getInstance();
-		monitor.reconfigure(url.trim(), username ?? '', password ?? '');
+		monitor.reconfigure(url.trim(), username ?? '', resolvedPassword);
 		return res.status(200).json({ ok: true });
 	} catch (error) {
 		next(error);
