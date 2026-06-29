@@ -2021,10 +2021,11 @@ import {
 	createDbBackup,
 	listDbBackups,
 	restoreDbFromBackup,
-	pruneDbBackups,
 	getDefaultBackupDir,
 } from '../db/backup.js';
 import { getDatabasePath } from '../db/db-path.js';
+import { join as pathJoin } from 'path';
+import { existsSync, rmSync } from 'fs';
 
 /** GET /v1/backups — list all database backups */
 router.get('/v1/backups', async (_req: Request, res: Response, next: NextFunction) => {
@@ -2055,7 +2056,7 @@ router.post('/v1/backups/:fileName/restore', async (req: Request, res: Response,
 		const { fileName } = req.params;
 		const dbPath = getDatabasePath();
 		const backupDir = getDefaultBackupDir(dbPath);
-		const backupPath = require('path').join(backupDir, fileName);
+		const backupPath = pathJoin(backupDir, fileName);
 		const result = await restoreDbFromBackup({ dbPath, backupPath, createPreRestoreBackup: true });
 		return res.status(200).json({ ok: true, restoredPath: result.restoredPath, preRestoreBackupPath: result.preRestoreBackupPath });
 	} catch (error) {
@@ -2069,15 +2070,13 @@ router.delete('/v1/backups/:fileName', async (req: Request, res: Response, next:
 		const { fileName } = req.params;
 		const dbPath = getDatabasePath();
 		const backupDir = getDefaultBackupDir(dbPath);
-		const fs = await import('fs');
-		const path = await import('path');
-		const backupPath = path.join(backupDir, fileName);
+		const backupPath = pathJoin(backupDir, fileName);
 		const metaPath = `${backupPath}.meta.json`;
-		if (!fs.existsSync(backupPath)) {
+		if (!existsSync(backupPath)) {
 			return res.status(404).json({ error: 'Backup not found' });
 		}
-		fs.rmSync(backupPath, { force: true });
-		fs.rmSync(metaPath, { force: true });
+		rmSync(backupPath, { force: true });
+		rmSync(metaPath, { force: true });
 		return res.status(200).json({ ok: true });
 	} catch (error) {
 		next(error);
