@@ -133,9 +133,9 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: agent/node_modules
-          key: ${{ runner.os }}-node-modules-${{ matrix.arch }}-${{ hashFiles('agent/package-lock.json') }}
+          key: ${{ runner.os }}-node-modules-${{ matrix.arch }}-v2-${{ hashFiles('agent/package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-node-modules-${{ matrix.arch }}-
+            ${{ runner.os }}-node-modules-${{ matrix.arch }}-v2-
 
       - name: Install dependencies
         if: steps.node-modules-cache.outputs.cache-hit != 'true'
@@ -143,7 +143,7 @@ jobs:
         run: npm ci --prefer-offline --no-audit --legacy-peer-deps
 
       - name: Rebuild native modules for ARM64
-        if: matrix.arch == 'arm64' && steps.node-modules-cache.outputs.cache-hit != 'true'
+        if: matrix.arch == 'arm64'
         run: |
           docker run --rm -v "${{ github.workspace }}/agent":/app -w /app --platform linux/arm64 \
             node:20-slim bash -c "

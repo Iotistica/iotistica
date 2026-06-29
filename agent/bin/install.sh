@@ -814,19 +814,22 @@ echo ""
         
         echo "✓ Pre-built agent verified (architecture-specific native modules included)"
 
-        # Verify native modules are loadable on this architecture; rebuild if not.
-        # This handles cases where the tarball was built for a different arch or the
-        # .node binary is missing.
-        if ! node -e "require('/opt/iotistic/agent/node_modules/better-sqlite3')" 2>/dev/null; then
+        # ARM64: always rebuild native modules from source.
+        # The tarball is built on x86_64 CI runners so bundled .node binaries are x86_64
+        # and will not load on aarch64. Unconditional — no detection needed.
+        if [ "$ARCH" = "aarch64" ]; then
             echo ""
-            echo "Native modules are not compatible with this architecture — rebuilding from source..."
-            apt-get install -y --no-install-recommends build-essential python3 libsqlite3-dev || true
-            cd /opt/iotistic/agent
-            npm rebuild better-sqlite3 node-pty --build-from-source || {
-                echo "✗ Error: Failed to rebuild native modules"
+            echo "ARM64 device — rebuilding native modules from source (this takes ~2 min)..."
+            apt-get install -y --no-install-recommends build-essential python3 libsqlite3-dev || {
+                echo "✗ Error: Failed to install build tools for native module compilation"
                 exit 1
             }
-            echo "✓ Native modules rebuilt for $(uname -m)"
+            cd /opt/iotistic/agent
+            npm rebuild better-sqlite3 node-pty --build-from-source || {
+                echo "✗ Error: Failed to rebuild native modules for ARM64"
+                exit 1
+            }
+            echo "✓ Native modules compiled for aarch64"
         fi
 
         # Verify admin UI is included in the tarball
