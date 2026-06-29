@@ -149,7 +149,7 @@ jobs:
           docker run --rm -v "${{ github.workspace }}/agent":/app -w /app --platform linux/arm64 \
             node:24-slim bash -c "
               apt-get update -qq && apt-get install -y -qq build-essential python3 libsqlite3-dev
-              npm rebuild node-pty @serialport/bindings-cpp --build-from-source
+              npm rebuild node-pty @serialport/bindings-cpp
             "
 
       - name: Build tarball (${{ matrix.arch }})
@@ -173,7 +173,7 @@ jobs:
           fi
 
       - name: Azure login
-        uses: azure/login@1384c340ab2dda50fed2bee3041d1d87018aa5e8 # v2
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
@@ -333,7 +333,7 @@ jobs:
           fi
 
       - name: Azure login
-        uses: azure/login@1384c340ab2dda50fed2bee3041d1d87018aa5e8 # v2
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
