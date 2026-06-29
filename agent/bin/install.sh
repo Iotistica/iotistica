@@ -6,18 +6,21 @@ set -e
 # This script installs the Iotistic agent using either Docker or Systemd
 # Usage: curl -sfL https://get.iotistica.com/agent | sh
 #
-# Environment Variables (CI/Non-interactive mode):
-#   IOTISTICA_AGENT_VERSION        - Agent version to install (default: latest for Docker, dev for Systemd)
+# The agent installs in standalone mode by default. Open the admin UI to configure
+# cloud sync and provision the device — no interactive prompts required.
+#
+# Environment Variables (optional overrides):
+#   IOTISTICA_AGENT_VERSION        - Agent version to install (default: latest)
 #   IOTISTICA_DEVICE_PORT          - Device API port (default: 48484)
-#   IOTISTICA_API   - Cloud API endpoint (e.g., https://api.iotistica.com)
-#   IOTISTICA_PROVISIONING_KEY     - Provisioning API key (leave empty for local mode)
+#   IOTISTICA_API                  - Cloud API endpoint — set to enable cloud mode (e.g., https://api.iotistica.com)
+#   PROVISIONING_KEY               - Cloud provisioning key (only used when IOTISTICA_API is set)
 #   IOTISTICA_DOWNLOAD_BASE_URL    - Base URL for published agent tarballs (default: https://get.iotistica.com/agent/artifacts)
 #   IOTISTICA_INSTALL_SOURCE       - Install source: auto | repo | artifact (default: auto)
 #   IOTISTICA_INSTALL_DOCKER       - Set to yes/true/1 to allow automatic Docker installation
 #   IOTISTICA_INSTALL_MOSQUITTO    - Set to yes/true/1 to install and manage a local Mosquitto broker
 #   MQTT_BROKER_PORT               - Port for the local Mosquitto broker (default: 1883); set if 1883 is already in use
-#   AGENT_SHELL_HMAC_KEY           - HMAC secret for remote shell command verification (required when remote shell access is enabled)
-#   FORCE_INSTALL                 - Legacy opt-in flag; set to 1 to allow automatic Docker installation
+#   AGENT_SHELL_HMAC_KEY           - HMAC secret for remote shell command verification
+#   FORCE_INSTALL                  - Legacy opt-in flag; set to 1 to allow automatic Docker installation
 
 # Note: This script is POSIX-compliant and works with both sh and bash
 # No re-exec needed - works when piped to sh
@@ -537,57 +540,16 @@ echo ""
         fi
     }
     
-    # Detect interactive vs non-interactive.
-    # Non-interactive: CI flag set, or key env vars already provided via environment.
-    INTERACTIVE_MODE="no"
-    if [ -z "$CI" ] && [ -z "$IOTISTICA_AGENT_VERSION" ] && [ -z "$IOTISTICA_DEVICE_PORT" ] \
-       && [ -z "$IOTISTICA_API" ] && [ -z "$PROVISIONING_KEY" ] && [ -e /dev/tty ]; then
-        INTERACTIVE_MODE="yes"
-    fi
+        # Provisioning is done through the web admin UI after installation.
+    # Cloud mode can be enabled by setting IOTISTICA_API + PROVISIONING_KEY env vars
+    # before running this script (e.g. for automated fleet deployments).
+    DEVICE_API_PORT="${IOTISTICA_DEVICE_PORT:-48484}"
+    AGENT_VERSION="${IOTISTICA_AGENT_VERSION:-dev}"
+    IOTISTICA_API="${IOTISTICA_API:-}"
+    PROVISIONING_KEY="${PROVISIONING_KEY:-}"
 
-    if [ "$INTERACTIVE_MODE" = "yes" ]; then
-        echo "Running in interactive mode"
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo " Deployment Mode"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "  1) Standalone  — fully offline, local admin UI only"
-        echo "  2) Cloud       — connect to Iotistica Cloud (fleet management, remote access)"
-        echo ""
-        echo -n "Select mode [1/2]: " >/dev/tty
-        read DEPLOY_MODE </dev/tty
-
-        if [ "$DEPLOY_MODE" = "2" ]; then
-            echo ""
-            echo -n "Iotistica API URL [https://api.iotistica.com]: " >/dev/tty
-            read IOTISTICA_API </dev/tty
-            IOTISTICA_API="${IOTISTICA_API:-https://api.iotistica.com}"
-
-            echo -n "Provisioning key: " >/dev/tty
-            read PROVISIONING_KEY </dev/tty
-
-            if [ -z "$PROVISIONING_KEY" ]; then
-                echo "Warning: No provisioning key provided — agent will run in cloud mode but cannot provision"
-            fi
-        else
-            echo "→ Standalone mode selected"
-            IOTISTICA_API=""
-            PROVISIONING_KEY=""
-        fi
-
-        echo ""
-        echo -n "Device API port [48484]: " >/dev/tty
-        read DEVICE_API_PORT </dev/tty
-        DEVICE_API_PORT="${DEVICE_API_PORT:-48484}"
-        AGENT_VERSION="dev"
-    else
-        echo "Running in non-interactive mode"
-        if [ -n "$PROVISIONING_KEY" ]; then
-            echo "[DEBUG] PROVISIONING_KEY found in environment (redacted)"
-        fi
-        DEVICE_API_PORT="${IOTISTICA_DEVICE_PORT:-48484}"
-        AGENT_VERSION="${IOTISTICA_AGENT_VERSION:-dev}"
-        IOTISTICA_API="${IOTISTICA_API:-}"
+    if [ -n "$PROVISIONING_KEY" ]; then
+        echo "[DEBUG] PROVISIONING_KEY found in environment (redacted)"
     fi
     
     # Normalize API endpoint - add http:// if protocol missing
@@ -888,6 +850,12 @@ STATE_FILE=/var/lib/iotistic/agent/target-state.json
 DATABASE_PATH=/var/lib/iotistic/agent/agent.sqlite
 EOF
 
+    # Run in standalone mode by default — provisioning is done via the web admin UI.
+    # Only skip STANDALONE when IOTISTICA_API is explicitly provided (cloud/fleet deployments).
+    if [ -z "$IOTISTICA_API" ]; then
+        echo "STANDALONE=true" >> /etc/iotistic/agent.env
+    fi
+
     if [ -n "$MQTT_BROKER_URL_VALUE" ]; then
         echo "MQTT_BROKER_URL=${MQTT_BROKER_URL_VALUE}" >> /etc/iotistic/agent.env
     fi
@@ -1136,8 +1104,13 @@ EOFJOURNALD
         echo "Admin UI:   http://$(hostname -I | awk '{print $1}'):${DEVICE_API_PORT}/admin"
         echo ""
         echo "Default credentials: admin / admin"
-        echo "  Change password via the admin UI after first login."
+        echo "  → Open the admin UI to change your password and configure the agent."
         echo ""
+        if [ -z "$IOTISTICA_API" ]; then
+        echo "Running in standalone mode."
+        echo "  To connect to Iotistica Cloud, go to Settings → Cloud Sync in the admin UI."
+        echo ""
+        fi
         if [ "$MANAGE_LOCAL_MOSQUITTO" = "yes" ]; then
             echo "Local MQTT broker: ${MQTT_BROKER_URL_VALUE}"
             echo "  Username: ${MQTT_USERNAME_VALUE}"
