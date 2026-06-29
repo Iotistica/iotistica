@@ -271,6 +271,9 @@ jobs:
         working-directory: ./agent
         run: npm prune --omit=dev
 
+      - name: Bundle cli-install.sh into agent bin
+        run: cp "${{ github.workspace }}/agent-cli/bin/cli-install.sh" "${{ github.workspace }}/agent/bin/cli-install.sh"
+
       - name: Build tarball
         run: |
           set -euo pipefail
