@@ -105,8 +105,11 @@ export class DeviceAPI {
 
 		// Serve admin panel static files (built output from agent/admin/dist)
 		const adminDist = join(__dirname, '../../admin/dist');
-		this.api.use('/admin', express.static(adminDist));
+		// Hashed assets (JS/CSS chunks) get long-lived cache; index.html must never be cached
+		// so browsers always get the latest chunk manifest after an upgrade.
+		this.api.use('/admin', express.static(adminDist, { maxAge: '1y', immutable: true }));
 		this.api.get('/admin/*', (_req, res) => {
+			res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
 			res.sendFile(join(adminDist, 'index.html'));
 		});
 
