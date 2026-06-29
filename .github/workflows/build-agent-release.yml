@@ -11,9 +11,10 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g. 1.0.522) — must have CI artifacts in Azure staging'
+        description: 'Version to release — must have CI artifacts in Azure staging'
         required: true
         type: string
+        default: '1.0.522'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
