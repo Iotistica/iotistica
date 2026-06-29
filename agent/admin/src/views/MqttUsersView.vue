@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, DeleteOutlined, WifiOutlined, LockOutlined, CrownOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, DeleteOutlined, WifiOutlined, CrownOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { client as apiClient } from '@/api/client'

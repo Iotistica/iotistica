@@ -6,7 +6,7 @@ import AppSidebar from './AppSidebar.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useProStatus } from '@/composables/useProStatus'
 
-defineProps<{ title: string }>()
+defineProps<{ title?: string }>()
 
 const router = useRouter()
 const { currentUser, logout } = useAuth()
