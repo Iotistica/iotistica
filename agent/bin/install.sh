@@ -179,7 +179,7 @@ should_manage_mosquitto() {
     elif [ "$IOTISTICA_INSTALL_MOSQUITTO" = "no" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "false" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "0" ]; then
         SHOULD_INSTALL_MOSQUITTO="no"
     elif command -v mosquitto >/dev/null 2>&1; then
-        SHOULD_INSTALL_MOSQUITTO="yes"
+        SHOULD_INSTALL_MOSQUITTO="no"
     elif [ -e /dev/tty ]; then
         echo ""
         echo -n "Install and manage a local Mosquitto MQTT broker? (yes/no): " >/dev/tty
