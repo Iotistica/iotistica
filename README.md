@@ -4,7 +4,7 @@ Connect industrial assets, process data at the edge, and deliver trusted telemet
 
 **[iotistica.com](https://iotistica.com) · [Solutions & Pricing](https://iotistica.com/solutions.html)**
 
-![Dashboard](https://raw.githubusercontent.com/Iotistica/iot-website/main/docs/static/img/agent/dashboard.JPG)
+![Dashboard](https://docs.iotistica.com/img/agent/dashboard.JPG)
 
 ---
 
@@ -56,9 +56,9 @@ The agent is the core component. It runs on edge hardware and handles:
 
 The agent ships a local admin UI (Vue 3 + Ant Design Vue) served at `http://<device>:48481/admin/`.
 
-![Endpoints](https://raw.githubusercontent.com/Iotistica/iot-website/main/docs/static/img/agent/endpoints.JPG)
+![Endpoints](https://docs.iotistica.com/img/agent/endpoints.JPG)
 
-![Applications](https://raw.githubusercontent.com/Iotistica/iot-website/main/docs/static/img/agent/applications.JPG)
+![Applications](https://docs.iotistica.com/img/agent/applications.JPG)
 
 ---
 
@@ -66,7 +66,7 @@ The agent ships a local admin UI (Vue 3 + Ant Design Vue) served at `http://<dev
 
 Agent Pro includes a live MQTT broker monitor — browse every active topic, inspect message payloads in real time, and track client counts and throughput without leaving the admin UI.
 
-![MQTT Broker Monitor showing metric cards, topic tree, and message payload viewer](https://raw.githubusercontent.com/Iotistica/iot-website/main/docs/static/img/agent/mqtt.JPG)
+![MQTT Broker Monitor showing metric cards, topic tree, and message payload viewer](https://docs.iotistica.com/img/agent/mqtt.JPG)
 
 The monitor connects to the local Mosquitto broker and refreshes every five seconds:
 
