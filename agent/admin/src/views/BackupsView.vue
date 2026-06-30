@@ -222,6 +222,7 @@ onMounted(() => { load(); loadSchedule() })
                 type="primary"
                 :loading="scheduleSaving"
                 :disabled="!schedule.enabled"
+                style="margin-left: auto"
                 @click="saveSchedule"
               >
                 Save
