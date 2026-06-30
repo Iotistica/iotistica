@@ -178,6 +178,8 @@ should_manage_mosquitto() {
         SHOULD_INSTALL_MOSQUITTO="yes"
     elif [ "$IOTISTICA_INSTALL_MOSQUITTO" = "no" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "false" ] || [ "$IOTISTICA_INSTALL_MOSQUITTO" = "0" ]; then
         SHOULD_INSTALL_MOSQUITTO="no"
+    elif command -v mosquitto >/dev/null 2>&1; then
+        SHOULD_INSTALL_MOSQUITTO="yes"
     elif [ -e /dev/tty ]; then
         echo ""
         echo -n "Install and manage a local Mosquitto MQTT broker? (yes/no): " >/dev/tty
@@ -217,8 +219,19 @@ configure_mosquitto_file_auth() {
     MQTT_BROKER_HOST_VALUE="${MQTT_BROKER_HOST:-localhost}"
     MQTT_BROKER_PORT_VALUE="${MQTT_BROKER_PORT:-1883}"
 
-    # Check if the desired port is already occupied
-    if is_port_in_use "$MQTT_BROKER_PORT_VALUE"; then
+    # Check if the desired port is already occupied by something other than Mosquitto.
+    # If Mosquitto itself holds the port we are about to reconfigure it — no conflict.
+    port_held_by_other() {
+        local port="$1"
+        is_port_in_use "$port" || return 1
+        if command -v ss >/dev/null 2>&1; then
+            ss -tlnp 2>/dev/null | grep ":${port}[[:space:]]" | grep -q "mosquitto" && return 1
+        elif command -v lsof >/dev/null 2>&1; then
+            lsof -i :"$port" -sTCP:LISTEN 2>/dev/null | grep -q "mosquitto" && return 1
+        fi
+        return 0
+    }
+    if port_held_by_other "$MQTT_BROKER_PORT_VALUE"; then
         echo ""
         echo "⚠️  Port $MQTT_BROKER_PORT_VALUE is already in use by another process."
         echo "   (A Docker container or existing service may be running on this port.)"
