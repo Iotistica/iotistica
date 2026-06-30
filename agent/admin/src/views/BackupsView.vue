@@ -200,29 +200,26 @@ onMounted(() => { load(); loadSchedule() })
         <a-spin :spinning="scheduleLoading">
           <div class="schedule-body">
             <div class="schedule-fields">
-              <a-form-item label="Frequency" style="margin-bottom: 0">
-                <a-select
-                  v-model:value="schedule.intervalHours"
-                  :options="intervalOptions"
-                  style="width: 200px"
-                  :disabled="!schedule.enabled"
-                />
-              </a-form-item>
-              <a-form-item label="Keep last" style="margin-bottom: 0">
-                <a-input-number
-                  v-model:value="schedule.keepCount"
-                  :min="1"
-                  :max="100"
-                  :disabled="!schedule.enabled"
-                  addon-after="backups"
-                  style="width: 160px"
-                />
-              </a-form-item>
+              <span class="field-label">Frequency</span>
+              <a-select
+                v-model:value="schedule.intervalHours"
+                :options="intervalOptions"
+                style="width: 180px"
+                :disabled="!schedule.enabled"
+              />
+              <span class="field-label">Keep last</span>
+              <a-input-number
+                v-model:value="schedule.keepCount"
+                :min="1"
+                :max="100"
+                :disabled="!schedule.enabled"
+                addon-after="backups"
+                style="width: 150px"
+              />
               <a-button
                 type="primary"
                 :loading="scheduleSaving"
                 :disabled="!schedule.enabled"
-                style="margin-left: auto"
                 @click="saveSchedule"
               >
                 Save
@@ -353,10 +350,16 @@ onMounted(() => { load(); loadSchedule() })
   gap: 12px;
 }
 
+.field-label {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+  white-space: nowrap;
+}
+
 .schedule-fields {
   display: flex;
-  align-items: flex-end;
-  gap: 20px;
+  align-items: center;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
