@@ -379,7 +379,7 @@ let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
 async function connectToSim() {
   connecting.value = true
   try {
-    const health = await simFetch('/health')
+    await simFetch('/health')
     connected.value = true
     meta.value = await simFetch('/meta')
     await loadDevices()
@@ -511,7 +511,7 @@ async function saveDevice() {
       })
       message.success('Device updated')
     } else {
-      const created = await simFetch('/devices', {
+      await simFetch('/devices', {
         method: 'POST',
         body: JSON.stringify(deviceForm.value),
       })
