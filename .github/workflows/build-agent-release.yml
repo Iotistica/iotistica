@@ -295,6 +295,27 @@ jobs:
               --overwrite true --auth-mode key --only-show-errors --output none --content-type application/json
           done
 
+          # Manifest — lets the docs site show which version the "latest" SBOMs belong to
+          cat > /tmp/sbom/sbom-latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "releasedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "baseUrl": "https://apps.iotistica.com/agent/sbom",
+            "files": [
+              { "id": "agent-source",           "label": "Agent — source",      "file": "agent-source.cyclonedx.json",            "description": "All npm dependencies declared in agent/package.json, generated from source." },
+              { "id": "agent-artifacts-x86_64", "label": "Agent — x86_64 build","file": "agent-artifacts-x86_64.cyclonedx.json",  "description": "Filesystem scan of the built x86_64 release tarball — includes bundled binaries." },
+              { "id": "agent-artifacts-arm64",  "label": "Agent — arm64 build", "file": "agent-artifacts-arm64.cyclonedx.json",   "description": "Filesystem scan of the built arm64 release tarball — includes bundled binaries." },
+              { "id": "install-script",         "label": "Install script",       "file": "install-script.cyclonedx.json",          "description": "Scan of install.sh and any bundled tooling." }
+            ]
+          }
+          EOF
+          az storage blob upload --account-name "$ACCT" --container-name scripts \
+            --name "agent/sbom/sbom-latest.json" \
+            --file "/tmp/sbom/sbom-latest.json" \
+            --overwrite true --auth-mode key --only-show-errors --output none \
+            --content-type application/json \
+            --metadata "Cache-Control=no-cache"
+
       - name: Create GitHub Release
         run: |
           set -euo pipefail
