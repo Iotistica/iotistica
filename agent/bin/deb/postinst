@@ -160,19 +160,34 @@ echo "✓ Mosquitto configured on port ${MQTT_PORT}"
 
 # ── Default config ────────────────────────────────────────────────────────────
 
-# Conffile is placed by dpkg on fresh install; update MQTT settings in-place
-# so they match the broker we just configured.
-if [ -f "$ENV_FILE" ]; then
-    # Append MQTT block only if not already present
-    if ! grep -q '^MQTT_BROKER_URL=' "$ENV_FILE"; then
-        cat >> "$ENV_FILE" << EOFENV
+# Write on fresh install only — upgrades preserve the existing file.
+if [ ! -f "$ENV_FILE" ]; then
+    cat > "$ENV_FILE" << EOFENV
+# Iotistica Agent configuration
+# Edit this file and restart the service: systemctl restart iotistica-agent
+#
+# Leave IOTISTICA_API and PROVISIONING_KEY blank to run in standalone mode.
+# Open the admin UI at http://<device-ip>:48481/admin/ to configure the device.
+
+NODE_ENV=production
+DEPLOYMENT_TYPE=systemd
+DEVICE_API_PORT=48484
+STANDALONE=true
+
+# Cloud connectivity (optional — provision via admin UI instead)
+IOTISTICA_API=
+PROVISIONING_KEY=
+
+# Logging
+LOG_LEVEL=info
+DATA_DIR=/var/lib/iotistic/agent
+LOG_DIR=/var/log/iotistic
 
 # Local Mosquitto MQTT broker (configured by installer)
 MQTT_BROKER_URL=mqtt://localhost:${MQTT_PORT}
 MQTT_USERNAME=${MQTT_USERNAME}
 MQTT_PASSWORD=${MQTT_PASSWORD}
 EOFENV
-    fi
     chown iotistic:iotistic "$ENV_FILE"
     chmod 600 "$ENV_FILE"
 fi
