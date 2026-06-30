@@ -6,7 +6,7 @@ import AppSidebar from './AppSidebar.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useProStatus } from '@/composables/useProStatus'
 
-defineProps<{ title?: string }>()
+defineProps<{ title?: string; flex?: boolean }>()
 
 const router = useRouter()
 const { currentUser, logout } = useAuth()
@@ -37,7 +37,7 @@ onMounted(fetchProStatus)
           </a-button>
         </div>
       </a-layout-header>
-      <a-layout-content class="page-content">
+      <a-layout-content :class="['page-content', { 'page-content--flex': flex }]">
         <slot />
       </a-layout-content>
     </a-layout>
@@ -89,5 +89,12 @@ onMounted(fetchProStatus)
   min-height: 360px;
   overflow-y: auto;
   height: calc(100vh - 52px - 48px);
+}
+
+.page-content--flex {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 </style>

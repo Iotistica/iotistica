@@ -176,6 +176,14 @@ export async function initDeviceAPI(ctx: AgentInitContext): Promise<void> {
 	});
 
 	await ctx.agentAPI.listen(ctx.configManager!.getAgentApiPort());
+
+	// Attach WebSocket shell handler after the HTTP server is listening
+	const httpServer = ctx.agentAPI.getServer();
+	if (httpServer) {
+		const { attachShellHandler } = await import('../api/shell.js');
+		attachShellHandler(httpServer, ctx.agentLogger);
+	}
+
 	ctx.agentLogger?.infoSync('Device API initialized', {
 		component: LogComponents.agent,
 		port: ctx.configManager!.getAgentApiPort(),

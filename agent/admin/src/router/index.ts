@@ -47,6 +47,11 @@ const router = createRouter({
       meta: { title: 'Anomaly Detection' },
     },
     {
+      path: '/terminal',
+      component: () => import('@/views/TerminalView.vue'),
+      meta: { title: 'Terminal' },
+    },
+    {
       path: '/logs',
       component: () => import('@/views/LogsView.vue'),
       meta: { title: 'Logs' },

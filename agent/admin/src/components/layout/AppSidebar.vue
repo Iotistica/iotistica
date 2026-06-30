@@ -21,6 +21,7 @@ import {
   ApiOutlined,
   ClusterOutlined,
   DatabaseOutlined,
+  CodeOutlined,
 } from '@ant-design/icons-vue'
 import IotisticaLogo from '@/components/IotisticaLogo.vue'
 
@@ -109,6 +110,11 @@ function onMenuClick({ key }: { key: string }) {
           <template #icon><WifiOutlined /></template>
           MQTT
           <a-tag color="gold" class="pro-badge">Pro</a-tag>
+        </a-menu-item>
+
+        <a-menu-item key="/terminal">
+          <template #icon><CodeOutlined /></template>
+          Terminal
         </a-menu-item>
 
         <a-menu-item key="/logs">

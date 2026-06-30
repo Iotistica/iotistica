@@ -169,6 +169,10 @@ export class DeviceAPI {
 	public getApp(): express.Application {
 		return this.api;
 	}
+
+	public getServer(): Server | null {
+		return this.server;
+	}
 }
 
 export default DeviceAPI;
