@@ -315,18 +315,14 @@ export class DiscoveryService extends EventEmitter {
 								device.confidence = 'high';
 
 								if (validationData.manufacturer || validationData.modelNumber) {
-									const baseName = `${validationData.manufacturer || protocol}_${validationData.modelNumber || device.name}`
-										.toLowerCase()
-										.replace(/\s+/g, '_');
-
 									if (protocol === 'bacnet') {
-										const deviceInstance = device.connection?.deviceInstance;
-										const cleanedBaseName = baseName.replace(/^iotistica_+/, '');
-										const nameWithPrefix = cleanedBaseName.startsWith('iotistica_') ? cleanedBaseName : `iotistica_${cleanedBaseName}`;
-										device.name = typeof deviceInstance === 'number'
-											? nameWithPrefix.endsWith(`_${deviceInstance}`) ? nameWithPrefix : `${nameWithPrefix}_${deviceInstance}`
-											: nameWithPrefix;
+										// BACnet discover() already named the device from its BACnet objectName —
+										// don't clobber with manufacturer+modelNumber (which gives generic names
+										// like "iotistica_bacnet_simulator_1001" for all devices).
 									} else {
+										const baseName = `${validationData.manufacturer || protocol}_${validationData.modelNumber || device.name}`
+											.toLowerCase()
+											.replace(/\s+/g, '_');
 										device.name = baseName;
 									}
 								}

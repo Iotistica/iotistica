@@ -200,6 +200,13 @@ export class BACnetDiscovery extends BaseDiscovery {
    * - Hostname: 'bacnet-sim' → ['192.168.65.3'] (resolved via DNS)
    */
 	private expandDiscoveryTarget(target: string): string[] {
+		// Strip :port suffix if present (e.g. '172.22.0.20:47808' → '172.22.0.20')
+		// Port is handled by the transport patch — bacstack whoIs() expects bare IP/hostname.
+		const colonIdx = target.lastIndexOf(':');
+		if (colonIdx !== -1 && /^\d+$/.test(target.slice(colonIdx + 1))) {
+			target = target.slice(0, colonIdx);
+		}
+
 		// CIDR notation (e.g., 192.168.65.0/24)
 		if (target.includes('/')) {
 			const [baseIP, prefixStr] = target.split('/');

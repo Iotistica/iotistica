@@ -12,6 +12,7 @@
  */
 
 import type { Server, IncomingMessage } from 'http';
+import { existsSync } from 'fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import { AdminSessionModel } from '../db/models/admin-session.model.js';
@@ -45,10 +46,9 @@ function authenticate(req: IncomingMessage): boolean {
 
 function resolveShell(): string {
 	const candidate = process.env.SHELL ?? '/bin/bash';
-	if (SHELL_ALLOWLIST.includes(candidate)) return candidate;
-	// Fallback to bash, then sh
+	if (SHELL_ALLOWLIST.includes(candidate) && existsSync(candidate)) return candidate;
 	for (const s of ['/bin/bash', '/bin/sh']) {
-		if (SHELL_ALLOWLIST.includes(s)) return s;
+		if (existsSync(s)) return s;
 	}
 	return '/bin/sh';
 }

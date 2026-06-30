@@ -812,8 +812,5 @@ volumes:
 
 networks:
   iotistica-net:
-    driver: bridge
+    external: true
     name: iotistica-net
-    ipam:
-      config:
-        - subnet: 172.22.0.0/16
