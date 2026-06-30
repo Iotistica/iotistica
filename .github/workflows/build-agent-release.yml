@@ -314,7 +314,7 @@ jobs:
             --file "/tmp/sbom/sbom-latest.json" \
             --overwrite true --auth-mode key --only-show-errors --output none \
             --content-type application/json \
-            --metadata "Cache-Control=no-cache"
+            --content-cache-control "no-cache"
 
       - name: Create GitHub Release
         run: |
