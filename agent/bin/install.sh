@@ -524,14 +524,6 @@ echo ""
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
     AGENT_DIR="$(dirname "$SCRIPT_DIR")"
     
-    echo "[DEBUG] Script location:"
-    echo "[DEBUG]   script path ($0)=$0"
-    echo "[DEBUG]   SCRIPT_DIR=$SCRIPT_DIR"
-    echo "[DEBUG]   AGENT_DIR=$AGENT_DIR"
-    echo "[DEBUG]   Current directory: $(pwd)"
-    echo "[DEBUG]   Files in AGENT_DIR:"
-    ls -la "$AGENT_DIR" | head -15
-    
     # Function to normalize API endpoint URL
     normalize_api_endpoint() {
         if [ -n "$IOTISTICA_API" ] && ! echo "$IOTISTICA_API" | grep -qE '^https?://'; then
@@ -548,10 +540,6 @@ echo ""
     IOTISTICA_API="${IOTISTICA_API:-}"
     PROVISIONING_KEY="${PROVISIONING_KEY:-}"
 
-    if [ -n "$PROVISIONING_KEY" ]; then
-        echo "[DEBUG] PROVISIONING_KEY found in environment (redacted)"
-    fi
-    
     # Normalize API endpoint - add http:// if protocol missing
     normalize_api_endpoint
     
@@ -565,15 +553,6 @@ echo ""
         fi
     fi
     
-    # Now handle repository access (works for both modes)
-    echo "[DEBUG] CI=$CI"
-    echo "[DEBUG] SCRIPT_DIR=$SCRIPT_DIR"
-    echo "[DEBUG] AGENT_DIR=$AGENT_DIR"
-    echo "[DEBUG] Checking for: $AGENT_DIR/package.json"
-    echo "[DEBUG] File exists: $([ -f "$AGENT_DIR/package.json" ] && echo 'YES' || echo 'NO')"
-    echo "[DEBUG] Checking for: $AGENT_DIR/.git"
-    echo "[DEBUG] Directory exists: $([ -d "$AGENT_DIR/.git" ] && echo 'YES' || echo 'NO')"
-
     INSTALL_SOURCE="${IOTISTICA_INSTALL_SOURCE:-auto}"
     USE_LOCAL_REPO="no"
 
@@ -754,11 +733,7 @@ echo ""
         
         # Verify pre-built files exist
         cd /opt/iotistic/agent
-        
-        # Debug: Show what's in dist/
-        echo "Contents of dist directory:"
-        ls -la dist/
-        
+
         if [ ! -d dist ]; then
             echo "✗ Error: Pre-built dist/ directory not found"
             exit 1
@@ -874,16 +849,12 @@ EOF
 
     # Write CI mode flag if set (for testing environments)
     if [ "$CI" = "true" ]; then
-        echo "[DEBUG] Writing CI=true to agent.env (testing mode)"
         echo "CI=true" >> /etc/iotistic/agent.env
         echo "SYSTEMD_READY_MODE=ci" >> /etc/iotistic/agent.env
     fi
 
     if [ -n "$PROVISIONING_KEY" ]; then
-        echo "[DEBUG] Writing PROVISIONING_KEY to agent.env (redacted)"
         echo "PROVISIONING_KEY=${PROVISIONING_KEY}" >> /etc/iotistic/agent.env
-    else
-        echo "[DEBUG] PROVISIONING_KEY is empty, not writing to agent.env"
     fi
 
     if [ -n "$IOTISTICA_API" ]; then
@@ -1052,31 +1023,6 @@ EOFJOURNALD
     fi
     echo "✓ Configuration file permissions verified (600)"
 
-    # Debug: Show service file contents
-    echo ""
-    echo "[DEBUG] Systemd service file contents:"
-    echo "========================================"
-    cat /etc/systemd/system/${SERVICE_NAME}.service
-    echo "========================================"
-    
-    # Debug: Verify dist directory exists
-    echo ""
-    echo "[DEBUG] Checking dist directory:"
-    if [ -d /opt/iotistic/agent/dist ]; then
-        echo "✓ dist/ exists"
-        ls -la /opt/iotistic/agent/dist/
-        if [ -f /opt/iotistic/agent/dist/app.js ]; then
-            echo "✓ dist/app.js exists (CORRECT PATH)"
-        elif [ -f /opt/iotistic/agent/dist/src/app.js ]; then
-            echo "✓ dist/src/app.js exists (LEGACY PATH)"
-        else
-            echo "✗ app.js NOT FOUND in either location"
-            echo "Available .js files:"
-            find /opt/iotistic/agent/dist -name "*.js" | head -20
-        fi
-    else
-        echo "✗ dist/ directory NOT FOUND"
-    fi
     
     # Start (or restart) service
     systemctl daemon-reload
