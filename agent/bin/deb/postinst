@@ -290,12 +290,14 @@ fi
 # If node is already present (upgrade), use the actual path.
 NODE_BIN=$(command -v node 2>/dev/null || echo "/usr/bin/node")
 
-if [ -f "$AGENT_DIR/dist/app.js" ]; then
+if [ -f "$AGENT_DIR/app.js" ]; then
+    APP_JS="$AGENT_DIR/app.js"
+elif [ -f "$AGENT_DIR/dist/app.js" ]; then
     APP_JS="$AGENT_DIR/dist/app.js"
 elif [ -f "$AGENT_DIR/dist/src/app.js" ]; then
     APP_JS="$AGENT_DIR/dist/src/app.js"
 else
-    APP_JS="$AGENT_DIR/dist/app.js"
+    APP_JS="$AGENT_DIR/app.js"
 fi
 
 cat > "$AGENT_SERVICE" << EOF
