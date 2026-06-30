@@ -1,0 +1,125 @@
+name: Build Agent .deb Packages
+
+# Builds Debian packages from already-promoted tarballs in Azure.
+# Can run independently of the release workflow — useful for backfilling
+# .deb files for any version that already has promoted tarballs.
+#
+# Triggered automatically via workflow_call from build-agent-release.yml,
+# or manually via workflow_dispatch for any existing released version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Agent version to package (must have promoted tarballs in agent/versions/)'
+        required: true
+        type: string
+        default: '1.0.526'
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  build-and-upload:
+    name: Build .deb (${{ matrix.deb_arch }})
+    runs-on: [ubuntu-24.04]
+    permissions:
+      contents: write
+
+    strategy:
+      matrix:
+        include:
+          - tarball_arch: x86_64
+            deb_arch: amd64
+          - tarball_arch: arm64
+            deb_arch: arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Azure login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Download promoted tarball from Azure
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          mkdir -p /tmp/artifacts
+
+          az storage blob download \
+            --account-name "$ACCT" --container-name scripts \
+            --name "agent/versions/agent-${VERSION}-${{ matrix.tarball_arch }}.tar.gz" \
+            --file "/tmp/artifacts/agent-${VERSION}-${{ matrix.tarball_arch }}.tar.gz" \
+            --auth-mode key --only-show-errors --output none
+
+          echo "✓ Downloaded agent-${VERSION}-${{ matrix.tarball_arch }}.tar.gz"
+
+      - name: Build .deb package
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          chmod +x scripts/build-deb.sh
+          ./scripts/build-deb.sh \
+            "/tmp/artifacts/agent-${VERSION}-${{ matrix.tarball_arch }}.tar.gz" \
+            "$VERSION" \
+            "${{ matrix.deb_arch }}"
+
+      - name: Upload .deb to Azure
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          DEB="iotistica-agent_${VERSION}_${{ matrix.deb_arch }}.deb"
+
+          # Versioned path
+          az storage blob upload \
+            --account-name "$ACCT" --container-name scripts \
+            --name "agent/versions/${DEB}" \
+            --file "/tmp/artifacts/${DEB}" \
+            --overwrite true --auth-mode key --only-show-errors --output none \
+            --content-type "application/vnd.debian.binary-package"
+
+          az storage blob upload \
+            --account-name "$ACCT" --container-name scripts \
+            --name "agent/versions/${DEB}.sha256" \
+            --file "/tmp/artifacts/${DEB}.sha256" \
+            --overwrite true --auth-mode key --only-show-errors --output none \
+            --content-type "text/plain"
+
+          # Rolling latest
+          az storage blob upload \
+            --account-name "$ACCT" --container-name scripts \
+            --name "agent/iotistica-agent-latest-${{ matrix.deb_arch }}.deb" \
+            --file "/tmp/artifacts/${DEB}" \
+            --overwrite true --auth-mode key --only-show-errors --output none \
+            --content-type "application/vnd.debian.binary-package"
+
+          echo "✓ ${DEB} → get.iotistica.com/agent/versions/${DEB}"
+
+      - name: Attach .deb to GitHub Release (if release exists)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          TAG="v${VERSION}"
+          DEB="iotistica-agent_${VERSION}_${{ matrix.deb_arch }}.deb"
+
+          if gh release view "$TAG" \
+               --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "/tmp/artifacts/${DEB}" \
+              "/tmp/artifacts/${DEB}.sha256" \
+              --repo "${{ github.repository }}" --clobber
+            echo "✓ Attached ${DEB} to release ${TAG}"
+          else
+            echo "No GitHub release for ${TAG} — skipping attachment"
+          fi
