@@ -1,0 +1,24 @@
+#!/bin/sh
+set -e
+
+SERVICE_NAME="iotistica-agent"
+SERVICE_FILE="/lib/systemd/system/${SERVICE_NAME}.service"
+
+# Remove the service unit (written by postinst, not shipped in the package)
+rm -f "$SERVICE_FILE"
+
+if command -v systemctl > /dev/null 2>&1; then
+    systemctl daemon-reload || true
+fi
+
+# On purge: remove data dirs, config, and user
+if [ "$1" = "purge" ]; then
+    rm -rf /opt/iotistic/agent
+    rm -rf /var/lib/iotistic/agent
+    rm -rf /var/log/iotistic
+    rm -rf /etc/iotistic
+
+    if id -u iotistic > /dev/null 2>&1; then
+        userdel iotistic || true
+    fi
+fi

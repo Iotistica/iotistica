@@ -1,0 +1,18 @@
+Package: iotistica-agent
+Version: DEB_VERSION
+Architecture: DEB_ARCH
+Maintainer: Iotistica <support@iotistica.com>
+Installed-Size: DEB_SIZE
+Depends: nodejs (>= 22)
+Recommends: docker-ce | docker.io | docker-engine
+Section: net
+Priority: optional
+Homepage: https://iotistica.com
+Description: Iotistica IoT Edge Agent
+ Manages Docker containers, collects telemetry, bridges industrial
+ devices (Modbus, OPC-UA, BACnet, SNMP, MQTT), detects anomalies
+ locally, and syncs state with the cloud over MQTT.
+ .
+ Designed to run offline-first on Raspberry Pi and other edge hardware.
+ Open the admin UI on port 48481 after installation to configure the
+ device and optionally connect it to the Iotistica cloud.

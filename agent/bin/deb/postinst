@@ -1,0 +1,157 @@
+#!/bin/sh
+set -e
+
+SERVICE_NAME="iotistica-agent"
+AGENT_DIR="/opt/iotistic/agent"
+DATA_DIR="/var/lib/iotistic/agent"
+LOG_DIR="/var/log/iotistic"
+CONFIG_DIR="/etc/iotistic"
+ENV_FILE="$CONFIG_DIR/agent.env"
+SERVICE_FILE="/lib/systemd/system/${SERVICE_NAME}.service"
+
+# ── User ──────────────────────────────────────────────────────────────────────
+
+if ! id -u iotistic > /dev/null 2>&1; then
+    useradd --system --home-dir /opt/iotistic --shell /bin/bash \
+        --comment "Iotistica Agent" iotistic
+fi
+
+# Add to docker group if it exists
+if getent group docker > /dev/null 2>&1; then
+    usermod -aG docker iotistic
+fi
+
+# ── Directories ───────────────────────────────────────────────────────────────
+
+mkdir -p "$DATA_DIR" "$LOG_DIR" "$CONFIG_DIR"
+
+# OPC-UA certificate storage
+mkdir -p /opt/iotistic/.config/node-opcua-default-nodejs/PKI
+chown -R iotistic:iotistic /opt/iotistic/.config
+chmod -R 755 /opt/iotistic/.config
+
+chown -R iotistic:iotistic "$AGENT_DIR"
+chown -R iotistic:iotistic "$DATA_DIR"
+chown -R iotistic:iotistic "$LOG_DIR"
+
+# ── Default config ────────────────────────────────────────────────────────────
+
+# Only write env file on first install (dpkg preserves conffiles on upgrade)
+if [ ! -f "$ENV_FILE" ]; then
+    cat > "$ENV_FILE" << 'EOF'
+# Iotistica Agent configuration
+# Edit this file and restart the service: systemctl restart iotistica-agent
+#
+# Leave IOTISTICA_API and PROVISIONING_KEY blank to run in standalone mode.
+# Open the admin UI at http://<device-ip>:48481/admin/ to configure the device.
+
+NODE_ENV=production
+DEPLOYMENT_TYPE=systemd
+DEVICE_API_PORT=48484
+STANDALONE=true
+
+# Cloud connectivity (optional — provision via admin UI instead)
+IOTISTICA_API=
+PROVISIONING_KEY=
+
+# Logging
+LOG_LEVEL=info
+DATA_DIR=/var/lib/iotistic/agent
+LOG_DIR=/var/log/iotistic
+EOF
+    chown iotistic:iotistic "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+fi
+
+# ── systemd service ───────────────────────────────────────────────────────────
+
+if ! command -v systemctl > /dev/null 2>&1; then
+    echo "Warning: systemd not found — skipping service setup."
+    echo "Start the agent manually: node $AGENT_DIR/dist/app.js"
+    exit 0
+fi
+
+# Detect node binary
+NODE_BIN=$(command -v node 2>/dev/null || echo "")
+if [ -z "$NODE_BIN" ]; then
+    echo "Warning: node not found in PATH — service will fail to start."
+    echo "Install Node.js 22+ from https://deb.nodesource.com/ then restart the service."
+    NODE_BIN="/usr/bin/node"
+fi
+
+# Detect app entry point
+if [ -f "$AGENT_DIR/dist/app.js" ]; then
+    APP_JS="$AGENT_DIR/dist/app.js"
+elif [ -f "$AGENT_DIR/dist/src/app.js" ]; then
+    APP_JS="$AGENT_DIR/dist/src/app.js"
+else
+    echo "Warning: Cannot find dist/app.js in $AGENT_DIR"
+    APP_JS="$AGENT_DIR/dist/app.js"
+fi
+
+cat > "$SERVICE_FILE" << EOF
+[Unit]
+Description=Iotistica Agent - IoT Device Management Service
+Documentation=https://docs.iotistica.com
+After=network-online.target docker.service
+Requires=docker.service
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=notify
+User=iotistic
+Group=iotistic
+WorkingDirectory=$AGENT_DIR
+EnvironmentFile=$ENV_FILE
+Environment=NODE_ENV=production
+Environment=DEPLOYMENT_TYPE=systemd
+ExecStart=$NODE_BIN $APP_JS
+Restart=always
+RestartSec=5
+WatchdogSec=60
+NotifyAccess=all
+TimeoutStartSec=120
+TimeoutStopSec=20
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=$SERVICE_NAME
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/iotistic /var/log/iotistic $AGENT_DIR /var/run/docker.sock
+LockPersonality=true
+MemoryAccounting=true
+CPUAccounting=true
+LimitNOFILE=65536
+LimitNPROC=65536
+MemoryHigh=250M
+MemoryMax=300M
+TasksMax=512
+CPUQuota=80%
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable "$SERVICE_NAME"
+
+# On upgrade: restart if already running; on fresh install: start
+if [ "$1" = "configure" ] && [ -n "$2" ]; then
+    # Upgrade — restart to pick up new binaries
+    systemctl restart "$SERVICE_NAME" || true
+else
+    # Fresh install — start
+    systemctl start "$SERVICE_NAME" || true
+fi
+
+echo ""
+echo "✓ Iotistica Agent installed and started."
+echo "  Admin UI:  http://localhost:48481/admin/"
+echo "  Status:    systemctl status $SERVICE_NAME"
+echo "  Logs:      journalctl -u $SERVICE_NAME -f"
+echo ""

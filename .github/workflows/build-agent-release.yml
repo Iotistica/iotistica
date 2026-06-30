@@ -210,9 +210,95 @@ jobs:
             iotistic/agent:${SHA_SHORT}
           echo "Tagged iotistic/agent:${SHA_SHORT} → iotistic/agent:${VERSION}"
 
+  build-deb:
+    name: Build .deb Packages
+    needs: [promote-artifacts]
+    runs-on: [ubuntu-24.04]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Azure login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Download promoted tarballs
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          mkdir -p /tmp/artifacts
+          for arch in x86_64 arm64; do
+            az storage blob download --account-name "$ACCT" --container-name scripts \
+              --name "agent/versions/agent-${VERSION}-${arch}.tar.gz" \
+              --file "/tmp/artifacts/agent-${VERSION}-${arch}.tar.gz" \
+              --auth-mode key --only-show-errors --output none
+          done
+
+      - name: Build .deb packages
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          chmod +x scripts/build-deb.sh
+          # x86_64 tarball → amd64 .deb
+          ./scripts/build-deb.sh \
+            /tmp/artifacts/agent-${VERSION}-x86_64.tar.gz \
+            "$VERSION" amd64
+          # arm64 tarball → arm64 .deb
+          ./scripts/build-deb.sh \
+            /tmp/artifacts/agent-${VERSION}-arm64.tar.gz \
+            "$VERSION" arm64
+
+      - name: Upload .deb packages to Azure
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          ACCT=${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          for arch in amd64 arm64; do
+            DEB="iotistica-agent_${VERSION}_${arch}.deb"
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/versions/${DEB}" \
+              --file "/tmp/artifacts/${DEB}" \
+              --overwrite true --auth-mode key --only-show-errors --output none \
+              --content-type application/vnd.debian.binary-package
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/versions/${DEB}.sha256" \
+              --file "/tmp/artifacts/${DEB}.sha256" \
+              --overwrite true --auth-mode key --only-show-errors --output none \
+              --content-type text/plain
+            # Latest pointer
+            az storage blob upload --account-name "$ACCT" --container-name scripts \
+              --name "agent/iotistica-agent-latest-${arch}.deb" \
+              --file "/tmp/artifacts/${DEB}" \
+              --overwrite true --auth-mode key --only-show-errors --output none \
+              --content-type application/vnd.debian.binary-package
+          done
+
+      - name: Upload .deb as GitHub Actions artifact (for publish job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-packages
+          path: /tmp/artifacts/iotistica-agent_*.deb*
+          retention-days: 1
+
   publish:
     name: SBOM & GitHub Release
-    needs: [promote-artifacts, promote-docker]
+    needs: [promote-artifacts, promote-docker, build-deb]
     runs-on: [ubuntu-24.04]
     permissions:
       contents: write
@@ -239,6 +325,12 @@ jobs:
         uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Download .deb packages from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-packages
+          path: /tmp/artifacts
 
       - name: Download promoted artifacts for SBOM + Release
         run: |
@@ -342,9 +434,31 @@ jobs:
 
           docker pull iotistic/agent:${VERSION}
 
+          ## Install
+
+          ### One-line installer (recommended)
+          \`\`\`sh
+          curl -sfL https://get.iotistica.com/agent | sudo sh
+          \`\`\`
+
+          ### Debian / Ubuntu (.deb)
+          \`\`\`sh
+          # amd64
+          wget https://apps.iotistica.com/agent/versions/iotistica-agent_${VERSION}_amd64.deb
+          sudo dpkg -i iotistica-agent_${VERSION}_amd64.deb
+
+          # arm64 (Raspberry Pi 4/5)
+          wget https://apps.iotistica.com/agent/versions/iotistica-agent_${VERSION}_arm64.deb
+          sudo dpkg -i iotistica-agent_${VERSION}_arm64.deb
+          \`\`\`
+
           ## Artifacts
-          - [agent-${VERSION}-x86_64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${VERSION}-x86_64.tar.gz)
-          - [agent-${VERSION}-arm64.tar.gz](https://apps.iotistica.com/agent/versions/agent-${VERSION}-arm64.tar.gz)
+          | File | Platform |
+          |------|----------|
+          | \`iotistica-agent_${VERSION}_amd64.deb\` | Debian/Ubuntu x86_64 |
+          | \`iotistica-agent_${VERSION}_arm64.deb\` | Debian/Ubuntu arm64 (Pi 4/5) |
+          | \`agent-${VERSION}-x86_64.tar.gz\` | Tarball x86_64 |
+          | \`agent-${VERSION}-arm64.tar.gz\` | Tarball arm64 |
           NOTES
 
           ASSETS=(
