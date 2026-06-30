@@ -215,6 +215,8 @@ jobs:
   build-deb:
     name: Build .deb Packages
     needs: [promote-artifacts]
+    permissions:
+      contents: write
     uses: ./.github/workflows/build-agent-deb.yml
     with:
       version: ${{ needs.promote-artifacts.outputs.version }}
