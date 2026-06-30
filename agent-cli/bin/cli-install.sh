@@ -85,7 +85,7 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 if command -v curl >/dev/null 2>&1; then
-    curl -fSL -o "$TMP_DIR/cli.tar.gz" "$DOWNLOAD_URL" || {
+    curl -fsSL -o "$TMP_DIR/cli.tar.gz" "$DOWNLOAD_URL" || {
         echo "Error: Failed to download CLI from $DOWNLOAD_URL"
         exit 1
     }
@@ -130,7 +130,7 @@ LAUNCHER_PATH="$CLI_INSTALL_DIR/iotctl"
 rm -f "$LAUNCHER_PATH"
 cat > "$LAUNCHER_PATH" <<EOF
 #!/bin/sh
-exec node "$CLI_LIB_DIR/dist/iotctl.js" "$@"
+exec node "$CLI_LIB_DIR/dist/iotctl.js" "\$@"
 EOF
 chmod +x "$LAUNCHER_PATH"
 

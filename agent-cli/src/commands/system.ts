@@ -19,6 +19,7 @@ export function showLogs(follow: boolean = false, lines: number = 50): void {
  */
 export function showVersion(): void {
   const possiblePaths = [
+    join(__dirname, '..', 'package.json'),   // installed: /opt/iotistic/cli/dist/../package.json
     join(process.cwd(), 'package.json'),
     join(process.cwd(), '..', 'package.json'),
     '/app/package.json',
