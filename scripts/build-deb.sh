@@ -55,7 +55,7 @@ mkdir -p "$PKG_DIR/etc/iotistic"
 # ── Extract agent files ───────────────────────────────────────────────────────
 
 echo "Extracting agent files..."
-tar -xzf "$TARBALL" -C "$PKG_DIR/opt/iotistic/agent" --strip-components=1
+tar -xzf "$TARBALL" -C "$PKG_DIR/opt/iotistic/agent"
 
 # ── DEBIAN control files ──────────────────────────────────────────────────────
 
