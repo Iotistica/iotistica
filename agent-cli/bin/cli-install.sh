@@ -33,7 +33,7 @@ if [ -n "$DOWNLOAD_BASE_URL" ]; then
     #   https://get.iotistica.com/agent/artifacts
     # CLI artifacts live at:
     #   https://get.iotistica.com/agent-cli/artifacts
-    CLI_DOWNLOAD_BASE="${DOWNLOAD_BASE_URL/agent\/artifacts/agent-cli\/artifacts}"
+    CLI_DOWNLOAD_BASE="${DOWNLOAD_BASE_URL%/agent/artifacts}/agent-cli/artifacts"
 else
     CLI_DOWNLOAD_BASE="https://get.iotistica.com/agent-cli/artifacts"
 fi
