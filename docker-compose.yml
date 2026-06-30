@@ -497,21 +497,25 @@ services:
                 max-file: "2"
     sim-bacnet:
         build:
-            context: ./simulators/bacnet-simulator
+            context: ../iot-sims/bacnet-simulator
             dockerfile: Dockerfile
         container_name: sim-bacnet
         restart: unless-stopped
         # Bridge network: same iotistica-net as the agent so BACnet UDP broadcast
         # and unicast reads work within the bridge subnet.
         # Agent uses port 47809 to avoid collision with the simulator on 47808.
-        # Port published so the agent can reach the sim from WSL/host during dev.
         ports:
             - "47808:47808/udp"
+            - "47900:47900"      # BACnet Sim REST + WebSocket API
         networks:
             iotistica-net:
                 ipv4_address: 172.22.0.20
         environment:
-            - BACPYPES_IFACE=0.0.0.0:47808  # ip:port format — bacpypes3 Address() does not accept ip:port/prefix
+            - BACPYPES_IFACE=0.0.0.0:47808
+            - DATA_DIR=/data
+            - SIM_API_PORT=47900
+        volumes:
+            - bacnet-sim-data:/data
         logging:
             driver: "json-file"
             options:
@@ -778,6 +782,8 @@ services:
                 max-file: "2"
 
 volumes:
+    bacnet-sim-data:
+        driver: local
     wg-data:
     agent-cli-data:
         driver: local

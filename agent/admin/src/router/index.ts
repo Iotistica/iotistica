@@ -52,6 +52,11 @@ const router = createRouter({
       meta: { title: 'Terminal' },
     },
     {
+      path: '/bacnet-sim',
+      component: () => import('@/views/BACnetSimView.vue'),
+      meta: { title: 'BACnet Simulator' },
+    },
+    {
       path: '/logs',
       component: () => import('@/views/LogsView.vue'),
       meta: { title: 'Logs' },
