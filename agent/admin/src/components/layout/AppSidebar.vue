@@ -22,7 +22,6 @@ import {
   ClusterOutlined,
   DatabaseOutlined,
   CodeOutlined,
-  ExperimentOutlined,
 } from '@ant-design/icons-vue'
 import IotisticaLogo from '@/components/IotisticaLogo.vue'
 
@@ -111,11 +110,6 @@ function onMenuClick({ key }: { key: string }) {
           <template #icon><WifiOutlined /></template>
           MQTT
           <a-tag color="gold" class="pro-badge">Pro</a-tag>
-        </a-menu-item>
-
-        <a-menu-item key="/bacnet-sim">
-          <template #icon><ExperimentOutlined /></template>
-          BACnet Sim
         </a-menu-item>
 
         <a-menu-item key="/terminal">
