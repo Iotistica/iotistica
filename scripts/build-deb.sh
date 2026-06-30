@@ -51,6 +51,31 @@ mkdir -p "$PKG_DIR/var/lib/iotistic/agent"
 mkdir -p "$PKG_DIR/var/log/iotistic"
 mkdir -p "$PKG_DIR/etc/iotistic"
 
+# ── Default conffiles ────────────────────────────────────────────────────────
+# dpkg requires every file listed in DEBIAN/conffiles to exist in the package.
+
+cat > "$PKG_DIR/etc/iotistic/agent.env" << 'ENVEOF'
+# Iotistica Agent configuration
+# Edit this file and restart the service: systemctl restart iotistica-agent
+#
+# Leave IOTISTICA_API and PROVISIONING_KEY blank to run in standalone mode.
+# Open the admin UI at http://<device-ip>:48481/admin/ to configure the device.
+
+NODE_ENV=production
+DEPLOYMENT_TYPE=systemd
+DEVICE_API_PORT=48484
+STANDALONE=true
+
+# Cloud connectivity (optional — provision via admin UI instead)
+IOTISTICA_API=
+PROVISIONING_KEY=
+
+# Logging
+LOG_LEVEL=info
+DATA_DIR=/var/lib/iotistic/agent
+LOG_DIR=/var/log/iotistic
+ENVEOF
+
 # ── Extract agent files ───────────────────────────────────────────────────────
 
 echo "Extracting agent files..."
