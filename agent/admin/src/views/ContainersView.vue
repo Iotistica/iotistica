@@ -10,10 +10,13 @@ import {
   EditOutlined,
   AppstoreOutlined,
   FileTextOutlined,
+  ShopOutlined,
+  SearchOutlined,
+  RocketOutlined,
 } from '@ant-design/icons-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { containersApi } from '@/api/containers'
-import type { ContainerApp, ContainerService } from '@/api/containers'
+import { containersApi, templatesApi } from '@/api/containers'
+import type { ContainerApp, ContainerService, AppTemplate } from '@/api/containers'
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -66,6 +69,17 @@ function resolveState(svc: ContainerService): RunState {
   if (s === 'error') return 'error'
   if (s === 'creating' || s === 'pending') return 'creating'
   return 'unknown'
+}
+
+const CATEGORY_COLOR: Record<string, string> = {
+  Automation:   'orange',
+  Monitoring:   'blue',
+  'Time Series':'purple',
+  MQTT:         'cyan',
+  Management:   'geekblue',
+  'IoT Platform':'green',
+  Database:     'red',
+  AI:           'volcano',
 }
 
 const STATUS_COLOR: Record<RunState, string> = {
@@ -337,6 +351,53 @@ watch(logLines, () => {
   })
 }, { deep: false })
 
+// ── Marketplace modal ─────────────────────────────────────────────────────────
+
+const marketOpen = ref(false)
+const marketTemplates = ref<AppTemplate[]>([])
+const marketCategories = ref<string[]>(['All'])
+const marketCategory = ref('All')
+const marketSearch = ref('')
+const marketLoading = ref(false)
+
+const filteredTemplates = computed(() => {
+  return marketTemplates.value.filter(t => {
+    const matchCat = marketCategory.value === 'All' || t.category === marketCategory.value
+    const q = marketSearch.value.toLowerCase()
+    const matchQ = !q || t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)
+    return matchCat && matchQ
+  })
+})
+
+async function openMarketplace() {
+  marketOpen.value = true
+  if (marketTemplates.value.length > 0) return
+  marketLoading.value = true
+  try {
+    const data = await templatesApi.getAll()
+    marketTemplates.value = data.templates
+    marketCategories.value = data.categories
+  } catch {
+    // non-fatal
+  } finally {
+    marketLoading.value = false
+  }
+}
+
+function deployTemplate(tpl: AppTemplate) {
+  marketOpen.value = false
+  appName.value = tpl.appName
+  services.value = tpl.services.map(s => ({
+    serviceName: s.serviceName,
+    image: s.image,
+    ports: (s.ports ?? []).join('\n'),
+    volumes: (s.volumes ?? []).join('\n'),
+    env: s.environment ? Object.entries(s.environment).map(([k, v]) => `${k}=${v}`).join('\n') : '',
+    restart: s.restart ?? 'unless-stopped',
+  }))
+  drawerOpen.value = true
+}
+
 // ── Deploy drawer ─────────────────────────────────────────────────────────────
 
 const drawerOpen = ref(false)
@@ -459,6 +520,10 @@ async function deploy() {
       <a-button :loading="loading" @click="load">
         <template #icon><ReloadOutlined /></template>
         Refresh
+      </a-button>
+      <a-button @click="openMarketplace">
+        <template #icon><ShopOutlined /></template>
+        Marketplace
       </a-button>
       <a-button type="primary" @click="openDeploy">
         <template #icon><PlusOutlined /></template>
@@ -800,6 +865,82 @@ async function deploy() {
       </template>
     </a-drawer>
 
+    <!-- Marketplace modal -->
+    <a-modal
+      v-model:open="marketOpen"
+      title="App Marketplace"
+      :footer="null"
+      width="900px"
+      :body-style="{ padding: '0', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }"
+    >
+      <template #title>
+        <div style="display: flex; align-items: center; gap: 10px">
+          <ShopOutlined style="color: #1677ff; font-size: 18px" />
+          <span>App Marketplace</span>
+          <span style="font-size: 12px; font-weight: 400; color: #888; margin-left: 4px">
+            One-click deploy for popular IoT apps
+          </span>
+        </div>
+      </template>
+
+      <!-- Search bar -->
+      <div style="padding: 16px 20px 0; flex-shrink: 0">
+        <a-input
+          v-model:value="marketSearch"
+          placeholder="Search apps…"
+          allow-clear
+          size="large"
+        >
+          <template #prefix><SearchOutlined style="color: #bbb" /></template>
+        </a-input>
+      </div>
+
+      <!-- Category tabs -->
+      <div style="padding: 0 20px; flex-shrink: 0; border-bottom: 1px solid #f0f0f0; margin-top: 12px">
+        <a-tabs v-model:activeKey="marketCategory" size="small" :tab-bar-style="{ marginBottom: 0 }">
+          <a-tab-pane v-for="cat in marketCategories" :key="cat" :tab="cat" />
+        </a-tabs>
+      </div>
+
+      <!-- Cards -->
+      <div style="flex: 1; overflow-y: auto; padding: 20px">
+        <a-spin :spinning="marketLoading">
+          <div v-if="filteredTemplates.length === 0 && !marketLoading" style="text-align: center; padding: 48px 0; color: #bbb">
+            No apps found
+          </div>
+          <div class="market-grid">
+            <div
+              v-for="tpl in filteredTemplates"
+              :key="tpl.id"
+              class="market-card"
+              @click="deployTemplate(tpl)"
+            >
+              <div class="market-card-top">
+                <div
+                  class="market-avatar"
+                  :style="{ background: tpl.color }"
+                >{{ tpl.letter }}</div>
+                <div class="market-meta">
+                  <div class="market-name">{{ tpl.name }}</div>
+                  <a-tag :color="CATEGORY_COLOR[tpl.category] ?? 'default'" style="font-size: 11px; line-height: 18px; padding: 0 6px; margin: 0">
+                    {{ tpl.category }}
+                  </a-tag>
+                </div>
+              </div>
+              <div class="market-desc">{{ tpl.description }}</div>
+              <div class="market-footer">
+                <span class="market-image">{{ tpl.services[0]?.image }}</span>
+                <a-button type="primary" size="small" class="market-deploy-btn">
+                  <template #icon><RocketOutlined /></template>
+                  Deploy
+                </a-button>
+              </div>
+            </div>
+          </div>
+        </a-spin>
+      </div>
+    </a-modal>
+
     <!-- Log viewer drawer -->
     <a-drawer
       v-model:open="logDrawerOpen"
@@ -1051,5 +1192,100 @@ async function deploy() {
 
 .log-msg {
   flex: 1;
+}
+
+/* ── Marketplace ─────────────────────────────────────────── */
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px;
+}
+
+.market-card {
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+  padding: 16px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  transition: box-shadow 0.18s, border-color 0.18s, transform 0.12s;
+}
+
+.market-card:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  border-color: #1677ff;
+  transform: translateY(-1px);
+}
+
+.market-card-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.market-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
+
+.market-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.market-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.market-desc {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.5;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.market-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.market-image {
+  font-size: 10px;
+  color: #aaa;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.market-deploy-btn {
+  flex-shrink: 0;
 }
 </style>

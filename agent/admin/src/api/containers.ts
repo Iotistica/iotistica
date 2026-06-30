@@ -1,5 +1,25 @@
 import { client } from './client'
 
+export interface AppTemplateService {
+  serviceName: string
+  image: string
+  ports?: string[]
+  volumes?: string[]
+  environment?: Record<string, string>
+  restart?: string
+}
+
+export interface AppTemplate {
+  id: string
+  name: string
+  category: string
+  description: string
+  color: string
+  letter: string
+  appName: string
+  services: AppTemplateService[]
+}
+
 export type ServiceStatus = {
   state: 'creating' | 'running' | 'stopped' | 'error' | 'unknown'
   startedAt?: string
@@ -86,6 +106,12 @@ export const dockerConfigApi = {
   },
   test(cfg: DockerConfig): Promise<DockerTestResult> {
     return client.post<DockerTestResult>('/v1/docker/test', cfg).then(r => r.data)
+  },
+}
+
+export const templatesApi = {
+  getAll(): Promise<{ templates: AppTemplate[]; categories: string[] }> {
+    return client.get('/v1/app-templates').then(r => r.data)
   },
 }
 

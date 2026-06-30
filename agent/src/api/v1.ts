@@ -110,6 +110,16 @@ router.get('/v1/apps/:appId', async (req: Request, res: Response, next: NextFunc
 });
 
 /**
+ * GET /v1/app-templates
+ * Returns the built-in catalog of one-click deployable application templates.
+ */
+import { APP_TEMPLATES, TEMPLATE_CATEGORIES } from '../data/app-templates.js';
+
+router.get('/v1/app-templates', (_req: Request, res: Response) => {
+	return res.status(200).json({ templates: APP_TEMPLATES, categories: TEMPLATE_CATEGORIES });
+});
+
+/**
  * GET /v1/apps
  * List all apps with current runtime state
  */
