@@ -392,7 +392,7 @@ jobs:
           {
             "version": "${VERSION}",
             "releasedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "baseUrl": "https://apps.iotistica.com/agent/sbom",
+            "baseUrl": "https://get.iotistica.com/agent/sbom",
             "files": [
               { "id": "agent-source",           "label": "Agent — source",      "file": "agent-source.cyclonedx.json",            "description": "All npm dependencies declared in agent/package.json, generated from source." },
               { "id": "agent-artifacts-x86_64", "label": "Agent — x86_64 build","file": "agent-artifacts-x86_64.cyclonedx.json",  "description": "Filesystem scan of the built x86_64 release tarball — includes bundled binaries." },
@@ -444,11 +444,11 @@ jobs:
           ### Debian / Ubuntu (.deb)
           \`\`\`sh
           # amd64
-          wget https://apps.iotistica.com/agent/versions/iotistica-agent_${VERSION}_amd64.deb
+          wget https://get.iotistica.com/agent/versions/iotistica-agent_${VERSION}_amd64.deb
           sudo dpkg -i iotistica-agent_${VERSION}_amd64.deb
 
           # arm64 (Raspberry Pi 4/5)
-          wget https://apps.iotistica.com/agent/versions/iotistica-agent_${VERSION}_arm64.deb
+          wget https://get.iotistica.com/agent/versions/iotistica-agent_${VERSION}_arm64.deb
           sudo dpkg -i iotistica-agent_${VERSION}_arm64.deb
           \`\`\`
 
