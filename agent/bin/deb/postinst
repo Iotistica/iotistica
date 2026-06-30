@@ -40,11 +40,12 @@ if [ ! -f "$ENV_FILE" ]; then
 # Edit this file and restart the service: systemctl restart iotistica-agent
 #
 # Leave IOTISTICA_API and PROVISIONING_KEY blank to run in standalone mode.
-# Open the admin UI at http://<device-ip>:48481/admin/ to configure the device.
+# Open the admin UI at http://<device-ip>:48484/admin/ to configure the device.
 
 NODE_ENV=production
 DEPLOYMENT_TYPE=systemd
 DEVICE_API_PORT=48484
+API_SECURITY_MODE=NETWORK
 STANDALONE=true
 
 # Cloud connectivity (optional — provision via admin UI instead)
@@ -240,7 +241,7 @@ systemctl start iotistica-agent || true
 
 echo ""
 echo "✓ Iotistica Agent is running."
-echo "  Admin UI:  http://localhost:48481/admin/"
+echo "  Admin UI:  http://localhost:48484/admin/"
 echo "  MQTT:      localhost:$MQTT_PORT  (user: $MQTT_USERNAME)"
 echo "  Status:    systemctl status iotistica-agent"
 echo "  Logs:      journalctl -u iotistica-agent -f"
