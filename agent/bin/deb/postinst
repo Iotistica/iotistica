@@ -45,7 +45,7 @@ if [ ! -f "$ENV_FILE" ]; then
 NODE_ENV=production
 DEPLOYMENT_TYPE=systemd
 DEVICE_API_PORT=48484
-API_SECURITY_MODE=NETWORK
+API_SECURITY_MODE=LOCAL_NETWORK
 STANDALONE=true
 
 # Cloud connectivity (optional — provision via admin UI instead)
