@@ -7,14 +7,19 @@ import { join } from 'path';
 
 /** Returns package version or unknown. */
 export function getPackageVersion(): string {
-	try {
-		const packageJsonPath = join(process.cwd(), "package.json");
-		const content = readFileSync(packageJsonPath, "utf-8");
-		const packageJson = JSON.parse(content);
-		return packageJson.version || "unknown";
-	} catch (_error) {
-		return "unknown";
+	// __dirname is dist/utils/ when compiled; ../../package.json resolves to the app root.
+	// Falls back to process.cwd() for dev (tsx watch from agent/).
+	const candidates = [
+		join(__dirname, '../../package.json'),
+		join(process.cwd(), 'package.json'),
+	];
+	for (const p of candidates) {
+		try {
+			const pkg = JSON.parse(readFileSync(p, 'utf-8'));
+			if (pkg.version && pkg.version !== 'unknown') return pkg.version as string;
+		} catch { /* try next */ }
 	}
+	return 'unknown';
 }
 
 
