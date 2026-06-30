@@ -639,7 +639,7 @@ echo ""
         
         # Try to download with curl or wget
         if command -v curl &> /dev/null; then
-            curl -fSL -o agent.tar.gz "$DOWNLOAD_URL" || DOWNLOAD_FAILED=1
+            curl -fsSL -o agent.tar.gz "$DOWNLOAD_URL" || DOWNLOAD_FAILED=1
         elif command -v wget &> /dev/null; then
             wget -O agent.tar.gz "$DOWNLOAD_URL" || DOWNLOAD_FAILED=1
         else
@@ -1116,7 +1116,7 @@ EOFJOURNALD
             CLI_INSTALLER_URL="${CLI_CDN_BASE}/agent-cli/cli-install.sh"
 
             if command -v curl >/dev/null 2>&1; then
-                curl -fSL -o /tmp/cli-install.sh "$CLI_INSTALLER_URL" || {
+                curl -fsSL -o /tmp/cli-install.sh "$CLI_INSTALLER_URL" || {
                     echo "Warning: Could not download cli-install.sh - skipping CLI install"
                     CLI_INSTALLER=""
                 }
