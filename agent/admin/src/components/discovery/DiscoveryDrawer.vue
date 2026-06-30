@@ -5,7 +5,7 @@ import { CheckCircleOutlined, ThunderboltOutlined, StopOutlined } from '@ant-des
 import type { TableColumnType } from 'ant-design-vue'
 import type { DiscoveredDevice, DiscoveryRule, Endpoint } from '@/types'
 import { discoveryRulesApi } from '@/api/discovery'
-import { endpointsApi } from '@/api/endpoints'
+import { sourcesApi } from '@/api/sources'
 import { protocolColor, protocolLabel } from '@/utils/protocol'
 
 const emit = defineEmits<{
@@ -98,7 +98,7 @@ async function runRuleScan() {
   try {
     const { devices } = await discoveryRulesApi.run(rule.uuid, abortController.signal)
     results.value = devices
-    existingEndpoints.value = await endpointsApi.getAll().catch(() => existingEndpoints.value)
+    existingEndpoints.value = await sourcesApi.getAll().catch(() => existingEndpoints.value)
     hasRun.value = true
     emit('saved')
   } catch (err: unknown) {
@@ -119,7 +119,7 @@ async function addDevice(device: DiscoveredDevice) {
   const key = device.fingerprint
   adding.value = new Set([...adding.value, key])
   try {
-    await endpointsApi.create({
+    await sourcesApi.create({
       name: device.name,
       protocol: device.protocol,
       connection: device.connection,
@@ -156,7 +156,7 @@ watch(
     if (isOpen) {
       const [, endpoints] = await Promise.all([
         loadRules(),
-        endpointsApi.getAll().catch(() => [] as Endpoint[]),
+        sourcesApi.getAll().catch(() => [] as Endpoint[]),
       ])
       existingEndpoints.value = endpoints
       selectedRuleUuid.value = props.preSelectedRuleUuid ?? (rules.value.length === 1 ? rules.value[0].uuid : null)

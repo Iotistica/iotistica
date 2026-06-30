@@ -22,9 +22,9 @@ const router = createRouter({
       meta: { title: 'Subscriptions' },
     },
     {
-      path: '/endpoints',
-      component: () => import('@/views/EndpointsView.vue'),
-      meta: { title: 'Endpoints' },
+      path: '/sources',
+      component: () => import('@/views/SourcesView.vue'),
+      meta: { title: 'Sources' },
     },
     {
       path: '/devices',

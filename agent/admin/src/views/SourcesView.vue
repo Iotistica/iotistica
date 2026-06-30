@@ -4,10 +4,10 @@ import { message, Modal } from 'ant-design-vue'
 import { PlusOutlined, EditOutlined, DeleteOutlined, RadarChartOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import EndpointDrawer from '@/components/endpoints/EndpointDrawer.vue'
+import SourceDrawer from '@/components/sources/SourceDrawer.vue'
 import DiscoveryDrawer from '@/components/discovery/DiscoveryDrawer.vue'
 import type { Endpoint, EndpointCommunicationQuality, EndpointCreateData } from '@/types'
-import { endpointsApi } from '@/api/endpoints'
+import { sourcesApi } from '@/api/sources'
 import { protocolColor } from '@/utils/protocol'
 
 const rows = ref<Endpoint[]>([])
@@ -114,10 +114,10 @@ async function load(showLoader = true) {
   if (showLoader) loading.value = true
   error.value = null
   try {
-    rows.value = await endpointsApi.getAll()
+    rows.value = await sourcesApi.getAll()
   } catch (err: unknown) {
     const e = err as { message?: string }
-    error.value = e?.message ?? 'Failed to load endpoints'
+    error.value = e?.message ?? 'Failed to load sources'
   } finally {
     loading.value = false
   }
@@ -125,7 +125,7 @@ async function load(showLoader = true) {
 
 async function toggleEnabled(row: Endpoint) {
   try {
-    await endpointsApi.update(row.uuid, { enabled: !row.enabled })
+    await sourcesApi.update(row.uuid, { enabled: !row.enabled })
     await load(false)
   } catch {
     message.error('Failed to update')
@@ -147,11 +147,11 @@ function openEdit(row: Endpoint) {
 function confirmDelete(row: Endpoint) {
   Modal.confirm({
     title: `Delete "${row.name}"?`,
-    content: 'This will remove the endpoint and stop data collection from it.',
+    content: 'This will remove the source and stop data collection from it.',
     okType: 'danger',
     okText: 'Delete',
     async onOk() {
-      await endpointsApi.remove(row.uuid)
+      await sourcesApi.remove(row.uuid)
       message.success('Deleted')
       await load()
     },
@@ -171,7 +171,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppLayout title="Endpoints">
+  <AppLayout title="Sources">
     <div class="toolbar">
       <a-radio-group
         v-model:value="activeProtocol"
@@ -192,7 +192,7 @@ onUnmounted(() => {
         </a-button>
         <a-button type="primary" @click="openCreate">
           <template #icon><PlusOutlined /></template>
-          Add Endpoint
+          Add Source
         </a-button>
       </a-space>
     </div>
@@ -273,7 +273,7 @@ onUnmounted(() => {
       </template>
     </a-table>
 
-    <EndpointDrawer
+    <SourceDrawer
       v-model:open="drawerOpen"
       :editing="editing"
       :prefill="prefill"
@@ -282,7 +282,6 @@ onUnmounted(() => {
 
     <DiscoveryDrawer
       v-model:open="discoveryOpen"
-      :existing-endpoints="rows"
       @saved="load"
     />
   </AppLayout>

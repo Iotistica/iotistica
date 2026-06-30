@@ -3,7 +3,7 @@ import type { Endpoint, EndpointCreateData, EndpointUpdateData } from '@/types'
 
 const BASE = '/v1/endpoints'
 
-export const endpointsApi = {
+export const sourcesApi = {
   getAll(protocol?: string): Promise<Endpoint[]> {
     return client
       .get<{ endpoints: Endpoint[] }>(BASE, { params: protocol ? { protocol } : {} })

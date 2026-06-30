@@ -70,9 +70,9 @@ function onMenuClick({ key }: { key: string }) {
           Dashboard
         </a-menu-item>
 
-        <a-menu-item key="/endpoints">
+        <a-menu-item key="/sources">
           <template #icon><ApartmentOutlined /></template>
-          Endpoints
+          Sources
         </a-menu-item>
 
         <a-menu-item key="/devices">

@@ -3,8 +3,8 @@ import { ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import type { FormInstance } from 'ant-design-vue'
 import type { Endpoint, EndpointCreateData } from '@/types'
-import { endpointsApi } from '@/api/endpoints'
-import EndpointConnectionFields from './EndpointConnectionFields.vue'
+import { sourcesApi } from '@/api/sources'
+import SourceConnectionFields from './SourceConnectionFields.vue'
 
 const props = defineProps<{
   open: boolean
@@ -67,11 +67,11 @@ async function submit() {
   saving.value = true
   try {
     if (props.editing) {
-      await endpointsApi.replace(props.editing.uuid, form.value)
-      message.success('Endpoint updated')
+      await sourcesApi.replace(props.editing.uuid, form.value)
+      message.success('Source updated')
     } else {
-      await endpointsApi.create(form.value)
-      message.success('Endpoint added')
+      await sourcesApi.create(form.value)
+      message.success('Source added')
     }
     emit('update:open', false)
     emit('saved')
@@ -91,7 +91,7 @@ function close() {
 <template>
   <a-drawer
     :open="open"
-    :title="editing ? `Edit — ${editing.name}` : 'New Endpoint'"
+    :title="editing ? `Edit — ${editing.name}` : 'New Source'"
     width="480"
     @close="close"
   >
@@ -119,7 +119,7 @@ function close() {
 
       <a-divider orientation="left" orientation-margin="0">Connection</a-divider>
 
-      <EndpointConnectionFields
+      <SourceConnectionFields
         :protocol="form.protocol"
         :model-value="form.connection"
         @update:model-value="form.connection = $event"
@@ -150,7 +150,7 @@ function close() {
       <a-space>
         <a-button @click="close">Cancel</a-button>
         <a-button type="primary" :loading="saving" @click="submit">
-          {{ editing ? 'Save' : 'Add Endpoint' }}
+          {{ editing ? 'Save' : 'Add Source' }}
         </a-button>
       </a-space>
     </template>
