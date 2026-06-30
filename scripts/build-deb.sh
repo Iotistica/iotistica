@@ -74,6 +74,11 @@ PROVISIONING_KEY=
 LOG_LEVEL=info
 DATA_DIR=/var/lib/iotistic/agent
 LOG_DIR=/var/log/iotistic
+
+# Local Mosquitto MQTT broker (configured by installer — do not edit manually)
+MQTT_BROKER_URL=mqtt://localhost:1883
+MQTT_USERNAME=admin
+MQTT_PASSWORD=admin
 ENVEOF
 
 # ── Extract agent files ───────────────────────────────────────────────────────

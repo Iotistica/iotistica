@@ -9,16 +9,15 @@ CONFIG_DIR="/etc/iotistic"
 ENV_FILE="$CONFIG_DIR/agent.env"
 SERVICE_FILE="/lib/systemd/system/${SERVICE_NAME}.service"
 
+MQTT_PORT="${MQTT_BROKER_PORT:-1883}"
+MQTT_USERNAME="${MQTT_USERNAME:-admin}"
+MQTT_PASSWORD="${MQTT_PASSWORD:-admin}"
+
 # ── User ──────────────────────────────────────────────────────────────────────
 
 if ! id -u iotistic > /dev/null 2>&1; then
     useradd --system --home-dir /opt/iotistic --shell /bin/bash \
         --comment "Iotistica Agent" iotistic
-fi
-
-# Add to docker group if it exists
-if getent group docker > /dev/null 2>&1; then
-    usermod -aG docker iotistic
 fi
 
 # ── Directories ───────────────────────────────────────────────────────────────
@@ -34,31 +33,146 @@ chown -R iotistic:iotistic "$AGENT_DIR"
 chown -R iotistic:iotistic "$DATA_DIR"
 chown -R iotistic:iotistic "$LOG_DIR"
 
+# ── Docker ────────────────────────────────────────────────────────────────────
+
+if ! command -v docker > /dev/null 2>&1; then
+    echo "Installing Docker..."
+    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+    sh /tmp/get-docker.sh > /dev/null 2>&1
+    rm -f /tmp/get-docker.sh
+    systemctl enable docker > /dev/null 2>&1
+    systemctl start docker > /dev/null 2>&1 || true
+    echo "✓ Docker installed"
+fi
+
+# Add iotistic to docker group
+if getent group docker > /dev/null 2>&1; then
+    usermod -aG docker iotistic
+fi
+
+# ── Mosquitto ─────────────────────────────────────────────────────────────────
+
+if ! command -v mosquitto > /dev/null 2>&1; then
+    echo "Installing Mosquitto..."
+    apt-get install -y -qq --no-install-recommends mosquitto mosquitto-clients > /dev/null
+    echo "✓ Mosquitto installed"
+fi
+
+# Install ACL utilities if available (non-fatal if missing)
+if ! command -v setfacl > /dev/null 2>&1; then
+    apt-get install -y -qq --no-install-recommends acl > /dev/null 2>&1 || true
+fi
+
+echo "Configuring Mosquitto..."
+mkdir -p /etc/mosquitto/conf.d
+mkdir -p /var/log/mosquitto
+chgrp mosquitto /etc/mosquitto 2>/dev/null || true
+chmod 2755 /etc/mosquitto 2>/dev/null || true
+
+if ! grep -q 'include_dir /etc/mosquitto/conf.d' /etc/mosquitto/mosquitto.conf 2>/dev/null; then
+    echo "include_dir /etc/mosquitto/conf.d" >> /etc/mosquitto/mosquitto.conf
+fi
+
+cat > /etc/mosquitto/conf.d/iotistica.conf << EOFMOSQ
+# Iotistica managed configuration
+
+listener ${MQTT_PORT}
+allow_anonymous false
+
+password_file /etc/mosquitto/passwd
+acl_file /etc/mosquitto/acl
+EOFMOSQ
+
+touch /etc/mosquitto/passwd /etc/mosquitto/acl
+touch /var/log/mosquitto/mosquitto.log
+
+mosquitto_passwd -b -c /etc/mosquitto/passwd "$MQTT_USERNAME" "$MQTT_PASSWORD"
+
+cat > /etc/mosquitto/acl << EOFACL
+# Iotistica managed ACL
+user ${MQTT_USERNAME}
+topic readwrite #
+EOFACL
+
+chown root:mosquitto /etc/mosquitto/passwd /etc/mosquitto/acl
+chmod 0640 /etc/mosquitto/passwd /etc/mosquitto/acl
+chown mosquitto:mosquitto /var/log/mosquitto/mosquitto.log
+chmod 640 /var/log/mosquitto/mosquitto.log
+
+usermod -aG mosquitto iotistic 2>/dev/null || true
+
+if command -v setfacl > /dev/null 2>&1; then
+    setfacl -m u:iotistic:rwx /etc/mosquitto || true
+    setfacl -m u:iotistic:rw /etc/mosquitto/passwd || true
+    setfacl -m u:iotistic:rw /etc/mosquitto/acl || true
+fi
+
+# Reload helper script invoked by the systemd path unit below
+cat > /usr/local/bin/iotistica-mqtt-reload.sh << 'EOFRELOAD'
+#!/bin/sh
+set -e
+chown root:mosquitto /etc/mosquitto/passwd /etc/mosquitto/acl
+chmod 0640 /etc/mosquitto/passwd /etc/mosquitto/acl
+if command -v setfacl > /dev/null 2>&1; then
+    setfacl -m u:iotistic:rw /etc/mosquitto/passwd || true
+    setfacl -m u:iotistic:rw /etc/mosquitto/acl || true
+fi
+systemctl reload mosquitto
+EOFRELOAD
+chmod +x /usr/local/bin/iotistica-mqtt-reload.sh
+
+# sudoers fallback (primary is the path unit below)
+cat > /etc/sudoers.d/iotistica-mqtt-reload << 'EOFSUDO'
+iotistic ALL=(root) NOPASSWD: /usr/local/bin/iotistica-mqtt-reload.sh
+EOFSUDO
+chmod 440 /etc/sudoers.d/iotistica-mqtt-reload
+
+# systemd path unit: reloads Mosquitto automatically when passwd file changes
+cat > /etc/systemd/system/iotistica-mqtt-reload.service << 'EOFSERVICE'
+[Unit]
+Description=Reload Mosquitto MQTT auth files after credential update
+After=mosquitto.service
+Requires=mosquitto.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/iotistica-mqtt-reload.sh
+EOFSERVICE
+
+cat > /etc/systemd/system/iotistica-mqtt-reload.path << 'EOFPATH'
+[Unit]
+Description=Watch Mosquitto passwd file for credential updates
+
+[Path]
+PathModified=/etc/mosquitto/passwd
+Unit=iotistica-mqtt-reload.service
+
+[Install]
+WantedBy=multi-user.target
+EOFPATH
+
+systemctl daemon-reload
+systemctl enable mosquitto > /dev/null 2>&1
+systemctl enable --now iotistica-mqtt-reload.path > /dev/null 2>&1
+systemctl restart mosquitto
+
+echo "✓ Mosquitto configured on port ${MQTT_PORT}"
+
 # ── Default config ────────────────────────────────────────────────────────────
 
-# Only write env file on first install (dpkg preserves conffiles on upgrade)
-if [ ! -f "$ENV_FILE" ]; then
-    cat > "$ENV_FILE" << 'EOF'
-# Iotistica Agent configuration
-# Edit this file and restart the service: systemctl restart iotistica-agent
-#
-# Leave IOTISTICA_API and PROVISIONING_KEY blank to run in standalone mode.
-# Open the admin UI at http://<device-ip>:48481/admin/ to configure the device.
+# Conffile is placed by dpkg on fresh install; update MQTT settings in-place
+# so they match the broker we just configured.
+if [ -f "$ENV_FILE" ]; then
+    # Append MQTT block only if not already present
+    if ! grep -q '^MQTT_BROKER_URL=' "$ENV_FILE"; then
+        cat >> "$ENV_FILE" << EOFENV
 
-NODE_ENV=production
-DEPLOYMENT_TYPE=systemd
-DEVICE_API_PORT=48484
-STANDALONE=true
-
-# Cloud connectivity (optional — provision via admin UI instead)
-IOTISTICA_API=
-PROVISIONING_KEY=
-
-# Logging
-LOG_LEVEL=info
-DATA_DIR=/var/lib/iotistic/agent
-LOG_DIR=/var/log/iotistic
-EOF
+# Local Mosquitto MQTT broker (configured by installer)
+MQTT_BROKER_URL=mqtt://localhost:${MQTT_PORT}
+MQTT_USERNAME=${MQTT_USERNAME}
+MQTT_PASSWORD=${MQTT_PASSWORD}
+EOFENV
+    fi
     chown iotistic:iotistic "$ENV_FILE"
     chmod 600 "$ENV_FILE"
 fi
@@ -71,7 +185,6 @@ if ! command -v systemctl > /dev/null 2>&1; then
     exit 0
 fi
 
-# Detect node binary
 NODE_BIN=$(command -v node 2>/dev/null || echo "")
 if [ -z "$NODE_BIN" ]; then
     echo "Warning: node not found in PATH — service will fail to start."
@@ -79,7 +192,6 @@ if [ -z "$NODE_BIN" ]; then
     NODE_BIN="/usr/bin/node"
 fi
 
-# Detect app entry point
 if [ -f "$AGENT_DIR/dist/app.js" ]; then
     APP_JS="$AGENT_DIR/dist/app.js"
 elif [ -f "$AGENT_DIR/dist/src/app.js" ]; then
@@ -93,9 +205,9 @@ cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=Iotistica Agent - IoT Device Management Service
 Documentation=https://docs.iotistica.com
-After=network-online.target docker.service
+After=network-online.target docker.service mosquitto.service
 Requires=docker.service
-Wants=network-online.target
+Wants=network-online.target mosquitto.service
 StartLimitIntervalSec=60
 StartLimitBurst=10
 
@@ -140,18 +252,16 @@ EOF
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 
-# On upgrade: restart if already running; on fresh install: start
 if [ "$1" = "configure" ] && [ -n "$2" ]; then
-    # Upgrade — restart to pick up new binaries
     systemctl restart "$SERVICE_NAME" || true
 else
-    # Fresh install — start
     systemctl start "$SERVICE_NAME" || true
 fi
 
 echo ""
 echo "✓ Iotistica Agent installed and started."
 echo "  Admin UI:  http://localhost:48481/admin/"
+echo "  MQTT:      localhost:${MQTT_PORT} (user: ${MQTT_USERNAME})"
 echo "  Status:    systemctl status $SERVICE_NAME"
 echo "  Logs:      journalctl -u $SERVICE_NAME -f"
 echo ""
