@@ -438,7 +438,7 @@ echo ""
 
     # Install essential dependencies first (these should always work)
     apt-get install -y -qq --no-install-recommends \
-        curl wget git build-essential python3 make g++ > /dev/null || {
+        curl wget git build-essential python3 make g++ > /dev/null 2>&1 || {
         echo "✗ Error: Failed to install essential build tools"
         exit 1
     }
@@ -562,7 +562,6 @@ echo ""
         EXTRACTED_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$AGENT_DIR/package.json" | sed 's/.*"\([^"]*\)".*/\1/')
         if [ -n "$EXTRACTED_VERSION" ]; then
             AGENT_VERSION="$EXTRACTED_VERSION"
-            echo "Detected version from package.json: $AGENT_VERSION"
         fi
     fi
     
@@ -900,17 +899,12 @@ EOF
     # Auto-detect correct app.js path (handles both old and new build structures)
     if [ -f /opt/iotistic/agent/dist/app.js ]; then
         APP_JS_PATH="/opt/iotistic/agent/dist/app.js"
-        echo "Detected app.js at: dist/app.js (new structure)"
     elif [ -f /opt/iotistic/agent/dist/src/app.js ]; then
         APP_JS_PATH="/opt/iotistic/agent/dist/src/app.js"
-        echo "Detected app.js at: dist/src/app.js (legacy structure)"
     else
         echo "✗ Error: Could not find app.js in dist/ or dist/src/"
         exit 1
     fi
-
-    echo "Node path: ${NODE_PATH}"
-    echo "App path: ${APP_JS_PATH}"
 
     # Allow install-time override for service memory cap.
     AGENT_MEMORY_LIMIT="${AGENT_MEMORY_LIMIT:-300M}"
