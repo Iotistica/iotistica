@@ -1036,11 +1036,6 @@ EOFJOURNALD
     if systemctl is-active --quiet "${SERVICE_NAME}"; then
         echo ""
         echo "✓ Agent service is running"
-        
-        echo ""
-        echo "Recent logs:"
-        journalctl -u "${SERVICE_NAME}" -n 50 --no-pager
-        
         echo ""
         echo "====================================="
         echo "Installation complete!"
