@@ -206,6 +206,13 @@ function onMenuClick({ key }: { key: string }) {
 .nav-main {
   flex: 1;
   overflow-y: auto;
+  background: #141414;
+}
+
+:deep(.ant-menu-dark),
+:deep(.ant-menu-dark .ant-menu-sub),
+:deep(.ant-menu-dark.ant-menu-inline) {
+  background: #141414 !important;
 }
 
 .nav-bottom {
@@ -223,11 +230,6 @@ function onMenuClick({ key }: { key: string }) {
   flex-direction: column;
 }
 
-:deep(.ant-menu-dark),
-:deep(.ant-menu-dark .ant-menu-sub),
-:deep(.ant-menu-dark.ant-menu-inline) {
-  background: #0a0a0a !important;
-}
 
 :deep(.ant-menu-dark .ant-menu-item:not(.ant-menu-item-selected):hover) {
   background: #111111 !important;
