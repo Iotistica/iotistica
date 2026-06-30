@@ -88,17 +88,13 @@ function buildCommands(args) {
                 list: publish_1.publishDestinationsList,
                 _default: publish_1.publishDestinationsList,
             },
-            publishers: {
-                list: publish_1.publishDestinationsList,
-                _default: publish_1.publishDestinationsList,
-            },
             subscriptions: {
                 add: publish_1.publishSubscriptionsAdd,
                 list: publish_1.publishSubscriptionsList,
                 _default: publish_1.publishSubscriptionsList,
             },
-            mqtt: {
-                add: publish_1.publishMqttAdd,
+            add: {
+                mqtt: publish_1.publishMqttAdd,
             },
             _default: () => (0, help_1.showHelp)(commands),
         },
