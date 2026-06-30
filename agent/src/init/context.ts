@@ -16,6 +16,7 @@ import type { DeviceAPI } from '../api/index.js';
 import type { ContainerLogMonitor } from '../logging/container-monitor.js';
 import type { DictionaryManager } from '../mqtt/dictionary.js';
 import type { HttpClient } from '../lib/http-client.js';
+import type { IncidentCorrelator } from '../anomaly/incident-correlator.js';
 
 export interface AgentInitContext {
 	agent: {
@@ -38,6 +39,7 @@ export interface AgentInitContext {
 	updater?: AgentUpdater;
 	featureInitializer?: FeatureInitializer;
 	anomalyService?: any;
+	correlator?: IncidentCorrelator;
 	pipelineService?: PipelineService;
 	simulationOrchestrator?: any;
 	discoveryService?: DiscoveryService;

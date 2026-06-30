@@ -5,6 +5,8 @@ import { CloudMqttClient } from '../mqtt/manager.js';
 import { agentTopic } from '../mqtt/topics.js';
 import { PublishDestinationsModel } from '../db/models/publish-destinations.model.js';
 import { createExternalMqttClientFromDestination } from '../publish/plugins/mqtt.js';
+import { IncidentCorrelator } from '../anomaly/incident-correlator.js';
+import type { AnomalyEventPayload } from '../db/models/anomaly-event.model.js';
 import type { AgentInitContext } from './context.js';
 
 export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void> {
@@ -48,6 +50,12 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 		ctx.anomalyService = undefined;
 	}
 
+	// Start the edge incident correlator (runs regardless of Pro license).
+	if (!ctx.correlator) {
+		ctx.correlator = new IncidentCorrelator();
+		ctx.correlator.start();
+	}
+
 	try {
 		const pro = await loadAnomalyDetection();
 		if (!pro) {
@@ -71,6 +79,7 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 		});
 
 		const { AnomalyDetectionService } = pro;
+		const correlator = ctx.correlator;
 		ctx.anomalyService = new AnomalyDetectionService(
 			config,
 			dbInstance,
@@ -86,6 +95,8 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 					PublishDestinationsModel.getById(id) ?? null,
 				createAlertMqttClient: (config: Record<string, unknown> | null | undefined, deviceId?: string, name?: string, logger?: any) =>
 					createExternalMqttClientFromDestination(config, deviceId, name, logger),
+				onAnomalyDetected: (event: AnomalyEventPayload) =>
+					correlator?.processEvent(event),
 			}
 		);
 

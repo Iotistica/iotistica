@@ -18,6 +18,7 @@ import { migration as addAdminUsers } from './migrations/20260620010000_add_admi
 import { migration as addDriftOptionsToEndpointOutputs } from './migrations/20260621000000_add_drift_options_to_endpoint_outputs.js';
 import { migration as addTargetSyncEnabled } from './migrations/20260626000000_add_target_sync_enabled.js';
 import { migration as addBackupSchedule } from './migrations/20260629000000_add_backup_schedule.js';
+import { migration as addAnomalyEdgeTracking } from './migrations/20260630001000_add_anomaly_edge_tracking.js';
 import type { NativeSqliteMigration } from './migration-types.js';
 
 export const nativeMigrations: NativeSqliteMigration[] = [
@@ -41,4 +42,5 @@ export const nativeMigrations: NativeSqliteMigration[] = [
 	addDriftOptionsToEndpointOutputs,
 	addTargetSyncEnabled,
 	addBackupSchedule,
+	addAnomalyEdgeTracking,
 ];
