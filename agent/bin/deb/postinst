@@ -33,6 +33,23 @@ chown -R iotistic:iotistic "$AGENT_DIR"
 chown -R iotistic:iotistic "$DATA_DIR"
 chown -R iotistic:iotistic "$LOG_DIR"
 
+# ── Node.js 22 ───────────────────────────────────────────────────────────────
+
+NODE_OK=0
+if command -v node > /dev/null 2>&1; then
+    NODE_MAJOR=$(node -e "process.stdout.write(String(process.version.split('.')[0].slice(1)))" 2>/dev/null || echo "0")
+    if [ "$NODE_MAJOR" -ge 22 ] 2>/dev/null; then
+        NODE_OK=1
+    fi
+fi
+
+if [ "$NODE_OK" != "1" ]; then
+    echo "Installing Node.js 22 via NodeSource..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null 2>&1
+    apt-get install -y -qq nodejs > /dev/null
+    echo "✓ Node.js $(node --version) installed"
+fi
+
 # ── Docker ────────────────────────────────────────────────────────────────────
 
 if ! command -v docker > /dev/null 2>&1; then

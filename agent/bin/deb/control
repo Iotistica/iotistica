@@ -3,7 +3,6 @@ Version: DEB_VERSION
 Architecture: DEB_ARCH
 Maintainer: Iotistica <support@iotistica.com>
 Installed-Size: DEB_SIZE
-Depends: nodejs (>= 22)
 Recommends: docker-ce | docker.io | docker-engine
 Section: net
 Priority: optional
