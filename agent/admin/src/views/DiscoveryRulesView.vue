@@ -100,7 +100,10 @@ function resultSummary(rule: DiscoveryRule): string {
   const r = rule.last_result_json
   if (!r) return '—'
   if (r.error) return `Error: ${r.error.slice(0, 40)}`
-  return `found ${r.found}, saved ${r.saved}`
+  const parts = [`found ${r.found}`]
+  if (r.saved > 0) parts.push(`${r.saved} auto-added`)
+  if (r.skipped > 0) parts.push(`${r.skipped} skipped`)
+  return parts.join(' · ')
 }
 
 async function load() {
@@ -280,7 +283,9 @@ onMounted(load)
             <template v-else-if="column.key === 'result'">
               <span v-if="record.error" style="font-size: 11px; color: #cf1322">{{ record.error }}</span>
               <span v-else style="font-size: 12px; color: #888">
-                found {{ record.found }}, saved {{ record.saved }}
+                found {{ record.found }}
+                <template v-if="record.saved > 0"> · {{ record.saved }} auto-added</template>
+                <template v-if="record.skipped > 0"> · {{ record.skipped }} skipped</template>
               </span>
             </template>
           </template>
