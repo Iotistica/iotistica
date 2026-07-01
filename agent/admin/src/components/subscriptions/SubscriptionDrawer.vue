@@ -9,6 +9,7 @@ const props = defineProps<{
   open: boolean
   editing: Subscription | null
   destinations: Destination[]
+  deviceNames?: string[]
   iotisticaTopicBase?: string
 }>()
 
@@ -267,11 +268,21 @@ function close() {
           <a-form-item label="Exclude metrics">
             <a-select v-model:value="form.route_json!.excludeMetrics" mode="tags" :open="false" />
           </a-form-item>
-          <a-form-item label="Include devices">
-            <a-select v-model:value="form.route_json!.includeDevices" mode="tags" :open="false" />
+          <a-form-item label="Include devices" extra="Select from the list or type a custom name">
+            <a-select
+              v-model:value="form.route_json!.includeDevices"
+              mode="tags"
+              placeholder="All devices (leave empty for all)"
+              :options="(deviceNames ?? []).map(n => ({ value: n, label: n }))"
+            />
           </a-form-item>
           <a-form-item label="Exclude devices">
-            <a-select v-model:value="form.route_json!.excludeDevices" mode="tags" :open="false" />
+            <a-select
+              v-model:value="form.route_json!.excludeDevices"
+              mode="tags"
+              placeholder="None excluded"
+              :options="(deviceNames ?? []).map(n => ({ value: n, label: n }))"
+            />
           </a-form-item>
           <a-form-item label="Quality filter">
             <a-checkbox-group v-model:value="form.route_json!.qualities">

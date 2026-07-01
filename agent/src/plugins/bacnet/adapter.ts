@@ -326,7 +326,14 @@ export class BACnetAdapter extends BaseProtocolAdapter {
 			const enabledObjects = deviceConfig.objects.filter(obj => obj.enabled);
 			const results = await client.read(enabledObjects);
 
-			// Convert results to deviceDataPoint[]
+			// readObject() swallows per-object errors and returns quality:'BAD' rather than throwing,
+			// so client.read() always resolves. Determine reachability from the result set:
+			// if every object failed, the device is unreachable (network timeout) — update health
+			// accordingly while still emitting BAD-quality data points so subscribers see the signal.
+			const allFailed = enabledObjects.length > 0 &&
+				[...results.values()].every(r => r.quality === 'BAD');
+
+			// Convert results to deviceDataPoint[] (always — including BAD quality)
 			const dataPoints: DeviceDataPoint[] = [];
 			let updatedCount = 0;
 
@@ -362,21 +369,32 @@ export class BACnetAdapter extends BaseProtocolAdapter {
 
 			const responseTime = Date.now() - startTime;
 
-			// Update device status
-			this.updateDeviceStatus(deviceName, {
-				connected: true,
-				lastSeen: new Date(),
-				responseTimeMs: responseTime,
-				registersUpdated: updatedCount,
-				errorCount: 0,
-				lastError: null,
-			});
+			if (allFailed) {
+				// All reads timed out / failed — device is unreachable
+				const firstError = [...results.values()][0]?.error ?? 'All reads failed';
+				const errorCount = (this.deviceStatuses.get(deviceName)?.errorCount || 0) + 1;
+				this.updateDeviceStatus(deviceName, {
+					connected: false,
+					lastError: firstError,
+					errorCount,
+					responseTimeMs: responseTime,
+				});
+				this.recordBACnetPollResult(deviceName, false);
+				this.logger.warn(`BACnet device ${deviceName} unreachable: ${firstError}`);
+			} else {
+				this.updateDeviceStatus(deviceName, {
+					connected: true,
+					lastSeen: new Date(),
+					responseTimeMs: responseTime,
+					registersUpdated: updatedCount,
+					errorCount: 0,
+					lastError: null,
+				});
+				this.recordBACnetPollResult(deviceName, true);
+				this.retryAttempts.set(deviceName, 0);
+			}
 
-			// Track poll success
-			this.recordBACnetPollResult(deviceName, true);
-			this.retryAttempts.set(deviceName, 0);
-
-			// Emit data event
+			// Always emit data (BAD quality included) so subscribers see the signal
 			if (dataPoints.length > 0) {
 				this.emit('data', dataPoints);
 			}

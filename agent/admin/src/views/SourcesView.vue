@@ -18,6 +18,13 @@ const drawerOpen = ref(false)
 const discoveryOpen = ref(false)
 const editing = ref<Endpoint | null>(null)
 const prefill = ref<EndpointCreateData | null>(null)
+const selectedUuids = ref<string[]>([])
+const deleting = ref(false)
+
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedUuids.value,
+  onChange: (keys: string[]) => { selectedUuids.value = keys },
+}))
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
@@ -158,6 +165,27 @@ function confirmDelete(row: Endpoint) {
   })
 }
 
+function confirmDeleteSelected() {
+  const count = selectedUuids.value.length
+  Modal.confirm({
+    title: `Delete ${count} source${count !== 1 ? 's' : ''}?`,
+    content: 'This will remove the selected sources and stop data collection from them.',
+    okType: 'danger',
+    okText: `Delete ${count}`,
+    async onOk() {
+      deleting.value = true
+      try {
+        await Promise.allSettled(selectedUuids.value.map((uuid) => sourcesApi.remove(uuid)))
+        selectedUuids.value = []
+        message.success(`Deleted ${count} source${count !== 1 ? 's' : ''}`)
+        await load()
+      } finally {
+        deleting.value = false
+      }
+    },
+  })
+}
+
 watch(discoveryOpen, (isOpen) => { if (!isOpen) load() })
 
 onMounted(() => {
@@ -186,6 +214,15 @@ onUnmounted(() => {
       </a-radio-group>
 
       <a-space>
+        <a-button
+          v-if="selectedUuids.length > 0"
+          danger
+          :loading="deleting"
+          @click="confirmDeleteSelected"
+        >
+          <template #icon><DeleteOutlined /></template>
+          Delete ({{ selectedUuids.length }})
+        </a-button>
         <a-button @click="discoveryOpen = true">
           <template #icon><RadarChartOutlined /></template>
           Discover
@@ -210,6 +247,7 @@ onUnmounted(() => {
       :data-source="filteredRows"
       :loading="loading"
       :pagination="false"
+      :row-selection="rowSelection"
       row-key="uuid"
       size="middle"
     >

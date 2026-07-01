@@ -9,11 +9,13 @@ import type { Destination, Subscription } from '@/types'
 import { subscriptionsApi } from '@/api/subscriptions'
 import { destinationsApi } from '@/api/destinations'
 import { settingsApi } from '@/api/settings'
+import { sourcesApi } from '@/api/sources'
 import { protocolColor, destinationColor } from '@/utils/protocol'
 import { buildIotisticaTopicBase } from '@/utils/mqtt'
 
 const rows = ref<Subscription[]>([])
 const destinations = ref<Destination[]>([])
+const deviceNames = ref<string[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const drawerOpen = ref(false)
@@ -39,13 +41,15 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const [subs, dests, settings] = await Promise.all([
+    const [subs, dests, settings, endpoints] = await Promise.all([
       subscriptionsApi.getAll(),
       destinationsApi.getAll(),
       settingsApi.get(),
+      sourcesApi.getAll().catch(() => [] as { name: string }[]),
     ])
     rows.value = subs
     destinations.value = dests
+    deviceNames.value = endpoints.map((e) => e.name)
     const { uuid, tenantId } = settings.agent ?? {}
     if (uuid && tenantId) iotisticaTopicBase.value = buildIotisticaTopicBase(uuid, tenantId)
   } catch (err: unknown) {
@@ -190,6 +194,7 @@ onMounted(load)
       v-model:open="drawerOpen"
       :editing="editing"
       :destinations="destinations"
+      :device-names="deviceNames"
       :iotistica-topic-base="iotisticaTopicBase ?? undefined"
       @saved="load"
     />
