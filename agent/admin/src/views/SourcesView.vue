@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, EditOutlined, DeleteOutlined, RadarChartOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, EditOutlined, DeleteOutlined, RadarChartOutlined, CheckCircleOutlined, StopOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SourceDrawer from '@/components/sources/SourceDrawer.vue'
@@ -20,6 +20,8 @@ const editing = ref<Endpoint | null>(null)
 const prefill = ref<EndpointCreateData | null>(null)
 const selectedUuids = ref<string[]>([])
 const deleting = ref(false)
+const bulkEnabling = ref(false)
+const bulkDisabling = ref(false)
 
 const rowSelection = computed(() => ({
   selectedRowKeys: selectedUuids.value,
@@ -186,6 +188,32 @@ function confirmDeleteSelected() {
   })
 }
 
+async function bulkEnable() {
+  const uuids = [...selectedUuids.value]
+  bulkEnabling.value = true
+  try {
+    await Promise.allSettled(uuids.map((uuid) => sourcesApi.update(uuid, { enabled: true })))
+    selectedUuids.value = []
+    message.success(`Enabled ${uuids.length} source${uuids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkEnabling.value = false
+  }
+}
+
+async function bulkDisable() {
+  const uuids = [...selectedUuids.value]
+  bulkDisabling.value = true
+  try {
+    await Promise.allSettled(uuids.map((uuid) => sourcesApi.update(uuid, { enabled: false })))
+    selectedUuids.value = []
+    message.success(`Disabled ${uuids.length} source${uuids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkDisabling.value = false
+  }
+}
+
 watch(discoveryOpen, (isOpen) => { if (!isOpen) load() })
 
 onMounted(() => {
@@ -214,15 +242,21 @@ onUnmounted(() => {
       </a-radio-group>
 
       <a-space>
-        <a-button
-          v-if="selectedUuids.length > 0"
-          danger
-          :loading="deleting"
-          @click="confirmDeleteSelected"
-        >
-          <template #icon><DeleteOutlined /></template>
-          Delete ({{ selectedUuids.length }})
-        </a-button>
+        <template v-if="selectedUuids.length > 0">
+          <span style="font-size: 13px; color: #666">{{ selectedUuids.length }} selected</span>
+          <a-button :loading="bulkEnabling" @click="bulkEnable">
+            <template #icon><CheckCircleOutlined /></template>
+            Enable
+          </a-button>
+          <a-button :loading="bulkDisabling" @click="bulkDisable">
+            <template #icon><StopOutlined /></template>
+            Disable
+          </a-button>
+          <a-button danger :loading="deleting" @click="confirmDeleteSelected">
+            <template #icon><DeleteOutlined /></template>
+            Delete
+          </a-button>
+        </template>
         <a-button @click="discoveryOpen = true">
           <template #icon><RadarChartOutlined /></template>
           Discover

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, StopOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SubscriptionDrawer from '@/components/subscriptions/SubscriptionDrawer.vue'
@@ -21,6 +21,15 @@ const error = ref<string | null>(null)
 const drawerOpen = ref(false)
 const editing = ref<Subscription | null>(null)
 const iotisticaTopicBase = ref<string | null>(null)
+const selectedIds = ref<(string | number)[]>([])
+const deleting = ref(false)
+const bulkEnabling = ref(false)
+const bulkDisabling = ref(false)
+
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedIds.value,
+  onChange: (keys: (string | number)[]) => { selectedIds.value = keys },
+}))
 
 const destMap = computed<Record<number, Destination>>(() =>
   Object.fromEntries(destinations.value.map((d) => [d.id, d])),
@@ -93,23 +102,86 @@ function confirmDelete(row: Subscription) {
   })
 }
 
+function confirmDeleteSelected() {
+  const count = selectedIds.value.length
+  Modal.confirm({
+    title: `Delete ${count} subscription${count !== 1 ? 's' : ''}?`,
+    okType: 'danger',
+    okText: `Delete ${count}`,
+    async onOk() {
+      deleting.value = true
+      try {
+        await Promise.allSettled(selectedIds.value.map((id) => subscriptionsApi.delete(id as number)))
+        selectedIds.value = []
+        message.success(`Deleted ${count} subscription${count !== 1 ? 's' : ''}`)
+        await load()
+      } finally {
+        deleting.value = false
+      }
+    },
+  })
+}
+
+async function bulkEnable() {
+  const ids = [...selectedIds.value] as number[]
+  bulkEnabling.value = true
+  try {
+    await Promise.allSettled(ids.map((id) => subscriptionsApi.update(id, { enabled: true })))
+    selectedIds.value = []
+    message.success(`Enabled ${ids.length} subscription${ids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkEnabling.value = false
+  }
+}
+
+async function bulkDisable() {
+  const ids = [...selectedIds.value] as number[]
+  bulkDisabling.value = true
+  try {
+    await Promise.allSettled(ids.map((id) => subscriptionsApi.update(id, { enabled: false })))
+    selectedIds.value = []
+    message.success(`Disabled ${ids.length} subscription${ids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkDisabling.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
 <template>
   <AppLayout title="Subscriptions">
     <div class="toolbar">
+      <a-space>
+        <template v-if="selectedIds.length > 0">
+          <span style="font-size: 13px; color: #666">{{ selectedIds.length }} selected</span>
+          <a-button :loading="bulkEnabling" @click="bulkEnable">
+            <template #icon><CheckCircleOutlined /></template>
+            Enable
+          </a-button>
+          <a-button :loading="bulkDisabling" @click="bulkDisable">
+            <template #icon><StopOutlined /></template>
+            Disable
+          </a-button>
+          <a-button danger :loading="deleting" @click="confirmDeleteSelected">
+            <template #icon><DeleteOutlined /></template>
+            Delete
+          </a-button>
+        </template>
+        <a-alert
+          v-if="destinations.length === 0 && !loading"
+          type="warning"
+          message="Create a destination first before adding subscriptions."
+          show-icon
+          style="padding: 4px 12px"
+        />
+      </a-space>
       <a-button type="primary" :disabled="destinations.length === 0" @click="openCreate">
         <template #icon><PlusOutlined /></template>
         New Subscription
       </a-button>
-      <a-alert
-        v-if="destinations.length === 0 && !loading"
-        type="warning"
-        message="Create a destination first before adding subscriptions."
-        show-icon
-        style="margin-left: 12px; padding: 4px 12px"
-      />
     </div>
 
     <a-alert
@@ -125,6 +197,7 @@ onMounted(load)
       :data-source="rows"
       :loading="loading"
       :pagination="false"
+      :row-selection="rowSelection"
       row-key="id"
       size="middle"
     >
@@ -205,7 +278,9 @@ onMounted(load)
 .toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 </style>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, EditOutlined, DeleteOutlined, CheckCircleOutlined, StopOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import DestinationDrawer from '@/components/destinations/DestinationDrawer.vue'
@@ -17,6 +17,15 @@ const drawerOpen = ref(false)
 const editing = ref<Destination | null>(null)
 const activeType = ref('all')
 const provisioned = ref(false)
+const selectedIds = ref<(string | number)[]>([])
+const deleting = ref(false)
+const bulkEnabling = ref(false)
+const bulkDisabling = ref(false)
+
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedIds.value,
+  onChange: (keys: (string | number)[]) => { selectedIds.value = keys },
+}))
 
 const availableTypes = computed(() => [...new Set(rows.value.map((r) => r.type))].sort())
 
@@ -79,6 +88,53 @@ function confirmDelete(row: Destination) {
   })
 }
 
+function confirmDeleteSelected() {
+  const count = selectedIds.value.length
+  Modal.confirm({
+    title: `Delete ${count} destination${count !== 1 ? 's' : ''}?`,
+    content: 'This will remove the selected destinations and all their associated subscriptions.',
+    okType: 'danger',
+    okText: `Delete ${count}`,
+    async onOk() {
+      deleting.value = true
+      try {
+        await Promise.allSettled(selectedIds.value.map((id) => destinationsApi.delete(id as number)))
+        selectedIds.value = []
+        message.success(`Deleted ${count} destination${count !== 1 ? 's' : ''}`)
+        await load()
+      } finally {
+        deleting.value = false
+      }
+    },
+  })
+}
+
+async function bulkEnable() {
+  const ids = [...selectedIds.value] as number[]
+  bulkEnabling.value = true
+  try {
+    await Promise.allSettled(ids.map((id) => destinationsApi.update(id, { enabled: true })))
+    selectedIds.value = []
+    message.success(`Enabled ${ids.length} destination${ids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkEnabling.value = false
+  }
+}
+
+async function bulkDisable() {
+  const ids = [...selectedIds.value] as number[]
+  bulkDisabling.value = true
+  try {
+    await Promise.allSettled(ids.map((id) => destinationsApi.update(id, { enabled: false })))
+    selectedIds.value = []
+    message.success(`Disabled ${ids.length} destination${ids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkDisabling.value = false
+  }
+}
+
 onMounted(async () => {
   const [, settings] = await Promise.allSettled([load(), settingsApi.get()])
   if (settings.status === 'fulfilled') {
@@ -96,10 +152,27 @@ onMounted(async () => {
           {{ t.charAt(0).toUpperCase() + t.slice(1) }}
         </a-radio-button>
       </a-radio-group>
-      <a-button type="primary" @click="openCreate">
-        <template #icon><PlusOutlined /></template>
-        New Destination
-      </a-button>
+      <a-space>
+        <template v-if="selectedIds.length > 0">
+          <span style="font-size: 13px; color: #666">{{ selectedIds.length }} selected</span>
+          <a-button :loading="bulkEnabling" @click="bulkEnable">
+            <template #icon><CheckCircleOutlined /></template>
+            Enable
+          </a-button>
+          <a-button :loading="bulkDisabling" @click="bulkDisable">
+            <template #icon><StopOutlined /></template>
+            Disable
+          </a-button>
+          <a-button danger :loading="deleting" @click="confirmDeleteSelected">
+            <template #icon><DeleteOutlined /></template>
+            Delete
+          </a-button>
+        </template>
+        <a-button type="primary" @click="openCreate">
+          <template #icon><PlusOutlined /></template>
+          New Destination
+        </a-button>
+      </a-space>
     </div>
 
     <a-alert
@@ -115,6 +188,7 @@ onMounted(async () => {
       :data-source="filteredRows"
       :loading="loading"
       :pagination="false"
+      :row-selection="rowSelection"
       row-key="id"
       size="middle"
     >
