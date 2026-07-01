@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   DashboardOutlined,
@@ -24,9 +24,20 @@ import {
   CodeOutlined,
 } from '@ant-design/icons-vue'
 import IotisticaLogo from '@/components/IotisticaLogo.vue'
+import { settingsApi } from '@/api/settings'
 
 const route = useRoute()
 const router = useRouter()
+
+const agentVersion = ref<string | null>(null)
+onMounted(async () => {
+  try {
+    const s = await settingsApi.get()
+    agentVersion.value = s.agent?.version ?? null
+  } catch {
+    // non-fatal
+  }
+})
 
 const selectedKey = computed(() => route.path)
 
@@ -55,6 +66,7 @@ function onMenuClick({ key }: { key: string }) {
     <div class="logo">
       <IotisticaLogo :size="24" />
       <span>Iotistica</span>
+      <a-tag v-if="agentVersion" class="version-badge">v{{ agentVersion }}</a-tag>
     </div>
 
     <div class="nav-main">
@@ -194,12 +206,26 @@ function onMenuClick({ key }: { key: string }) {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 24px;
+  padding: 0 16px 0 24px;
   color: rgba(255, 255, 255, 0.85);
   font-size: 16px;
   font-weight: 600;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   margin-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.version-badge {
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 5px;
+  height: 16px;
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.45);
+  border-radius: 3px;
+  font-weight: 400;
   flex-shrink: 0;
 }
 
