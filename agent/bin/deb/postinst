@@ -152,6 +152,24 @@ if ! grep -q 'include_dir /etc/mosquitto/conf.d' /etc/mosquitto/mosquitto.conf 2
     echo "include_dir /etc/mosquitto/conf.d" >> /etc/mosquitto/mosquitto.conf
 fi
 
+# Auto-detect port conflict and switch to an alternative if needed
+if ss -tlnp 2>/dev/null | grep -q ":${MQTT_PORT}[[:space:]]"; then
+    echo "iotistica-setup: port $MQTT_PORT is already in use"
+    SWITCHED=0
+    for TRY_PORT in 8883 1884 1885 1886; do
+        if ! ss -tlnp 2>/dev/null | grep -q ":${TRY_PORT}[[:space:]]"; then
+            MQTT_PORT="$TRY_PORT"
+            SWITCHED=1
+            echo "iotistica-setup: auto-switching Mosquitto to port $MQTT_PORT"
+            sed -i "s|MQTT_BROKER_URL=mqtt://localhost:[0-9]*|MQTT_BROKER_URL=mqtt://localhost:${MQTT_PORT}|" /etc/iotistic/agent.env
+            break
+        fi
+    done
+    if [ "$SWITCHED" = "0" ]; then
+        echo "iotistica-setup: WARNING all candidate MQTT ports are in use — Mosquitto may not start"
+    fi
+fi
+
 cat > /etc/mosquitto/conf.d/iotistica.conf << EOFMOSQ
 # Iotistica managed configuration
 
@@ -229,8 +247,14 @@ EOFMQPATH
 systemctl daemon-reload
 systemctl enable mosquitto > /dev/null 2>&1
 systemctl enable --now iotistica-mqtt-reload.path > /dev/null 2>&1
-systemctl restart mosquitto
-echo "iotistica-setup: ✓ Mosquitto running on port $MQTT_PORT"
+if systemctl restart mosquitto; then
+    echo "iotistica-setup: ✓ Mosquitto running on port $MQTT_PORT"
+else
+    echo "iotistica-setup: WARNING Mosquitto failed to start on port $MQTT_PORT"
+    echo "  Diagnosis:  journalctl -u mosquitto -n 20 --no-pager"
+    echo "  Port check: ss -tlnp | grep :$MQTT_PORT"
+    echo "  After fix:  sudo systemctl restart mosquitto && sudo systemctl restart iotistica-agent"
+fi
 
 # ── Mark complete and start agent ─────────────────────────────────────────────
 
