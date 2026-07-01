@@ -18,6 +18,7 @@
 import type { AgentLogger } from '../../logging/agent-logger';
 import os from 'os';
 import { createHash } from 'crypto';
+import { lookup as dnsLookup } from 'dns/promises';
 import BACnet from 'bacstack';
 import { LogComponents } from '../../logging/types';
 import { BaseDiscovery } from '../base';
@@ -458,6 +459,10 @@ export class BACnetDiscovery extends BaseDiscovery {
 			let iAmIgnoredCount = 0;
 			let devicePropertyReadFailures = 0;
 
+			// Map resolved IP → original target string so the iAm handler can
+			// store the user-configured hostname instead of the raw UDP source IP.
+			const resolvedIPToTarget = new Map<string, string>();
+
 			this.logger?.debugSync('Attaching I-Am event listener', {
 				...this.logContext,
 				agentDeviceId: this.AGENT_DEVICE_ID,
@@ -475,7 +480,7 @@ export class BACnetDiscovery extends BaseDiscovery {
 				}
 
 				const deviceInstance = device.deviceId;
-        
+
 				if (deviceInstance === this.AGENT_DEVICE_ID) {
 					iAmIgnoredCount++;
 					return;
@@ -484,10 +489,12 @@ export class BACnetDiscovery extends BaseDiscovery {
 				const addressParts = device.address.split(':');
 				const ipAddress = addressParts[0];
 				const devicePort = addressParts.length > 1 ? Number(addressParts[1]) : port;
+				// Prefer the original hostname target over the raw IP (preserves FQDN in source config)
+				const effectiveHost = resolvedIPToTarget.get(ipAddress) ?? ipAddress;
 
 				devices.set(deviceInstance, {
 					deviceInstance,
-					ipAddress,
+					ipAddress: effectiveHost,
 					port: devicePort,
 					vendorId: device.vendorId
 				});
@@ -500,9 +507,22 @@ export class BACnetDiscovery extends BaseDiscovery {
 					count: discoveryTargets.length
 				});
 
+				const IP_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+
 				for (const target of discoveryTargets) {
 					try {
 						const targetIPs = this.expandDiscoveryTarget(target);
+
+						// For a single-hostname target, resolve it so we can map
+						// the I-Am source IP back to the original FQDN/hostname.
+						if (targetIPs.length === 1 && !IP_RE.test(targetIPs[0])) {
+							try {
+								const { address } = await dnsLookup(targetIPs[0]);
+								resolvedIPToTarget.set(address, targetIPs[0]);
+							} catch {
+								// DNS lookup failed — iAm will fall back to raw IP
+							}
+						}
 
 						for (const targetIP of targetIPs) {
 							this.logger?.debugSync('Sending Who-Is to unicast target', {
