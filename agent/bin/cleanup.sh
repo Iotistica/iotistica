@@ -8,8 +8,6 @@
 # Usage:
 #   sudo bash cleanup.sh
 
-set -e
-
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
@@ -40,21 +38,23 @@ for svc in iotistica-agent iotistica-setup iotistica-mqtt-reload.path iotistica-
     fi
 done
 
-# ── 2. Remove dpkg package (purge removes opt/lib/log/etc dirs via postrm) ──
+# ── 2. Remove dpkg package ───────────────────────────────────────────────────
 
 echo ""
 echo "Removing package..."
 if dpkg -l iotistica-agent 2>/dev/null | grep -q '^ii'; then
-    apt-get purge -y iotistica-agent
-    ok "purged iotistica-agent"
+    apt-get purge -y iotistica-agent && ok "purged iotistica-agent"
 else
     skip "iotistica-agent not installed via dpkg"
-    # Still remove dirs in case of a manual/partial install
-    rm -rf /opt/iotistic/agent
-    rm -rf /var/lib/iotistic
-    rm -rf /var/log/iotistic
-    rm -rf /etc/iotistic
 fi
+
+# Always force-remove these dirs — purge only removes the agent subdirs,
+# parent dirs (/opt/iotistic, /var/lib/iotistic) are left if non-empty.
+for dir in /opt/iotistic /var/lib/iotistic /var/log/iotistic /etc/iotistic; do
+    if [ -d "$dir" ]; then
+        rm -rf "$dir" && ok "removed $dir"
+    fi
+done
 
 # ── 3. Leftover systemd units (written by postinst, not tracked by dpkg) ────
 
@@ -74,8 +74,7 @@ do
         skip "$unit"
     fi
 done
-systemctl daemon-reload
-ok "systemd daemon reloaded"
+systemctl daemon-reload && ok "systemd daemon reloaded"
 
 # ── 4. Leftover scripts and flags ────────────────────────────────────────────
 
@@ -109,10 +108,15 @@ do
     fi
 done
 
+# Mosquitto restart is best-effort — port 1883 may be occupied by Docker
 if systemctl is-active --quiet mosquitto 2>/dev/null; then
-    systemctl restart mosquitto && ok "mosquitto restarted"
+    if systemctl restart mosquitto 2>/dev/null; then
+        ok "mosquitto restarted"
+    else
+        warn "mosquitto failed to restart (port conflict?) — fresh install will handle it"
+    fi
 else
-    warn "mosquitto is not running — start it manually if needed"
+    skip "mosquitto (not running)"
 fi
 
 # ── 6. iotistic user ─────────────────────────────────────────────────────────
@@ -130,7 +134,7 @@ fi
 echo ""
 echo "Verifying..."
 LEFTOVER=0
-for path in /opt/iotistic/agent /var/lib/iotistic /etc/iotistic; do
+for path in /opt/iotistic /var/lib/iotistic /etc/iotistic; do
     [ -e "$path" ] && warn "still exists: $path" && LEFTOVER=1
 done
 for svc in iotistica-agent iotistica-setup; do

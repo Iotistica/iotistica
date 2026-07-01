@@ -7,7 +7,7 @@ import {
   PartitionOutlined,
   ApartmentOutlined,
   RadarChartOutlined,
-  AlertOutlined,
+  FundOutlined,
   FileTextOutlined,
   ContainerOutlined,
   SettingOutlined,
@@ -101,8 +101,8 @@ function onMenuClick({ key }: { key: string }) {
         </a-menu-item>
 
         <a-menu-item key="/anomaly">
-          <template #icon><AlertOutlined /></template>
-          Alerts
+          <template #icon><FundOutlined /></template>
+          Anomalies
           <a-tag color="gold" class="pro-badge">Pro</a-tag>
         </a-menu-item>
 
