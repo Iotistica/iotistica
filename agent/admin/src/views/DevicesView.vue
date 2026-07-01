@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { message, Modal } from 'ant-design-vue'
+import { CheckCircleOutlined, StopOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { client } from '@/api/client'
@@ -20,6 +22,16 @@ const rows = ref<Device[]>([])
 const loading = ref(false)
 const activeProtocol = ref('')
 let refreshTimer: ReturnType<typeof setInterval> | null = null
+
+const selectedUuids = ref<string[]>([])
+const deleting = ref(false)
+const bulkEnabling = ref(false)
+const bulkDisabling = ref(false)
+
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedUuids.value,
+  onChange: (keys: string[]) => { selectedUuids.value = keys },
+}))
 
 const protocols = computed(() => {
   const seen = new Set(rows.value.map(d => d.protocol))
@@ -81,6 +93,53 @@ function identifierLabel(d: Device): string {
   return '—'
 }
 
+function confirmDeleteSelected() {
+  const count = selectedUuids.value.length
+  Modal.confirm({
+    title: `Delete ${count} device${count !== 1 ? 's' : ''}?`,
+    content: 'Removed devices will reappear if the endpoint reconnects.',
+    okType: 'danger',
+    okText: `Delete ${count}`,
+    async onOk() {
+      deleting.value = true
+      try {
+        await Promise.allSettled(selectedUuids.value.map((uuid) => client.delete(`/v1/devices/${uuid}`)))
+        selectedUuids.value = []
+        message.success(`Deleted ${count} device${count !== 1 ? 's' : ''}`)
+        await load()
+      } finally {
+        deleting.value = false
+      }
+    },
+  })
+}
+
+async function bulkEnable() {
+  const uuids = [...selectedUuids.value]
+  bulkEnabling.value = true
+  try {
+    await Promise.allSettled(uuids.map((uuid) => client.patch(`/v1/devices/${uuid}`, { enabled: true })))
+    selectedUuids.value = []
+    message.success(`Enabled ${uuids.length} device${uuids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkEnabling.value = false
+  }
+}
+
+async function bulkDisable() {
+  const uuids = [...selectedUuids.value]
+  bulkDisabling.value = true
+  try {
+    await Promise.allSettled(uuids.map((uuid) => client.patch(`/v1/devices/${uuid}`, { enabled: false })))
+    selectedUuids.value = []
+    message.success(`Disabled ${uuids.length} device${uuids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkDisabling.value = false
+  }
+}
+
 onMounted(() => {
   load()
   refreshTimer = setInterval(load, 30_000)
@@ -99,7 +158,24 @@ onUnmounted(() => {
           <h2>Devices</h2>
           <p class="subtitle">Physical and logical devices discovered through protocol endpoints</p>
         </div>
-        <a-button @click="load" :loading="loading">Refresh</a-button>
+        <a-space>
+          <template v-if="selectedUuids.length > 0">
+            <span style="font-size: 13px; color: #666">{{ selectedUuids.length }} selected</span>
+            <a-button :loading="bulkEnabling" @click="bulkEnable">
+              <template #icon><CheckCircleOutlined /></template>
+              Enable
+            </a-button>
+            <a-button :loading="bulkDisabling" @click="bulkDisable">
+              <template #icon><StopOutlined /></template>
+              Disable
+            </a-button>
+            <a-button danger :loading="deleting" @click="confirmDeleteSelected">
+              <template #icon><DeleteOutlined /></template>
+              Delete
+            </a-button>
+          </template>
+          <a-button @click="load" :loading="loading">Refresh</a-button>
+        </a-space>
       </div>
 
       <!-- Protocol filter tabs -->
@@ -125,6 +201,7 @@ onUnmounted(() => {
         :columns="columns"
         :loading="loading"
         :pagination="{ pageSize: 50, hideOnSinglePage: true }"
+        :row-selection="rowSelection"
         row-key="uuid"
         size="small"
       >

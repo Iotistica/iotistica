@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { PlusOutlined, DeleteOutlined, WifiOutlined, CrownOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
@@ -17,6 +17,14 @@ interface MqttUser {
 
 const rows = ref<MqttUser[]>([])
 const loading = ref(false)
+const selectedUsernames = ref<string[]>([])
+const deleting = ref(false)
+
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedUsernames.value,
+  onChange: (keys: (string | number)[]) => { selectedUsernames.value = keys as string[] },
+  getCheckboxProps: (record: MqttUser) => ({ disabled: record.superuser }),
+}))
 
 const createOpen = ref(false)
 const createForm = ref({ username: '', password: '', topic: '' })
@@ -84,6 +92,29 @@ async function deleteUser(row: MqttUser) {
   }
 }
 
+function confirmDeleteSelected() {
+  const count = selectedUsernames.value.length
+  Modal.confirm({
+    title: `Delete ${count} MQTT user${count !== 1 ? 's' : ''}?`,
+    content: 'Connected clients using these credentials will be disconnected.',
+    okType: 'danger',
+    okText: `Delete ${count}`,
+    async onOk() {
+      deleting.value = true
+      try {
+        await Promise.allSettled(
+          selectedUsernames.value.map((u) => apiClient.delete(`/v1/mqtt/users/${encodeURIComponent(u)}`))
+        )
+        selectedUsernames.value = []
+        message.success(`Deleted ${count} MQTT user${count !== 1 ? 's' : ''}`)
+        await load()
+      } finally {
+        deleting.value = false
+      }
+    },
+  })
+}
+
 onMounted(load)
 </script>
 
@@ -94,10 +125,19 @@ onMounted(load)
         <h2 class="page-title">MQTT Users</h2>
         <p class="page-subtitle">Manage credentials for clients connecting to the local MQTT broker</p>
       </div>
-      <a-button type="primary" @click="openCreate">
-        <template #icon><PlusOutlined /></template>
-        Add User
-      </a-button>
+      <a-space>
+        <template v-if="selectedUsernames.length > 0">
+          <span style="font-size: 13px; color: rgba(255,255,255,0.65)">{{ selectedUsernames.length }} selected</span>
+          <a-button danger :loading="deleting" @click="confirmDeleteSelected">
+            <template #icon><DeleteOutlined /></template>
+            Delete
+          </a-button>
+        </template>
+        <a-button type="primary" @click="openCreate">
+          <template #icon><PlusOutlined /></template>
+          Add User
+        </a-button>
+      </a-space>
     </div>
 
     <a-table
@@ -105,6 +145,7 @@ onMounted(load)
       :columns="columns"
       :loading="loading"
       :pagination="false"
+      :row-selection="rowSelection"
       rowKey="username"
       size="middle"
     >

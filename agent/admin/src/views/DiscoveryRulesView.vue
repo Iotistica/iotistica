@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, PlayCircleOutlined, HistoryOutlined, DeleteOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, PlayCircleOutlined, HistoryOutlined, DeleteOutlined, CheckCircleOutlined, StopOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import DiscoveryRuleDrawer from '@/components/discovery/DiscoveryRuleDrawer.vue'
@@ -19,6 +19,16 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 const activeTab = ref('rules')
+
+const selectedUuids = ref<string[]>([])
+const deleting = ref(false)
+const bulkEnabling = ref(false)
+const bulkDisabling = ref(false)
+
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedUuids.value,
+  onChange: (keys: string[]) => { selectedUuids.value = keys },
+}))
 
 const rows = ref<DiscoveryRule[]>([])
 const loading = ref(false)
@@ -156,6 +166,52 @@ function confirmDelete(row: DiscoveryRule) {
   })
 }
 
+function confirmDeleteSelected() {
+  const count = selectedUuids.value.length
+  Modal.confirm({
+    title: `Delete ${count} rule${count !== 1 ? 's' : ''}?`,
+    okType: 'danger',
+    okText: `Delete ${count}`,
+    async onOk() {
+      deleting.value = true
+      try {
+        await Promise.allSettled(selectedUuids.value.map((uuid) => discoveryRulesApi.remove(uuid)))
+        selectedUuids.value = []
+        message.success(`Deleted ${count} rule${count !== 1 ? 's' : ''}`)
+        await load()
+      } finally {
+        deleting.value = false
+      }
+    },
+  })
+}
+
+async function bulkEnable() {
+  const uuids = [...selectedUuids.value]
+  bulkEnabling.value = true
+  try {
+    await Promise.allSettled(uuids.map((uuid) => discoveryRulesApi.update(uuid, { enabled: true })))
+    selectedUuids.value = []
+    message.success(`Enabled ${uuids.length} rule${uuids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkEnabling.value = false
+  }
+}
+
+async function bulkDisable() {
+  const uuids = [...selectedUuids.value]
+  bulkDisabling.value = true
+  try {
+    await Promise.allSettled(uuids.map((uuid) => discoveryRulesApi.update(uuid, { enabled: false })))
+    selectedUuids.value = []
+    message.success(`Disabled ${uuids.length} rule${uuids.length !== 1 ? 's' : ''}`)
+    await load()
+  } finally {
+    bulkDisabling.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -166,9 +222,26 @@ onMounted(load)
       <!-- ── Rules tab ───────────────────────────────────────────────────── -->
       <a-tab-pane key="rules" tab="Rules">
         <div class="toolbar">
-          <span style="color: #888; font-size: 13px">
-            Scheduled protocol scans — runs automatically, or trigger manually.
-          </span>
+          <a-space>
+            <template v-if="selectedUuids.length > 0">
+              <span style="font-size: 13px; color: #666">{{ selectedUuids.length }} selected</span>
+              <a-button :loading="bulkEnabling" @click="bulkEnable">
+                <template #icon><CheckCircleOutlined /></template>
+                Enable
+              </a-button>
+              <a-button :loading="bulkDisabling" @click="bulkDisable">
+                <template #icon><StopOutlined /></template>
+                Disable
+              </a-button>
+              <a-button danger :loading="deleting" @click="confirmDeleteSelected">
+                <template #icon><DeleteOutlined /></template>
+                Delete
+              </a-button>
+            </template>
+            <span v-else style="color: #888; font-size: 13px">
+              Scheduled protocol scans — runs automatically, or trigger manually.
+            </span>
+          </a-space>
           <a-button type="primary" @click="openCreate">
             <template #icon><PlusOutlined /></template>
             New Rule
@@ -189,6 +262,7 @@ onMounted(load)
           :loading="loading"
           :pagination="false"
           :scroll="{ x: 'max-content' }"
+          :row-selection="rowSelection"
           row-key="uuid"
           size="middle"
         >

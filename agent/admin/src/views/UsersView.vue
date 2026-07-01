@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, DeleteOutlined, KeyOutlined, StopOutlined, ReloadOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, DeleteOutlined, KeyOutlined, StopOutlined, ReloadOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { usersApi, sessionsApi, type User, type Session } from '@/api/users'
@@ -10,6 +10,15 @@ import { usersApi, sessionsApi, type User, type Session } from '@/api/users'
 
 const rows = ref<User[]>([])
 const loading = ref(false)
+const selectedUsernames = ref<string[]>([])
+const deletingUsers = ref(false)
+const bulkActivating = ref(false)
+const bulkDeactivating = ref(false)
+
+const userRowSelection = computed(() => ({
+  selectedRowKeys: selectedUsernames.value,
+  onChange: (keys: (string | number)[]) => { selectedUsernames.value = keys as string[] },
+}))
 
 const createOpen = ref(false)
 const createForm = ref({ username: '', password: '', is_superuser: false })
@@ -99,6 +108,52 @@ function confirmDelete(row: User) {
   })
 }
 
+function confirmDeleteSelectedUsers() {
+  const count = selectedUsernames.value.length
+  Modal.confirm({
+    title: `Delete ${count} user${count !== 1 ? 's' : ''}?`,
+    okType: 'danger',
+    okText: `Delete ${count}`,
+    async onOk() {
+      deletingUsers.value = true
+      try {
+        await Promise.allSettled(selectedUsernames.value.map((u) => usersApi.remove(u)))
+        selectedUsernames.value = []
+        message.success(`Deleted ${count} user${count !== 1 ? 's' : ''}`)
+        await loadUsers()
+      } finally {
+        deletingUsers.value = false
+      }
+    },
+  })
+}
+
+async function bulkActivate() {
+  const usernames = [...selectedUsernames.value]
+  bulkActivating.value = true
+  try {
+    await Promise.allSettled(usernames.map((u) => usersApi.update(u, { is_active: true })))
+    selectedUsernames.value = []
+    message.success(`Activated ${usernames.length} user${usernames.length !== 1 ? 's' : ''}`)
+    await loadUsers()
+  } finally {
+    bulkActivating.value = false
+  }
+}
+
+async function bulkDeactivate() {
+  const usernames = [...selectedUsernames.value]
+  bulkDeactivating.value = true
+  try {
+    await Promise.allSettled(usernames.map((u) => usersApi.update(u, { is_active: false })))
+    selectedUsernames.value = []
+    message.success(`Deactivated ${usernames.length} user${usernames.length !== 1 ? 's' : ''}`)
+    await loadUsers()
+  } finally {
+    bulkDeactivating.value = false
+  }
+}
+
 // ── Sessions ──────────────────────────────────────────────────────────────────
 
 const sessions = ref<Session[]>([])
@@ -150,7 +205,24 @@ onMounted(loadUsers)
 
       <!-- ── Users tab ──────────────────────────────────────────────────────── -->
       <a-tab-pane key="users" tab="Users">
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 16px">
+        <div class="users-toolbar">
+          <a-space>
+            <template v-if="selectedUsernames.length > 0">
+              <span style="font-size: 13px; color: #666">{{ selectedUsernames.length }} selected</span>
+              <a-button :loading="bulkActivating" @click="bulkActivate">
+                <template #icon><CheckCircleOutlined /></template>
+                Activate
+              </a-button>
+              <a-button :loading="bulkDeactivating" @click="bulkDeactivate">
+                <template #icon><StopOutlined /></template>
+                Deactivate
+              </a-button>
+              <a-button danger :loading="deletingUsers" @click="confirmDeleteSelectedUsers">
+                <template #icon><DeleteOutlined /></template>
+                Delete
+              </a-button>
+            </template>
+          </a-space>
           <a-button type="primary" @click="openCreate">
             <template #icon><PlusOutlined /></template>
             New User
@@ -162,6 +234,7 @@ onMounted(loadUsers)
           :data-source="rows"
           :loading="loading"
           :pagination="false"
+          :row-selection="userRowSelection"
           row-key="username"
           size="middle"
         >
@@ -281,3 +354,13 @@ onMounted(loadUsers)
     </a-modal>
   </AppLayout>
 </template>
+
+<style scoped>
+.users-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 8px;
+}
+</style>

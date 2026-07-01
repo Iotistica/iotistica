@@ -116,6 +116,10 @@ async function runRuleScan() {
   }
 }
 
+const connParams = computed((): Record<string, any> | null =>
+  selectedRule.value?.params_json ?? null,
+)
+
 const pendingDevices = computed(() => results.value.filter((d) => !isAlreadyAdded(d)))
 
 async function addAll() {
@@ -217,7 +221,7 @@ watch(
 
     <!-- Rule details + run controls -->
     <template v-if="selectedRule">
-      <a-descriptions :column="2" size="small" style="margin-bottom: 16px">
+      <a-descriptions :column="2" size="small" style="margin-bottom: 14px">
         <a-descriptions-item label="Protocol">
           <a-tag :color="protocolColor(selectedRule.protocol)">
             {{ protocolLabel(selectedRule.protocol) }}
@@ -235,10 +239,102 @@ watch(
             :text="selectedRule.status"
           />
         </a-descriptions-item>
-        <a-descriptions-item v-if="selectedRule.params_json" label="Targets" :span="2">
-          <a-tag color="blue" style="font-size: 11px">custom targets configured</a-tag>
-        </a-descriptions-item>
       </a-descriptions>
+
+      <!-- Connection / scan target details -->
+      <div class="conn-box" style="margin-bottom: 16px">
+        <div class="conn-box-title">Scan Targets</div>
+
+        <!-- BACnet -->
+        <template v-if="selectedRule.protocol === 'bacnet'">
+          <div class="conn-row">
+            <span class="conn-label">Targets</span>
+            <span class="conn-value">
+              <template v-if="connParams?.discoveryTargets?.length">
+                <a-tag
+                  v-for="t in (connParams.discoveryTargets as string[])"
+                  :key="t"
+                  style="font-family: monospace; font-size: 11px; margin-bottom: 2px"
+                >{{ t }}</a-tag>
+              </template>
+              <span v-else class="conn-default">Broadcast — all reachable devices on local network</span>
+            </span>
+          </div>
+          <div v-if="connParams?.timeout" class="conn-row">
+            <span class="conn-label">Timeout</span>
+            <span class="conn-value">{{ connParams.timeout }} ms</span>
+          </div>
+          <div v-if="connParams?.maxDevices" class="conn-row">
+            <span class="conn-label">Max devices</span>
+            <span class="conn-value">{{ connParams.maxDevices }}</span>
+          </div>
+        </template>
+
+        <!-- Modbus -->
+        <template v-else-if="selectedRule.protocol === 'modbus'">
+          <div class="conn-row">
+            <span class="conn-label">Host</span>
+            <span class="conn-value">
+              <span v-if="connParams?.tcpHost" class="conn-mono">
+                {{ connParams.tcpHost }}{{ connParams.tcpPort ? `:${connParams.tcpPort}` : ':502' }}
+              </span>
+              <span v-else class="conn-default">Using global Modbus host config</span>
+            </span>
+          </div>
+          <div v-if="connParams?.slaveIdRange" class="conn-row">
+            <span class="conn-label">Slave IDs</span>
+            <span class="conn-value">{{ (connParams.slaveIdRange as number[])[0] }} – {{ (connParams.slaveIdRange as number[])[1] }}</span>
+          </div>
+          <div v-if="connParams?.timeout" class="conn-row">
+            <span class="conn-label">Timeout</span>
+            <span class="conn-value">{{ connParams.timeout }} ms</span>
+          </div>
+        </template>
+
+        <!-- OPC-UA -->
+        <template v-else-if="selectedRule.protocol === 'opcua'">
+          <template v-if="connParams?.discoveryUrls?.length">
+            <div v-for="url in (connParams.discoveryUrls as string[])" :key="url" class="conn-row">
+              <span class="conn-label">URL</span>
+              <span class="conn-value conn-mono">{{ url }}</span>
+            </div>
+          </template>
+          <div v-else class="conn-row">
+            <span class="conn-label">URLs</span>
+            <span class="conn-value conn-default">Local Discovery Server — opc.tcp://localhost:4840</span>
+          </div>
+        </template>
+
+        <!-- MQTT -->
+        <template v-else-if="selectedRule.protocol === 'mqtt'">
+          <div class="conn-row">
+            <span class="conn-label">Broker</span>
+            <span class="conn-value">
+              <span v-if="connParams?.brokerUrl" class="conn-mono">{{ connParams.brokerUrl }}</span>
+              <span v-else class="conn-default">Using global MQTT broker config</span>
+            </span>
+          </div>
+          <div v-if="connParams?.topics?.length" class="conn-row">
+            <span class="conn-label">Topics</span>
+            <span class="conn-value">
+              <a-tag
+                v-for="t in (connParams.topics as string[])"
+                :key="t"
+                style="font-family: monospace; font-size: 11px; margin-bottom: 2px"
+              >{{ t }}</a-tag>
+            </span>
+          </div>
+          <div v-if="connParams?.samplingDurationMs" class="conn-row">
+            <span class="conn-label">Sampling</span>
+            <span class="conn-value">{{ ((connParams.samplingDurationMs as number) / 1000).toFixed(0) }}s</span>
+          </div>
+        </template>
+
+        <!-- SNMP / other -->
+        <template v-else>
+          <span class="conn-default">Using global {{ selectedRule.protocol.toUpperCase() }} defaults</span>
+        </template>
+      </div>
 
       <div style="display: flex; gap: 8px; align-items: center">
         <a-button
@@ -335,3 +431,57 @@ watch(
     </template>
   </a-drawer>
 </template>
+
+<style scoped>
+.conn-box {
+  padding: 12px 14px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+}
+
+.conn-box-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.conn-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.conn-row:last-child {
+  margin-bottom: 0;
+}
+
+.conn-label {
+  width: 84px;
+  flex-shrink: 0;
+  color: #888;
+  font-size: 12px;
+  padding-top: 2px;
+}
+
+.conn-value {
+  flex: 1;
+  color: #333;
+  line-height: 1.5;
+}
+
+.conn-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+.conn-default {
+  color: #aaa;
+  font-style: italic;
+}
+</style>
