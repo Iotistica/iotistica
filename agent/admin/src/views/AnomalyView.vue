@@ -849,7 +849,7 @@ onUnmounted(() => {
       </a-tab-pane>
 
       <!-- ══ RULES ══════════════════════════════════════════════════════════ -->
-      <a-tab-pane key="rules" tab="Anomaly Rules">
+      <a-tab-pane key="rules" tab="Rules">
         <a-spin :spinning="configLoading">
           <template v-if="config">
             <div class="toolbar">
