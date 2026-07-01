@@ -1,0 +1,278 @@
+{
+  "updated": "2026-07-01",
+  "source": "BACnet International BTL Database (seed)",
+  "url": "https://www.bacnetinternational.net/btl/",
+  "vendors": [
+    {
+      "name": "ABB",
+      "models": [
+        { "name": "Cylon CXpro-HD", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "Cylon CXpro-LD", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Cylon UC32", "type": "B-ASC", "typeLabel": "Application Specific Controller" }
+      ]
+    },
+    {
+      "name": "Alerton",
+      "models": [
+        { "name": "Ascent LINX", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "BACtalk VLC-Pro", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "BACtalk VLC2", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Envision for BACtalk", "type": "B-OWS", "typeLabel": "Operator Workstation" }
+      ]
+    },
+    {
+      "name": "Automated Logic",
+      "models": [
+        { "name": "ALC E-BUS ZN-LP", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "ALC LGR", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "ALC LGX", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "WebCTRL Server", "type": "B-OWS", "typeLabel": "Operator Workstation" }
+      ]
+    },
+    {
+      "name": "Azbil (Yamatake)",
+      "models": [
+        { "name": "DMM-BACnet", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Savic-net FX", "type": "B-OWS", "typeLabel": "Operator Workstation" }
+      ]
+    },
+    {
+      "name": "Beckhoff",
+      "models": [
+        { "name": "TF8040 BACnet/IP Server", "type": "B-BC", "typeLabel": "Building Controller" }
+      ]
+    },
+    {
+      "name": "Belimo",
+      "models": [
+        { "name": "Belimo Gateway MP to BACnet/IP", "type": "B-GW", "typeLabel": "Gateway" },
+        { "name": "Energy Valve BACnet", "type": "B-SA", "typeLabel": "Smart Actuator" },
+        { "name": "Room Sensor CO2/Temp BACnet", "type": "B-SS", "typeLabel": "Smart Sensor" }
+      ]
+    },
+    {
+      "name": "Bosch",
+      "models": [
+        { "name": "DIGIMAT FX1012", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "PRC1.00 Presence and Climate Controller", "type": "B-ASC", "typeLabel": "Application Specific Controller" }
+      ]
+    },
+    {
+      "name": "Carrier",
+      "models": [
+        { "name": "CentraLine HAWK", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "CentraLine EAGLE", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "i-Vu Open Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "i-Vu Plus CCN", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "i-Vu Touch Screen", "type": "B-OD", "typeLabel": "Operator Display" }
+      ]
+    },
+    {
+      "name": "Contemporary Controls",
+      "models": [
+        { "name": "BASRT-B MS/TP Router", "type": "B-RTR", "typeLabel": "Router" },
+        { "name": "BACRP BACnet Router", "type": "B-RTR", "typeLabel": "Router" },
+        { "name": "BBMD-2 BACnet/IP BBMD", "type": "B-BBMD", "typeLabel": "BBMD" }
+      ]
+    },
+    {
+      "name": "Daikin Applied",
+      "models": [
+        { "name": "Daikin One+ Smart Thermostat", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Microtech III Unit Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "Rebel Applied Rooftop BACnet", "type": "B-AAC", "typeLabel": "Advanced Application Controller" }
+      ]
+    },
+    {
+      "name": "Delta Controls",
+      "models": [
+        { "name": "enteliBUS Manager (eBMGR)", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "enteliBUS Controller (eBCon)", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "eMB-PLUS Expansion Module", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "ORCAview BACnet/IP", "type": "B-OWS", "typeLabel": "Operator Workstation" }
+      ]
+    },
+    {
+      "name": "Distech Controls",
+      "models": [
+        { "name": "EC-BOS-8", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "ECL-300 ZS", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "ECL-600", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "ECL-800", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "ECLYPSE Connected Building Controller", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "ENVYSION BACnet/IP", "type": "B-OWS", "typeLabel": "Operator Workstation" }
+      ]
+    },
+    {
+      "name": "Emerson",
+      "models": [
+        { "name": "Network Power BACnet Gateway", "type": "B-GW", "typeLabel": "Gateway" },
+        { "name": "Ovation BACnet Interface", "type": "B-BC", "typeLabel": "Building Controller" }
+      ]
+    },
+    {
+      "name": "FieldServer Technologies",
+      "models": [
+        { "name": "ProtoAir FS-B35-0-50", "type": "B-GW", "typeLabel": "Gateway" },
+        { "name": "QuickServer FS-QS-X110", "type": "B-GW", "typeLabel": "Gateway" },
+        { "name": "QuickServer FS-QS-X120", "type": "B-GW", "typeLabel": "Gateway" }
+      ]
+    },
+    {
+      "name": "Honeywell",
+      "models": [
+        { "name": "Excel 500 W7750", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "Excel 800 WEBs", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "JADE W7220", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "SPYDER PUL6438", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "SPYDER PVL6436", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "WEB-600", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "WEB-700", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "WEB-740", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "WEB-800", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "WEB-850", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "WEB-8000", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "EBI R500", "type": "B-OWS", "typeLabel": "Operator Workstation" }
+      ]
+    },
+    {
+      "name": "Johnson Controls",
+      "models": [
+        { "name": "FX-PC Application Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "FX-PCV VAV Controller", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Metasys ADS/ADX Server", "type": "B-OWS", "typeLabel": "Operator Workstation" },
+        { "name": "Metasys CGE", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Metasys LCS85", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Metasys NAE45", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Metasys NAE55", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Metasys NCE25", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Metasys SNE10050", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "TEC3000 Series", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Verasys VS-SGW140", "type": "B-BC", "typeLabel": "Building Controller" }
+      ]
+    },
+    {
+      "name": "KMC Controls",
+      "models": [
+        { "name": "BAC-5000 Series", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "BAC-5831E Conquest", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "BAC-5900 Series", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "BAC-A1616BC", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "SAC-0101 Smart Actuator", "type": "B-SA", "typeLabel": "Smart Actuator" }
+      ]
+    },
+    {
+      "name": "Lennox",
+      "models": [
+        { "name": "iHarmony Zoning System", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Prodigy 2.0 M3 Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" }
+      ]
+    },
+    {
+      "name": "Pelican Wireless",
+      "models": [
+        { "name": "Pelican Bay Thermostat", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Pelican Wireless Controller", "type": "B-BC", "typeLabel": "Building Controller" }
+      ]
+    },
+    {
+      "name": "Reliable Controls",
+      "models": [
+        { "name": "MACH-Pro2L", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "MACH-ProV", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "RC-Studio BACnet", "type": "B-OWS", "typeLabel": "Operator Workstation" }
+      ]
+    },
+    {
+      "name": "Sauter",
+      "models": [
+        { "name": "ecos504 ROOM Controller", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "ecos511 Compact Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "moduNet300 CASE Engine", "type": "B-BC", "typeLabel": "Building Controller" }
+      ]
+    },
+    {
+      "name": "Schneider Electric",
+      "models": [
+        { "name": "EcoStruxure BMS Server", "type": "B-OWS", "typeLabel": "Operator Workstation" },
+        { "name": "MNB-300 Controller", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "MNB-1000 Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "MNB-5000 Controller", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "MP-C Open Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "MP-V VAV Controller", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "SmartStruxure Solution", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "TAC Vista MNL-800", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "TAC I/A Series MNB-V", "type": "B-ASC", "typeLabel": "Application Specific Controller" }
+      ]
+    },
+    {
+      "name": "Siemens",
+      "models": [
+        { "name": "APOGEE ATR Drive Controller", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "APOGEE P1 FLN Automation Station", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "APOGEE TRA Terminal Room Controller", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Desigo CC", "type": "B-OWS", "typeLabel": "Operator Workstation" },
+        { "name": "Desigo PXA30-RC0", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Desigo PXC00-E.D", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Desigo PXC001-E.D", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Desigo PXC50-E.D", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "Desigo PXC100-E.D", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "Desigo PXC200-E.D", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "Desigo PXM30-1", "type": "B-OD", "typeLabel": "Operator Display" },
+        { "name": "Desigo RXB22.1", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Desigo RXC21.1", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "Desigo RXL21.1", "type": "B-LSC", "typeLabel": "Lighting Application Specific Controller" }
+      ]
+    },
+    {
+      "name": "Trane",
+      "models": [
+        { "name": "BCU Building Control Unit", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Tracer SC+ BACnet/IP", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Tracer TU Service Tool", "type": "B-OWS", "typeLabel": "Operator Workstation" },
+        { "name": "UC210 Unit Controller", "type": "B-ASC", "typeLabel": "Application Specific Controller" },
+        { "name": "UC400 Unit Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "UC600 Unit Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "UC800 Unit Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "Zone Sensor Module ZSM", "type": "B-SS", "typeLabel": "Smart Sensor" }
+      ]
+    },
+    {
+      "name": "Tridium",
+      "models": [
+        { "name": "JACE 8000", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "JACE 6 (Niagara 4)", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Niagara Framework N4 Supervisor", "type": "B-OWS", "typeLabel": "Operator Workstation" }
+      ]
+    },
+    {
+      "name": "Veris Industries",
+      "models": [
+        { "name": "E51 Series Power Meter BACnet", "type": "B-SS", "typeLabel": "Smart Sensor" },
+        { "name": "H8035-H8036 Power Meter BACnet", "type": "B-SS", "typeLabel": "Smart Sensor" }
+      ]
+    },
+    {
+      "name": "Vertiv (Liebert)",
+      "models": [
+        { "name": "Liebert iCOM-S", "type": "B-BC", "typeLabel": "Building Controller" },
+        { "name": "Liebert Nform BACnet", "type": "B-OWS", "typeLabel": "Operator Workstation" }
+      ]
+    },
+    {
+      "name": "WAGO",
+      "models": [
+        { "name": "WAGO 750-829 BACnet/IP Controller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "WAGO 750-830 BACnet MS/TP", "type": "B-AAC", "typeLabel": "Advanced Application Controller" }
+      ]
+    },
+    {
+      "name": "York (Johnson Controls)",
+      "models": [
+        { "name": "YMCCHP Magnetic Bearing Chiller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "YNXLS Centrifugal Chiller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" },
+        { "name": "YZ Oil-Free Magnetic Chiller", "type": "B-AAC", "typeLabel": "Advanced Application Controller" }
+      ]
+    }
+  ]
+}

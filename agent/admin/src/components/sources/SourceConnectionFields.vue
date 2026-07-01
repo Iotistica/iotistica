@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref, computed, watch, onMounted } from 'vue'
+
 const props = defineProps<{
   protocol: string
   modelValue: Record<string, unknown>
@@ -15,6 +17,67 @@ function set(key: string, value: unknown) {
 function get<T>(key: string, fallback: T): T {
   return (props.modelValue[key] as T) ?? fallback
 }
+
+// ── BACnet vendor/model data ──────────────────────────────────────────────────
+
+interface VendorModel { name: string; type?: string; typeLabel?: string }
+interface Vendor { name: string; models: VendorModel[] }
+
+const vendors = ref<Vendor[]>([])
+const vendorsLoading = ref(false)
+const selectedVendor = ref<string>('')
+const selectedModel = ref<string>('')
+
+const vendorOptions = computed(() =>
+  vendors.value.map(v => ({ value: v.name, label: v.name }))
+)
+
+const modelOptions = computed(() => {
+  const v = vendors.value.find(v => v.name === selectedVendor.value)
+  if (!v) return []
+  return v.models.map(m => ({
+    value: m.name,
+    label: m.typeLabel ? `${m.name} (${m.typeLabel})` : m.name,
+  }))
+})
+
+async function loadVendors() {
+  if (vendors.value.length || vendorsLoading.value) return
+  vendorsLoading.value = true
+  try {
+    const res = await fetch('/bacnet-vendors.json')
+    if (res.ok) {
+      const data = await res.json()
+      vendors.value = data.vendors ?? []
+    }
+  } catch {
+    // silently fall through — vendor picker is optional
+  } finally {
+    vendorsLoading.value = false
+  }
+}
+
+function onVendorChange(name: string) {
+  selectedVendor.value = name
+  selectedModel.value = ''
+}
+
+function filterOption(input: string, opt: { label?: string }) {
+  return (opt.label ?? '').toLowerCase().includes(input.toLowerCase())
+}
+
+function onModelChange(name: string) {
+  selectedModel.value = name
+  // Populate displayName with vendor + model if not already set
+  if (name && !get('displayName', '')) {
+    const label = selectedVendor.value ? `${selectedVendor.value} ${name}` : name
+    set('displayName', label)
+  }
+}
+
+// Load vendor list when BACnet tab becomes active
+watch(() => props.protocol, (p) => { if (p === 'bacnet') loadVendors() }, { immediate: true })
+onMounted(() => { if (props.protocol === 'bacnet') loadVendors() })
 </script>
 
 <template>
@@ -182,7 +245,89 @@ function get<T>(key: string, fallback: T): T {
     </a-form-item>
   </template>
 
-  <!-- BACnet / fallback -->
+  <!-- BACnet -->
+  <template v-else-if="protocol === 'bacnet'">
+    <!-- Vendor / Model pickers (optional, for reference) -->
+    <a-form-item label="Vendor">
+      <a-select
+        v-model:value="selectedVendor"
+        show-search
+        allow-clear
+        placeholder="Search vendor…"
+        :options="vendorOptions"
+        :loading="vendorsLoading"
+        :filter-option="filterOption"
+        @change="onVendorChange"
+      />
+    </a-form-item>
+
+    <a-form-item v-if="selectedVendor" label="Model">
+      <a-select
+        v-model:value="selectedModel"
+        show-search
+        allow-clear
+        placeholder="Select model…"
+        :options="modelOptions"
+        :filter-option="filterOption"
+        @change="onModelChange"
+      />
+    </a-form-item>
+
+    <a-divider v-if="selectedVendor" style="margin: 12px 0" />
+
+    <!-- Connection fields -->
+    <a-form-item
+      label="IP Address"
+      :name="['connection', 'ipAddress']"
+      :rules="[{ required: true, message: 'IP address is required' }]"
+    >
+      <a-input
+        :value="get('ipAddress', '')"
+        placeholder="e.g. 192.168.1.50"
+        @update:value="set('ipAddress', $event)"
+      />
+    </a-form-item>
+
+    <a-form-item label="Port" :name="['connection', 'port']">
+      <a-input-number
+        :value="get('port', 47808)"
+        :min="1"
+        :max="65535"
+        style="width: 100%"
+        @update:value="set('port', $event)"
+      />
+    </a-form-item>
+
+    <a-form-item
+      label="Device Instance"
+      :name="['connection', 'deviceInstance']"
+      :rules="[{ required: true, message: 'Device instance is required' }]"
+      extra="BACnet device identifier (0 – 4194303)"
+    >
+      <a-input-number
+        :value="get('deviceInstance', undefined)"
+        :min="0"
+        :max="4194303"
+        style="width: 100%"
+        placeholder="e.g. 1001"
+        @update:value="set('deviceInstance', $event)"
+      />
+    </a-form-item>
+
+    <a-form-item
+      label="Display Name"
+      :name="['connection', 'displayName']"
+      extra="Optional label shown in place of the auto-discovered BACnet objectName"
+    >
+      <a-input
+        :value="get('displayName', '')"
+        placeholder="e.g. AHU-1 Siemens PXC50"
+        @update:value="set('displayName', $event)"
+      />
+    </a-form-item>
+  </template>
+
+  <!-- Fallback for unknown protocols -->
   <template v-else>
     <a-form-item label="Configuration (JSON)" name="connection_raw">
       <a-textarea
@@ -191,9 +336,6 @@ function get<T>(key: string, fallback: T): T {
         placeholder="{}"
         @update:value="(v: string) => { try { emit('update:modelValue', JSON.parse(v)) } catch {} }"
       />
-      <div style="color: #999; font-size: 12px; margin-top: 4px">
-        BACnet devices are typically added via discovery. Enter connection config as JSON if needed.
-      </div>
     </a-form-item>
   </template>
 </template>

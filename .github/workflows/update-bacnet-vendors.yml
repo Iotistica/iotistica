@@ -1,0 +1,70 @@
+name: Update BACnet Vendor Database
+
+on:
+  schedule:
+    # Every Sunday at 02:00 UTC
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Run with visible browser (screenshot on failure)'
+        required: false
+        default: 'false'
+
+jobs:
+  scrape:
+    name: Scrape BTL Product Database
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Run BTL scraper
+        id: scrape
+        run: |
+          python agent/admin/scripts/scrape-btl.py \
+            --output agent/admin/public/bacnet-vendors.json
+        env:
+          PYTHONUNBUFFERED: "1"
+
+      - name: Show result summary
+        if: always()
+        run: |
+          if [ -f agent/admin/public/bacnet-vendors.json ]; then
+            VENDORS=$(jq '.vendors | length' agent/admin/public/bacnet-vendors.json)
+            PRODUCTS=$(jq '[.vendors[].models | length] | add' agent/admin/public/bacnet-vendors.json)
+            UPDATED=$(jq -r '.updated' agent/admin/public/bacnet-vendors.json)
+            echo "## BTL Scrape Result" >> $GITHUB_STEP_SUMMARY
+            echo "- **Vendors:** $VENDORS" >> $GITHUB_STEP_SUMMARY
+            echo "- **Products:** $PRODUCTS" >> $GITHUB_STEP_SUMMARY
+            echo "- **Updated:** $UPDATED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Commit updated vendor data
+        if: steps.scrape.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add agent/admin/public/bacnet-vendors.json
+          if git diff --staged --quiet; then
+            echo "No changes to vendor data"
+          else
+            VENDORS=$(jq '.vendors | length' agent/admin/public/bacnet-vendors.json)
+            PRODUCTS=$(jq '[.vendors[].models | length] | add' agent/admin/public/bacnet-vendors.json)
+            git commit -m "chore: update BACnet vendor database ($VENDORS vendors, $PRODUCTS products) [skip ci]"
+            git push
+            echo "Committed and pushed updated bacnet-vendors.json"
+          fi
