@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import type { TableColumnType } from 'ant-design-vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SparklineChart from '@/components/SparklineChart.vue'
 import { dashboardApi, type DashboardStats, type NetworkBandwidth } from '@/api/dashboard'
+import { anomalyApi } from '@/api/anomaly'
+
+const router = useRouter()
 
 const netColumns: TableColumnType<NetworkBandwidth>[] = [
   { title: 'Interface', dataIndex: 'iface', key: 'iface', width: 120 },
@@ -19,6 +23,8 @@ const POLL_MS = 3000
 const stats = ref<DashboardStats | null>(null)
 const loading = ref(true)
 const error = ref(false)
+
+const incidentStats = ref<{ open: number; active: number; resolved: number; total: number } | null>(null)
 
 // Rolling history buffers
 const cpuHistory    = ref<number[]>([])
@@ -58,7 +64,11 @@ async function poll() {
 }
 
 let timer: ReturnType<typeof setInterval> | null = null
-onMounted(() => { poll(); timer = setInterval(poll, POLL_MS) })
+onMounted(() => {
+  poll()
+  timer = setInterval(poll, POLL_MS)
+  anomalyApi.getEdgeIncidentStats().then((s) => { incidentStats.value = s }).catch(() => {})
+})
 onUnmounted(() => { if (timer) clearInterval(timer) })
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -105,6 +115,48 @@ const netIface   = computed(() => stats.value ? (primaryNet(stats.value.network)
     <a-spin :spinning="loading">
 
       <a-alert v-if="error" type="warning" message="Could not reach agent — retrying…" show-icon style="margin-bottom:16px" />
+
+      <!-- ── Anomaly incidents summary ──────────────────────────────────────── -->
+      <template v-if="incidentStats">
+        <div class="section-label">
+          Anomaly Incidents
+          <span class="section-link" @click="router.push('/anomaly')">View all →</span>
+        </div>
+        <a-row :gutter="16" style="margin-bottom:16px">
+          <a-col :xs="12" :sm="6">
+            <div class="widget widget-clickable" @click="router.push('/anomaly')">
+              <div class="widget-title">Open</div>
+              <div class="widget-value" :style="{ color: incidentStats.open > 0 ? '#fa8c16' : '#52c41a' }">
+                {{ incidentStats.open }}
+              </div>
+              <div class="widget-sub">awaiting action</div>
+            </div>
+          </a-col>
+          <a-col :xs="12" :sm="6">
+            <div class="widget widget-clickable" @click="router.push('/anomaly')">
+              <div class="widget-title">Active</div>
+              <div class="widget-value" :style="{ color: incidentStats.active > 0 ? '#cf1322' : '#52c41a' }">
+                {{ incidentStats.active }}
+              </div>
+              <div class="widget-sub">currently firing</div>
+            </div>
+          </a-col>
+          <a-col :xs="12" :sm="6">
+            <div class="widget widget-clickable" @click="router.push('/anomaly')">
+              <div class="widget-title">Resolved</div>
+              <div class="widget-value" style="color:#888">{{ incidentStats.resolved }}</div>
+              <div class="widget-sub">closed incidents</div>
+            </div>
+          </a-col>
+          <a-col :xs="12" :sm="6">
+            <div class="widget widget-clickable" @click="router.push('/anomaly')">
+              <div class="widget-title">Total</div>
+              <div class="widget-value">{{ incidentStats.total }}</div>
+              <div class="widget-sub">all time</div>
+            </div>
+          </a-col>
+        </a-row>
+      </template>
 
       <template v-if="stats">
 
@@ -322,6 +374,33 @@ const netIface   = computed(() => stats.value ? (primaryNet(stats.value.network)
   letter-spacing: 0.06em;
   color: #aaa;
   margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-link {
+  font-size: 11px;
+  font-weight: 500;
+  color: #1677ff;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: auto;
+}
+
+.section-link:hover {
+  color: #4096ff;
+}
+
+.widget-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.widget-clickable:hover {
+  border-color: #d9d9d9;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .widget {
