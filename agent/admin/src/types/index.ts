@@ -317,3 +317,53 @@ export interface AgentSettings {
   anomalyDetection?: Record<string, unknown>
   mqttMonitor?: AgentSettingsMqttMonitor
 }
+
+// ── Edge anomaly tracking (events → incidents → alerts) ───────────────────────
+
+export interface EdgeAnomalyEvent {
+  id: number
+  msg_id: string
+  metric: string
+  fingerprint: string
+  timestamp_ms: number
+  observed_value: number
+  anomaly_score: number
+  confidence: number
+  severity: 'info' | 'warning' | 'critical'
+  severity_reason?: string
+  consecutive_count: number
+  device_name: string
+  device_type?: string
+  created_at: number
+}
+
+export interface EdgeAnomalyIncident {
+  id: number
+  incident_id: string
+  fingerprint: string
+  metric: string
+  severity: 'info' | 'warning' | 'critical'
+  device_name: string
+  device_type?: string
+  first_seen: number
+  last_seen: number
+  max_anomaly_score: number
+  max_confidence: number
+  event_count: number
+  status: 'open' | 'active' | 'resolved'
+  last_alert_at?: number
+  created_at: number
+  updated_at: number
+}
+
+export interface EdgeAnomalyAlert {
+  id: number
+  alert_id: string
+  incident_id: string
+  severity: 'info' | 'warning' | 'critical'
+  metric: string
+  device_name: string
+  max_anomaly_score: number
+  message: string
+  created_at: number
+}

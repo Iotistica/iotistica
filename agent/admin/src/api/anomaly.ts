@@ -4,6 +4,9 @@ import type {
   AnomalyConfig,
   AnomalyStats,
   AnomalyBaseline,
+  EdgeAnomalyEvent,
+  EdgeAnomalyIncident,
+  EdgeAnomalyAlert,
 } from '@/types'
 
 const BASE = '/v1/anomaly'
@@ -53,6 +56,28 @@ export const anomalyApi = {
 
   saveBaselines(): Promise<void> {
     return client.post(`${BASE}/save-baselines`).then(() => undefined)
+  },
+
+  // ── Edge tracking ────────────────────────────────────────────────────────────
+
+  getEdgeEvents(params?: { severity?: string; limit?: number; offset?: number }): Promise<{ events: EdgeAnomalyEvent[]; total: number }> {
+    return client.get<{ events: EdgeAnomalyEvent[]; total: number }>('/v1/anomaly-events', { params }).then((r) => r.data)
+  },
+
+  getEdgeIncidents(params?: { status?: string; limit?: number; offset?: number }): Promise<{ incidents: EdgeAnomalyIncident[]; total: number }> {
+    return client.get<{ incidents: EdgeAnomalyIncident[]; total: number }>('/v1/anomaly-incidents', { params }).then((r) => r.data)
+  },
+
+  getEdgeIncidentStats(): Promise<{ open: number; active: number; resolved: number; total: number }> {
+    return client.get<{ open: number; active: number; resolved: number; total: number }>('/v1/anomaly-incidents/stats').then((r) => r.data)
+  },
+
+  resolveIncident(incidentId: string, notes?: string): Promise<void> {
+    return client.patch(`/v1/anomaly-incidents/${incidentId}/resolve`, { notes }).then(() => undefined)
+  },
+
+  getEdgeAlerts(params?: { limit?: number; offset?: number }): Promise<{ alerts: EdgeAnomalyAlert[]; total: number }> {
+    return client.get<{ alerts: EdgeAnomalyAlert[]; total: number }>('/v1/anomaly-alerts', { params }).then((r) => r.data)
   },
 
   getMetrics(): Promise<
