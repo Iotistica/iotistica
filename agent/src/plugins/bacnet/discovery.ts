@@ -224,7 +224,11 @@ export class BACnetDiscovery extends BaseDiscovery {
 		}
 
 		// IP range (e.g., 192.168.65.1-192.168.65.10)
-		if (target.includes('-')) {
+		// Must look like two dotted-decimal IPs separated by a single dash.
+		// Plain hostnames like 'bacnet-sim-host.example.com' also contain dashes —
+		// they fall through to the hostname branch below.
+		const IP_RANGE_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}-\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+		if (IP_RANGE_RE.test(target)) {
 			const [startIP, endIP] = target.split('-').map(s => s.trim());
 			const startParts = startIP.split('.').map(Number);
 			const endParts = endIP.split('.').map(Number);
