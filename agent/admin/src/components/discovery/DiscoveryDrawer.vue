@@ -44,6 +44,7 @@ const running = ref(false)
 const results = ref<DiscoveredDevice[]>([])
 const hasRun = ref(false)
 const adding = ref<Set<string>>(new Set())
+const addingAll = ref(false)
 const addedThisSession = ref<Set<string>>(new Set())
 let abortController: AbortController | null = null
 
@@ -113,6 +114,16 @@ async function runRuleScan() {
     abortController = null
     running.value = false
   }
+}
+
+const pendingDevices = computed(() => results.value.filter((d) => !isAlreadyAdded(d)))
+
+async function addAll() {
+  addingAll.value = true
+  const toAdd = pendingDevices.value
+  await Promise.allSettled(toAdd.map((d) => addDevice(d)))
+  addingAll.value = false
+  if (toAdd.length) message.success(`Added ${toAdd.length} source${toAdd.length !== 1 ? 's' : ''}`)
 }
 
 async function addDevice(device: DiscoveredDevice) {
@@ -267,8 +278,19 @@ watch(
         No devices found. Try expanding the scan range or checking network connectivity.
       </div>
       <template v-else>
-        <div style="margin-bottom: 12px; color: #666; font-size: 13px">
-          Found {{ results.length }} device{{ results.length !== 1 ? 's' : '' }}
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px">
+          <span style="color: #666; font-size: 13px">
+            Found {{ results.length }} device{{ results.length !== 1 ? 's' : '' }}
+          </span>
+          <a-button
+            v-if="pendingDevices.length > 0"
+            size="small"
+            type="primary"
+            :loading="addingAll"
+            @click="addAll"
+          >
+            Add All ({{ pendingDevices.length }})
+          </a-button>
         </div>
         <a-table
           :columns="columns"
