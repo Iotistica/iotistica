@@ -525,20 +525,18 @@ export class FeatureInitializer {
 	private async initFirewall(): Promise<void> {
 		const { logger, configSettings, deviceApiPort } = this.context;
 
-		// Check if firewall is disabled via environment variable
-		// Firewall is infrastructure security, controlled at deployment time only
-		if (process.env.FIREWALL_ENABLED === 'false') {
-			logger.debugSync('Firewall disabled by environment variable', {
+		// Get firewall configuration from config or environment
+		const firewallMode =
+      configSettings.firewallMode ||
+      process.env.FIREWALL_MODE ||
+      'auto';
+
+		if (firewallMode === 'disabled') {
+			logger.debugSync('Firewall disabled by configuration', {
 				component: LogComponents.agent,
 			});
 			return;
 		}
-
-		// Get firewall configuration from config or environment
-		const firewallMode = 
-      configSettings.firewallMode || 
-      process.env.FIREWALL_MODE || 
-      'auto';
     
 		// Check if running as root (required for iptables)
 		const hasGetuid = typeof process.getuid === 'function';
@@ -555,7 +553,7 @@ export class FeatureInitializer {
 		if (uid !== 0) {
 			logger.warnSync('Firewall disabled - requires root privileges', {
 				component: LogComponents.agent,
-				note: 'Run container with --privileged or set FIREWALL_ENABLED=false',
+				note: 'Run container with --privileged or set FIREWALL_MODE=disabled',
 				uid,
 			});
 			return;
@@ -569,7 +567,7 @@ export class FeatureInitializer {
 		this.features.firewall = new AgentFirewall(
 			{
 				enabled: true,
-				mode: firewallMode as 'on' | 'off' | 'auto',
+				mode: firewallMode as 'on' | 'off' | 'auto' | 'disabled',
 				deviceApiPort,
 				mqttPort,
 			},
@@ -696,8 +694,9 @@ export async function initFeatures(ctx: AgentInitContext): Promise<void> {
 	await initializer.initJobsFeature();
 
 	// Anomaly detection must be initialized before simulation so producer-mode scenarios can feed the shared pipeline.
-	const { initAnomalyDetection } = await import('./anomaly.js');
+	const { initAnomalyDetection, configureAnomalyFeed } = await import('./anomaly.js');
 	await initAnomalyDetection(ctx);
+	await configureAnomalyFeed(ctx);
 
 	const { initSimulationMode } = await import('./simulation.js');
 	await initSimulationMode(ctx);

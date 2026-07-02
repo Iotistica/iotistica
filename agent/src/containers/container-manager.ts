@@ -386,7 +386,7 @@ export class ContainerManager extends EventEmitter {
 	*/
 	private async loadTargetStateFromDB(): Promise<void> {
 		try {
-			const snapshot = StateSnapshotModel.getLatest('target');
+			const snapshot = StateSnapshotModel.getLatest('apps-target');
 
 			if (snapshot) {
 				this.targetState = JSON.parse(snapshot.state);
@@ -446,7 +446,7 @@ export class ContainerManager extends EventEmitter {
 			const stateJson = JSON.stringify(this.targetState);
 	
 			// Delete old target snapshots and insert new (with hash)
-			StateSnapshotModel.replace('target', stateJson, stateHash);
+			StateSnapshotModel.replace('apps-target', stateJson, stateHash);
 			
 		} catch (error) {
 			this.logger?.errorSync(

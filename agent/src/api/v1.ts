@@ -741,6 +741,19 @@ router.get('/v1/anomaly/baselines', (req: Request, res: Response, next: NextFunc
 });
 
 /**
+ * DELETE /v1/anomaly/baselines
+ * Clear all persisted baseline statistics from SQLite and reset in-memory buffers.
+ */
+router.delete('/v1/anomaly/baselines', (req: Request, res: Response, next: NextFunction) => {
+	try {
+		const deleted = actions.clearAnomalyBaselines();
+		return res.status(200).json({ deleted });
+	} catch (error) {
+		next(error);
+	}
+});
+
+/**
  * GET /v1/memory
  * Get agent process memory diagnostics and leak detection status
  */

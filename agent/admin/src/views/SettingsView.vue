@@ -1012,34 +1012,42 @@ function setMemory<K extends keyof NonNullable<NonNullable<AgentSettings['runtim
 
           <a-card size="small" title="Local Broker Connection">
             <a-form layout="vertical">
-              <a-form-item label="Broker URL" required>
-                <a-input
-                  v-model:value="mqttForm.url"
-                  placeholder="mqtt://localhost:1883"
-                  style="font-family: monospace; font-size: 13px"
-                />
-                <div style="font-size: 12px; color: #888; margin-top: 4px">
-                  Use <code>mqtt://</code> for plain TCP or <code>mqtts://</code> for TLS.
-                  In Docker deployments use the container hostname (e.g. <code>mqtt://iotistic-mosquitto-agent:1883</code>).
-                </div>
-              </a-form-item>
+              <a-row :gutter="[16, 0]">
+                <a-col :span="14">
+                  <a-form-item label="Broker URL" required>
+                    <a-input
+                      v-model:value="mqttForm.url"
+                      placeholder="mqtt://localhost:1883"
+                      style="font-family: monospace; font-size: 13px"
+                    />
+                    <div style="font-size: 12px; color: #888; margin-top: 4px">
+                      Use <code>mqtt://</code> for plain TCP or <code>mqtts://</code> for TLS.
+                      In Docker deployments use the container hostname (e.g. <code>mqtt://iotistic-mosquitto-agent:1883</code>).
+                    </div>
+                  </a-form-item>
+                </a-col>
+              </a-row>
 
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
-                <a-form-item label="Username">
-                  <a-input
-                    v-model:value="mqttForm.username"
-                    placeholder="admin"
-                    autocomplete="off"
-                  />
-                </a-form-item>
-                <a-form-item label="Password">
-                  <a-input-password
-                    v-model:value="mqttForm.password"
-                    placeholder="Leave blank to keep current password"
-                    autocomplete="new-password"
-                  />
-                </a-form-item>
-              </div>
+              <a-row :gutter="[16, 0]">
+                <a-col :span="7">
+                  <a-form-item label="Username">
+                    <a-input
+                      v-model:value="mqttForm.username"
+                      placeholder="admin"
+                      autocomplete="off"
+                    />
+                  </a-form-item>
+                </a-col>
+                <a-col :span="7">
+                  <a-form-item label="Password">
+                    <a-input-password
+                      v-model:value="mqttForm.password"
+                      placeholder="Leave blank to keep current"
+                      autocomplete="new-password"
+                    />
+                  </a-form-item>
+                </a-col>
+              </a-row>
 
               <a-alert
                 v-if="mqttTestResult?.connected"

@@ -3,7 +3,7 @@ import * as deviceActions from '../api/actions.js';
 import { LogComponents } from '../logging/types.js';
 import { CloudMqttClient } from '../mqtt/manager.js';
 import { CloudSync } from '../sync/index.js';
-import { initAnomalyDetection } from './anomaly.js';
+import { initAnomalyDetection, configureAnomalyFeed } from './anomaly.js';
 import { isStandaloneMode } from '../utils/env.js';
 
 export async function initSync(ctx: AgentInitContext): Promise<void> {
@@ -12,6 +12,7 @@ export async function initSync(ctx: AgentInitContext): Promise<void> {
 	if (!ctx.anomalyService) {
 		await initAnomalyDetection(ctx);
 	}
+	await configureAnomalyFeed(ctx);
 
 	deviceActions.initialize(
 		ctx.containerManager!,

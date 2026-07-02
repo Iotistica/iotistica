@@ -16,6 +16,7 @@ import { buildIotisticaTopicBase } from '@/utils/mqtt'
 const rows = ref<Subscription[]>([])
 const destinations = ref<Destination[]>([])
 const deviceNames = ref<string[]>([])
+const metricNames = ref<string[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const drawerOpen = ref(false)
@@ -59,6 +60,9 @@ async function load() {
     rows.value = subs
     destinations.value = dests
     deviceNames.value = endpoints.map((e) => e.name)
+    metricNames.value = endpoints.flatMap((e) =>
+      ((e.data_points ?? []) as { name?: string }[]).map((dp) => dp.name).filter((n): n is string => !!n),
+    )
     const { uuid, tenantId } = settings.agent ?? {}
     if (uuid && tenantId) iotisticaTopicBase.value = buildIotisticaTopicBase(uuid, tenantId)
   } catch (err: unknown) {
@@ -178,10 +182,12 @@ onMounted(load)
           style="padding: 4px 12px"
         />
       </a-space>
-      <a-button type="primary" :disabled="destinations.length === 0" @click="openCreate">
-        <template #icon><PlusOutlined /></template>
-        New Subscription
-      </a-button>
+      <a-space style="margin-left: auto">
+        <a-button type="primary" :disabled="destinations.length === 0" @click="openCreate">
+          <template #icon><PlusOutlined /></template>
+          New Subscription
+        </a-button>
+      </a-space>
     </div>
 
     <a-alert
@@ -268,6 +274,7 @@ onMounted(load)
       :editing="editing"
       :destinations="destinations"
       :device-names="deviceNames"
+      :metric-names="metricNames"
       :iotistica-topic-base="iotisticaTopicBase ?? undefined"
       @saved="load"
     />

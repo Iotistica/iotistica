@@ -1,7 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { getDatabase, transact } from '../sqlite';
 
-export type StateSnapshotType = 'target' | 'current' | 'config';
+export type StateSnapshotType = 'target' | 'current' | 'config' | 'apps-target';
 
 export interface StateSnapshotRecord {
 	id: number;

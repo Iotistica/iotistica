@@ -215,6 +215,55 @@ jobs:
           echo "- \`iotistic/agent:${{ needs.build.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`iotistic/agent:latest\`" >> $GITHUB_STEP_SUMMARY
 
+  deploy-container-app:
+    name: Deploy to Azure Container App
+    needs: [build, docker]
+    if: github.ref == 'refs/heads/master'
+    runs-on: [ubuntu-24.04]
+    env:
+      RESOURCE_GROUP: iotistic
+      CONTAINER_APP: iotistica-agent
+
+    steps:
+      - name: Azure login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48 # v3.0.0
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Ensure ingress config
+        run: |
+          az containerapp ingress update \
+            --name "$CONTAINER_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --type external \
+            --transport http \
+            --target-port 48484
+
+      - name: Deploy image and env vars
+        run: |
+          az containerapp update \
+            --name "$CONTAINER_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "iotistic/agent:${{ needs.build.outputs.sha_short }}" \
+            --set-env-vars \
+              NODE_ENV=production \
+              STANDALONE=true \
+              API_SECURITY_MODE=OPEN \
+              FIREWALL_MODE=disabled \
+              PRO_FORCE=false \
+              USE_MSGPACK_POC=false \
+              USE_KEY_COMPACTION_POC=false \
+              USE_DEFLATE_COMPRESSION=false \
+              AGENT_SHELL_MAX_SESSION_MS=3600000 \
+              LOG_LEVEL=info
+
+      - name: Deploy Summary
+        run: |
+          echo "## Azure Container App Deploy" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`iotistic/agent:${{ needs.build.outputs.sha_short }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**App:** \`$CONTAINER_APP\` (resource group \`$RESOURCE_GROUP\`)" >> $GITHUB_STEP_SUMMARY
+
   package-agent:
     name: Package Agent (${{ matrix.arch }})
     needs: build

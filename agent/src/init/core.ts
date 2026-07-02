@@ -28,8 +28,9 @@ export function setupConfigEventListeners(ctx: AgentInitContext): void {
 				logger?.infoSync('Starting Anomaly Detection Service (dynamically enabled)', {
 					component: LogComponents.agent
 				});
-				const { initAnomalyDetection } = await import('./anomaly.js');
+				const { initAnomalyDetection, configureAnomalyFeed } = await import('./anomaly.js');
 				await initAnomalyDetection(ctx);
+				await configureAnomalyFeed(ctx);
 
 				// Simulation init runs before target state is available (in features.ts).
 				// Now that anomaly detection is up, re-run simulation init so it can

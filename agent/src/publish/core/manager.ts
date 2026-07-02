@@ -453,7 +453,7 @@ export class PublishManager extends EventEmitter {
 		return this.enricher.enrich(messages, endpointName) as ProtocolMessage[];
 	}
 
-	private buildPayload(endpointName: string, messages: ProtocolMessage[], payloadFormat: PayloadFormat): {
+	private buildPayload(endpointName: string, messages: ProtocolMessage[], payloadFormat: PayloadFormat, filterBadQuality = false): {
     data: PublishPayload;
     msgId: string;
     baselineSize: number;
@@ -477,9 +477,15 @@ export class PublishManager extends EventEmitter {
 		const tagRecords = this.collectTagRecords(messages);
 		const externalNodeName = this.resolveExternalNodeName(externalGroupName, messages, tagRecords);
 		const timestampMs = Date.now();
-		const tags = tagRecords
-			.map((message, index) => this.mapTagPayload(message, index, payloadFormat))
+		const allTags = tagRecords
+			.map((message, index) => this.mapTagPayload(message, index, payloadFormat, filterBadQuality))
 			.filter((tag): tag is TagPayload => tag !== null);
+		// ECP is a snapshot format (single batch timestamp, one entry per tag).
+		// Deduplicate by name keeping the last (most recent) value so a multi-poll
+		// batch doesn't repeat the same metric N times.
+		const tags = payloadFormat === 'ecp'
+			? [...new Map(allTags.map((t) => [t.name, t])).values()]
+			: allTags;
 
 		const data = {
 			timestamp: timestampMs,
@@ -506,7 +512,7 @@ export class PublishManager extends EventEmitter {
 		return tagRecords;
 	}
 
-	private mapTagPayload(message: ProtocolMessage, index: number, payloadFormat: Exclude<PayloadFormat, 'custom'>): TagPayload | null {
+	private mapTagPayload(message: ProtocolMessage, index: number, payloadFormat: Exclude<PayloadFormat, 'custom'>, filterBadQuality = false): TagPayload | null {
 		const name = String(
 			message.metric
 			?? message.metric_name
@@ -524,7 +530,9 @@ export class PublishManager extends EventEmitter {
 			|| message.qualityCode !== undefined;
 
 		if (hasError) {
-			if (payloadFormat === 'ecp') {
+			// Only drop bad-quality readings when the subscription explicitly restricts quality.
+			// An empty qualities filter means "no restriction" — publish errors as error tags.
+			if (payloadFormat === 'ecp' && filterBadQuality) {
 				return null;
 			}
 
@@ -566,13 +574,14 @@ export class PublishManager extends EventEmitter {
 		messages: ProtocolMessage[],
 		compressedPayloadCache: Map<string, string | Buffer>,
 		overrideOpts?: CompressorOptions,
+		filterBadQuality = false,
 	): Promise<string | Buffer> {
 		const cached = compressedPayloadCache.get(cacheKey);
 		if (cached !== undefined) {
 			return cached;
 		}
 
-		const { data, baselineSize } = this.buildPayload(endpointName, messages, payloadFormat);
+		const { data, baselineSize } = this.buildPayload(endpointName, messages, payloadFormat, filterBadQuality);
 		const { payload } = await this.compressor.compress(data, baselineSize, this.stats.data.messagesPublished, overrideOpts);
 		compressedPayloadCache.set(cacheKey, payload);
 		return payload;
@@ -710,7 +719,7 @@ export class PublishManager extends EventEmitter {
 			}
 
 			const compressedPayloadCache = new Map<string, string | Buffer>();
-			compressedPayloadCache.set(`${this.payloadFormat}::global`, payload);
+			compressedPayloadCache.set(`${this.payloadFormat}::global::fq=false`, payload);
 			await this.routePublishBatch(topic, compressedPayloadCache, endpointName, enriched);
 			publishConfirmed = true;
 
@@ -1003,10 +1012,15 @@ export class PublishManager extends EventEmitter {
 			}
 
 			const payloadFormat = this.resolvePayloadFormatForBinding(binding);
+			const route = binding.subscription.route_json as PublishSubscriptionRoute | null;
+			const qualities = Array.isArray(route?.qualities) ? route.qualities : [];
+			// Only drop bad-quality readings when the subscription explicitly restricts to
+			// specific qualities and 'BAD' is not in that list.
+			const filterBadQuality = qualities.length > 0 && !qualities.includes('BAD');
 			const subscriptionCompression = (binding.subscription.compression ?? null);
 			const cacheKey = subscriptionCompression
-				? `${payloadFormat}::${subscriptionCompression}`
-				: `${payloadFormat}::global`;
+				? `${payloadFormat}::${subscriptionCompression}::fq=${filterBadQuality}`
+				: `${payloadFormat}::global::fq=${filterBadQuality}`;
 			const overrideOpts = subscriptionCompression ? compressionToOpts(subscriptionCompression) : undefined;
 			const payload = await this.getCompressedPayloadForFormat(
 				payloadFormat,
@@ -1015,6 +1029,7 @@ export class PublishManager extends EventEmitter {
 				messages,
 				compressedPayloadCache,
 				overrideOpts,
+				filterBadQuality,
 			);
 
 			this.logger?.debug('Routing batch to destination', {

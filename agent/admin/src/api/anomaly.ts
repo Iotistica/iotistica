@@ -58,6 +58,10 @@ export const anomalyApi = {
     return client.post(`${BASE}/save-baselines`).then(() => undefined)
   },
 
+  clearBaselines(): Promise<{ deleted: number }> {
+    return client.delete<{ deleted: number }>(`${BASE}/baselines`).then((r) => r.data)
+  },
+
   // ── Edge tracking ────────────────────────────────────────────────────────────
 
   getEdgeEvents(params?: { severity?: string; limit?: number; offset?: number }): Promise<{ events: EdgeAnomalyEvent[]; total: number }> {
@@ -83,24 +87,22 @@ export const anomalyApi = {
   getMetrics(): Promise<
     Array<{
       name: string
-      source: 'live' | 'system' | 'endpoint'
       score?: number
       deviceState?: string
-      endpointName?: string
       unit?: string
       configured: boolean
+      endpointName?: string
     }>
   > {
     return client
       .get<{
         metrics: Array<{
           name: string
-          source: 'live' | 'system' | 'endpoint'
           score?: number
           deviceState?: string
-          endpointName?: string
           unit?: string
           configured: boolean
+          endpointName?: string
         }>
       }>(`${BASE}/metrics`)
       .then((r) => r.data.metrics)

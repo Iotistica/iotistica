@@ -40,17 +40,11 @@ services:
       - STANDALONE=false
       - IOTISTICA_API=http://host.docker.internal:4003
       - API_SECURITY_MODE=LOCAL_NETWORK
-      - FIREWALL_ENABLED=false
-      - FIREWALL_MODE=off
+      - FIREWALL_MODE=disabled
       # Testing & Development (not dashboard-controlled)
-      - SIMULATION_MODE=false
-      - SIMULATION_PROFILE=disabled
-      - SIMULATION_CONFIG='{}'
       - USE_MSGPACK_POC=false
       - USE_KEY_COMPACTION_POC=false
       - USE_DEFLATE_COMPRESSION=false
-      - ENABLE_HEAP_PROFILING=false
-      - PIPELINE_FLOWS_FILE=/app/data/flows/opcua-transform.flows.json
       # Shell security (HMAC signature verification)
       - AGENT_SHELL_HMAC_KEY=${AGENT_SHELL_HMAC_KEY}
       - AGENT_SHELL_MAX_SESSION_MS=3600000

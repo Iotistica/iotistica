@@ -13,6 +13,7 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const filterLevel = ref<LogLevel | ''>('')
 const filterSource = ref<LogSourceType | ''>('')
+const filterComponent = ref('')
 const filterText = ref('')
 const limitOption = ref(200)
 
@@ -20,7 +21,7 @@ const LEVEL_COLOR: Record<LogLevel, string> = {
   error: 'error',
   warn:  'warning',
   info:  'processing',
-  debug: 'default',
+  debug: '#555',
 }
 
 const LEVEL_TEXT_COLOR: Record<LogLevel, string> = {
@@ -40,9 +41,16 @@ function fmtDate(ms: number): string {
   return new Date(ms).toLocaleDateString()
 }
 
+const componentOptions = computed(() => {
+  const names = [...new Set(logs.value.map((l) => l.source.name))].sort()
+  return names.map((n) => ({ value: n, label: n }))
+})
+
 const filtered = computed(() => {
   const q = filterText.value.trim().toLowerCase()
+  const comp = filterComponent.value
   return logs.value.filter((l) => {
+    if (comp && l.source.name !== comp) return false
     if (q && !l.message.toLowerCase().includes(q) && !l.source.name.toLowerCase().includes(q)) return false
     return true
   })
@@ -83,30 +91,38 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 
     <!-- Toolbar -->
     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap">
-      <a-select
+      <a-radio-group
         v-model:value="filterLevel"
-        style="width: 120px"
-        placeholder="All levels"
-        allow-clear
+        button-style="solid"
+        size="small"
         @change="load"
       >
-        <a-select-option value="error">Error</a-select-option>
-        <a-select-option value="warn">Warn</a-select-option>
-        <a-select-option value="info">Info</a-select-option>
-        <a-select-option value="debug">Debug</a-select-option>
-      </a-select>
+        <a-radio-button value="">All</a-radio-button>
+        <a-radio-button value="error">Error</a-radio-button>
+        <a-radio-button value="warn">Warn</a-radio-button>
+        <a-radio-button value="info">Info</a-radio-button>
+        <a-radio-button value="debug">Debug</a-radio-button>
+      </a-radio-group>
+
+      <a-radio-group
+        v-model:value="filterSource"
+        button-style="solid"
+        size="small"
+        @change="load"
+      >
+        <a-radio-button value="">All</a-radio-button>
+        <a-radio-button value="system">System</a-radio-button>
+        <a-radio-button value="container">Container</a-radio-button>
+        <a-radio-button value="manager">Manager</a-radio-button>
+      </a-radio-group>
 
       <a-select
-        v-model:value="filterSource"
-        style="width: 130px"
-        placeholder="All sources"
+        v-model:value="filterComponent"
+        :options="componentOptions"
+        placeholder="All components"
         allow-clear
-        @change="load"
-      >
-        <a-select-option value="system">System</a-select-option>
-        <a-select-option value="container">Container</a-select-option>
-        <a-select-option value="manager">Manager</a-select-option>
-      </a-select>
+        style="width: 160px"
+      />
 
       <a-select
         v-model:value="limitOption"

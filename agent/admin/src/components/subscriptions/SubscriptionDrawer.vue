@@ -10,6 +10,7 @@ const props = defineProps<{
   editing: Subscription | null
   destinations: Destination[]
   deviceNames?: string[]
+  metricNames?: string[]
   iotisticaTopicBase?: string
 }>()
 
@@ -262,11 +263,21 @@ function close() {
         style="margin-top: 8px"
       >
         <a-collapse-panel key="true" header="Advanced Routing (optional)">
-          <a-form-item label="Include metrics">
-            <a-select v-model:value="form.route_json!.includeMetrics" mode="tags" :open="false" placeholder="Leave empty for all" />
+          <a-form-item label="Include metrics" extra="Select from the list or type a custom name">
+            <a-select
+              v-model:value="form.route_json!.includeMetrics"
+              mode="tags"
+              placeholder="All metrics (leave empty for all)"
+              :options="(metricNames ?? []).map(n => ({ value: n, label: n }))"
+            />
           </a-form-item>
-          <a-form-item label="Exclude metrics">
-            <a-select v-model:value="form.route_json!.excludeMetrics" mode="tags" :open="false" />
+          <a-form-item label="Exclude metrics" extra="Select from the list or type a custom name">
+            <a-select
+              v-model:value="form.route_json!.excludeMetrics"
+              mode="tags"
+              placeholder="None excluded"
+              :options="(metricNames ?? []).map(n => ({ value: n, label: n }))"
+            />
           </a-form-item>
           <a-form-item label="Include devices" extra="Select from the list or type a custom name">
             <a-select

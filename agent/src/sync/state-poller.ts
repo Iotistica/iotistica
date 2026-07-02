@@ -358,6 +358,21 @@ export class StatePoller extends EventEmitter {
 			};
 		}
 
+		// Preserve locally-set feature flags that the cloud doesn't explicitly send.
+		// Feature toggles (enableAnomalyDetection etc.) are set via the admin UI and
+		// must survive cloud polls that omit the features key entirely.
+		// Cloud-provided values always win (existing is the base, cloud spread on top).
+		const existingFeatures = existingTargetState.config?.features;
+		if (existingFeatures) {
+			newTargetState.config = {
+				...(newTargetState.config || {}),
+				features: {
+					...existingFeatures,
+					...(newTargetState.config?.features || {}),
+				},
+			};
+		}
+
 		const currentStateHash = calculateHash(this.stateManager.getTargetState?.() ?? {});
 		const newStateHash = calculateHash(newTargetState);
 

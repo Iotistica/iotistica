@@ -102,7 +102,7 @@ param(
     [int]$MaxLogFileSize = 52428800,
     [int]$MaxLogs = 10000,
     [string]$AnomalyDetectionEnabled = "true",
-    [string]$FirewallEnabled = "true",
+    [ValidateSet('on', 'off', 'auto', 'disabled')]
     [string]$FirewallMode = "auto",
     [string]$ProForce = "false",
     [string]$UseMsgpackPoc = "false",
@@ -163,10 +163,53 @@ param(
     # Standalone Mode
     # When set, agents run with no cloud provisioning or sync.
     # Skips provisioning key generation and omits IOTISTICA_API from compose output.
-    [switch]$Standalone
+    [switch]$Standalone,
+
+    # Pro Edition
+    # Shorthand for -ProForce true. Sets PRO_FORCE=true in the container.
+    [switch]$Pro
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Pro) { $ProForce = "true" }
+
+# Treat -Pro switch and -ProForce true identically for the build steps below.
+$IsProBuild = $Pro -or ($ProForce -eq "true")
+
+# When building Pro from source, pack the iot-agent-pro package into agent/pro/
+# so the Dockerfile can install it as @iotistica/agent-pro.
+if ($IsProBuild -and $BuildFromSource) {
+    $proSrcPath = Join-Path $PSScriptRoot ".." ".." "iot-agent-pro" | Resolve-Path -ErrorAction SilentlyContinue
+    $proDestDir = Join-Path $PSScriptRoot ".." "agent" "pro"
+    New-Item -ItemType Directory -Force $proDestDir | Out-Null
+    # Remove stale tarballs from a previous build
+    Get-ChildItem $proDestDir -Filter "*.tgz" -ErrorAction SilentlyContinue | Remove-Item -Force
+
+    if ($proSrcPath -and (Test-Path $proSrcPath)) {
+        Write-Host "Building @iotistica/agent-pro from $proSrcPath …" -ForegroundColor Cyan
+        Push-Location $proSrcPath
+        try {
+            npm run build
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "npm run build failed — Pro features will not be available in the image."
+            } else {
+                $tgzName = (npm pack --quiet 2>$null | Select-Object -Last 1).Trim()
+                if ($tgzName -and (Test-Path $tgzName)) {
+                    Move-Item $tgzName (Join-Path $proDestDir $tgzName) -Force
+                    Write-Host "  Packed: $tgzName" -ForegroundColor Green
+                } else {
+                    Write-Warning "npm pack produced no output — Pro features will not be available in the image."
+                }
+            }
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-Warning "iot-agent-pro directory not found at $proSrcPath — Pro features will not be available."
+        Write-Warning "Expected location: $(Join-Path $PSScriptRoot '..\..\iot-agent-pro')"
+    }
+}
 
 # Simulation sample variables (reference only)
 # Use these as a quick template when manually setting environment variables.
@@ -201,8 +244,7 @@ $ProfileDefaults = @{
         IOTISTICA_API = 'http://api:3002'
         DeviceApiHost = '0.0.0.0'
         ApiSecurityMode = 'LOCAL_NETWORK'
-        FirewallEnabled = 'false'
-        FirewallMode = 'off'
+        FirewallMode = 'disabled'
     }
     'cloud' = @{
         ApiUrl = 'https://demo-api.iotistica.com/'
@@ -1442,11 +1484,12 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
     
     # Build configuration: use build context if -BuildFromSource, otherwise use image
     $buildOrImageLines = if ($BuildFromSource) {
-        @(
+        $lines = @(
             '    build:',
             '      context: .',
             '      dockerfile: agent/Dockerfile'
         )
+        $lines
     } else {
         @('    image: iotistic/agent:latest')
     }
@@ -1493,24 +1536,15 @@ for ($i = $StartIndex; $i -lt ($StartIndex + $Count); $i++) {
                 "      - MQTT_BROKER_URL=$MqttBrokerUrl",
                 "      - MQTT_USERNAME=$MqttUsername",
                 "      - MQTT_PASSWORD=$MqttPassword",
-                "      - LOCAL_MQTT_URL=$(if ($LocalMqttUrl) { $LocalMqttUrl } else { $MqttBrokerUrl })",
-                "      - LOCAL_MQTT_USER=$(if ($LocalMqttUser) { $LocalMqttUser } else { $MqttUsername })",
-                "      - LOCAL_MQTT_PASS=$(if ($LocalMqttPass) { $LocalMqttPass } else { $MqttPassword })",
                 '      # Bootstrap & Security (not dashboard-controlled)',
                 "      - STANDALONE=$(if ($Standalone) { 'true' } else { 'false' })",
                 "      - API_SECURITY_MODE=$ApiSecurityMode",
-                "      - FIREWALL_ENABLED=$FirewallEnabled",
                 "      - FIREWALL_MODE=$FirewallMode",
                 '      # Testing & Development (not dashboard-controlled)',
                 "      - PRO_FORCE=$ProForce",
-                "      - SIMULATION_MODE=$($simConfig.enabled)",
-                "      - SIMULATION_PROFILE=$($simConfig.name)",
-                "      - SIMULATION_CONFIG='$($simConfig.config)'",
                 "      - USE_MSGPACK_POC=$UseMsgpackPoc",
                 "      - USE_KEY_COMPACTION_POC=$UseKeyCompactionPoc",
                 "      - USE_DEFLATE_COMPRESSION=$UseDeflateCompression",
-                "      - ENABLE_HEAP_PROFILING=$EnableHeapProfiling",
-                "      - PIPELINE_FLOWS_FILE=$PipelineFlowsFile",
                 '      # Shell security (HMAC signature verification)',
                 "      - AGENT_SHELL_HMAC_KEY=$agentShellHmacKeyEnv",
                 '      - AGENT_SHELL_MAX_SESSION_MS=3600000'

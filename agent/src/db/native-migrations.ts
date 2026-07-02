@@ -19,6 +19,7 @@ import { migration as addDriftOptionsToEndpointOutputs } from './migrations/2026
 import { migration as addTargetSyncEnabled } from './migrations/20260626000000_add_target_sync_enabled.js';
 import { migration as addBackupSchedule } from './migrations/20260629000000_add_backup_schedule.js';
 import { migration as addAnomalyEdgeTracking } from './migrations/20260630001000_add_anomaly_edge_tracking.js';
+import { migration as fixAnomalyBaselineNullProfile } from './migrations/20260702000000_fix_anomaly_baseline_null_profile.js';
 import type { NativeSqliteMigration } from './migration-types.js';
 
 export const nativeMigrations: NativeSqliteMigration[] = [
@@ -43,4 +44,5 @@ export const nativeMigrations: NativeSqliteMigration[] = [
 	addTargetSyncEnabled,
 	addBackupSchedule,
 	addAnomalyEdgeTracking,
+	fixAnomalyBaselineNullProfile,
 ];

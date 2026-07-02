@@ -620,7 +620,7 @@ export class VirtualAgentDeployer {
                   { name: 'IS_VIRTUAL_AGENT', value: 'true' },
                   { name: 'IOTISTICA_API', value: cloudApiUrl },
                   { name: 'MQTT_BROKER_URL', value: this.mqttBrokerUrl },
-                  { name: 'FIREWALL_ENABLED', value: 'false' },
+                  { name: 'FIREWALL_MODE', value: 'disabled' },
                   {
                     name: 'PROVISIONING_KEY',
                     valueFrom: {

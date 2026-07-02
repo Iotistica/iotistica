@@ -95,8 +95,25 @@ export async function initAnomalyDetection(ctx: AgentInitContext): Promise<void>
 					PublishDestinationsModel.getById(id) ?? null,
 				createAlertMqttClient: (config: Record<string, unknown> | null | undefined, deviceId?: string, name?: string, logger?: any) =>
 					createExternalMqttClientFromDestination(config, deviceId, name, logger),
-				onAnomalyDetected: (event: AnomalyEventPayload) =>
-					correlator?.processEvent(event),
+				onAnomalyDetected: (event: any) =>
+					correlator?.processEvent({
+						metric:            event.metric,
+						fingerprint:       event.fingerprint,
+						timestamp_ms:      event.timestampMs,
+						observed_value:    event.observedValue,
+						anomaly_score:     event.anomalyScore,
+						confidence:        event.confidence,
+						severity:          event.severity,
+						severity_reason:   event.severityReason,
+						consecutive_count: event.consecutiveCount,
+						triggered_by:      event.triggeredBy,
+						baseline:          event.baseline,
+						expected_range:    event.expectedRange,
+						deviation:         event.deviation,
+						device_name:       event.deviceName,
+						device_type:       event.deviceType,
+						device_uuid:       event.agentUuid,
+					} satisfies AnomalyEventPayload),
 			}
 		);
 

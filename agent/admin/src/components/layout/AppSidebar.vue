@@ -25,9 +25,12 @@ import {
 } from '@ant-design/icons-vue'
 import IotisticaLogo from '@/components/IotisticaLogo.vue'
 import { settingsApi } from '@/api/settings'
+import { useProStatus } from '@/composables/useProStatus'
 
 const route = useRoute()
 const router = useRouter()
+
+const { proInstalled } = useProStatus()
 
 const agentVersion = ref<string | null>(null)
 onMounted(async () => {
@@ -115,13 +118,13 @@ function onMenuClick({ key }: { key: string }) {
         <a-menu-item key="/anomaly">
           <template #icon><FundOutlined /></template>
           Anomalies
-          <a-tag color="gold" class="pro-badge">Pro</a-tag>
+          <a-tag v-if="!proInstalled" color="gold" class="pro-badge">Pro</a-tag>
         </a-menu-item>
 
         <a-menu-item key="/mqtt-broker">
           <template #icon><WifiOutlined /></template>
           MQTT
-          <a-tag color="gold" class="pro-badge">Pro</a-tag>
+          <a-tag v-if="!proInstalled" color="gold" class="pro-badge">Pro</a-tag>
         </a-menu-item>
 
         <a-menu-item key="/terminal">
@@ -192,7 +195,7 @@ function onMenuClick({ key }: { key: string }) {
         <a-menu-item key="/support">
           <template #icon><CustomerServiceOutlined /></template>
           Support
-          <a-tag color="gold" class="pro-badge">Pro</a-tag>
+          <a-tag v-if="!proInstalled" color="gold" class="pro-badge">Pro</a-tag>
         </a-menu-item>
       </a-menu>
     </div>

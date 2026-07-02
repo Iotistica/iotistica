@@ -1621,12 +1621,12 @@ export const factoryResetDevice = async () => {
 export const getAvailableAnomalyMetrics = async (): Promise<
 	Array<{
 		name: string;
-		source: 'live' | 'system' | 'endpoint';
+		source: 'live';
 		score?: number;
 		deviceState?: string;
-		endpointName?: string;
 		unit?: string;
 		configured: boolean;
+		endpointName?: string;
 	}>
 > => {
 	const configuredNames = new Set(anomalyService?.getConfig().metrics.map((m: any) => m.name) ?? []);
@@ -1634,14 +1634,33 @@ export const getAvailableAnomalyMetrics = async (): Promise<
 		string,
 		{
 			name: string;
-			source: 'live' | 'system' | 'endpoint';
+			source: 'live';
 			score?: number;
 			deviceState?: string;
-			endpointName?: string;
 			unit?: string;
 			configured: boolean;
+			endpointName?: string;
 		}
 	>();
+
+	// Load endpoints up front — used both to annotate live metrics and as DP fallback.
+	let endpoints: any[] = [];
+	const endpointById = new Map<string, string>();
+	try {
+		const { EndpointModel } = await import('../db/models/endpoint.model.js');
+		endpoints = await EndpointModel.getAll();
+		for (const ep of endpoints) {
+			// Key by UUID — metric names contain UUIDs, not integer row IDs.
+			const uuid = ep.uuid ? String(ep.uuid).toLowerCase() : undefined;
+			if (!uuid) continue;
+			let meta: Record<string, unknown> | undefined;
+			try { meta = typeof ep.metadata === 'string' ? JSON.parse(ep.metadata) : ep.metadata; } catch { /* ignore */ }
+			const displayName: string = (meta?.objectName as string | undefined) || String(ep.name ?? uuid);
+			endpointById.set(uuid, displayName);
+		}
+	} catch {
+		// non-fatal
+	}
 
 	// 1. Persistent metric catalog — every metric the agent has ever observed.
 	//    This is the primary source; falls back gracefully if service unavailable.
@@ -1674,41 +1693,45 @@ export const getAvailableAnomalyMetrics = async (): Promise<
 		}
 	}
 
-	// 2. System metrics always produced by the agent (seed even if agent not yet warmed up).
-	for (const name of ['cpu_usage', 'memory_percent', 'cpu_temp', 'disk_usage']) {
-		if (!results.has(name)) {
-			results.set(name, { name, source: 'system', configured: configuredNames.has(name) });
-		}
-	}
-
-	// 3. Data-point names from all configured endpoints not already in the catalog.
-	try {
-		const { EndpointModel } = await import('../db/models/endpoint.model.js');
-		const endpoints = await EndpointModel.getAll();
-		for (const ep of endpoints) {
-			const dataPoints: any[] = Array.isArray(ep.data_points) ? ep.data_points : [];
-			for (const dp of dataPoints) {
-				const dpName: unknown = dp.name ?? dp.key ?? dp.tag ?? dp.label;
-				if (typeof dpName !== 'string' || !dpName.trim()) continue;
-				const name = dpName.trim();
-				if (!results.has(name)) {
-					results.set(name, {
-						name,
-						source: 'endpoint',
-						endpointName: ep.name,
-						configured: configuredNames.has(name),
-					});
+	// Annotate live metrics with endpoint name by matching any UUID in the canonical
+	// name against the endpoints table (canonical format: {ep_uuid}_{metric_name}).
+	const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+	for (const entry of results.values()) {
+		const uuids = entry.name.match(UUID_RE);
+		if (uuids) {
+			for (const uuid of uuids) {
+				const epName = endpointById.get(uuid.toLowerCase());
+				if (epName) {
+					entry.endpointName = epName;
+					break;
 				}
 			}
 		}
-	} catch {
-		// non-fatal — endpoints table may not exist yet
 	}
 
-	return Array.from(results.values()).sort((a, b) => {
-		const order: Record<string, number> = { live: 0, system: 1, endpoint: 2 };
-		return (order[a.source] - order[b.source]) || a.name.localeCompare(b.name);
-	});
+	// 2. Supplement with data-point names from configured endpoints.
+	//    Endpoint metrics may not yet be in the live catalog (agent hasn't warmed up,
+	//    or the anomaly feed isn't wired for that protocol yet).
+	for (const ep of endpoints) {
+		const dataPoints: any[] = Array.isArray(ep.data_points) ? ep.data_points : [];
+		const uuid = ep.uuid ? String(ep.uuid).toLowerCase() : undefined;
+		const epDisplayName = uuid ? (endpointById.get(uuid) ?? ep.name) : ep.name;
+		for (const dp of dataPoints) {
+			const dpName: unknown = dp.name ?? dp.key ?? dp.tag ?? dp.label;
+			if (typeof dpName !== 'string' || !dpName.trim()) continue;
+			const name = dpName.trim();
+			if (!results.has(name)) {
+				results.set(name, {
+					name,
+					source: 'live',
+					configured: configuredNames.has(name),
+					endpointName: epDisplayName ?? undefined,
+				});
+			}
+		}
+	}
+
+	return Array.from(results.values()).sort((a, b) => a.name.localeCompare(b.name));
 };
 
 /**
@@ -1724,6 +1747,21 @@ export const persistAnomalyConfig = async (config: Record<string, unknown>): Pro
 	await applyConfigUpdate((targetConfig) => {
 		targetConfig.anomalyDetection = config;
 	});
+};
+
+/**
+ * Delete all anomaly baselines from SQLite and reset in-memory buffers.
+ * Used by: DELETE /v1/anomaly/baselines
+ */
+export const clearAnomalyBaselines = (): number => {
+	try {
+		const db = getDatabase();
+		const result = db.prepare('DELETE FROM anomaly_baselines').run();
+		anomalyService?.clearBaselines?.();
+		return result.changes as number;
+	} catch {
+		return 0;
+	}
 };
 
 /**

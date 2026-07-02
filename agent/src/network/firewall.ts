@@ -16,7 +16,7 @@ import { build, getDefaultRuleAdaptor, RuleAction, type Rule } from '../lib/ipta
 
 export interface FirewallConfig {
   enabled: boolean;
-  mode: 'on' | 'off' | 'auto';
+  mode: 'on' | 'off' | 'auto' | 'disabled';
   deviceApiPort: number;
   mqttPort?: number;
   allowedLanNetworks?: string[];

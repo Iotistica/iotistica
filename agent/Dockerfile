@@ -70,6 +70,18 @@ RUN npx tsc --project tsconfig.build.json && \
     find dist -name "*.map" -delete && \
     npm prune --omit=dev
 
+# Pro package (optional — populated by generate-agents.ps1 -ProForce true / -Pro)
+# Must run AFTER npm prune — prune removes unlisted packages from node_modules.
+# Extract directly into node_modules so native deps (better-sqlite3, node-pty)
+# are resolved from the agent's already-compiled node_modules tree.
+COPY agent/pro/ /tmp/agent-pro/
+RUN if ls /tmp/agent-pro/*.tgz 1>/dev/null 2>&1; then \
+    echo "[Pro] Extracting @iotistica/agent-pro…" && \
+    mkdir -p /app/node_modules/@iotistica/agent-pro && \
+    tar -xzf /tmp/agent-pro/*.tgz -C /app/node_modules/@iotistica/agent-pro --strip-components=1 && \
+    echo "[Pro] Installed"; \
+    else echo "[Pro] No tarball found — Community build"; fi
+
 # ---- Admin panel build stage ----
 FROM node:24-alpine AS admin-builder
 

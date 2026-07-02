@@ -1,5 +1,4 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { columnExists } from '../migration-helpers.js';
 import type { NativeSqliteMigration } from '../migration-types.js';
 
 function up(db: DatabaseSync): void {
@@ -58,11 +57,7 @@ function up(db: DatabaseSync): void {
 	db.exec(`CREATE INDEX IF NOT EXISTS idx_anomaly_incidents_status      ON anomaly_incidents (status);`);
 	db.exec(`CREATE INDEX IF NOT EXISTS idx_anomaly_incidents_first_seen  ON anomaly_incidents (first_seen DESC);`);
 
-	// anomaly_alerts exists in the squashed initial schema with a different schema (no incident_id).
-	// Drop and recreate so our incident-correlation columns are present.
-	if (!columnExists(db, 'anomaly_alerts', 'incident_id')) {
-		db.exec(`DROP TABLE IF EXISTS anomaly_alerts;`);
-	}
+	// anomaly_alerts stores summarised alerts per incident (owned by the incident correlator).
 	db.exec(`
 		CREATE TABLE IF NOT EXISTS anomaly_alerts (
 			id                INTEGER PRIMARY KEY AUTOINCREMENT,
